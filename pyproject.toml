@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vcmi-gym"
+version = "0.0.1"
+authors = [
+    { name="Simeon Manolov", email="s.manolloff@gmail.com" },
+]
+
+description = "A Gymnasium environment for the open-source engine for Heroes of Might and Magic III: VCMI"
+readme = "README.md"
+license = {text = "Apache License v2.0"}
+requires-python = ">=3.11"
+keywords = [
+    "gym",
+    "gymnasium",
+    "Farama-Foundation",
+    "Reinforcement Learning",
+    "AI",
+    "game",
+    "Heroes3",
+    "HOMM3",
+    "VCMI",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Topic :: Education",
+    "Topic :: Games/Entertainment",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    # TODO: build or runtime dep?
+    "pybind11",
+
+    # TODO: pin versions
+    "gymnasium",
+    "numpy",
+]
+
+[project.optional-dependencies]
+sb3 = [
+    "stable_baselines3 ~= 2.1",
+    "sb3-contrib ~= 2.1",
+    "tensorboard",
+    "tensorflow",
+    "tqdm",
+    "rich",
+]
+
+# Disabled until imitation supports gymnasium
+#imitation = ["imitation"]
+
+[project.urls]
+"Homepage" = "https://github.com/smanolloff/vcmi-gym"
+"Bug Tracker" = "https://github.com/smanolloff/vcmi-gym/issues"
+
+[project.scripts]
+"vcmi-gym" = "vcmi_gym.tools.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vcmi_gym*"]  # alternatively: `exclude = ["additional*"]`

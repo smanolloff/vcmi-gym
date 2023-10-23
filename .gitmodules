@@ -1,0 +1,3 @@
+[submodule "vcmi_gym/envs/v0/vcmi"]
+	path = vcmi_gym/envs/v0/vcmi
+	url = git@github.com:smanolloff/vcmi.git
