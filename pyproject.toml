@@ -12,7 +12,7 @@ authors = [
 description = "A Gymnasium environment for the open-source engine for Heroes of Might and Magic III: VCMI"
 readme = "README.md"
 license = {text = "Apache License v2.0"}
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 keywords = [
     "gym",
     "gymnasium",
@@ -35,7 +35,7 @@ classifiers = [
 ]
 dependencies = [
     # TODO: build or runtime dep?
-    "pybind11",
+    "pybind11 == 2.10.4",
 
     # TODO: pin versions
     "gymnasium",

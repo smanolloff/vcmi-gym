@@ -1,2 +1,0 @@
-[console_scripts]
-vcmi-gym = vcmi_gym.tools.main:main
