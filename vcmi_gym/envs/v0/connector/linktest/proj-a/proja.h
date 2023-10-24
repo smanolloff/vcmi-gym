@@ -1,0 +1,1 @@
+int mymain(int i);
