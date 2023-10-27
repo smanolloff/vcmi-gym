@@ -1,0 +1,33 @@
+1. (vcmi root folder) build vcmi
+  1.1. conan deps
+    $ conan install . \
+      --install-folder=conan-generated \
+      --no-imports \
+      --build=missing \
+      --profile:build=default \
+      --profile:host=default
+
+  1.2. vcmi itself
+
+    $ cmake --fresh -S . -B build -Wno-dev \
+        -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
+        -D CMAKE_BUILD_TYPE=Debug \
+        -D ENABLE_SINGLE_APP_BUILD=1 \
+        -D ENABLE_CCACHE=1 \
+        -D ENABLE_MYCLIENT_BUILD=1 \
+        -D ENABLE_DEV_BUILD=1
+
+2. (connector root folder) build connector
+    2.1. symlinks to dependencies
+
+        $ ln -s ../vcmi/build/bin/libmyclient.dylib lib/
+        $ ln -s ../vcmi/myclient/myclient.h include/
+
+    2.2. conan deps
+    2.3. build connector
+
+        $ cmake --fresh -S . -B build -Wno-dev \
+            -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
+            -D CMAKE_BUILD_TYPE=Debug
+
+3. ...

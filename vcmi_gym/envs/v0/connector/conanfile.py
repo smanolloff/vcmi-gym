@@ -37,7 +37,7 @@ class Connector(ConanFile):
         self.options["boost"].shared = True
         self.options["boost"].without_context = True
         self.options["boost"].without_contract = True
-        self.options["boost"].without_coroutine = True
+        self.options["boost"].without_coroutine = False
         self.options["boost"].without_fiber = True
         self.options["boost"].without_graph = True
         self.options["boost"].without_graph_parallel = True
