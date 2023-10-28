@@ -1,5 +1,5 @@
 import logging
-import asyncio
+# import asyncio
 import threading
 import numpy as np
 import time
@@ -48,7 +48,7 @@ from build import connector
 #     return state["state"], state["cppcb"]
 
 
-async def start_vcmi(event, state_wrapper, pycb, pycbinit):
+def start_vcmi(event, state_wrapper, pycb, pycbinit):
     logging.info("start")
 
     # np1 = np.array([1,2,3.0])
@@ -58,18 +58,18 @@ async def start_vcmi(event, state_wrapper, pycb, pycbinit):
 
     logging.info("Create thread for connector.start_vcmi()")
     t = threading.Thread(target=connector.start_vcmi, args=(pycb, pycbinit), daemon=True)
-    t.run()
+    t.start()
 
     # wait until connector.start_vcmi calls pycb, setting state and cppcb
     logging.info("event.wait()")
-    await event.wait()
+    event.wait()
 
     logging.info("return")
 
 
 def start():
     state_wrapper = {"state": "TODO", "cppcb": "TODO"}
-    event = asyncio.Event()
+    event = threading.Event()
 
     # cb to be called from VCMI client thread
     def pycb(state):
@@ -99,8 +99,8 @@ def start():
         logging.info("return")
 
     logging.info("start")
-    asyncio.run(start_vcmi(event, state_wrapper, pycb, pycbinit))
-    logging.info("asyncio done; state=%s, cppcb=%s" % (state_wrapper["state"], state_wrapper["cppcb"]))
+    start_vcmi(event, state_wrapper, pycb, pycbinit)
+    logging.info("state=%s, cppcb=%s" % (state_wrapper["state"], state_wrapper["cppcb"]))
 
     logging.info("return")
-    return state, cppcb
+    return state_wrapper["state"], state_wrapper["cppcb"]

@@ -1,6 +1,6 @@
 import logging
 
-from connector_diagram import gymenv
+from simulation import gymenv
 
 
 logging.basicConfig(
