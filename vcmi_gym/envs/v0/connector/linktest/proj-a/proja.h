@@ -1,1 +1,0 @@
-int mymain(int i);

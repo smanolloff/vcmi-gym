@@ -1,6 +1,7 @@
 import logging
+import numpy as np
 
-from simulation import gymenv
+from simulation.vcmi_env import VcmiEnv
 
 
 logging.basicConfig(
@@ -11,6 +12,9 @@ logging.basicConfig(
 
 if __name__ == '__main__':
     logging.info("start")
-    env = gymenv.VcmiEnv()
-    logging.info("Initialization complete")
-    logging.info("exit")
+
+    logging.info("Creating VcmiEnv")
+    env = VcmiEnv()
+
+    logging.info("Calling env.step([6,6,6])")
+    env.step(np.array([6, 6, 6], dtype=np.float32))
