@@ -14,8 +14,6 @@ find_package(Python3 3.10 REQUIRED EXACT COMPONENTS Interpreter Development)
 find_package(pybind11 REQUIRED)
 find_package(Boost 1.48.0 REQUIRED COMPONENTS filesystem thread)
 
-# SIMULATOR
-# ORIG one - works
 pybind11_add_module(connsimulator
   simulation/cppconnector/common.h
   simulation/cppconnector/ai_simulator.h
@@ -28,23 +26,4 @@ pybind11_add_module(connsimulator
   simulation/cppconnector/connector.cpp)
 target_include_directories(connsimulator PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(connsimulator PRIVATE myclient Boost::boost Boost::thread Boost::filesystem)
-
-# add_executable(conntest main.cpp)
-# target_link_libraries(conntest PRIVATE myclient)
-# target_include_directories(conntest PRIVATE ${CMAKE_SOURCE_DIR}/include)
-
-# SIMULATOR2
-# Wrapper cbs one - NOT working
-pybind11_add_module(connsimulator2
-  simulation2/cppconnector/common.h
-  simulation2/cppconnector/ai_simulator.h
-  simulation2/cppconnector/ai_simulator.cpp
-  simulation2/cppconnector/client_simulator.h
-  simulation2/cppconnector/client_simulator.cpp
-  simulation2/cppconnector/server_simulator.h
-  simulation2/cppconnector/server_simulator.cpp
-  simulation2/cppconnector/connector.h
-  simulation2/cppconnector/connector.cpp)
-target_include_directories(connsimulator2 PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(connsimulator2 PRIVATE myclient Boost::boost Boost::thread Boost::filesystem)
 

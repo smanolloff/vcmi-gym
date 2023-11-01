@@ -4,18 +4,30 @@
 #include "common.h"
 
 class AISimulator {
-  PyCBInit pycbinit;
-  PyCB pycb;
+  // simulate common.h NOT included (we still need it for LOG macro tho)
+  // simulate a totally different project
+
+  // WPyCBInit
+  const std::function<void(std::function<void(const std::array<float, 3>)>)> pycbinit;
+
+  // WCppCB
+  const std::function<void(const std::array<float, 3>)> pycb;
+
   bool inited;
-  Action action;
+  std::array<float, 3> action;
   boost::mutex m;
   boost::condition_variable cond;
 
   void init();
+  std::string aryToStr(const std::array<float, 3>);
 
 public:
-  AISimulator(const PyCBInit &pycbinit, const PyCB &pycb);
+  AISimulator(
+    const std::function<void(std::function<void(const std::array<float, 3>)>)> pycbinit, // WPyCBInit
+    const std::function<void(const std::array<float, 3>)> pycb // WPyCB
+  );
+
   void activeStack(int i);
-  void cppcb(const Action action);
+  void cppcb(const std::array<float, 3>);
 };
 

@@ -3,4 +3,4 @@
 
 #include "common.h"
 
-void start_vcmi(const PyCBInit &pycbinit, const PyCB &pycb);
+void start_vcmi(const WPyCBInit &wpycbinit, const WPyCB &wpycb);

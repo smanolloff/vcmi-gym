@@ -1,12 +1,20 @@
 #include "ai_simulator.h"
 
-AISimulator::AISimulator(const PyCBInit &pycbinit, const PyCB &pycb) {
+AISimulator::AISimulator(
+    const std::function<void(std::function<void(const std::array<float, 3>)>)> _pycbinit,
+    const std::function<void(const std::array<float, 3>)> _pycb)
+    : pycbinit(_pycbinit), pycb(_pycb), inited(false) {
   LOG("constructor called");
-  this->pycbinit = pycbinit;
-  this->pycb = pycb;
-  this->inited = false;
-  LOG("return");
+  if (!this->pycbinit) {
+    LOG("NULLLL!?!?!?")
 }
+
+}
+
+std::string AISimulator::aryToStr(const std::array<float, 3> arr) {
+    return std::to_string(arr[0]) + " " + std::to_string(arr[1]) + " " + std::to_string(arr[2]);
+}
+
 
 // this can't be defined here as const, as it will need access to
 // a cond variable which it should modify
@@ -15,16 +23,16 @@ AISimulator::AISimulator(const PyCBInit &pycbinit, const PyCB &pycb) {
 //     LOG("called with action.getA(): %s, action.getB(): ?\n", action.getA());
 // }
 
-void AISimulator::cppcb(const Action a) {
-    LOGSTR("called with a.getA()=", a.getA());
+void AISimulator::cppcb(const std::array<float, 3> arr) {
+    LOGSTR("called with arr: ", aryToStr(arr));
 
-    // TODO: no need to acquire GIL here?
-    // (caller is a Python thread)
-    LOG("acquire lock");
-    boost::lock_guard<boost::mutex> lock(m);
+    // Need to copy - storing just the pointer is dangerous
+    // as the underlying array may get wiped
+    LOG("Copy assign action = arr");
+    action = arr;
 
-    LOG("assign action = action");
-    action = a;
+    // here we would call cb->makeAction()
+    // ...
 
     LOG("cond.notify_one()");
     cond.notify_one();
@@ -36,13 +44,13 @@ void AISimulator::cppcb(const Action a) {
 void AISimulator::init() {
     LOG("called");
 
-    // Ensure we pass an already locked mutex to the cppcb!
-    LOG("acquire lock");
-    boost::unique_lock<boost::mutex> lock(this->m);
+    if (!this->pycbinit) {
+        LOG("NULLLL!?!?!?")
+    }
 
     // XXX: Danger: SIGSERV?
-    LOG("call this->pycbinit([this](Action a) { this->cppcb(a) })");
-    this->pycbinit([this](Action a) { this->cppcb(a); });
+    LOG("call this->pycbinit([this](const std::array<float, 3>) { this->cppcb(arr) })");
+    this->pycbinit([this](const std::array<float, 3> arr) { this->cppcb(arr); });
 
     LOG("set inited = true");
     inited = true;
@@ -53,42 +61,30 @@ void AISimulator::init() {
 void AISimulator::activeStack(int i) {
     LOG("called");
 
-    LOG("acquire Python GIL");
-    py::gil_scoped_acquire acquire;
-
     if (!inited)
         init();
 
     LOG("sleep 100ms");
     boost::this_thread::sleep_for(boost::chrono::milliseconds(100));
 
-    // NOTE: GIL is required for constructing py::array_t objects
-    auto ary = py::array_t<float>(3);
-    float* data = ary.mutable_data();
-    data[0] = i;
-    data[1] = i;
-    data[2] = i;
+    const std::array<float, 3> state_ary = {1, 2, 3};
 
-    State state{std::to_string(i), ary};
-
-    // Ensure we pass an already locked mutex to the cppcb!
     LOG("acquire lock");
     boost::unique_lock<boost::mutex> lock(this->m);
 
-    LOG("call this->pycb(state)");
-    this->pycb(state);
-
-    LOG("release Python GIL");
-    py::gil_scoped_release release;
+    LOG("call this->pycb(state_ary)");
+    this->pycb(state_ary);
 
     // We've set some events in motion:
-    //  - in python, env = Env() has now returned, storing our lambda_act
-    //  - in python, env.step(action) will be called, which will call our lambda_act
-    // our lambda_act will then call AI->cb->makeAction()
+    //  - in python, "env" now has our cppcb stored (via pycbinit)
+    //  - in python, "env" now has the state stored (via pycb)
+    //  - in python, "env" constructor can now return (pycb also set an event)
+    //  - in python, env.step(action) will be called, which will call cppcb
+    // our cppcb will then call AI->cb->makeAction()
     // ...we wait until that happens, and FINALLY we can return from yourTurn
     LOG("cond.wait()");
     this->cond.wait(lock);
 
-    LOGSTR("this->action.getA()=", this->action.getA());
+    LOGSTR("this->action: ", aryToStr(action));
     LOG("return");
 }

@@ -26,7 +26,7 @@ class PyConnector():
     # cb to be called from VCMI client thread
     def pycb(self, state):
         logging.info("start")
-        logging.info("state.getA(): %s, state.getB(): %s" % (state.getA(), state.getB()))
+        logging.info("state.getStr(): %s, state.getState(): %s" % (state.getStr(), state.getState()))
 
         logging.info("sleep(0.1)")
         time.sleep(0.1)
@@ -61,9 +61,7 @@ class PyConnector():
 
     def act(self, action):
         logging.info("start: action=%s" % action)
-        cppaction = connsimulator.Action()
-        cppaction.setA(str(action))
-        cppaction.setB(action)
+        cppaction = connsimulator.Action(str(action), action)
 
         logging.info("event.clear()")
         self.event.clear()

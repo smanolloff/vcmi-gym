@@ -7,6 +7,6 @@ class ServerSimulator {
   std::shared_ptr<ClientSimulator> client;
 
 public:
-  void start(const PyCBInit &pycbinit, const PyCB &pycb);
+  void start(PyCBInit &pycbinit, PyCB &pycb);
 };
 

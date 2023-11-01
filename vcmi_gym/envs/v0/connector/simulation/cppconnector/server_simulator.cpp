@@ -4,7 +4,7 @@
 #include <boost/chrono.hpp>
 #include "server_simulator.h"
 
-void ServerSimulator::start(const PyCBInit &pycbinit, const PyCB &pycb) {
+void ServerSimulator::start(PyCBInit &pycbinit, PyCB &pycb) {
     LOG("called");
 
     LOG("this->client = ClientSimulator()");

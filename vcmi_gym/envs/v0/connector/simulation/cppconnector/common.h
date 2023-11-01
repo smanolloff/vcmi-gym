@@ -4,6 +4,8 @@
 #include <memory>
 #include <filesystem>
 #include <pybind11/numpy.h>
+#include <sstream>
+#include <array>
 #include <boost/thread.hpp>
 #include <boost/lexical_cast.hpp>
 
@@ -12,28 +14,41 @@
 
 namespace py = pybind11;
 
+using ActionF = std::array<float, 3>;
+using StateF = std::array<float, 3>;
+
+py::array_t<float> stateForPython(StateF statef);
+ActionF actionFromPython(py::array_t<float> pyaction);
+
 struct Action {
-    void setA(const std::string &a_) { a = a_; }
-    void setB(const py::array_t<float> &b_) { b = b_; }
+    Action(std::string str_, py::array_t<float> pyaction)
+    : str(str_), action(actionFromPython(pyaction)) {}
 
-    const std::string &getA() const { return a; }
-    const py::array_t<float> &getB() const { return b; }
-
-    std::string a;
-    py::array_t<float> b;
+    const std::string str;
+    const ActionF action;
 };
 
 struct State {
-    void setA(const std::string &a_) { a = a_; }
-    void setB(const py::array_t<float> &b_) { b = b_; }
+    State(std::string str_, StateF statef)
+    : str(str_), state(stateForPython(statef)) {}
 
-    const std::string &getA() const { return a; }
-    const py::array_t<float> &getB() const { return b; }
+    const std::string str;
+    const py::array_t<float> state;
 
-    std::string a;
-    py::array_t<float> b;
+    const std::string &getStr() const { return str; }
+    const py::array_t<float> &getState() const { return state; }
 };
 
-using CppCB = std::function<void(Action)>;
-using PyCB = std::function<void(State)>;
-using PyCBInit = std::function<void(CppCB)>;
+using WCppCB = const std::function<void(Action)>;
+using WPyCB = const std::function<void(State)>;
+using WPyCBInit = const std::function<void(WCppCB)>;
+
+using CppCB = const std::function<void(const ActionF &arr)>;
+using PyCB = const std::function<void(const StateF &arr)>;
+using PyCBInit = const std::function<void(CppCB)>;
+
+// TODO:
+// declare a PyCallbackProvider class/struct
+// it will have a .getInitCB() and .getCB() methods
+// BUT it will be passed through as std::any
+// (all the way to AI, where it will be casted to a PyCallbackProvider again)
