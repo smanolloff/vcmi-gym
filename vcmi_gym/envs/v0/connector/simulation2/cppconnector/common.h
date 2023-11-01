@@ -4,6 +4,7 @@
 #include <memory>
 #include <filesystem>
 #include <pybind11/numpy.h>
+#include <sstream>
 #include <boost/thread.hpp>
 #include <boost/lexical_cast.hpp>
 
@@ -34,6 +35,16 @@ struct State {
     py::array_t<float> b;
 };
 
-using CppCB = std::function<void(Action)>;
-using PyCB = std::function<void(State)>;
-using PyCBInit = std::function<void(CppCB)>;
+using CppCB = const std::function<void(Action)>;
+using PyCB = const std::function<void(State)>;
+using PyCBInit = const std::function<void(CppCB)>;
+
+using WCppCB = const std::function<void(const float * arr)>;
+using WPyCB = const std::function<void(const float * arr)>;
+using WPyCBInit = const std::function<void(WCppCB)>;
+
+// TODO:
+// declare a PyCallbackProvider class/struct
+// it will have a .getInitCB() and .getCB() methods
+// BUT it will be passed through as std::any
+// (all the way to AI, where it will be casted to a PyCallbackProvider again)
