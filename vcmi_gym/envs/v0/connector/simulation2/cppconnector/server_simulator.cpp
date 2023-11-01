@@ -13,7 +13,7 @@ void ServerSimulator::start(WPyCBInit &wpycbinit, WPyCB &wpycb) {
     // simulate starting VCMI client, which inits AI
     // no need of vcmi client simulator
     LOG("boost::thread(client->start(wpycbinit, wpycb))");
-    boost::thread([this, wpycbinit, wpycb]() { client->start(wpycbinit, wpycb); });
+    boost::thread([this, &wpycbinit, &wpycb]() { client->start(wpycbinit, wpycb); });
 
     LOG("Entering sleep loop...");
     while(true)

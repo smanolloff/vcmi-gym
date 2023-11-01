@@ -8,26 +8,26 @@ class AISimulator {
   // simulate a totally different project
 
   // WPyCBInit
-  const std::function<void(std::function<void(const float * arr)>)> &pycbinit;
+  const std::function<void(std::function<void(const float (&arr)[3])>)> &pycbinit;
 
   // WCppCB
-  const std::function<void(const float * arr)> pycb;
+  const std::function<void(const float (&arr)[3])> pycb;
 
   bool inited;
-  const float * action;
+  float action[3];
   boost::mutex m;
   boost::condition_variable cond;
 
   void init();
-  std::string aryToStr(const float * &ary);
+  std::string aryToStr(const float (&ary)[3]);
 
 public:
   AISimulator(
-    const std::function<void(std::function<void(const float * arr)>)> &pycbinit, // WPyCBInit
-    const std::function<void(const float * arr)> &pycb // WPyCB
+    const std::function<void(std::function<void(const float (&arr)[3])>)> &pycbinit, // WPyCBInit
+    const std::function<void(const float (&arr)[3])> &pycb // WPyCB
   );
 
   void activeStack(int i);
-  void cppcb(const float * arr);
+  void cppcb(const float (&arr)[3]);
 };
 

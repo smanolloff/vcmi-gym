@@ -1,14 +1,14 @@
 #include "ai_simulator.h"
 
 AISimulator::AISimulator(
-    const std::function<void(std::function<void(const float * arr)>)> &_pycbinit,
-    const std::function<void(const float * arr)> &_pycb)
+    const std::function<void(std::function<void(const float (&arr)[3])>)> &_pycbinit,
+    const std::function<void(const float (&arr)[3])> &_pycb)
     : pycbinit(_pycbinit), pycb(_pycb), inited(false) {
   LOG("constructor called");
 }
 
-std::string AISimulator::aryToStr(const float * &ary) {
-    return std::to_string(ary[0]) + " " + std::to_string(ary[1]) + " " + std::to_string(ary[2]);
+std::string AISimulator::aryToStr(const float (&arr)[3]) {
+    return std::to_string(arr[0]) + " " + std::to_string(arr[1]) + " " + std::to_string(arr[2]);
 }
 
 
@@ -19,18 +19,19 @@ std::string AISimulator::aryToStr(const float * &ary) {
 //     LOG("called with action.getA(): %s, action.getB(): ?\n", action.getA());
 // }
 
-void AISimulator::cppcb(const float * action_ary) {
-    LOGSTR("called with action_ary: ", aryToStr(action_ary));
+void AISimulator::cppcb(const float (&arr)[3]) {
+    LOGSTR("called with arr: ", aryToStr(arr));
 
-    LOG("assign this->action = action_ary");
-    action = action_ary;
+    // Need to copy - storing just the pointer is dangerous
+    // as the underlying array may get wiped
+    LOG("Copy arr to this->action");
+    std::copy(std::begin(arr), std::end(arr), std::begin(action));
 
     // here we would call cb->makeAction()
     // ...
 
-    // DEBUG: uncomment this, just temporary commented to test sth
-    // LOG("cond.notify_one()");
-    // cond.notify_one();
+    LOG("cond.notify_one()");
+    cond.notify_one();
 
     LOG("return");
 }
@@ -40,8 +41,8 @@ void AISimulator::init() {
     LOG("called");
 
     // XXX: Danger: SIGSERV?
-    LOG("call this->pycbinit([this](float * action_ary) { this->cppcb(action_ary) })");
-    this->pycbinit([this](const float * action_ary) { this->cppcb(action_ary); });
+    LOG("call this->pycbinit([this](const float (&arr)[3]) { this->cppcb(arr) })");
+    this->pycbinit([this](const float (&arr)[3]) { this->cppcb(arr); });
 
     LOG("set inited = true");
     inited = true;

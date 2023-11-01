@@ -33,7 +33,7 @@ target_link_libraries(connsimulator PRIVATE myclient Boost::boost Boost::thread 
 # target_link_libraries(conntest PRIVATE myclient)
 # target_include_directories(conntest PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
-# SIMULATOR
+# SIMULATOR2
 # Wrapper cbs one - NOT working
 pybind11_add_module(connsimulator2
   simulation2/cppconnector/common.h
@@ -48,20 +48,3 @@ pybind11_add_module(connsimulator2
 target_include_directories(connsimulator2 PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(connsimulator2 PRIVATE myclient Boost::boost Boost::thread Boost::filesystem)
 
-# SIMULATOR3
-# Wrapper cbs one - attempts to remove python entrypoint
-# and replace it with own main() for debugging
-# WIP
-add_executable(connsimulator3
-  simulation3/cppconnector/main.cpp
-  simulation3/cppconnector/common.h
-  simulation3/cppconnector/ai_simulator.h
-  simulation3/cppconnector/ai_simulator.cpp
-  simulation3/cppconnector/client_simulator.h
-  simulation3/cppconnector/client_simulator.cpp
-  simulation3/cppconnector/server_simulator.h
-  simulation3/cppconnector/server_simulator.cpp
-  simulation3/cppconnector/connector.h
-  simulation3/cppconnector/connector.cpp)
-
-target_link_libraries(connsimulator3 PRIVATE myclient Boost::boost Boost::thread Boost::filesystem)

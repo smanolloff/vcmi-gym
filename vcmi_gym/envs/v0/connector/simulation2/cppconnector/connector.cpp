@@ -13,16 +13,16 @@ void start_vcmi(const PyCBInit &pycbinit, const PyCB &pycb) {
     //      Will try without GIL first.
 
     // Convert PyCB -> WPyCB
-    const WPyCB wpycb = [&pycb](const float * data) {
+    const WPyCB wpycb = [&pycb](const StateF &data) {
         LOG("acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
         // convert float* to py::array_t<float>
-        // TODO: magic number 3 should be a constant STATE_ARY_LENGTH
         auto pyary = py::array_t<float>(3);
-        float * md = pyary.mutable_data();
+        auto md = pyary.mutable_data();
         std::string s = "";
-        for(int i=0; i < 3; i++) {
+
+        for (int i=0; i<std::size(data); i++) {
             md[i] = data[i];
             s += std::string(" ") + std::to_string(data[i]);
         }
@@ -33,33 +33,13 @@ void start_vcmi(const PyCBInit &pycbinit, const PyCB &pycb) {
 
     // Convert PyCBInit -> WPyCBInit
     const WPyCBInit wpycbinit = [&pycbinit](WCppCB &wcppcb) {
-        // LOG("AAAAASADSDADSDASSDADASDASADSDASDSA call wcppcb(float*)");
-        // const float bbb[3] = {66.0f, 66.0f, 66.0f};
-        // wcppcb(bbb);
-
-        LOG("acquire Python GIL");
-        py::gil_scoped_acquire acquire;
-
         // Convert WCppCBInit -> CppCBInit
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // wcppcb must NOT be captured by reference here [&wcppcb]:
-        // it references a local var within AISimulator::init
-        // As soon as AISimulator::init returns, the reference becomes invalid
-        // (and it will return as soon as wpycbinit returns)
         CppCB cppcb = [wcppcb](Action a) {
-            // this is called by python -- we already have the GIL
-            // convert py::array_t<float> to float*
-            LOG("acquire Python GIL");
-            py::gil_scoped_acquire acquire;
-
-            boost::this_thread::sleep_for(boost::chrono::milliseconds(1000));
-            // This does not work
-            // Here we're in the main python2.py thread (before spawning connector)
-            if (!wcppcb)
-                LOG("NUUUUULLLLLLL");
-
-            LOG("!!!!!!!! CALL cppcb(...)");
-            wcppcb(static_cast<const float*>(std::array<float, 3>{66.0f, 66.0f, 66.0f}.data()));
+            //         ^^^^^^
+            //         NOT a reference!
+            // The reference is to a local var within AISimulator::init
+            // and becomes dangling as soon as AISimulator::init returns
+            // (as soon as wpycbinit returns)
 
             //
             // NOTE:
@@ -69,22 +49,19 @@ void start_vcmi(const PyCBInit &pycbinit, const PyCB &pycb) {
             // To make it on a single line:
             // const float * data = const_cast<py::array_t<float>&>(a.getB()).mutable_data();
             //
+
+            // NOTE: using b.data()  may allow us to use a.getB().data()
             py::array_t<float> b = a.getB();
-            const float * data = b.mutable_data();
+            const float * data = b.data();
 
-            // LOG("release Python GIL");
-            // py::gil_scoped_release release;
-            // LOG("acquire Python GIL");
-            // py::gil_scoped_acquire acquire;
-            boost::this_thread::sleep_for(boost::chrono::milliseconds(1000));
+            ActionF actionf;
+            for (int i=0; i<b.size(); i++)
+                actionf[i] = data[i];
 
-            LOG("call wcppcb(float*)");
-            const float bbb[3] = {66.0f, 66.0f, 66.0f};
+            LOG("release Python GIL");
+            py::gil_scoped_release release;
 
-            if (!wcppcb)
-                LOG("NUUUUULLLLLLL");
-
-            wcppcb(bbb);
+            wcppcb(actionf);
         };
 
         // This works - maybe because we-re in the AI thread?
