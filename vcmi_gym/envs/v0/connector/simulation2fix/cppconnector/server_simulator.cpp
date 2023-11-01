@@ -4,7 +4,7 @@
 #include <boost/chrono.hpp>
 #include "server_simulator.h"
 
-void ServerSimulator::start(const PyCBInit &pycbinit, const PyCB &pycb) {
+void ServerSimulator::start(const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
     LOG("called");
 
     LOG("this->client = ClientSimulator()");
@@ -12,8 +12,8 @@ void ServerSimulator::start(const PyCBInit &pycbinit, const PyCB &pycb) {
 
     // simulate starting VCMI client, which inits AI
     // no need of vcmi client simulator
-    LOG("boost::thread(client->start(pycbinit, pycb))");
-    boost::thread([this, &pycbinit, &pycb]() { client->start(pycbinit, pycb); });
+    LOG("boost::thread(client->start(wpycbinit, wpycb))");
+    boost::thread([this, &wpycbinit, &wpycb]() { client->start(wpycbinit, wpycb); });
 
     LOG("Entering sleep loop...");
     while(true)
