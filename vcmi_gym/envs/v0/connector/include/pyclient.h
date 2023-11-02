@@ -1,0 +1,1 @@
+../../vcmi/pyclient/pyclient.h

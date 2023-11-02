@@ -27,3 +27,18 @@ pybind11_add_module(connsimulator
 target_include_directories(connsimulator PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(connsimulator PRIVATE myclient Boost::boost Boost::thread Boost::filesystem)
 
+pybind11_add_module(conntest
+  testing/cppconnector/common.h
+  testing/cppconnector/cppconnector.h
+  testing/cppconnector/cppconnector.cpp)
+target_include_directories(conntest PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(conntest PRIVATE pyclient Boost::boost Boost::thread Boost::filesystem)
+
+add_executable(conntestexe
+  testing/cppconnector/common.h
+  testing/cppconnector/cppconnector.h
+  testing/cppconnector/main.h
+  testing/cppconnector/main.cpp)
+
+target_include_directories(conntestexe PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(conntestexe PRIVATE pyclient Boost::boost Boost::thread Boost::filesystem)
