@@ -91,7 +91,8 @@ void start_vcmi(const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
 
 
     LOG("Start server");
-    ServerSimulator().start(pycbinit, pycb);
+    auto provider = std::make_any<CBProvider>(pycbinit, pycb);
+    ServerSimulator().start(provider);
 
     LOG("return !!!! !SHOULD NEVER HAPPEN");
 }

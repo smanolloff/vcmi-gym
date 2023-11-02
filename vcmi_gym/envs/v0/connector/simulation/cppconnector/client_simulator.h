@@ -7,6 +7,6 @@ class ClientSimulator {
   std::shared_ptr<AISimulator> ai;
 
 public:
-  void start(PyCBInit &pycbinit, PyCB &pycb);
+  void start(std::any &baggage);
 };
 

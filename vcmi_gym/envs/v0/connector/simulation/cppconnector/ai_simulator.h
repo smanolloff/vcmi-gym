@@ -21,11 +21,11 @@ class AISimulator {
   void init();
   std::string aryToStr(const std::array<float, 3>);
 
+  std::function<void(std::function<void(const std::array<float, 3>)>)> loadPyCbInit(std::any cbprovider);
+  std::function<void(const std::array<float, 3>)> loadPyCb(std::any cbprovider);
+
 public:
-  AISimulator(
-    const std::function<void(std::function<void(const std::array<float, 3>)>)> pycbinit, // WPyCBInit
-    const std::function<void(const std::array<float, 3>)> pycb // WPyCB
-  );
+  AISimulator(const std::any cbprovider);
 
   void activeStack(int i);
   void cppcb(const std::array<float, 3>);

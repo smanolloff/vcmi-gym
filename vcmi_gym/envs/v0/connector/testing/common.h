@@ -6,7 +6,6 @@
 #include <pybind11/numpy.h>
 #include <sstream>
 #include <array>
-#include <any>
 #include <boost/thread.hpp>
 #include <boost/lexical_cast.hpp>
 
@@ -47,14 +46,6 @@ using WPyCBInit = const std::function<void(WCppCB)>;
 using CppCB = const std::function<void(const ActionF &arr)>;
 using PyCB = const std::function<void(const StateF &arr)>;
 using PyCBInit = const std::function<void(CppCB)>;
-
-struct CBProvider {
-    CBProvider(const PyCBInit pycbinit_, const PyCB pycb_)
-    : pycbinit(pycbinit_), pycb(pycb_) {}
-
-    const PyCBInit pycbinit;
-    const PyCB pycb;
-};
 
 // TODO:
 // declare a PyCallbackProvider class/struct

@@ -1,15 +1,22 @@
 #include "ai_simulator.h"
 
-AISimulator::AISimulator(
-    const std::function<void(std::function<void(const std::array<float, 3>)>)> _pycbinit,
-    const std::function<void(const std::array<float, 3>)> _pycb)
-    : pycbinit(_pycbinit), pycb(_pycb), inited(false) {
-  LOG("constructor called");
-  if (!this->pycbinit) {
-    LOG("NULLLL!?!?!?")
+AISimulator::AISimulator(std::any cbprovider) : pycbinit(loadPyCbInit(cbprovider)), pycb(loadPyCb(cbprovider)), inited(false) {
+    LOG("constructor called");
+    if (!this->pycbinit) {
+        LOG("NULLLL!?!?!?")
+    }
 }
 
-}
+std::function<void(std::function<void(const std::array<float, 3>)>)> AISimulator::loadPyCbInit(std::any cbprovider) {
+    auto provider = std::any_cast<CBProvider>(cbprovider);
+    return provider.pycbinit;
+};
+
+std::function<void(const std::array<float, 3>)> AISimulator::loadPyCb(std::any cbprovider) {
+    auto provider = std::any_cast<CBProvider>(cbprovider);
+    return provider.pycb;
+};
+
 
 std::string AISimulator::aryToStr(const std::array<float, 3> arr) {
     return std::to_string(arr[0]) + " " + std::to_string(arr[1]) + " " + std::to_string(arr[2]);
@@ -43,10 +50,6 @@ void AISimulator::cppcb(const std::array<float, 3> arr) {
 // private
 void AISimulator::init() {
     LOG("called");
-
-    if (!this->pycbinit) {
-        LOG("NULLLL!?!?!?")
-    }
 
     // XXX: Danger: SIGSERV?
     LOG("call this->pycbinit([this](const std::array<float, 3>) { this->cppcb(arr) })");
