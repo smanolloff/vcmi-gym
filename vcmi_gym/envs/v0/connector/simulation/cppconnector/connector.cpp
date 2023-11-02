@@ -33,10 +33,8 @@ ActionF actionFromPython(py::array_t<float> pyaction) {
     return actionf;
 }
 
-void start_vcmi(const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
-    setvbuf(stdout, NULL, _IONBF, 0);
+void _start_vcmi(const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
     LOG("start");
-
     LOG("create wrappers around pycbinit, pycb")
 
     // XXX: do we need GIL when capturing Py defs in a [] block?
@@ -76,25 +74,22 @@ void start_vcmi(const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
             cppcb(a.action);
         };
 
-        // This works - maybe because we-re in the AI thread?
-        // LOG("!!!!!!!! CALL cppcb(...)");
-        // wcppcb(static_cast<const float*>(std::array<float, 3>{66.0f, 66.0f, 66.0f}.data()));
-
         LOG("call pycbinit(cppcb)");
         wpycbinit(wcppcb);
         LOG("RETURN");
     };
-
-
-    LOG("release Python GIL");
-    py::gil_scoped_release release;
-
 
     LOG("Start server");
     auto provider = std::make_any<CBProvider>(pycbinit, pycb);
     ServerSimulator().start(provider);
 
     LOG("return !!!! !SHOULD NEVER HAPPEN");
+}
+
+void start_vcmi(const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    LOG("start (main thread)");
+    boost::thread([wpycbinit, wpycb]() { _start_vcmi(wpycbinit, wpycb); });
 }
 
 PYBIND11_MODULE(connsimulator, m) {

@@ -48,9 +48,8 @@ class PyConnector():
         # t = threading.Thread(target=connsimulator.add_arrays, args=(np1, np2), daemon=True)
         # t.run()
 
-        logging.info("Create thread for connsimulator.start_vcmi(pycbinit, pycb)")
-        t = threading.Thread(target=connsimulator.start_vcmi, args=(self.pycbinit, self.pycb), daemon=True)
-        t.start()
+        logging.info("Call connsimulator.start_vcmi(pycbinit, pycb)")
+        connsimulator.start_vcmi(self.pycbinit, self.pycb)
 
         # wait until connsimulator.start_vcmi calls pycb, setting state and cppcb
         logging.info("event.wait()")
