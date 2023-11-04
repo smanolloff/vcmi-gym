@@ -1,10 +1,11 @@
 import logging
-# import asyncio
 import threading
-import numpy as np
 import time
 
-from build import conntest
+# don't remove - it is implicitly required by pybind11
+import numpy as np
+
+from build import cppconnector
 
 
 class PyConnector():
@@ -19,15 +20,6 @@ class PyConnector():
         logging.info("start")
         logging.info("Set shared vars: self.cppsyscb = %s" % cppsyscb)
         self.cppsyscb = cppsyscb
-
-        # logging.info("<DEBUG> schedule restart in 10s...")
-        # def debugtest():
-        #     logging.info("sleep(10)")
-        #     time.sleep(10)
-        #     logging.info('Call self.cppsyscb("reset")')
-        #     self.cppsyscb("reset")
-        # threading.Thread(target=debugtest, daemon=True).start()
-
         logging.info("return")
 
     # cb to be called from VCMI client thread on init only
@@ -48,11 +40,10 @@ class PyConnector():
 
     def start(self):
         logging.info("start")
+        logging.info("Call cppconnector.start_vcmi(pycbinit, pycb)")
+        cppconnector.start(self.pycbsysinit, self.pycbinit, self.pycb)
 
-        logging.info("Call conntest.start_connector(pycbsysinit, pycbinit, pycb)")
-        conntest.start_connector(self.pycbsysinit, self.pycbinit, self.pycb)
-
-        # wait until conntest.start_vcmi calls pycb, setting state and cppcb
+        # wait until cppconnector.start_vcmi calls pycb, setting state and cppcb
         logging.info("event.wait()")
         self.event.wait()
 

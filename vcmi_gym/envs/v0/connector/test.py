@@ -16,5 +16,5 @@ if __name__ == '__main__':
     logging.info("Creating VcmiEnv")
     env = VcmiEnv()
 
-    logging.info("Calling env.step([6,6,6])")
-    env.step(np.array([6, 6, 6], dtype=np.float32))
+    logging.info("Calling env.step(6)")
+    env.step(6)

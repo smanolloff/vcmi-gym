@@ -3,22 +3,22 @@
 
 int main() {
     // Convert WPyCB -> PyCB
-    const PyCB pycb = [](const StateF &statef) {
+    const MMAI::PyCB pycb = [](const MMAI::GymState &gymstate) {
         LOG("pycb called");
     };
 
     // Convert WPyCBInit -> PyCBInit
-    const PyCBInit pycbinit = [](CppCB &cppcb) {
+    const MMAI::PyCBInit pycbinit = [](MMAI::CppCB &cppcb) {
         LOG("pycbinit called");
     };
 
 
     // Convert WPyCBInit -> PyCBInit
-    const PyCBSysInit pycbsysinit = [](CppSysCB &cppsyscb) {
+    const MMAI::PyCBSysInit pycbsysinit = [](MMAI::CppSysCB &cppsyscb) {
         LOG("pycbsysinit called");
     };
 
-    auto cbprovider = CBProvider{pycbsysinit, pycbinit, pycb};
+    auto cbprovider = MMAI::CBProvider{pycbsysinit, pycbinit, pycb};
 
     // TODO: config values
     std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";

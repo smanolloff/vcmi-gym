@@ -42,3 +42,11 @@ add_executable(conntestexe
 
 target_include_directories(conntestexe PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(conntestexe PRIVATE pyclient Boost::boost Boost::thread Boost::filesystem)
+
+
+# pybind11_add_module(cppconnector
+#   cppconnector/common.h
+#   cppconnector/cppconnector.h
+#   cppconnector/cppconnector.cpp)
+# target_include_directories(cppconnector PUBLIC ${CMAKE_SOURCE_DIR}/include)
+# target_link_libraries(cppconnector PRIVATE pyclient Boost::boost Boost::thread Boost::filesystem)

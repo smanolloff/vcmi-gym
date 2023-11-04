@@ -3,83 +3,87 @@
 #include "cppconnector.h"
 #include "pyclient.h" // "vendor" header file
 
-// NOT USED: GymAction is a uint16_t, not a np array now
-// // actions are set in python and read by CPP
-// // => need to convert py::array_t to GymAction
-// GymAction actionFromPython(py::array_t<float> pyaction) {
-//     GymAction gymaction;
-//     auto data = pyaction.data();
-//     auto size = pyaction.size();
-//     assert(size == std::size(pyaction));
+// states are set in CPP and read by python
+// => need to convert GymState to py::array_t
+py::array_t<float> stateForPython(GymState gymstate) {
+    // convert float* to py::array_t<float>
+    auto pyary = py::array_t<float>(gymstate.size());
+    auto md = pyary.mutable_data();
 
-//     for (int i=0; i<size; i++)
-//         gymaction[i] = data[i];
+    for (int i=0; i<gymstate.size(); i++)
+        md[i] = gymstate[i];
 
-//     return gymaction;
-// }
+    return pyary;
+}
 
-void _start_connector(const WPyCBSysInit &wpycbsysinit, const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
+// actions are set in python and read by CPP
+// => need to convert py::array_t to ActionF
+ActionF actionFromPython(py::array_t<float> pyaction) {
+    ActionF actionf;
+    auto data = pyaction.data();
+    auto size = pyaction.size();
+    assert(size == std::size(pyaction));
+
+    for (int i=0; i<size; i++)
+        actionf[i] = data[i];
+
+    return actionf;
+}
+
+void _start(const WPyCBSysInit &wpycbsysinit, const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
     setvbuf(stdout, NULL, _IONBF, 0);
     LOG("start");
 
     LOG("create wrappers around pycbinit, pycb")
 
     // Convert WPyCB -> PyCB
-    const MMAI::PyCB pycb = [&wpycb](const MMAI::GymState &gymstate) {
-        LOG("[pycb] start");
+    const PyCB pycb = [&wpycb](const GymState &gymstate) {
+        LOG("start");
 
-        LOG("[pycb] acquire Python GIL");
+        LOG("acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
-        LOG("[pycb] Convert gs -> pgs");
-        auto pgs = PyGymState(gymstate.size());
-        auto md = pgs.mutable_data();
-        for (int i=0; i<gymstate.size(); i++)
-            md[i] = gymstate[i];
+        LOG("Create state(\"kur\", gymstate)");
+        State state("kur", gymstate);
 
-        LOG("[pycb] Call wpycb(pgs)");
-        wpycb(pgs);
-        LOG("[pycb] return");
+        LOG("Call wpycb(state)");
+        wpycb(state);
     };
 
 
     // Convert WPyCBInit -> PyCBInit
-    const MMAI::PyCBInit pycbinit = [&wpycbinit](MMAI::CppCB &cppcb) {
+    const PyCBInit pycbinit = [&wpycbinit](CppCB &cppcb) {
         // Convert WCppCBInit -> CppCBInit
-        WCppCB wcppcb = [cppcb](PyGymAction pga) {
+        WCppCB wcppcb = [cppcb](Action a) {
             //           ^^^^^
             //           NOT a reference!
             // The reference is to a local var within AISimulator::init
             // and becomes dangling as soon as AISimulator::init returns
             // (as soon as wpycbinit returns)
-            LOG("[wcppcb] start");
+            LOG("start");
 
             // NOTE: we already have GIL, cppcb is called from python
 
-            LOG("[wcppcb] release Python GIL");
+            LOG("release Python GIL");
             py::gil_scoped_release release;
 
-            LOG("[wcppcb] Convert pga -> ga");
-            auto ga = static_cast<MMAI::GymAction>(pga);
-
-            LOG("[wcppcb] Call cppcb(ga)");
-            cppcb(ga);
-            LOG("[wcppcb] return");
+            cppcb(a.action);
         };
 
         // NOTE: this may seem to work withoug GIL, but it is
         //       actually required (I once got an explicit error about it)
-        LOG("[pycbinit] acquire Python GIL");
+        LOG("acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
-        LOG("[pycbinit] call pycbinit(cppcb)");
+        LOG("call pycbinit(cppcb)");
         wpycbinit(wcppcb);
-        LOG("[pycbinit] return");
+
+        LOG("RETURN");
     };
 
 
     // Convert WPyCBInit -> PyCBInit
-    const MMAI::PyCBSysInit pycbsysinit = [&wpycbsysinit](MMAI::CppSysCB &cppsyscb) {
+    const PyCBSysInit pycbsysinit = [&wpycbsysinit](CppSysCB &cppsyscb) {
         // Convert WCppSysCBInit -> CppSysCBInit
         WCppSysCB wcppsyscb = [cppsyscb](std::string action) {
             //                 ^^^^^
@@ -87,39 +91,38 @@ void _start_connector(const WPyCBSysInit &wpycbsysinit, const WPyCBInit &wpycbin
             // The reference is to a local var within AISimulator::init
             // and becomes dangling as soon as AISimulator::init returns
             // (as soon as wpycbinit returns)
-            LOG("[wcppsyscb] start");
+            LOG("start");
 
             // NOTE: we already have GIL, cppcb is called from python
 
-            LOG("[wcppsyscb] release Python GIL");
+            LOG("release Python GIL");
             py::gil_scoped_release release;
 
-            LOG("[wcppsyscb] call cppsyscb");
             cppsyscb(action);
-            LOG("[wcppsyscb] return");
         };
 
 
         // NOTE: this may seem to work withoug GIL, but it is
         //       actually required (I once got an explicit error about it)
-        LOG("[pycbsysinit] acquire Python GIL");
+        LOG("acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
         // TODO: implement the pycbsysinit in PYthon and pass it to start_connector
-        LOG("[pycbsysinit] call pycbinit(cppcb)");
+        LOG("call pycbinit(cppcb)");
         wpycbsysinit(wcppsyscb);
 
         // Release GIL here instead of before calling start_vcmi()
-        LOG("[pycbsysinit] release Python GIL");
+        LOG("release Python GIL");
         py::gil_scoped_release release;
-        LOG("[pycbsysinit] return");
+
+        LOG("RETURN");
     };
 
     // NOTE: GIL is released when CPP calls the sysinit callback
     // LOG("release Python GIL");
     // py::gil_scoped_release release;
 
-    auto cbprovider = MMAI::CBProvider{pycbsysinit, pycbinit, pycb};
+    auto cbprovider = CBProvider{pycbsysinit, pycbinit, pycb};
 
     // TODO: config values
     // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
@@ -132,7 +135,7 @@ void _start_connector(const WPyCBSysInit &wpycbsysinit, const WPyCBInit &wpycbin
     LOG("return !!!! !SHOULD NEVER HAPPEN");
 }
 
-void start_connector(const WPyCBSysInit &wpycbsysinit, const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
+void start(const WPyCBSysInit &wpycbsysinit, const WPyCBInit &wpycbinit, const WPyCB &wpycb) {
     setvbuf(stdout, NULL, _IONBF, 0);
     LOG("start (main thread)");
 
@@ -145,12 +148,19 @@ void start_connector(const WPyCBSysInit &wpycbsysinit, const WPyCBInit &wpycbini
 
     LOG("launch new thread");
     boost::thread([wpycbsysinit, wpycbinit, wpycb]() {
-        _start_connector(wpycbsysinit, wpycbinit, wpycb);
+        _start(wpycbsysinit, wpycbinit, wpycb);
     });
 
     LOG("return");
 }
 
 PYBIND11_MODULE(conntest, m) {
-    m.def("start_connector", &start_connector, "Start VCMI");
-}
+    m.def("start", &start_connector, "Start VCMI");
+
+    py::class_<Action>(m, "Action")
+        .def(py::init<std::string, py::array_t<float>>());
+
+    py::class_<State>(m, "State")
+        .def(py::init<std::string, GymState>())
+        .def("getStr", &State::getStr)
+        .def("getState", &State::getState);}

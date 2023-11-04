@@ -10,7 +10,6 @@
 #include <boost/thread.hpp>
 #include <boost/lexical_cast.hpp>
 
-#define DLL_EXPORT __attribute__ ((visibility("default")))
 #include "aitypes.h" // "vendor" header file
 
 #define LOG(msg) printf("<%s>[CPP][%s] (%s) %s\n", boost::lexical_cast<std::string>(boost::this_thread::get_id()).c_str(), std::filesystem::path(__FILE__).filename().string().c_str(), __FUNCTION__, msg);
@@ -18,11 +17,30 @@
 
 namespace py = pybind11;
 
-using PyGymAction = int;
-using PyGymState = py::array_t<float>;
+py::array_t<float> stateForPython(GymState gymstate);
+ActionF actionFromPython(py::array_t<float> pyaction);
 
-using WCppCB = const std::function<void(PyGymAction)>;
+struct Action {
+    Action(std::string str_, py::array_t<float> pyaction)
+    : str(str_), action(actionFromPython(pyaction)) {}
+
+    const std::string str;
+    const ActionF action;
+};
+
+struct State {
+    State(std::string str_, GymState gymstate)
+    : str(str_), state(stateForPython(statef)) {}
+
+    const std::string str;
+    const py::array_t<float> state;
+
+    const std::string &getStr() const { return str; }
+    const py::array_t<float> &getState() const { return state; }
+};
+
+using WCppCB = const std::function<void(Action)>;
 using WCppSysCB = const std::function<void(std::string)>;
-using WPyCB = const std::function<void(PyGymState)>;
+using WPyCB = const std::function<void(State)>;
 using WPyCBInit = const std::function<void(WCppCB)>;
 using WPyCBSysInit = const std::function<void(WCppSysCB)>;
