@@ -1,9 +1,7 @@
-import pybind11
-
-
-def main():
-    print("'ello")
+from vcmi_gym.envs.v0.vcmi_env import VcmiEnv
 
 
 if __name__ == "__main__":
-    main()
+    env = VcmiEnv()
+    
+    env.step()

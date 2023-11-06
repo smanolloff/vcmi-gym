@@ -13,9 +13,9 @@ class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["browser", "rgb_array"], "render_fps": 30}
 
     def __init__(self):
-        self.render_mode = render_mode
+        self.render_mode = None
         self.action_space = gym.spaces.Discrete(1322)
-        self.observation_space = gym.spaces.Box(shape=(320,), low=-1, high=1, dtype=DTYPE)
+        self.observation_space = gym.spaces.Box(shape=(334,), low=-1, high=1, dtype=DTYPE)
         self.pc = PyConnector()
         self.state = self.pc.start()
 

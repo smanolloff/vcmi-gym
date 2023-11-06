@@ -7,7 +7,7 @@
       --profile:build=default \
       --profile:host=default
 
-  1.2. vcmi itself
+  1.2. vcmi itself (the EXPORT commands is needed by LSP-clangd in sublime)
 
     $ cmake --fresh -S . -B build -Wno-dev \
         -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
@@ -15,7 +15,8 @@
         -D ENABLE_SINGLE_APP_BUILD=1 \
         -D ENABLE_CCACHE=1 \
         -D ENABLE_MYCLIENT_BUILD=1 \
-        -D ENABLE_DEV_BUILD=1
+        -D ENABLE_DEV_BUILD=1 \
+        -D CMAKE_EXPORT_COMPILE_COMMANDS=1
 
     $ cmake --build build/ -- -j$(sysctl -n hw.ncpu)
 
@@ -30,7 +31,9 @@
 
         $ cmake --fresh -S . -B build -Wno-dev \
             -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
-            -D CMAKE_BUILD_TYPE=Debug
+            -D CMAKE_BUILD_TYPE=Debug \
+            -D CMAKE_EXPORT_COMPILE_COMMANDS=1
+
 
         $ cmake --build build/
 

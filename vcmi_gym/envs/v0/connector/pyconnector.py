@@ -5,7 +5,7 @@ import time
 # don't remove - it is implicitly required by pybind11
 import numpy as np
 
-from build import cppconnector
+from .build import cppconnector
 
 
 class PyConnector():
