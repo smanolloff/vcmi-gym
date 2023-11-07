@@ -55,7 +55,7 @@ class VcmiEnv(gym.Env):
 
     def calc_reward(self, result, old_result):
         n_errors = result.n_errors()
-        logging.info("Last action had %d errors" % n_errors)
+        logging.debug("Last action had %d errors" % n_errors)
 
         reward = -n_errors + result.dmg_dealt() - result.dmg_received()
         return reward

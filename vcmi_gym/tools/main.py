@@ -22,11 +22,11 @@ def main():
     while True:
         obs, rew, term, trunc, info = env.step(action)
         # obs, rew, term, trunc, info = env.step(0)
-        logging.info("======== obs: (hidden)")
-        logging.info("======== rew: %s" % rew)
-        logging.info("======== term: %s" % term)
-        logging.info("======== trunc: %s" % trunc)
-        logging.info("======== info: %s" % info)
+        logging.debug("======== obs: (hidden)")
+        logging.debug("======== rew: %s" % rew)
+        logging.debug("======== term: %s" % term)
+        logging.debug("======== trunc: %s" % trunc)
+        logging.debug("======== info: %s" % info)
         action += 1
 
         if term:
