@@ -12,28 +12,35 @@ DTYPE = np.float32
 class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["browser", "rgb_array"], "render_fps": 30}
 
-    def __init__(self):
+    def __init__(self, mapname):
         self.render_mode = None
-        self.action_space = gym.spaces.Discrete(1322)
-        self.observation_space = gym.spaces.Box(shape=(334,), low=-1, high=1, dtype=DTYPE)
-        self.pc = PyConnector()
-        self.state = self.pc.start()
+
+        # NOTE: removing action=0 (retreat) for now
+        #       => start from 1 and reduce total actions by 1
+        # self.action_space = gym.spaces.Discrete(PyConnector.ACTION_MAX + 1)
+        self.action_space = gym.spaces.Discrete(PyConnector.ACTION_MAX, start=1)
+        self.observation_space = gym.spaces.Box(shape=(PyConnector.STATE_SIZE,), low=-1, high=1, dtype=DTYPE)
+        self.pc = PyConnector(mapname)
+        self.result = self.pc.start()
 
     def step(self, action):
-        self.old_state = self.state
-        self.state, action_was_valid, terminated = self.pc.act(action)
-        reward = self.calc_reward(action_was_valid, self.state, self.old_state)
-        return self.state, reward, terminated, False, {}
+        if self.result.is_battle_over():
+            raise Exception("Reset needed")
+
+        self.old_result = self.result
+        self.result = self.pc.act(action)
+        reward = self.calc_reward(self.result, self.old_result)
+        return self.result.state(), reward, self.result.is_battle_over(), False, {}
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        if self.old_state:
+        if self.old_result:
             # do a reset only if at least 1 action was made
-            self.old_state = None
-            self.state = self.pc.reset()
+            self.old_result = None
+            self.result = self.pc.reset()
 
-        return self.state, {}
+        return self.result, {}
 
     def render(self, render_mode="browser"):
         gym.logger.warn("Rendering not yet implemented for VcmiEnv")
@@ -46,6 +53,9 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def calc_reward(self, action_was_valid, new_state, old_state):
-        # TODO
-        return 0
+    def calc_reward(self, result, old_result):
+        n_errors = result.n_errors()
+        logging.info("Last action had %d errors" % n_errors)
+
+        reward = -n_errors + result.dmg_dealt() - result.dmg_received()
+        return reward

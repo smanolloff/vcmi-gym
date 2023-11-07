@@ -16,7 +16,6 @@ find_package(Boost 1.48.0 REQUIRED COMPONENTS filesystem thread)
 
 pybind11_add_module(cppconnector
   cppconnector/common.h
-  cppconnector/cppconnector.h
   cppconnector/cppconnector.cpp)
 target_include_directories(cppconnector PUBLIC ${CMAKE_SOURCE_DIR}/../vcmi/pyclient)
 target_link_libraries(cppconnector PRIVATE pyclient Boost::boost Boost::thread Boost::filesystem)

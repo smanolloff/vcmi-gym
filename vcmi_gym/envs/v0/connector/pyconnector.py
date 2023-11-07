@@ -9,11 +9,23 @@ from .build import cppconnector
 
 
 class PyConnector():
-    def __init__(self):
+    STATE_SIZE = cppconnector.get_state_size()
+    ACTION_MAX = cppconnector.get_action_max()
+
+    def __init__(self, mapname):
         self.state = "TODO"
         self.cppcb = "TODO"
         self.cppsyscb = "TODO"
+        self.cppresetcb = "TODO"
+        self.mapname = mapname
         self.event = threading.Event()
+
+    # cb to be called from VCMI client thread on init only
+    def pycbresetinit(self, cppresetcb):
+        logging.info("start")
+        logging.info("Set shared vars: self.cppresetcb = %s" % cppresetcb)
+        self.cppresetcb = cppresetcb
+        logging.info("return")
 
     # cb to be called from VCMI root thread on boot only
     def pycbsysinit(self, cppsyscb):
@@ -30,25 +42,25 @@ class PyConnector():
         logging.info("return")
 
     # cb to be called from VCMI client thread
-    def pycb(self, state):
+    def pycb(self, result):
         logging.info("start")
-        logging.info("Set shared var: self.state = %s" % state)
-        self.state = state
+        logging.info("Set shared var: self.result = %s" % result)
+        self.result = result
         logging.info("event.set()")
         self.event.set()
         logging.info("return")
 
     def start(self):
         logging.info("start")
-        logging.info("Call cppconnector.start_vcmi(pycbinit, pycb)")
-        cppconnector.start(self.pycbsysinit, self.pycbinit, self.pycb)
+        logging.info("Call cppconnector.start_vcmi(...)")
+        cppconnector.start(self.pycbresetinit, self.pycbsysinit, self.pycbinit, self.pycb, self.mapname)
 
-        # wait until cppconnector.start_vcmi calls pycb, setting state and cppcb
+        # wait until cppconnector.start_vcmi calls pycb, setting result and cppcb
         logging.info("event.wait()")
         self.event.wait()
 
-        logging.info("return state")
-        return self.state
+        logging.info("return result")
+        return self.result
 
     def act(self, action):
         logging.info("start: action=%s" % action)
@@ -62,6 +74,22 @@ class PyConnector():
         logging.info("event.wait()")
         self.event.wait()
 
-        logging.info("state=%s" % self.state)
+        logging.info("result=%s" % self.result)
 
-        return self.state
+        return self.result
+
+    def reset(self):
+        logging.info("start")
+
+        logging.info("event.clear()")
+        self.event.clear()
+
+        logging.info("self.cppresetcb()")
+        self.cppresetcb()
+
+        logging.info("event.wait()")
+        self.event.wait()
+
+        logging.info("result=%s" % self.result)
+
+        return self.result
