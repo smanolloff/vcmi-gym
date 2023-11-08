@@ -12,15 +12,20 @@ DTYPE = np.float32
 class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
-    def __init__(self, mapname):
-        self.render_mode = None
+    def __init__(
+        self,
+        mapname,
+        render_mode="ansi",
+        vcmi_loglevel="error"
+    ):
+        self.render_mode = render_mode
 
         # NOTE: removing action=0 (retreat) for now
         #       => start from 1 and reduce total actions by 1
         # self.action_space = gym.spaces.Discrete(PyConnector.ACTION_MAX + 1)
         self.action_space = gym.spaces.Discrete(PyConnector.ACTION_MAX, start=1)
         self.observation_space = gym.spaces.Box(shape=(PyConnector.STATE_SIZE,), low=-1, high=1, dtype=DTYPE)
-        self.pc = PyConnector(mapname)
+        self.pc = PyConnector(mapname, vcmi_loglevel)
         self.result = self.pc.start()
 
     def step(self, action):
@@ -33,20 +38,14 @@ class VcmiEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-
-        if self.old_result:
-            # do a reset only if at least 1 action was made
-            self.old_result = None
-            self.result = self.pc.reset()
-
         return self.result, {}
 
     def render(self):
-        if render_mode == "ansi":
+        if self.render_mode == "ansi":
             return self.pc.render_ansi()
-        elif render_mode == "rgb_array":
+        elif self.render_mode == "rgb_array":
             gym.logger.warn("Rendering RGB arrays not yet implemented for VcmiEnv")
-        elif render_mode is None:
+        elif self.render_mode is None:
             gym.logger.warn("Cannot render with no render mode set")
 
         return

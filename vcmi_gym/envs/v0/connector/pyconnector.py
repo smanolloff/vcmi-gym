@@ -12,13 +12,22 @@ class PyConnector():
     STATE_SIZE = cppconnector.get_state_size()
     ACTION_MAX = cppconnector.get_action_max()
 
-    def __init__(self, mapname):
-        self.state = "TODO"
-        self.actioncb = "TODO"
-        self.syscb = "TODO"
-        self.resetcb = "TODO"
+    def __init__(self, mapname, vcmi_loglevel):
+        self.state = "<UNSET>"
+        self.actioncb = "<UNSET>"
+        self.syscb = "<UNSET>"
+        self.resetcb = "<UNSET>"
+        self.renderansicb = "<UNSET>"
         self.mapname = mapname
+        self.vcmi_loglevel = vcmi_loglevel
         self.event = threading.Event()
+
+    # cb to be called from VCMI client thread on init only
+    def renderansicbcb(self, renderansicb):
+        logging.info("start")
+        logging.debug("Set shared vars: self.renderansicb = %s" % renderansicb)
+        self.renderansicb = renderansicb
+        logging.debug("return")
 
     # cb to be called from VCMI client thread on init only
     def resetcbcb(self, resetcb):
@@ -53,7 +62,15 @@ class PyConnector():
     def start(self):
         logging.info("start")
         logging.debug("Call cppconnector.start_vcmi(...)")
-        cppconnector.start(self.resetcbcb, self.syscbcb, self.actioncbcb, self.resultcb, self.mapname)
+        cppconnector.start(
+            self.renderansicbcb,
+            self.resetcbcb,
+            self.syscbcb,
+            self.actioncbcb,
+            self.resultcb,
+            self.mapname,
+            self.vcmi_loglevel
+        )
 
         # wait until cppconnector.start_vcmi calls resultcb, setting result and actioncb
         logging.debug("event.wait()")
@@ -94,5 +111,7 @@ class PyConnector():
 
         return self.result
 
-    # def render_ansi(self):
-    #     logging.info("start")
+    def render_ansi(self):
+        logging.info("start")
+        logging.debug("return self.renderansicb()")
+        return self.renderansicb()

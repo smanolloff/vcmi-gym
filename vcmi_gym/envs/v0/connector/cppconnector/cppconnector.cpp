@@ -4,6 +4,7 @@
 #include "pyclient.h" // "vendor" header file
 
 void _start(
+    const P_RenderAnsiCBCB &p_renderansicbcb,
     const P_ResetCBCB &p_resetcbcb,
     const P_SysCBCB &p_syscbcb,
     const P_ActionCBCB &p_actioncbcb,
@@ -121,25 +122,46 @@ void _start(
         LOG("[syscbcb] return");
     };
 
-    // Convert p_resetcbcb -> PyCBResetInit
+    // Create ResetCBCB from the given resetcb
     const MMAI::ResetCBCB resetcbcb = [&p_resetcbcb](MMAI::ResetCB &resetcb) {
         // Convert CppResetCBInit -> WCppResetCBInit
-        P_ResetCB wresetcb = [resetcb]() {
-            LOG("[wresetcb] start");
+        P_ResetCB p_resetcb = [resetcb]() {
+            LOG("[p_resetcb] start");
 
-            LOG("[wresetcb] release Python GIL");
+            LOG("[p_resetcb] release Python GIL");
             py::gil_scoped_release release;
 
-            LOG("[wresetcb] call resetcb");
+            LOG("[p_resetcb] call resetcb");
             resetcb();
-            LOG("[wresetcb] return");
+            LOG("[p_resetcb] return");
         };
 
         LOG("[resetcbcb] acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
-        LOG("[resetcbcb] call p_resetcbcb(wresetcb)");
-        p_resetcbcb(wresetcb);
+        LOG("[resetcbcb] call p_resetcbcb(p_resetcb)");
+        p_resetcbcb(p_resetcb);
+        LOG("[resetcbcb] return");
+    };
+
+    // Create RenderAnsiCBCB from the given renderansicb
+    const MMAI::RenderAnsiCBCB renderansicbcb = [&p_renderansicbcb](MMAI::RenderAnsiCB &renderansicb) {
+        // Convert CppResetCBInit -> WCppResetCBInit
+        P_RenderAnsiCB p_renderansicb = [renderansicb]() {
+            LOG("[p_renderansicb] start");
+
+            LOG("[p_renderansicb] release Python GIL");
+            py::gil_scoped_release release;
+
+            LOG("[p_renderansicb] return renderansicb()");
+            return renderansicb();
+        };
+
+        LOG("[resetcbcb] acquire Python GIL");
+        py::gil_scoped_acquire acquire;
+
+        LOG("[resetcbcb] call p_renderansicbcb(p_renderansicb)");
+        p_renderansicbcb(p_renderansicb);
         LOG("[resetcbcb] return");
     };
 
@@ -147,24 +169,26 @@ void _start(
     // LOG("release Python GIL");
     // py::gil_scoped_release release;
 
-    auto cbprovider = MMAI::CBProvider{resetcbcb, syscbcb, actioncbcb, resultcb};
+    auto cbprovider = MMAI::CBProvider{renderansicbcb, resetcbcb, syscbcb, actioncbcb, resultcb};
 
     // TODO: config values
     // std::string resdir = "/Users/simo/Projects/vcmi-/vcmi_/envs/v0/vcmi/build/bin";
 
     LOG("Start VCMI");
-    start_vcmi(mapname, cbprovider);
+    start_vcmi(cbprovider, mapname);
 
     LOG("return !!!! !SHOULD NEVER HAPPEN");
 }
 
 
 void start(
+    const P_RenderAnsiCBCB &p_renderansicbcb,
     const P_ResetCBCB &p_resetcbcb,
     const P_SysCBCB &p_syscbcb,
     const P_ActionCBCB &p_actioncbcb,
     const P_ResultCB &p_resultcb,
-    const std::string mapname
+    const std::string mapname,
+    const std::string loglevel
 ) {
     setvbuf(stdout, NULL, _IONBF, 0);
     LOG("start (main thread)");
@@ -174,11 +198,11 @@ void start(
 
     // This must happen in the main thread (SDL requires it)
     LOG("call preinit_vcmi(...)");
-    preinit_vcmi(resdir);
+    preinit_vcmi(resdir, loglevel);
 
     LOG("launch new thread");
-    boost::thread t([p_resetcbcb, p_syscbcb, p_actioncbcb, p_resultcb, mapname]() {
-        _start(p_resetcbcb, p_syscbcb, p_actioncbcb, p_resultcb, mapname);
+    boost::thread t([p_renderansicbcb, p_resetcbcb, p_syscbcb, p_actioncbcb, p_resultcb, mapname]() {
+        _start(p_renderansicbcb, p_resetcbcb, p_syscbcb, p_actioncbcb, p_resultcb, mapname);
     });
 
     LOG("return");

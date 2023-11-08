@@ -5,9 +5,11 @@ from vcmi_gym.envs.v0.vcmi_env import VcmiEnv
 
 logging.basicConfig(
     format="[PY][%(filename)s] (%(funcName)s) %(message)s",
-    level=logging.INFO
+    level=logging.WARN
 )
 
+# To prevent annoying ApplePersistenceIgnoreState message on macOS:
+# $ defaults write org.python.python ApplePersistenceIgnoreState NO
 
 def main():
     testmap = "simotest.vmap"
@@ -20,6 +22,7 @@ def main():
     # stay on hex 75, shoot at enemy stack 1:
     action = 2 + 75*8 + 1
     while True:
+        print(env.render())
         obs, rew, term, trunc, info = env.step(action)
         # obs, rew, term, trunc, info = env.step(0)
         logging.debug("======== obs: (hidden)")
@@ -34,6 +37,7 @@ def main():
 
         # time.sleep(5)
 
+    print(env.render())
     time.sleep(5)
     env.reset()
     env.step(0)

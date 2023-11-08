@@ -73,6 +73,9 @@ struct P_Result {
 // Wrappers of functions called from/by CPP code
 // See notes in aitypes.h
 
+using P_RenderAnsiCB = const std::function<std::string()>;
+using P_RenderAnsiCBCB = const std::function<void(P_RenderAnsiCB)>;
+
 using P_ResetCB = const std::function<void()>;
 using P_ResetCBCB = const std::function<void(P_ResetCB)>;
 
