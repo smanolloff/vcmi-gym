@@ -10,7 +10,7 @@ DTYPE = np.float32
 
 
 class VcmiEnv(gym.Env):
-    metadata = {"render_modes": ["browser", "rgb_array"], "render_fps": 30}
+    metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
     def __init__(self, mapname):
         self.render_mode = None
@@ -27,9 +27,8 @@ class VcmiEnv(gym.Env):
         if self.result.is_battle_over():
             raise Exception("Reset needed")
 
-        self.old_result = self.result
         self.result = self.pc.act(action)
-        reward = self.calc_reward(self.result, self.old_result)
+        reward = self.calc_reward(self.result)
         return self.result.state(), reward, self.result.is_battle_over(), False, {}
 
     def reset(self, seed=None, options=None):
@@ -42,8 +41,14 @@ class VcmiEnv(gym.Env):
 
         return self.result, {}
 
-    def render(self, render_mode="browser"):
-        gym.logger.warn("Rendering not yet implemented for VcmiEnv")
+    def render(self):
+        if render_mode == "ansi":
+            return self.pc.render_ansi()
+        elif render_mode == "rgb_array":
+            gym.logger.warn("Rendering RGB arrays not yet implemented for VcmiEnv")
+        elif render_mode is None:
+            gym.logger.warn("Cannot render with no render mode set")
+
         return
 
     def close(self):
@@ -53,9 +58,14 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def calc_reward(self, result, old_result):
-        n_errors = result.n_errors()
-        logging.debug("Last action had %d errors" % n_errors)
+    def calc_reward(self, res):
+        n_errors = res.n_errors()
+        logging.debug("Action errors: %d" % n_errors)
 
-        reward = -n_errors + result.dmg_dealt() - result.dmg_received()
-        return reward
+        if n_errors:
+            return -10 * n_errors
+
+        net_dmg = res.dmg_dealt() - res.dmg_received()
+        net_value = res.value_killed() - res.value_lost()
+
+        return net_value + 10*net_dmg

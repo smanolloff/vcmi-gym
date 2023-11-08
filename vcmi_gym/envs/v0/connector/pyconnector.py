@@ -14,35 +14,35 @@ class PyConnector():
 
     def __init__(self, mapname):
         self.state = "TODO"
-        self.cppcb = "TODO"
-        self.cppsyscb = "TODO"
-        self.cppresetcb = "TODO"
+        self.actioncb = "TODO"
+        self.syscb = "TODO"
+        self.resetcb = "TODO"
         self.mapname = mapname
         self.event = threading.Event()
 
     # cb to be called from VCMI client thread on init only
-    def pycbresetinit(self, cppresetcb):
+    def resetcbcb(self, resetcb):
         logging.info("start")
-        logging.debug("Set shared vars: self.cppresetcb = %s" % cppresetcb)
-        self.cppresetcb = cppresetcb
+        logging.debug("Set shared vars: self.resetcb = %s" % resetcb)
+        self.resetcb = resetcb
         logging.debug("return")
 
     # cb to be called from VCMI root thread on boot only
-    def pycbsysinit(self, cppsyscb):
+    def syscbcb(self, syscb):
         logging.info("start")
-        logging.debug("Set shared vars: self.cppsyscb = %s" % cppsyscb)
-        self.cppsyscb = cppsyscb
+        logging.debug("Set shared vars: self.syscb = %s" % syscb)
+        self.syscb = syscb
         logging.debug("return")
 
     # cb to be called from VCMI client thread on init only
-    def pycbinit(self, cppcb):
+    def actioncbcb(self, actioncb):
         logging.info("start")
-        logging.debug("Set shared vars: self.cppcb = %s" % cppcb)
-        self.cppcb = cppcb
+        logging.debug("Set shared vars: self.actioncb = %s" % actioncb)
+        self.actioncb = actioncb
         logging.debug("return")
 
     # cb to be called from VCMI client thread
-    def pycb(self, result):
+    def resultcb(self, result):
         logging.info("start")
         logging.debug("Set shared var: self.result = %s" % result)
         self.result = result
@@ -53,9 +53,9 @@ class PyConnector():
     def start(self):
         logging.info("start")
         logging.debug("Call cppconnector.start_vcmi(...)")
-        cppconnector.start(self.pycbresetinit, self.pycbsysinit, self.pycbinit, self.pycb, self.mapname)
+        cppconnector.start(self.resetcbcb, self.syscbcb, self.actioncbcb, self.resultcb, self.mapname)
 
-        # wait until cppconnector.start_vcmi calls pycb, setting result and cppcb
+        # wait until cppconnector.start_vcmi calls resultcb, setting result and actioncb
         logging.debug("event.wait()")
         self.event.wait()
 
@@ -68,8 +68,8 @@ class PyConnector():
         logging.debug("event.clear()")
         self.event.clear()
 
-        logging.debug("self.cppcb(action)")
-        self.cppcb(action)
+        logging.debug("self.actioncb(action)")
+        self.actioncb(action)
 
         logging.debug("event.wait()")
         self.event.wait()
@@ -84,8 +84,8 @@ class PyConnector():
         logging.debug("event.clear()")
         self.event.clear()
 
-        logging.debug("self.cppresetcb()")
-        self.cppresetcb()
+        logging.debug("self.resetcb()")
+        self.resetcb()
 
         logging.debug("event.wait()")
         self.event.wait()
@@ -93,3 +93,6 @@ class PyConnector():
         logging.debug("result=%s" % self.result)
 
         return self.result
+
+    # def render_ansi(self):
+    #     logging.info("start")

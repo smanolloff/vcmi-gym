@@ -19,17 +19,21 @@
 
 namespace py = pybind11;
 
-static const int get_state_size() { return MMAI::stateSize; }
-static const int get_action_max() { return MMAI::actionMax; }
+static const int get_state_size() { return MMAI::STATE_SIZE; }
+static const int get_action_max() { return MMAI::N_ACTIONS; }
 
-using PyGymAction = int;
-using PyGymState = py::array_t<float>;
-struct PyGymResult {
-  PyGymResult(
-    PyGymState state,
+using P_Action = int;
+using P_State = py::array_t<float>;
+struct P_Result {
+  P_Result(
+    P_State state,
     int n_errors,
     int dmg_dealt,
     int dmg_received,
+    int units_lost,
+    int units_killed,
+    int value_lost,
+    int value_killed,
     bool is_battle_over,
     bool is_victorious
   )
@@ -38,12 +42,19 @@ struct PyGymResult {
     _dmg_dealt(dmg_dealt),
     _dmg_received(dmg_received),
     _is_battle_over(is_battle_over),
-    _is_victorious(is_victorious) {}
+    _units_lost(units_lost),
+    _units_killed(units_killed),
+    _value_lost(value_lost),
+    _value_killed(value_killed) {}
 
   const py::array_t<float> _state;
   const int _n_errors = -1;
   const int _dmg_dealt = -1;
   const int _dmg_received = -1;
+  const int _units_lost = -1;
+  const int _units_killed = -1;
+  const int _value_lost = -1;
+  const int _value_killed = -1;
   const bool _is_battle_over = false;
   const bool _is_victorious = false;
 
@@ -51,6 +62,10 @@ struct PyGymResult {
   const int &n_errors() const { return _n_errors; }
   const int &dmg_dealt() const { return _dmg_dealt; }
   const int &dmg_received() const { return _dmg_received; }
+  const int &units_lost() const { return _units_lost; }
+  const int &units_killed() const { return _units_killed; }
+  const int &value_lost() const { return _value_lost; }
+  const int &value_killed() const { return _value_killed; }
   const bool &is_battle_over() const { return _is_battle_over; }
   const bool &is_victorious() const { return _is_victorious; }
 };
@@ -58,12 +73,12 @@ struct PyGymResult {
 // Wrappers of functions called from/by CPP code
 // See notes in aitypes.h
 
-using WCppResetCB = const std::function<void()>;
-using WPyCBResetInit = const std::function<void(WCppResetCB)>;
+using P_ResetCB = const std::function<void()>;
+using P_ResetCBCB = const std::function<void(P_ResetCB)>;
 
-using WCppSysCB = const std::function<void(std::string)>;
-using WPyCBSysInit = const std::function<void(WCppSysCB)>;
+using P_SysCB = const std::function<void(std::string)>;
+using P_SysCBCB = const std::function<void(P_SysCB)>;
 
-using WCppCB = const std::function<void(PyGymAction)>;
-using WPyCBInit = const std::function<void(WCppCB)>;
-using WPyCB = const std::function<void(PyGymResult)>;
+using P_ActionCB = const std::function<void(P_Action)>;
+using P_ActionCBCB = const std::function<void(P_ActionCB)>;
+using P_ResultCB = const std::function<void(P_Result)>;

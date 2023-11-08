@@ -4,10 +4,10 @@
 #include "pyclient.h" // "vendor" header file
 
 void _start(
-    const WPyCBResetInit &wpycbresetinit,
-    const WPyCBSysInit &wpycbsysinit,
-    const WPyCBInit &wpycbinit,
-    const WPyCB &wpycb,
+    const P_ResetCBCB &p_resetcbcb,
+    const P_SysCBCB &p_syscbcb,
+    const P_ActionCBCB &p_actioncbcb,
+    const P_ResultCB &p_resultcb,
     const std::string mapname
 ) {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -25,138 +25,132 @@ void _start(
     // Gym code calls and is called by wrapped callbacks
     // (see common.h)
     //
-    // TODO: this terminology is very confusing
-    //       replace "W" with "P_" prefix
-    //       (all python-interacting functions are P_, others are the raw)
-    //
-    // TODO: rename functions
-    //       PyCB -> GymReportCB
-    //       CppCB -> VcmiActCB
-    //       PyCBInit -> GymInitCB
-    //       ...
-
     LOG("create wrappers around callbacks")
 
-    // Create PyCB from the given WPyCB
-    const MMAI::PyCB pycb = [&wpycb](const MMAI::GymResult &gr) {
-        LOG("[pycb] start");
+    // Create PyCB from the given p_resultCB
+    const MMAI::ResultCB resultcb = [&p_resultcb](const MMAI::Result &r) {
+        LOG("[resultcb] start");
 
-        LOG("[pycb] acquire Python GIL");
+        LOG("[resultcb] acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
-        LOG("[pycb] Convert gr -> pgr");
-        auto pgs = PyGymState(gr.state.size());
+        LOG("[resultcb] Convert r -> pgr");
+        auto pgs = P_State(r.state.size());
         auto md = pgs.mutable_data();
-        for (int i=0; i<gr.state.size(); i++)
-            md[i] = gr.state[i].norm;
+        for (int i=0; i<r.state.size(); i++)
+            md[i] = r.state[i].norm;
 
-        auto pgr = PyGymResult(pgs,
-            gr.n_errors,
-            gr.dmgDealt,
-            gr.dmgReceived,
-            gr.ended,
-            gr.victory
+        auto pgr = P_Result(pgs,
+            r.n_errors,
+            r.dmgDealt,
+            r.dmgReceived,
+            r.unitsLost,
+            r.unitsKilled,
+            r.valueLost,
+            r.valueKilled,
+            r.ended,
+            r.victory
         );
 
-        LOG("[pycb] Call wpycb(pgr)");
-        wpycb(pgr);
-        LOG("[pycb] return");
+        LOG("[resultcb] Call p_resultcb(pgr)");
+        p_resultcb(pgr);
+        LOG("[resultcb] return");
     };
 
 
-    // Create PyCBInit from the given WPyCBInit
-    const MMAI::PyCBInit pycbinit = [&wpycbinit](MMAI::CppCB &cppcb) {
+    // Create PyCBInit from the given p_actioncbcb
+    const MMAI::ActionCBCB actioncbcb = [&p_actioncbcb](MMAI::ActionCB &actioncb) {
         // Create WCppCB from the given CppCB
-        WCppCB wcppcb = [cppcb](PyGymAction pga) {
-            //           ^^^^^
-            //           NOT a reference!
+        P_ActionCB p_actioncb = [actioncb](P_Action pa) {
+            //                         ^^^^^
+            //                         NOT a reference!
             // The reference is to a local var within AISimulator::init
             // and becomes dangling as soon as AISimulator::init returns
-            // (as soon as wpycbinit returns)
-            LOG("[wcppcb] start");
+            // (as soon as p_actioncbcb returns)
+            LOG("[p_actioncb] start");
 
-            // NOTE: we already have GIL, cppcb is called from python
+            // NOTE: we already have GIL, actioncb is called from python
 
-            LOG("[wcppcb] release Python GIL");
+            LOG("[p_actioncb] release Python GIL");
             py::gil_scoped_release release;
 
-            LOG("[wcppcb] Convert pga -> ga");
-            auto ga = static_cast<MMAI::GymAction>(pga);
+            LOG("[p_actioncb] Convert pa -> a");
+            auto a = static_cast<MMAI::Action>(pa);
 
-            LOG("[wcppcb] Call cppcb(ga)");
-            cppcb(ga);
-            LOG("[wcppcb] return");
+            LOG("[p_actioncb] Call actioncb(a)");
+            actioncb(a);
+            LOG("[p_actioncb] return");
         };
 
         // NOTE: this may seem to work withoug GIL, but it is
         //       actually required (I once got an explicit error about it)
-        LOG("[pycbinit] acquire Python GIL");
+        LOG("[actioncbcb] acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
-        LOG("[pycbinit] call wpycbinit(wcppcb)");
-        wpycbinit(wcppcb);
-        LOG("[pycbinit] return");
+        LOG("[actioncbcb] call p_actioncbcb(p_actioncb)");
+        p_actioncbcb(p_actioncb);
+        LOG("[actioncbcb] return");
     };
 
 
-    // Create PyCBSysInit from the given WPyCBSysInit
-    // see pycbinit notes about GIL and lambda var scoping
-    const MMAI::PyCBSysInit pycbsysinit = [&wpycbsysinit](MMAI::CppSysCB &cppsyscb) {
-        // Create WCppSysCB from the given CppSysCB
-        WCppSysCB wcppsyscb = [cppsyscb](std::string action) {
-            LOG("[wcppsyscb] start");
+    // Create PyCBSysInit from the given p_syscbcb
+    // see actioncbcb notes about GIL and lambda var scoping
+    const MMAI::SysCBCB syscbcb = [&p_syscbcb](MMAI::SysCB &syscb) {
+        // Create WCppSysCB from the given syscb
+        P_SysCB p_syscb = [syscb](std::string action) {
+            LOG("[p_syscb] start");
 
-            LOG("[wcppsyscb] release Python GIL");
+            LOG("[p_syscb] release Python GIL");
             py::gil_scoped_release release;
 
-            LOG("[wcppsyscb] call cppsyscb");
-            cppsyscb(action);
-            LOG("[wcppsyscb] return");
+            LOG("[p_syscb] call syscb");
+            syscb(action);
+            LOG("[p_syscb] return");
         };
 
-        LOG("[pycbsysinit] acquire Python GIL");
+        LOG("[syscbcb] acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
-        LOG("[pycbsysinit] call wpycbsysinit(wcppsyscb)");
-        wpycbsysinit(wcppsyscb);
+        LOG("[syscbcb] call p_syscbcb(p_syscb)");
+        p_syscbcb(p_syscb);
 
         // Release GIL here instead of before calling start_vcmi()
         // (PySysCBInit is invoked in the main thread!)
-        LOG("[pycbsysinit] release Python GIL");
+        LOG("[syscbcb] release Python GIL");
         py::gil_scoped_release release;
-        LOG("[pycbsysinit] return");
+        LOG("[syscbcb] return");
     };
 
-    // Convert WPyCBResetInit -> PyCBResetInit
-    const MMAI::PyCBResetInit pycbresetinit = [&wpycbresetinit](MMAI::CppResetCB &cppresetcb) {
+    // Convert p_resetcbcb -> PyCBResetInit
+    const MMAI::ResetCBCB resetcbcb = [&p_resetcbcb](MMAI::ResetCB &resetcb) {
         // Convert CppResetCBInit -> WCppResetCBInit
-        WCppResetCB wcppresetcb = [cppresetcb]() {
-            LOG("[wcppresetcb] start");
+        P_ResetCB wresetcb = [resetcb]() {
+            LOG("[wresetcb] start");
 
-            LOG("[wcppresetcb] release Python GIL");
+            LOG("[wresetcb] release Python GIL");
             py::gil_scoped_release release;
 
-            LOG("[wcppresetcb] call cppresetcb");
-            cppresetcb();
-            LOG("[wcppresetcb] return");
+            LOG("[wresetcb] call resetcb");
+            resetcb();
+            LOG("[wresetcb] return");
         };
 
-        LOG("[pycbresetinit] acquire Python GIL");
+        LOG("[resetcbcb] acquire Python GIL");
         py::gil_scoped_acquire acquire;
 
-        LOG("[pycbresetinit] call wpycbresetinit(wcppresetcb)");
-        wpycbresetinit(wcppresetcb);
-        LOG("[pycbresetinit] return");
+        LOG("[resetcbcb] call p_resetcbcb(wresetcb)");
+        p_resetcbcb(wresetcb);
+        LOG("[resetcbcb] return");
     };
 
     // NOTE: GIL is released when CPP calls the sysinit callback
     // LOG("release Python GIL");
     // py::gil_scoped_release release;
 
-    auto cbprovider = MMAI::CBProvider{pycbresetinit, pycbsysinit, pycbinit, pycb};
+    auto cbprovider = MMAI::CBProvider{resetcbcb, syscbcb, actioncbcb, resultcb};
 
     // TODO: config values
-    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
+    // std::string resdir = "/Users/simo/Projects/vcmi-/vcmi_/envs/v0/vcmi/build/bin";
 
     LOG("Start VCMI");
     start_vcmi(mapname, cbprovider);
@@ -166,10 +160,10 @@ void _start(
 
 
 void start(
-    const WPyCBResetInit &wpycbresetinit,
-    const WPyCBSysInit &wpycbsysinit,
-    const WPyCBInit &wpycbinit,
-    const WPyCB &wpycb,
+    const P_ResetCBCB &p_resetcbcb,
+    const P_SysCBCB &p_syscbcb,
+    const P_ActionCBCB &p_actioncbcb,
+    const P_ResultCB &p_resultcb,
     const std::string mapname
 ) {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -183,8 +177,8 @@ void start(
     preinit_vcmi(resdir);
 
     LOG("launch new thread");
-    boost::thread t([wpycbresetinit, wpycbsysinit, wpycbinit, wpycb, mapname]() {
-        _start(wpycbresetinit, wpycbsysinit, wpycbinit, wpycb, mapname);
+    boost::thread t([p_resetcbcb, p_syscbcb, p_actioncbcb, p_resultcb, mapname]() {
+        _start(p_resetcbcb, p_syscbcb, p_actioncbcb, p_resultcb, mapname);
     });
 
     LOG("return");
@@ -195,11 +189,15 @@ PYBIND11_MODULE(cppconnector, m) {
     m.def("get_state_size", &get_state_size, "Get number of elements in state");
     m.def("get_action_max", &get_action_max, "Get max expected value of action");
 
-    py::class_<PyGymResult>(m, "PyGymResult")
-        .def("n_errors", &PyGymResult::n_errors)
-        .def("state", &PyGymResult::state)
-        .def("dmg_dealt", &PyGymResult::dmg_dealt)
-        .def("dmg_received", &PyGymResult::dmg_received)
-        .def("is_battle_over", &PyGymResult::is_battle_over)
-        .def("is_victorious", &PyGymResult::is_victorious);
+    py::class_<P_Result>(m, "PyGymResult")
+        .def("state", &P_Result::state)
+        .def("n_errors", &P_Result::n_errors)
+        .def("dmg_dealt", &P_Result::dmg_dealt)
+        .def("dmg_received", &P_Result::dmg_received)
+        .def("units_lost", &P_Result::units_lost)
+        .def("units_killed", &P_Result::units_killed)
+        .def("value_lost", &P_Result::value_lost)
+        .def("value_killed", &P_Result::value_killed)
+        .def("is_battle_over", &P_Result::is_battle_over)
+        .def("is_victorious", &P_Result::is_victorious);
 }
