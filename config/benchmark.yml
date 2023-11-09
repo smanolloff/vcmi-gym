@@ -1,0 +1,5 @@
+---
+steps: 10000
+env_kwargs:
+  mapname: "pikemen.vmap"
+  vcmi_loglevel: "trace"

@@ -1,0 +1,7 @@
+stable_baselines3 ~= 2.1
+sb3-contrib ~= 2.1
+tensorboard
+tensorflow
+tqdm
+rich
+pyyaml

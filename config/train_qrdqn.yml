@@ -1,0 +1,24 @@
+---
+seed: ~
+run_id: ~
+out_dir_template: "data/QRDQN-{run_id}"
+log_tensorboard: true
+total_timesteps: 1_000_000
+# max_episode_steps: 2000
+n_checkpoints: 1
+learner_kwargs:
+  policy: "MlpPolicy"
+  buffer_size: 100000
+  learning_starts: 100000
+  batch_size: 64
+  tau: 1.0
+  gamma: 0.995
+  train_freq: 4
+  gradient_steps: 1
+  target_update_interval: 100000
+  exploration_fraction: 0.5
+  exploration_initial_eps: 0.01
+  exploration_final_eps: 0
+learner_lr_schedule: "const_0.003"
+env_kwargs:
+  vcmi_loglevel: "error"

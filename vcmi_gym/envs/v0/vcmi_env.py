@@ -39,7 +39,8 @@ class VcmiEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        return self.result, {}
+        self.pc.reset()
+        return self.result.state(), {}
 
     def render(self):
         if self.render_mode == "ansi":
@@ -52,7 +53,8 @@ class VcmiEnv(gym.Env):
         return
 
     def close(self):
-        self.pc.shutdown()
+        # self.pc.shutdown()
+        pass
 
     def error_summary(self):
         res = "Error summary:\n"
