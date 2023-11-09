@@ -8,15 +8,17 @@ logging.basicConfig(
     level=logging.WARN
 )
 
-# To prevent annoying ApplePersistenceIgnoreState message on macOS:
+# NOTE (MacOS ONLY):
+# To prevent annoying ApplePersistenceIgnoreState message:
 # $ defaults write org.python.python ApplePersistenceIgnoreState NO
+
 
 def main():
     testmap = "simotest.vmap"
     if len(sys.argv) > 1:
         testmap = sys.argv[1]
 
-    env = VcmiEnv(testmap)
+    env = VcmiEnv(testmap, vcmi_loglevel="error")
 
     # enchanters:
     # stay on hex 75, shoot at enemy stack 1:
@@ -38,6 +40,8 @@ def main():
         # time.sleep(5)
 
     print(env.render())
+    print(env.error_summary())
+
     time.sleep(5)
     env.reset()
     env.step(0)

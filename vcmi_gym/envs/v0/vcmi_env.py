@@ -19,6 +19,7 @@ class VcmiEnv(gym.Env):
         vcmi_loglevel="error"
     ):
         self.render_mode = render_mode
+        self.errcounters = {key: 0 for key in PyConnector.ERROR_MAPPING.keys()}
 
         # NOTE: removing action=0 (retreat) for now
         #       => start from 1 and reduce total actions by 1
@@ -53,12 +54,20 @@ class VcmiEnv(gym.Env):
     def close(self):
         self.pc.shutdown()
 
+    def error_summary(self):
+        res = "Error summary:\n"
+        for (flag, count) in self.errcounters.items():
+            err, _msg = PyConnector.ERROR_MAPPING[flag]
+            res += ("%25s: %d\n" % (err, count))
+
+        return res
+
     #
     # private
     #
 
     def calc_reward(self, res):
-        n_errors = res.n_errors()
+        n_errors = self.parse_errmask(res.errmask())
         logging.debug("Action errors: %d" % n_errors)
 
         if n_errors:
@@ -68,3 +77,13 @@ class VcmiEnv(gym.Env):
         net_value = res.value_killed() - res.value_lost()
 
         return net_value + 10*net_dmg
+
+    def parse_errmask(self, errmask):
+        n_errors = 0
+
+        for flag in self.errcounters.keys():
+            if errmask & flag:
+                n_errors += 1
+                self.errcounters[flag] += 1
+
+        return n_errors

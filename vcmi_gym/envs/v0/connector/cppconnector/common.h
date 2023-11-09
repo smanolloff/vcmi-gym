@@ -4,6 +4,7 @@
 #include <memory>
 #include <filesystem>
 #include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 #include <sstream>
 #include <array>
 #include <any>
@@ -21,13 +22,22 @@ namespace py = pybind11;
 
 static const int get_state_size() { return MMAI::STATE_SIZE; }
 static const int get_action_max() { return MMAI::N_ACTIONS; }
+static const std::map<MMAI::ErrMask, std::tuple<std::string, std::string>> get_error_mapping() {
+  std::map<MMAI::ErrMask, std::tuple<std::string, std::string>> res;
+
+  for (auto& [_err, tuple] : MMAI::ERRORS) {
+    res[std::get<0>(tuple)] = {std::get<1>(tuple), std::get<2>(tuple)};
+  }
+
+  return res;
+}
 
 using P_Action = int;
 using P_State = py::array_t<float>;
 struct P_Result {
   P_Result(
     P_State state,
-    int n_errors,
+    uint8_t errmask,
     int dmg_dealt,
     int dmg_received,
     int units_lost,
@@ -37,8 +47,8 @@ struct P_Result {
     bool is_battle_over,
     bool is_victorious
   )
-  : _state(state),
-    _n_errors(n_errors),
+  : _errmask(errmask),
+    _state(state),
     _dmg_dealt(dmg_dealt),
     _dmg_received(dmg_received),
     _is_battle_over(is_battle_over),
@@ -48,7 +58,7 @@ struct P_Result {
     _value_killed(value_killed) {}
 
   const py::array_t<float> _state;
-  const int _n_errors = -1;
+  const uint8_t _errmask = -1;
   const int _dmg_dealt = -1;
   const int _dmg_received = -1;
   const int _units_lost = -1;
@@ -59,7 +69,7 @@ struct P_Result {
   const bool _is_victorious = false;
 
   const py::array_t<float> &state() const { return _state; }
-  const int &n_errors() const { return _n_errors; }
+  const uint8_t &errmask() const { return _errmask; }
   const int &dmg_dealt() const { return _dmg_dealt; }
   const int &dmg_received() const { return _dmg_received; }
   const int &units_lost() const { return _units_lost; }

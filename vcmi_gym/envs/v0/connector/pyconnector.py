@@ -11,6 +11,7 @@ from .build import cppconnector
 class PyConnector():
     STATE_SIZE = cppconnector.get_state_size()
     ACTION_MAX = cppconnector.get_action_max()
+    ERROR_MAPPING = cppconnector.get_error_mapping()
 
     def __init__(self, mapname, vcmi_loglevel):
         self.state = "<UNSET>"

@@ -42,7 +42,7 @@ void _start(
             md[i] = r.state[i].norm;
 
         auto pgr = P_Result(pgs,
-            r.n_errors,
+            r.errmask,
             r.dmgDealt,
             r.dmgReceived,
             r.unitsLost,
@@ -212,10 +212,11 @@ PYBIND11_MODULE(cppconnector, m) {
     m.def("start", &start, "Start VCMI");
     m.def("get_state_size", &get_state_size, "Get number of elements in state");
     m.def("get_action_max", &get_action_max, "Get max expected value of action");
+    m.def("get_error_mapping", &get_error_mapping, "Get available error names and flags");
 
     py::class_<P_Result>(m, "PyGymResult")
         .def("state", &P_Result::state)
-        .def("n_errors", &P_Result::n_errors)
+        .def("errmask", &P_Result::errmask)
         .def("dmg_dealt", &P_Result::dmg_dealt)
         .def("dmg_received", &P_Result::dmg_received)
         .def("units_lost", &P_Result::units_lost)
