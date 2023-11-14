@@ -22,6 +22,14 @@ namespace py = pybind11;
 using P_State = py::array_t<float>;
 
 struct P_Result {
+  // Values returned to python by CPP functions are also destructed
+  // as soon as the return happens; it seems PyBind creates
+  // its own copies of those though, so that's not an issue
+
+  // ~P_Result(){
+  //   LOG("----- P_RESULT DESTRUCTORR ----");
+  // }
+
   P_Result(
     MMAI::ResultType type_,
     P_State state_,
