@@ -50,11 +50,12 @@ logging.basicConfig(
 
 def run(action, cfg, tag=None):
     env_kwargs = cfg.pop("env_kwargs", {})
+    expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
 
     def env_creator(**kwargs):
         return VcmiEnv(**kwargs)
 
-    gym.envs.register(id="local/VCMI-v0", entry_point=env_creator, kwargs=env_kwargs)
+    gym.envs.register(id="local/VCMI-v0", entry_point=env_creator, kwargs=expanded_env_kwargs)
 
     match action:
         case "train_qrdqn":
@@ -84,12 +85,12 @@ def run(action, cfg, tag=None):
 
         case "benchmark":
             from .benchmark import benchmark
-
-            benchmark(steps=cfg.get("steps", 10000))
+            steps = cfg.get("steps", 10000)
+            benchmark(steps)
 
         case "test":
             from .test import test
-            test(env_kwargs.get("mapname"), env_kwargs.get("vcmi_loglevel"))
+            test(env_kwargs)
 
         case _:
             print("Unknown action: %s" % action)

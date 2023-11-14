@@ -1,3 +1,2 @@
 env_kwargs:
-  mapname: "pikemen.vmap"
-  vcmi_loglevel: "error"
+  __include__: "config/env.yml"

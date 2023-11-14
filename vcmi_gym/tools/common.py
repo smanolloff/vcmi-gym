@@ -1,6 +1,7 @@
 import math
 import re
 import os
+import yaml
 
 
 def exp_decay_fn(initial_value, final_value, decay_fraction, n_decays):
@@ -84,3 +85,13 @@ def out_dir_from_template(tmpl, seed, run_id):
         raise Exception("Output directory already exists: %s" % out_dir)
 
     return out_dir
+
+
+def expand_env_kwargs(env_kwargs):
+    env_include_cfg = env_kwargs.pop("__include__", None)
+
+    if env_include_cfg:
+        with open(env_include_cfg, "r") as f:
+            env_kwargs = yaml.safe_load(f) | env_kwargs
+
+    return env_kwargs

@@ -7,6 +7,7 @@ from .connector.build import connector
 # the numpy data type (pytorch works best with float32)
 DTYPE = np.float32
 ERROR_MAPPING = connector.get_error_mapping()
+VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
 
 
 class VcmiEnv(gym.Env):
@@ -16,8 +17,12 @@ class VcmiEnv(gym.Env):
         self,
         mapname,
         render_mode="ansi",
-        vcmi_loglevel="error"
+        vcmi_loglevel_global="error",
+        vcmi_loglevel_ai="error"
     ):
+        assert vcmi_loglevel_global in VCMI_LOGLEVELS
+        assert vcmi_loglevel_ai in VCMI_LOGLEVELS
+
         self.render_mode = render_mode
         self.errcounters = {key: 0 for key in ERROR_MAPPING.keys()}
 
@@ -25,19 +30,24 @@ class VcmiEnv(gym.Env):
         #       => start from 1 and reduce total actions by 1
         self.action_space = gym.spaces.Discrete(connector.get_n_actions() - 1, start=1)
         self.observation_space = gym.spaces.Box(shape=(connector.get_state_size(),), low=-1, high=1, dtype=DTYPE)
-        self.connector = connector.Connector(mapname, vcmi_loglevel)
+        self.connector = connector.Connector(mapname, vcmi_loglevel_global, vcmi_loglevel_ai)
         self.result = self.connector.start()
+        self.n_steps = 0
 
     def step(self, action):
         if self.result.get_is_battle_over():
             raise Exception("Reset needed")
 
+        self.n_steps += 1
         self.result = self.connector.act(action)
         reward = self.calc_reward(self.result)
         return self.result.get_state(), reward, self.result.get_is_battle_over(), False, {}
         return np.zeros(334, dtype=DTYPE), 0, False, False, {}
 
     def reset(self, seed=None, options=None):
+        if self.n_steps == 0:
+            return self.result.get_state(), {}
+
         super().reset(seed=seed)
         self.result = self.connector.reset()
         return self.result.get_state(), {}
@@ -69,11 +79,11 @@ class VcmiEnv(gym.Env):
     #
 
     def calc_reward(self, res):
-        n_errors = self.parse_errmask(res.get_errmask())
-        logging.debug("Action errors: %d" % n_errors)
+        self.last_action_n_errors = self.parse_errmask(res.get_errmask())
+        # logging.debug("Action errors: %d" % n_errors)
 
-        if n_errors:
-            return -10 * n_errors
+        if self.last_action_n_errors:
+            return -10 * self.last_action_n_errors
 
         net_dmg = res.get_dmg_dealt() - res.get_dmg_received()
         net_value = res.get_value_killed() - res.get_value_lost()
