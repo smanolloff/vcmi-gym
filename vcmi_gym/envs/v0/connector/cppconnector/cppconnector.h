@@ -104,9 +104,8 @@ public:
   CppConnector(const std::string mapname, const std::string loglevel);
   ~CppConnector();
 
-  void prestart();
-  void start();
-  void reset();
-  void act(const MMAI::Action a);
-  void renderAnsi();
+  const P_Result start();
+  const P_Result reset();
+  const P_Result act(const MMAI::Action a);
+  const std::string renderAnsi();
 };

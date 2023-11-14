@@ -16,7 +16,6 @@ class PyConnector():
     def __init__(self, mapname, vcmi_loglevel):
         logging.debug("begin")
         self.cppconn = cppconnector.create_cppconnector(mapname, vcmi_loglevel)
-        self.cppconn.prestart()
         logging.debug("end")
 
     def start(self):

@@ -3,7 +3,17 @@
 #include "aitypes.h"
 #include "pyclient.h" // "vendor" header file
 
-int i = 0;
+// const auto cc = std::make_unique<CppConnector>("pikemen.vmap", "trace");
+
+std::unique_ptr<CppConnector> create_cppconnector(const std::string mapname_, const std::string loglevel_) {
+    // cc = std::make_unique<CppConnector>(mapname_, loglevel_);
+    return std::make_unique<CppConnector>(mapname_, loglevel_);
+}
+
+CppConnector::~CppConnector() {
+    // not the issue - it seems it's not called
+    LOG("---------------------------- DESTRUCTED ---------------------");
+}
 
 CppConnector::CppConnector(const std::string mapname_, const std::string loglevel_)
 : mapname(mapname_), loglevel(loglevel_) {
@@ -12,7 +22,8 @@ CppConnector::CppConnector(const std::string mapname_, const std::string logleve
         return this->getAction(r);
         // return this->getActionDummy(r);
     };
-    cbprovider = MMAI::CBProvider{getaction};
+    cbprovider->f_getAction = getaction;
+    cbprovider->debugstr = "reassigned debugstr in CppConnector constructor";
 }
 
 // const MMAI::Action CppConnector::getActionDummy(MMAI::Result r) {
@@ -46,7 +57,7 @@ const P_Result CppConnector::convertResult(MMAI::Result r) {
     );
 }
 
-void CppConnector::reset() {
+const P_Result CppConnector::reset() {
     assert(state == ConnectorState::AWAITING_ACTION);
 
     // LOG("release Python GIL");
@@ -87,10 +98,10 @@ void CppConnector::reset() {
     LOG("release lock1 (return)");
     LOG("release lock2 (return)");
     LOG("return P_Result");
-    // return convertResult(result);
+    return convertResult(result);
 }
 
-void CppConnector::renderAnsi() {
+const std::string CppConnector::renderAnsi() {
     assert(state == ConnectorState::AWAITING_ACTION);
 
     LOG("obtain lock1");
@@ -128,10 +139,10 @@ void CppConnector::renderAnsi() {
     LOG("release lock1 (return)");
     LOG("release lock2 (return)");
     LOG("return P_Result");
-    // return result.ansiRender;
+    return result.ansiRender;
 }
 
-void CppConnector::act(MMAI::Action a) {
+const P_Result CppConnector::act(MMAI::Action a) {
     assert(state == ConnectorState::AWAITING_ACTION);
 
     // Prevent control actions via `step`
@@ -172,10 +183,10 @@ void CppConnector::act(MMAI::Action a) {
     LOG("release lock1 (return)");
     LOG("release lock2 (return)");
     LOG("return P_Result");
-    // return convertResult(result);
+    return convertResult(result);
 }
 
-void CppConnector::start() {
+const P_Result CppConnector::start() {
     assert(state == ConnectorState::NEW);
 
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -190,7 +201,7 @@ void CppConnector::start() {
 
     // This must happen in the main thread (SDL requires it)
     LOG("call init_vcmi(...)");
-    f_sys = init_vcmi(resdir, loglevel, cbprovider);
+    f_sys = init_vcmi(loglevel, cbprovider.get());
 
     LOG("set state = AWAITING_RESULT");
     state = ConnectorState::AWAITING_RESULT;
@@ -224,7 +235,9 @@ void CppConnector::start() {
     LOG("release lock1 (return)");
     LOG("release lock2 (return)");
     LOG("return P_Result");
-    // return convertResult(result);
+
+    // TODO: smart ref here
+    return convertResult(result);
 }
 
 MMAI::Action CppConnector::getAction(MMAI::Result r) {
@@ -252,10 +265,7 @@ MMAI::Action CppConnector::getAction(MMAI::Result r) {
     LOG("obtain lock2: done");
 
     LOG("release lock1");
-    lock1.release();
-
-    LOG("sleeping 1s...");
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    lock1.unlock();
 
     assert(state == ConnectorState::AWAITING_ACTION);
 
@@ -295,6 +305,7 @@ PYBIND11_MODULE(cppconnector, m) {
     m.def("get_state_size", &get_state_size, "Get number of elements in state");
     m.def("get_n_actions", &get_n_actions, "Get max expected value of action");
     m.def("get_error_mapping", &get_error_mapping, "Get available error names and flags");
+    m.def("create_cppconnector", &create_cppconnector, "");
 
     py::class_<P_Result>(m, "P_Result")
         .def("get_state", &P_Result::get_state)
