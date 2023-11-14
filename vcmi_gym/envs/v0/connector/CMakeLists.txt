@@ -14,8 +14,6 @@ find_package(Python3 3.10 REQUIRED EXACT COMPONENTS Interpreter Development)
 find_package(pybind11 REQUIRED)
 find_package(Boost 1.48.0 REQUIRED COMPONENTS filesystem thread)
 
-pybind11_add_module(cppconnector
-  cppconnector/cppconnector.h
-  cppconnector/cppconnector.cpp)
-target_include_directories(cppconnector PUBLIC ${CMAKE_SOURCE_DIR}/../vcmi/pyclient)
-target_link_libraries(cppconnector PRIVATE pyclient Boost::boost Boost::thread Boost::filesystem)
+pybind11_add_module(connector connector.h connector.cpp)
+target_include_directories(connector PUBLIC ${CMAKE_SOURCE_DIR}/../vcmi/pyclient)
+target_link_libraries(connector PRIVATE pyclient Boost::boost Boost::thread Boost::filesystem)

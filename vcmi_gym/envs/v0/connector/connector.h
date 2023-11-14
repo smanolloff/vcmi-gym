@@ -22,14 +22,6 @@ namespace py = pybind11;
 using P_State = py::array_t<float>;
 
 struct P_Result {
-  // Values returned to python by CPP functions are also destructed
-  // as soon as the return happens; it seems PyBind creates
-  // its own copies of those though, so that's not an issue
-
-  // ~P_Result(){
-  //   LOG("----- P_RESULT DESTRUCTORR ----");
-  // }
-
   P_Result(
     MMAI::ResultType type_,
     P_State state_,
@@ -88,7 +80,7 @@ enum ConnectorState {
   AWAITING_RESULT,
 };
 
-class CppConnector {
+class Connector {
   std::mutex m1;
   std::mutex m2;
   std::condition_variable cond1;
@@ -100,7 +92,7 @@ class CppConnector {
   const std::string loglevel;
   std::thread vcmithread;
   MMAI::F_Sys f_sys;
-  std::unique_ptr<MMAI::CBProvider> cbprovider = std::make_unique<MMAI::CBProvider>(nullptr, "from CppConnector (DEFAULT)");
+  std::unique_ptr<MMAI::CBProvider> cbprovider = std::make_unique<MMAI::CBProvider>(nullptr, "from Connector (DEFAULT)");
   MMAI::Action action;
   MMAI::Result result;
 
@@ -109,8 +101,7 @@ class CppConnector {
   const MMAI::Action getActionDummy(MMAI::Result);
 
 public:
-  CppConnector(const std::string mapname, const std::string loglevel);
-  ~CppConnector();
+  Connector(const std::string mapname, const std::string loglevel);
 
   const P_Result start();
   const P_Result reset();
