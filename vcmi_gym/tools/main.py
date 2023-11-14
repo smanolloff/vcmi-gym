@@ -87,6 +87,10 @@ def run(action, cfg, tag=None):
 
             benchmark(steps=cfg.get("steps", 10000))
 
+        case "test":
+            from .test import test
+            test(env_kwargs.get("mapname"), env_kwargs.get("vcmi_loglevel"))
+
         case _:
             print("Unknown action: %s" % action)
 
@@ -106,6 +110,7 @@ def main():
 action:
   train_qrdqn       train using Quantile Regression DQN (QRDQN)
   benchmark         evaluate the actions/s achievable with this env
+  test              for testing purposes only
   help              print this help message
 
 examples:

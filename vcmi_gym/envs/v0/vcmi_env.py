@@ -21,26 +21,26 @@ class VcmiEnv(gym.Env):
         self.render_mode = render_mode
         self.errcounters = {key: 0 for key in PyConnector.ERROR_MAPPING.keys()}
 
-        # NOTE: removing action=0 (retreat) for now
+        # NOTE: removing action=0 (retreat) which is used for resetting...
         #       => start from 1 and reduce total actions by 1
-        # self.action_space = gym.spaces.Discrete(PyConnector.ACTION_MAX + 1)
-        self.action_space = gym.spaces.Discrete(PyConnector.ACTION_MAX, start=1)
+        self.action_space = gym.spaces.Discrete(PyConnector.N_ACTIONS - 1, start=1)
         self.observation_space = gym.spaces.Box(shape=(PyConnector.STATE_SIZE,), low=-1, high=1, dtype=DTYPE)
         self.pc = PyConnector(mapname, vcmi_loglevel)
         self.result = self.pc.start()
 
     def step(self, action):
-        if self.result.is_battle_over():
-            raise Exception("Reset needed")
+        # if self.result.get_is_battle_over():
+        #     raise Exception("Reset needed")
 
         self.result = self.pc.act(action)
-        reward = self.calc_reward(self.result)
-        return self.result.state(), reward, self.result.is_battle_over(), False, {}
+        # reward = self.calc_reward(self.result)
+        # return self.result.get_state(), reward, self.result.get_is_battle_over(), False, {}
+        return np.zeros(334, dtype=DTYPE), 0, False, False, {}
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.pc.reset()
-        return self.result.state(), {}
+        return self.result.get_state(), {}
 
     def render(self):
         if self.render_mode == "ansi":

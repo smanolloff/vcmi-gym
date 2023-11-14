@@ -13,18 +13,15 @@ logging.basicConfig(
 # $ defaults write org.python.python ApplePersistenceIgnoreState NO
 
 
-def main():
-    testmap = "simotest.vmap"
-    if len(sys.argv) > 1:
-        testmap = sys.argv[1]
-
-    env = VcmiEnv(testmap, vcmi_loglevel="error")
+def test(testmap, vcmi_loglevel):
+    env = VcmiEnv(testmap, vcmi_loglevel=vcmi_loglevel)
 
     # enchanters:
     # stay on hex 75, shoot at enemy stack 1:
     action = 2 + 75*8 + 1
     while True:
-        print(env.render())
+        # print(env.render())
+        env.render()
         obs, rew, term, trunc, info = env.step(action)
         # obs, rew, term, trunc, info = env.step(0)
         logging.debug("======== obs: (hidden)")

@@ -10,109 +10,34 @@ from .build import cppconnector
 
 class PyConnector():
     STATE_SIZE = cppconnector.get_state_size()
-    ACTION_MAX = cppconnector.get_action_max()
+    N_ACTIONS = cppconnector.get_n_actions()
     ERROR_MAPPING = cppconnector.get_error_mapping()
 
     def __init__(self, mapname, vcmi_loglevel):
-        self.state = "<UNSET>"
-        self.actioncb = "<UNSET>"
-        self.syscb = "<UNSET>"
-        self.resetcb = "<UNSET>"
-        self.renderansicb = "<UNSET>"
-        self.mapname = mapname
-        self.vcmi_loglevel = vcmi_loglevel
-        self.event = threading.Event()
-
-    # cb to be called from VCMI client thread on init only
-    def renderansicbcb(self, renderansicb):
-        logging.info("start")
-        logging.debug("Set shared vars: self.renderansicb = %s" % renderansicb)
-        self.renderansicb = renderansicb
-        logging.debug("return")
-
-    # cb to be called from VCMI client thread on init only
-    def resetcbcb(self, resetcb):
-        logging.info("start")
-        logging.debug("Set shared vars: self.resetcb = %s" % resetcb)
-        self.resetcb = resetcb
-        logging.debug("return")
-
-    # cb to be called from VCMI root thread on boot only
-    def syscbcb(self, syscb):
-        logging.info("start")
-        logging.debug("Set shared vars: self.syscb = %s" % syscb)
-        self.syscb = syscb
-        logging.debug("return")
-
-    # cb to be called from VCMI client thread on init only
-    def actioncbcb(self, actioncb):
-        logging.info("start")
-        logging.debug("Set shared vars: self.actioncb = %s" % actioncb)
-        self.actioncb = actioncb
-        logging.debug("return")
-
-    # cb to be called from VCMI client thread
-    def resultcb(self, result):
-        logging.info("start")
-        logging.debug("Set shared var: self.result = %s" % result)
-        self.result = result
-        logging.debug("event.set()")
-        self.event.set()
-        logging.debug("return")
+        logging.debug("begin")
+        # self.cppconn = cppconnector.CppConnector(mapname, vcmi_loglevel)
+        # self.cppconn.prestart()
+        cppconnector.prestart()
+        logging.debug("end")
 
     def start(self):
-        logging.info("start")
-        logging.debug("Call cppconnector.start_vcmi(...)")
-        cppconnector.start(
-            self.renderansicbcb,
-            self.resetcbcb,
-            self.syscbcb,
-            self.actioncbcb,
-            self.resultcb,
-            self.mapname,
-            self.vcmi_loglevel
-        )
-
-        # wait until cppconnector.start_vcmi calls resultcb, setting result and actioncb
-        logging.debug("event.wait()")
-        self.event.wait()
-
-        logging.debug("return result")
-        return self.result
+        logging.debug("begin")
+        # res = self.cppconn.start()
+        res = cppconnector.start()
+        logging.debug("end")
+        return res
 
     def act(self, action):
-        logging.info("start: action=%s" % action)
-
-        logging.debug("event.clear()")
-        self.event.clear()
-
-        logging.debug("self.actioncb(action)")
-        self.actioncb(action)
-
-        logging.debug("event.wait()")
-        self.event.wait()
-
-        logging.debug("result=%s" % self.result)
-
-        return self.result
+        logging.debug("begin")
+        # res = self.cppconn.act(action)
+        res = cppconnector.act(action)
+        logging.debug("end")
+        return res
 
     def reset(self):
-        logging.info("start")
-
-        logging.debug("event.clear()")
-        self.event.clear()
-
-        logging.debug("self.resetcb()")
-        self.resetcb()
-
-        logging.debug("event.wait()")
-        self.event.wait()
-
-        logging.debug("result=%s" % self.result)
-
-        return self.result
+        logging.debug("Return self.cppconn.reset()")
+        return self.cppconn.reset()
 
     def render_ansi(self):
-        logging.info("start")
-        logging.debug("return self.renderansicb()")
-        return self.renderansicb()
+        logging.debug("Return self.cppconn.renderAnsi()")
+        return self.cppconn.renderAnsi()
