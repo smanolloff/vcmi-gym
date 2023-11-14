@@ -21,7 +21,7 @@ def test(testmap, vcmi_loglevel):
     action = 2 + 75*8 + 1
     while True:
         # print(env.render())
-        env.render()
+        # env.render()
         obs, rew, term, trunc, info = env.step(action)
         # obs, rew, term, trunc, info = env.step(0)
         logging.debug("======== obs: (hidden)")
