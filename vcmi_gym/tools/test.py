@@ -4,26 +4,8 @@ import sys
 import os
 import gymnasium as gym
 
-# from vcmi_gym.envs.v0.vcmi_env import VcmiEnv
-
-logging.basicConfig(
-    format="[PY][%(filename)s] (%(funcName)s) %(message)s",
-    level=logging.WARN
-)
-
-# NOTE (MacOS ONLY):
-# To prevent annoying ApplePersistenceIgnoreState message:
-# $ defaults write org.python.python ApplePersistenceIgnoreState NO
-
-
-# not needed - just sleeping after identically formatted prints is OK
-def clean_render(env):
-    print("\033c", end="")
-    print(env.render())
-
 
 def test(env_kwargs):
-    # env = VcmiEnv(**env_kwargs)
     env = gym.make("local/VCMI-v0")
     env.reset()
     print(env.render())
