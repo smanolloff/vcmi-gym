@@ -25,7 +25,7 @@ struct P_Result {
   P_Result(
     MMAI::ResultType type_,
     P_State state_,
-    uint8_t errmask_,
+    MMAI::ErrMask errmask_,
     int dmg_dealt_,
     int dmg_received_,
     int units_lost_,
@@ -51,7 +51,7 @@ struct P_Result {
 
   const MMAI::ResultType type;
   const py::array_t<float> state;
-  const uint8_t errmask;
+  const MMAI::ErrMask errmask;
   const int dmg_dealt;
   const int dmg_received;
   const int units_lost;
@@ -63,7 +63,7 @@ struct P_Result {
   const std::string ansiRender;
 
   const py::array_t<float> &get_state() const { return state; }
-  const uint8_t &get_errmask() const { return errmask; }
+  const MMAI::ErrMask &get_errmask() const { return errmask; }
   const int &get_dmg_dealt() const { return dmg_dealt; }
   const int &get_dmg_received() const { return dmg_received; }
   const int &get_units_lost() const { return units_lost; }
@@ -89,7 +89,8 @@ class Connector {
   ConnectorState state = ConnectorState::NEW;
 
   const std::string mapname;
-  const std::string loglevel;
+  const std::string loglevelGlobal;
+  const std::string loglevelAI;
   std::thread vcmithread;
   MMAI::F_Sys f_sys;
   std::unique_ptr<MMAI::CBProvider> cbprovider = std::make_unique<MMAI::CBProvider>(nullptr, "from Connector (DEFAULT)");
@@ -101,7 +102,11 @@ class Connector {
   const MMAI::Action getActionDummy(MMAI::Result);
 
 public:
-  Connector(const std::string mapname, const std::string loglevel);
+  Connector(
+    const std::string mapname,
+    const std::string loglevelGlobal,
+    const std::string loglevelAI
+  );
 
   const P_Result start();
   const P_Result reset();

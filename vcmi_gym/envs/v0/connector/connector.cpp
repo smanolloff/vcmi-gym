@@ -1,10 +1,17 @@
+#include <cstdio>
 #include <pybind11/pybind11.h>
 #include "connector.h"
 #include "aitypes.h"
 #include "pyclient.h" // "vendor" header file
 
-Connector::Connector(const std::string mapname_, const std::string loglevel_)
-: mapname(mapname_), loglevel(loglevel_) {
+Connector::Connector(
+    const std::string mapname_,
+    const std::string loglevelGlobal_,
+    const std::string loglevelAI_
+) : mapname(mapname_),
+    loglevelGlobal(loglevelGlobal_),
+    loglevelAI(loglevelAI_)
+{
     cbprovider->f_getAction = [this](MMAI::Result r) {
         return this->getAction(r);
     };
@@ -166,7 +173,7 @@ const P_Result Connector::start() {
 
     // This must happen in the main thread (SDL requires it)
     LOG("call init_vcmi(...)");
-    f_sys = init_vcmi(resdir, loglevel, cbprovider.get());
+    f_sys = init_vcmi(resdir, loglevelGlobal, loglevelAI, cbprovider.get());
 
     LOG("set state = AWAITING_RESULT");
     state = ConnectorState::AWAITING_RESULT;
@@ -285,7 +292,7 @@ PYBIND11_MODULE(connector, m) {
     // py::class_<Child, std::shared_ptr<Child>>(m, "Child");
 
     py::class_<Connector, std::unique_ptr<Connector>>(m, "Connector")
-        .def(py::init<const std::string &, const std::string &>())
+        .def(py::init<const std::string &, const std::string &, const std::string &>())
         .def("start", &Connector::start)
         .def("reset", &Connector::reset)
         .def("act", &Connector::act)
