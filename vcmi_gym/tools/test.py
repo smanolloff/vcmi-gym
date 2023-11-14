@@ -20,8 +20,7 @@ def test(testmap, vcmi_loglevel):
     # stay on hex 75, shoot at enemy stack 1:
     action = 2 + 75*8 + 1
     while True:
-        # print(env.render())
-        # env.render()
+        print(env.render())
         obs, rew, term, trunc, info = env.step(action)
         # obs, rew, term, trunc, info = env.step(0)
         logging.debug("======== obs: (hidden)")

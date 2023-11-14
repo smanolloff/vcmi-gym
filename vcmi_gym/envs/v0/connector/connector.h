@@ -13,7 +13,7 @@
 #define DLL_EXPORT __attribute__ ((visibility("default")))
 #include "aitypes.h" // "vendor" header file
 
-#define VERBOSE true
+#define VERBOSE false
 #define LOG(msg) if(VERBOSE) printf("<%s>[CPP][%s] (%s) %s\n", boost::lexical_cast<std::string>(std::this_thread::get_id()).c_str(), std::filesystem::path(__FILE__).filename().string().c_str(), __FUNCTION__, msg);
 #define LOGSTR(msg, a1) if (VERBOSE) printf("<%s>[CPP][%s] (%s) %s\n", boost::lexical_cast<std::string>(std::this_thread::get_id()).c_str(), std::filesystem::path(__FILE__).filename().string().c_str(), __FUNCTION__, (std::string(msg) + a1).c_str());
 

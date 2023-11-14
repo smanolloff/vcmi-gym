@@ -44,7 +44,7 @@ class VcmiEnv(gym.Env):
 
     def render(self):
         if self.render_mode == "ansi":
-            return self.connector.render_ansi()
+            return self.connector.renderAnsi()
         elif self.render_mode == "rgb_array":
             gym.logger.warn("Rendering RGB arrays not yet implemented for VcmiEnv")
         elif self.render_mode is None:
