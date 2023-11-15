@@ -2,6 +2,9 @@ import math
 import re
 import os
 import yaml
+import numpy as np
+import string
+import random
 
 
 def exp_decay_fn(initial_value, final_value, decay_fraction, n_decays):
@@ -95,3 +98,12 @@ def expand_env_kwargs(env_kwargs):
             env_kwargs = yaml.safe_load(f) | env_kwargs
 
     return env_kwargs
+
+
+def gen_seed():
+    return int(np.random.default_rng().integers(2**31))
+
+
+def gen_id():
+    population = string.ascii_lowercase + string.digits
+    return str.join("", random.choices(population, k=8))

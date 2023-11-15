@@ -42,3 +42,35 @@
 3. Try out the simulation
 
     $ python simulate.py
+
+
+==========================================================
+PROD BUILDS (w/o debug stuff - for training)
+*** Traget dir: /rel ***
+******* EPIC FAIL
+==========================================================
+// fail - compiles, but running yields
+RuntimeError: Resource with name CONFIG/FILESYSTEM and type TEXT wasn't found.
+// I guess it's looking for those as if the package was installed via a DMG file
+
+1/ VCMI
+    $ cmake --fresh -S . -B rel -Wno-dev \
+        -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D ENABLE_SINGLE_APP_BUILD=1 \
+        -D ENABLE_CCACHE=1 \
+        -D ENABLE_NULLKILLER_AI=0 \
+        -D ENABLE_LAUNCHER=0 \
+        -D ENABLE_MYCLIENT_BUILD=1 \
+        -D ENABLE_DEV_BUILD=0 \
+        -D CMAKE_EXPORT_COMPILE_COMMANDS=0
+
+$ cmake --build rel/ -- -j$(sysctl -n hw.ncpu)
+
+// fail - pybind11/pybind11.h not found.
+2/ connector
+
+    $ cmake --fresh -S . -B rel -Wno-dev \
+        -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_EXPORT_COMPILE_COMMANDS=0

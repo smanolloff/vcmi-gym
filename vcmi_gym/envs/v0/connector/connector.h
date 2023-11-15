@@ -6,16 +6,17 @@
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <sstream>
-#include <boost/lexical_cast.hpp>
 #include <condition_variable>
 #include <thread>
+#include <cstdio>
 
 #define DLL_EXPORT __attribute__ ((visibility("default")))
 #include "aitypes.h" // "vendor" header file
 
 #define VERBOSE false
-#define LOG(msg) if(VERBOSE) printf("<%s>[CPP][%s] (%s) %s\n", boost::lexical_cast<std::string>(std::this_thread::get_id()).c_str(), std::filesystem::path(__FILE__).filename().string().c_str(), __FUNCTION__, msg);
-#define LOGSTR(msg, a1) if (VERBOSE) printf("<%s>[CPP][%s] (%s) %s\n", boost::lexical_cast<std::string>(std::this_thread::get_id()).c_str(), std::filesystem::path(__FILE__).filename().string().c_str(), __FUNCTION__, (std::string(msg) + a1).c_str());
+
+#define LOG(msg) if(VERBOSE) { std::cout << "<" << std::this_thread::get_id() << ">[" << std::filesystem::path(__FILE__).filename().string() << "] (" << __FUNCTION__ << ") " << msg << "\n"; }
+#define LOGSTR(msg, a1) if (VERBOSE) { std::cout << "<" << std::this_thread::get_id() << ">[" << std::filesystem::path(__FILE__).filename().string() << "] (" << __FUNCTION__ << ") " << msg << a1 << "\n"; }
 
 namespace py = pybind11;
 
@@ -93,7 +94,7 @@ class Connector {
   const std::string loglevelAI;
   std::thread vcmithread;
   MMAI::F_Sys f_sys;
-  std::unique_ptr<MMAI::CBProvider> cbprovider = std::make_unique<MMAI::CBProvider>(nullptr, "from Connector (DEFAULT)");
+  std::unique_ptr<MMAI::CBProvider> cbprovider = std::make_unique<MMAI::CBProvider>(nullptr);
   MMAI::Action action;
   MMAI::Result result;
 

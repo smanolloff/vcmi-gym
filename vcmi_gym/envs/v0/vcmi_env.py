@@ -1,3 +1,4 @@
+import time
 import logging
 import numpy as np
 import gymnasium as gym
@@ -33,6 +34,7 @@ class VcmiEnv(gym.Env):
         self.connector = connector.Connector(mapname, vcmi_loglevel_global, vcmi_loglevel_ai)
         self.result = self.connector.start()
         self.n_steps = 0
+        self.render_mode = "ansi"
 
     def step(self, action):
         if self.result.get_is_battle_over():
@@ -41,8 +43,13 @@ class VcmiEnv(gym.Env):
         self.n_steps += 1
         self.result = self.connector.act(action)
         reward = self.calc_reward(self.result)
+
+        # DEBUG
+        # if self.last_action_n_errors == 0:
+        #     print(self.render())
+        #     time.sleep(0.1)
+
         return self.result.get_state(), reward, self.result.get_is_battle_over(), False, {}
-        return np.zeros(334, dtype=DTYPE), 0, False, False, {}
 
     def reset(self, seed=None, options=None):
         if self.n_steps == 0:

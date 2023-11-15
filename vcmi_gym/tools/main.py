@@ -7,6 +7,7 @@ import sys
 import gymnasium as gym
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common import logger
+import sb3_contrib
 
 from vcmi_gym import VcmiEnv
 from . import common
@@ -34,11 +35,15 @@ def run(action, cfg, tag=None):
         case "train_qrdqn":
             venv = make_vec_env("local/VCMI-v0")
             learner_kwargs = cfg.get("learner_kwargs")
+            learner_lr_schedule = cfg.get("learner_lr_schedule")
             learning_rate = common.lr_from_schedule(learner_lr_schedule)
             kwargs = dict(learner_kwargs, learning_rate=learning_rate)
             model = sb3_contrib.QRDQN(env=venv, **kwargs)
             out_dir_template = cfg.get("out_dir_template", "data/QRDQN-{run_id}")
+            run_id = cfg.get("run_id", None) or common.gen_id()
+            seed = cfg.get("seed", None) or common.gen_seed(),
             out_dir = common.out_dir_from_template(out_dir_template, seed, run_id)
+            log_tensorboard = cfg.get("log_tensorboard", False)
 
             if log_tensorboard:
                 os.makedirs(out_dir, exist_ok=True)

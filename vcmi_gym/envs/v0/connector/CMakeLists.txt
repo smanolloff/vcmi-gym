@@ -12,6 +12,8 @@ set(CMAKE_CXX_STANDARD 17)
 link_directories(${CMAKE_SOURCE_DIR}/lib)
 find_package(Python3 3.10 REQUIRED EXACT COMPONENTS Interpreter Development)
 find_package(pybind11 REQUIRED)
+
+# XXX: not needed anymore?
 find_package(Boost 1.48.0 REQUIRED COMPONENTS filesystem thread)
 
 pybind11_add_module(connector connector.h connector.cpp)

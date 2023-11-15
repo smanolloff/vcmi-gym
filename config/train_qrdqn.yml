@@ -2,7 +2,7 @@
 seed: ~
 run_id: ~
 out_dir_template: "data/QRDQN-{run_id}"
-log_tensorboard: true
+log_tensorboard: false
 total_timesteps: 1_000_000
 # max_episode_steps: 2000
 n_checkpoints: 1
