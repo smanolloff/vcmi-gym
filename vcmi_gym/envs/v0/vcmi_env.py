@@ -17,7 +17,11 @@ class VcmiEnv(gym.Env):
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
     ERROR_MAPPING = connector.get_error_mapping()
-    INFO_KEYS = ["is_success", "errors"] + [name for (name, _) in ERROR_MAPPING.values()]
+    INFO_KEYS = [name for (name, _) in ERROR_MAPPING.values()] + [
+        "errors",
+        "net_value",
+        "is_success",
+    ]
 
     def __init__(
         self,
@@ -25,7 +29,7 @@ class VcmiEnv(gym.Env):
         seed=None,  # not used currently
         render_mode="ansi",
         vcmi_loglevel_global="error",
-        vcmi_loglevel_ai="error"
+        vcmi_loglevel_ai="error",
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
@@ -42,20 +46,31 @@ class VcmiEnv(gym.Env):
         #          index 1322 is out of bounds for dimension 2 with size 1322
         #       => just start from 0, reduce max by 1, and manually add +1
         self.action_space = gym.spaces.Discrete(connector.get_n_actions() - 1)
-        self.observation_space = gym.spaces.Box(shape=(connector.get_state_size(),), low=-1, high=1, dtype=DTYPE)
-        self.connector = connector.Connector(mapname, vcmi_loglevel_global, vcmi_loglevel_ai)
+        self.observation_space = gym.spaces.Box(
+            shape=(connector.get_state_size(),), low=-1, high=1, dtype=DTYPE
+        )
+        self.connector = connector.Connector(
+            mapname, vcmi_loglevel_global, vcmi_loglevel_ai
+        )
         self.result = self.connector.start()
         self.n_steps = 0
+        self.net_value_total = 0
         self.render_mode = "ansi"
 
     def step(self, action):
         if self.result.get_is_battle_over():
             raise Exception("Reset needed")
 
+        res = self.connector.act(action + 1)
+        obs = res.get_state()
+        rew = self.calc_reward()
+        term = res.get_is_battle_over()
+        info = self.build_info()
+
+        self.result = res
         self.n_steps += 1
-        self.result = self.connector.act(action + 1)
-        reward = self.calc_reward(self.result)
-        return self.result.get_state(), reward, self.result.get_is_battle_over(), False, self.build_info()
+
+        return obs, rew, term, False, info
 
     def reset(self, seed=None, options=None):
         if self.n_steps == 0:
@@ -65,6 +80,7 @@ class VcmiEnv(gym.Env):
 
         self.errcounters = np.zeros(len(self.errnames), dtype=DTYPE)
         self.result = self.connector.reset()
+        self.net_value_total = 0
         return self.result.get_state(), self.build_info()
 
     def render(self):
@@ -80,12 +96,12 @@ class VcmiEnv(gym.Env):
     def close(self):
         # graceful shutdown of VCMI is not impossible (by design)
         # The 10+ running threads lead to segfaults on any such attempt anyway
-        gym.logger.warn("Graceful shutdown not yet implemented for VcmiEnv")
+        gym.logger.warn("Graceful shutdown is not supported by VCMI")
 
     def error_summary(self):
         res = "Error summary:\n"
-        for (i, name) in enumerate(self.errnames):
-            res += ("%25s: %d\n" % (name, self.errcounters[i]))
+        for i, name in enumerate(self.errnames):
+            res += "%25s: %d\n" % (name, self.errcounters[i])
 
         return res
 
@@ -93,7 +109,8 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def calc_reward(self, res):
+    def calc_reward(self):
+        res = self.result
         self.last_action_n_errors = self.parse_errmask(res.get_errmask())
         # self.logger.debug("Action errors: %d" % n_errors)
 
@@ -102,13 +119,15 @@ class VcmiEnv(gym.Env):
 
         net_dmg = res.get_dmg_dealt() - res.get_dmg_received()
         net_value = res.get_value_killed() - res.get_value_lost()
+        self.net_value_total += net_value
 
-        return net_value + 10*net_dmg
+        # XXX: pikemen value=80, life=10
+        return net_value + 5 * net_dmg
 
     def parse_errmask(self, errmask):
         n_errors = 0
 
-        for (i, flag) in enumerate(self.errflags):
+        for i, flag in enumerate(self.errflags):
             if errmask & flag:
                 n_errors += 1
                 self.errcounters[i] += ONE
@@ -118,5 +137,6 @@ class VcmiEnv(gym.Env):
     def build_info(self):
         info = {name: count for (name, count) in zip(self.errnames, self.errcounters)}
         info["errors"] = self.errcounters.sum()
+        info["net_value"] = self.net_value_total
         info["is_success"] = self.result.get_is_victorious()
         return info

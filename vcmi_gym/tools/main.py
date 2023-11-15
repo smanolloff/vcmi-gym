@@ -27,12 +27,14 @@ def run(action, cfg, tag=None):
             default_template = "data/%s-{run_id}" % learner_cls
             out_dir_template = cfg.get("out_dir_template", default_template)
             out_dir_template = common.make_absolute(cwd, out_dir_template)
+            seed = cfg.get("seed", None) or common.gen_seed()
+            run_id = cfg.get("run_id", None) or common.gen_id()
 
             # learner_cls is not part of the config
             run_config = deepcopy(
                 {
-                    "seed": cfg.get("seed", None) or common.gen_seed(),
-                    "run_id": cfg.get("run_id", None) or common.gen_id(),
+                    "seed": seed,
+                    "run_id": run_id,
                     "model_load_file": cfg.get("model_load_file", None),
                     "out_dir_template": out_dir_template,
                     "log_tensorboard": cfg.get("log_tensorboard", False),
@@ -45,6 +47,8 @@ def run(action, cfg, tag=None):
                     ),
                 }
             )
+
+            print("Starting run %s with seed %s" % (run_id, seed))
 
             run_duration, run_values = common.measure(
                 train_sb3, dict(run_config, learner_cls=learner_cls)

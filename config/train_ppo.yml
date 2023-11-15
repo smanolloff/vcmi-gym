@@ -4,7 +4,7 @@ run_id: ~
 model_load_file: ~
 out_dir_template: "data/PPO-{run_id}"
 log_tensorboard: true
-total_timesteps: 10_000_000
+total_timesteps: 5_000_000
 max_episode_steps: 500
 n_checkpoints: 5
 learner_kwargs:
