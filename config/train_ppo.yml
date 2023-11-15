@@ -1,0 +1,35 @@
+---
+seed: ~
+run_id: ~
+model_load_file: ~
+out_dir_template: "data/PPO-{run_id}"
+log_tensorboard: true
+total_timesteps: 10_000_000
+max_episode_steps: 500
+n_checkpoints: 5
+learner_kwargs:
+  policy: "MlpPolicy"
+  use_sde: false
+  sde_sample_freq: -1
+
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  normalize_advantage: true
+  ent_coef: 0
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+
+# Examples:
+#   * "const_0.001"
+#   * "lin_decay_0.03_0.0001_0.75"
+#   * "exp_decay_0.03_0.0001_0.5_5"
+learner_lr_schedule: "const_0.0003"
+
+env_kwargs:
+  __include__: "config/env.yml"
+env_wrappers: []

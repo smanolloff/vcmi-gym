@@ -5,6 +5,10 @@ import yaml
 import numpy as np
 import string
 import random
+import time
+import gymnasium as gym
+
+from .. import VcmiEnv
 
 
 def exp_decay_fn(initial_value, final_value, decay_fraction, n_decays):
@@ -107,3 +111,51 @@ def gen_seed():
 def gen_id():
     population = string.ascii_lowercase + string.digits
     return str.join("", random.choices(population, k=8))
+
+
+def measure(func, kwargs):
+    t1 = time.time()
+    retval = func(**kwargs)
+    t2 = time.time()
+
+    return t2 - t1, retval
+
+
+def save_run_metadata(action, cfg, duration, values):
+    out_dir = values["out_dir"]
+    metadata = dict(values, action=action, config=cfg, duration=duration)
+
+    print("Output directory: %s" % out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    md_file = os.path.join(out_dir, "metadata.yml")
+
+    with open(md_file, "w") as f:
+        f.write(yaml.safe_dump(metadata))
+
+
+def save_model(out_dir, model):
+    os.makedirs(out_dir, exist_ok=True)
+    model_file = os.path.join(out_dir, "model.zip")
+    model.save(model_file)
+
+
+def register_env(env_kwargs={}, env_wrappers=[]):
+    def wrapped_env_creator(**kwargs):
+        env = VcmiEnv(**kwargs)
+
+        for wrapper in env_wrappers:
+            wrapper_mod = importlib.import_module(wrapper["module"])
+            wrapper_cls = getattr(wrapper_mod, wrapper["cls"])
+            env = wrapper_cls(env, **wrapper.get("kwargs", {}))
+
+        return env
+
+    gym.envs.register(
+        id="local/VCMI-v0", entry_point=wrapped_env_creator, kwargs=env_kwargs
+    )
+
+
+def make_absolute(cwd, p):
+    if os.path.isabs(p):
+        return p
+    return f"{cwd}/{p}"

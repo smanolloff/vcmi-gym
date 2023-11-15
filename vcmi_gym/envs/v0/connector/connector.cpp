@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <cstdio>
 #include <pybind11/pybind11.h>
 #include "connector.h"
@@ -171,6 +172,8 @@ const P_Result Connector::start() {
     std::unique_lock lock1(m1);
     LOG("obtain lock1: done");
 
+    auto oldcwd = std::filesystem::current_path();
+
     // This must happen in the main thread (SDL requires it)
     LOG("call init_vcmi(...)");
     f_sys = init_vcmi(resdir, loglevelGlobal, loglevelAI, cbprovider.get());
@@ -200,6 +203,13 @@ const P_Result Connector::start() {
         LOG("acquire Python GIL (scope-auto)");
         // py::gil_scoped_acquire acquire2;
     }
+
+    // NOTE: changing CWD here *sometimes* fails with exception:
+    // std::__1::ios_base::failure: could not open file: unspecified iostream_category error
+    // (sometimes = fails on benchmark, works on test...)
+    //
+    // LOGSTR("Change cwd back to", oldcwd.string());
+    // std::filesystem::current_path(oldcwd);
 
     assert(state == ConnectorState::AWAITING_ACTION);
     assert(result.type == MMAI::ResultType::REGULAR);

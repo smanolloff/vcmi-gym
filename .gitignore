@@ -1,6 +1,7 @@
 .venv
 build
 rel
+data/
 *.egg-info
 CMakeUserPresets.json
 conan-generated/

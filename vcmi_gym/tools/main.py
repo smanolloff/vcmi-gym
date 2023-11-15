@@ -1,21 +1,11 @@
 import os
 import yaml
 import argparse
-import time
-import logging
-import sys
 import gymnasium as gym
-from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common import logger
-import sb3_contrib
+from copy import deepcopy
 
 from vcmi_gym import VcmiEnv
 from . import common
-
-logging.basicConfig(
-    format="[PY][%(filename)s] (%(funcName)s) %(message)s",
-    level=logging.DEBUG
-)
 
 # NOTE (MacOS ONLY):
 # To prevent annoying ApplePersistenceIgnoreState message:
@@ -23,43 +13,49 @@ logging.basicConfig(
 
 
 def run(action, cfg, tag=None):
+    cwd = os.getcwd()
+    env_wrappers = cfg.pop("env_wrappers", {})
     env_kwargs = cfg.pop("env_kwargs", {})
     expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
-
-    def env_creator(**kwargs):
-        return VcmiEnv(**kwargs)
-
-    gym.envs.register(id="local/VCMI-v0", entry_point=env_creator, kwargs=expanded_env_kwargs)
+    common.register_env(expanded_env_kwargs, env_wrappers)
 
     match action:
-        case "train_qrdqn":
-            venv = make_vec_env("local/VCMI-v0")
-            learner_kwargs = cfg.get("learner_kwargs")
-            learner_lr_schedule = cfg.get("learner_lr_schedule")
-            learning_rate = common.lr_from_schedule(learner_lr_schedule)
-            kwargs = dict(learner_kwargs, learning_rate=learning_rate)
-            model = sb3_contrib.QRDQN(env=venv, **kwargs)
-            out_dir_template = cfg.get("out_dir_template", "data/QRDQN-{run_id}")
-            run_id = cfg.get("run_id", None) or common.gen_id()
-            seed = cfg.get("seed", None) or common.gen_seed(),
-            out_dir = common.out_dir_from_template(out_dir_template, seed, run_id)
-            log_tensorboard = cfg.get("log_tensorboard", False)
+        case "train_ppo" | "train_qrdqn":
+            from .train_sb3 import train_sb3
 
-            if log_tensorboard:
-                os.makedirs(out_dir, exist_ok=True)
-                log = logger.configure(folder=out_dir, format_strings=["tensorboard"])
-                model.set_logger(log)
+            learner_cls = action.split("_")[-1].upper()
+            default_template = "data/%s-{run_id}" % learner_cls
+            out_dir_template = cfg.get("out_dir_template", default_template)
+            out_dir_template = common.make_absolute(cwd, out_dir_template)
 
-            total_timesteps = cfg.get("total_timesteps", 1000000)
-            n_checkpoints = cfg.get("n_checkpoints", 5)
-
-            model.learn(
-                total_timesteps=total_timesteps,
-                reset_num_timesteps=False,
-                progress_bar=True
+            # learner_cls is not part of the config
+            run_config = deepcopy(
+                {
+                    "seed": cfg.get("seed", None) or common.gen_seed(),
+                    "run_id": cfg.get("run_id", None) or common.gen_id(),
+                    "model_load_file": cfg.get("model_load_file", None),
+                    "out_dir_template": out_dir_template,
+                    "log_tensorboard": cfg.get("log_tensorboard", False),
+                    "learner_kwargs": cfg.get("learner_kwargs", {}),
+                    "total_timesteps": cfg.get("total_timesteps", 1000000),
+                    "max_episode_steps": cfg.get("max_episode_steps", 5000),
+                    "n_checkpoints": cfg.get("n_checkpoints", 5),
+                    "learner_lr_schedule": cfg.get(
+                        "learner_lr_schedule", "const_0.003"
+                    ),
+                }
             )
 
-            common.save_model(out_dir, model)
+            run_duration, run_values = common.measure(
+                train_sb3, dict(run_config, learner_cls=learner_cls)
+            )
+
+            common.save_run_metadata(
+                action=action,
+                cfg=dict(run_config, env_kwargs=env_kwargs),
+                duration=run_duration,
+                values=dict(run_values, env=expanded_env_kwargs),
+            )
 
         case "benchmark":
             from .benchmark import benchmark
@@ -87,6 +83,7 @@ def main():
     parser.usage = "%(prog)s [options] <action>"
     parser.epilog = """
 action:
+  train_ppo         train using Proximal Policy Optimization (PPO)
   train_qrdqn       train using Quantile Regression DQN (QRDQN)
   benchmark         evaluate the actions/s achievable with this env
   test              for testing purposes only

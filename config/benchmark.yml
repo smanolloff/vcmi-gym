@@ -1,4 +1,4 @@
 ---
-steps: 100000
+steps: 1_000_000
 env_kwargs:
   __include__: "config/env.yml"
