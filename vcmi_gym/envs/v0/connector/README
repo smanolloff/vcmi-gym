@@ -47,11 +47,10 @@
 ==========================================================
 PROD BUILDS (w/o debug stuff - for training)
 *** Traget dir: /rel ***
-******* EPIC FAIL
+speeds up VCMI ~5x!!!
 ==========================================================
-// fail - compiles, but running yields
-RuntimeError: Resource with name CONFIG/FILESYSTEM and type TEXT wasn't found.
-// I guess it's looking for those as if the package was installed via a DMG file
+// NOTE:
+// requires patched lib/VCMIDirs.cpp (VCMIDirsOSX::dataPaths())
 
 1/ VCMI
     $ cmake --fresh -S . -B rel -Wno-dev \
@@ -67,7 +66,7 @@ RuntimeError: Resource with name CONFIG/FILESYSTEM and type TEXT wasn't found.
 
 $ cmake --build rel/ -- -j$(sysctl -n hw.ncpu)
 
-// fail - pybind11/pybind11.h not found.
+// fail - pybind11/pybind11.h not found for rel builds
 2/ connector
 
     $ cmake --fresh -S . -B rel -Wno-dev \
