@@ -28,18 +28,11 @@ class VcmiEnv(gym.Env):
         mapname,
         seed=None,  # not used currently
         render_mode="ansi",
+        render_each_step=False,
         vcmi_loglevel_global="error",
         vcmi_loglevel_ai="error",
+        consecutive_error_reward_factor=-1
     ):
-        assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
-        assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
-
-        self.render_mode = render_mode
-        self.errflags = VcmiEnv.ERROR_MAPPING.keys()
-        self.errnames = [name for (name, desc) in VcmiEnv.ERROR_MAPPING.values()]
-        self.errcounters = np.zeros(len(self.errnames), dtype=DTYPE)
-        self.logger = log.get_logger("VcmiEnv", "DEBUG")
-
         # NOTE: removing action=0 (retreat) which is used for resetting...
         #       => start from 1 and reduce total actions by 1
         #          XXX: there seems to be a bug as start=1 causes this error:
@@ -52,10 +45,23 @@ class VcmiEnv(gym.Env):
         self.connector = connector.Connector(
             mapname, vcmi_loglevel_global, vcmi_loglevel_ai
         )
+
+        assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
+        assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
+
+        self.errflags = VcmiEnv.ERROR_MAPPING.keys()
+        self.errnames = [name for (name, desc) in VcmiEnv.ERROR_MAPPING.values()]
+        self.logger = log.get_logger("VcmiEnv", "DEBUG")
+
+        # <params>
+        self.render_mode = render_mode
+        self.render_each_step = render_each_step
+        self.consecutive_error_reward_factor = consecutive_error_reward_factor
+        # </params>
+
         self.result = self.connector.start()
-        self.n_steps = 0
-        self.net_value_total = 0
-        self.render_mode = "ansi"
+        self.n_steps = 0  # needed for reset
+        self.reset(seed=seed)
 
     def step(self, action):
         if self.result.get_is_battle_over():
@@ -69,23 +75,39 @@ class VcmiEnv(gym.Env):
 
         self.result = res
         self.n_steps += 1
+        self.reward_last = rew
+        self.reward_total += rew
+
+        if self.render_each_step:
+            print(self.render())
 
         return obs, rew, term, False, info
 
     def reset(self, seed=None, options=None):
-        if self.n_steps == 0:
-            return self.result.get_state(), self.build_info()
-
         super().reset(seed=seed)
 
+        if self.n_steps > 0:
+            self.result = self.connector.reset()
+
+        self.n_steps = 0
         self.errcounters = np.zeros(len(self.errnames), dtype=DTYPE)
-        self.result = self.connector.reset()
-        self.net_value_total = 0
+        self.value_total = 0
+        self.reward_total = 0
+        self.reward_last = 0
+
         return self.result.get_state(), self.build_info()
 
     def render(self):
         if self.render_mode == "ansi":
-            return self.connector.renderAnsi()
+            footer = (
+                f"Reward: {self.reward_last}\n"
+                f"Total reward: {self.reward_total}\n"
+                f"Total value: {self.value_total}\n"
+                f"n_steps: {self.n_steps}"
+            )
+
+            return "%s\n%s" % (self.connector.renderAnsi(), footer)
+
         elif self.render_mode == "rgb_array":
             gym.logger.warn("Rendering RGB arrays not yet implemented for VcmiEnv")
         elif self.render_mode is None:
@@ -111,15 +133,20 @@ class VcmiEnv(gym.Env):
 
     def calc_reward(self):
         res = self.result
-        self.last_action_n_errors = self.parse_errmask(res.get_errmask())
+        self.n_errors_last = self.parse_errmask(res.get_errmask())
         # self.logger.debug("Action errors: %d" % n_errors)
 
-        if self.last_action_n_errors:
-            return -10 * self.last_action_n_errors
+        # Penalize with ever-increasing amounts to prevent
+        # it from just making errors forever, avoiding any damage
+        if self.n_errors_last > 0:
+            self.n_errors_consecutive += self.n_errors_last
+            return self.n_errors_consecutive * self.consecutive_error_reward_factor
+
+        self.n_errors_consecutive = 0
 
         net_dmg = res.get_dmg_dealt() - res.get_dmg_received()
         net_value = res.get_value_killed() - res.get_value_lost()
-        self.net_value_total += net_value
+        self.value_total += net_value
 
         # XXX: pikemen value=80, life=10
         return net_value + 5 * net_dmg
@@ -137,6 +164,6 @@ class VcmiEnv(gym.Env):
     def build_info(self):
         info = {name: count for (name, count) in zip(self.errnames, self.errcounters)}
         info["errors"] = self.errcounters.sum()
-        info["net_value"] = self.net_value_total
+        info["net_value"] = self.value_total
         info["is_success"] = self.result.get_is_victorious()
         return info

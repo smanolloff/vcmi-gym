@@ -1,0 +1,11 @@
+---
+fps: 10
+reset_delay: 5
+model_file: "data/PPO-d4o3ydol/model_3000000_steps.zip"
+model_mod: "stable_baselines3"
+model_cls: "PPO"
+env_kwargs:
+  __include__: "config/env.yml"
+  render_each_step: true
+
+env_wrappers: []

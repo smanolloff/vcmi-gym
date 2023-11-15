@@ -11,6 +11,25 @@ import gymnasium as gym
 from .. import VcmiEnv
 
 
+class Clock:
+    """A better alternative to pygame.Clock for our use-case"""
+
+    def __init__(self, fps):
+        self.fps = fps
+        self.min_interval = 1 / fps
+        self.last_tick_at = time.time()
+
+    def tick(self):
+        tick_at = time.time()
+        interval = tick_at - self.last_tick_at
+        sleep_for = self.min_interval - interval
+
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+
+        self.last_tick_at = tick_at + sleep_for
+
+
 def exp_decay_fn(initial_value, final_value, decay_fraction, n_decays):
     assert initial_value > final_value
     assert final_value > 0
@@ -159,3 +178,15 @@ def make_absolute(cwd, p):
     if os.path.isabs(p):
         return p
     return f"{cwd}/{p}"
+
+
+def play_model(env, fps, model, obs):
+    terminated = False
+    clock = Clock(fps)
+
+    while not terminated:
+        action, _states = model.predict(obs)
+        obs, reward, terminated, truncated, info = env.step(action)
+        clock.tick()
+        if terminated:
+            break

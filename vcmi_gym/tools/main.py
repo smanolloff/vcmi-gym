@@ -61,6 +61,17 @@ def run(action, cfg, tag=None):
                 values=dict(run_values, env=expanded_env_kwargs),
             )
 
+        case "spectate":
+            from .spectate import spectate
+
+            spectate(
+                fps=cfg.get("fps", 2),
+                reset_delay=cfg.get("reset_delay", 5),
+                model_file=cfg["model_file"],
+                model_mod=cfg.get("model_mod", "stable_baselines3"),
+                model_cls=cfg.get("model_cls", "PPO"),
+            )
+
         case "benchmark":
             from .benchmark import benchmark
             steps = cfg.get("steps", 10000)
@@ -89,6 +100,7 @@ def main():
 action:
   train_ppo         train using Proximal Policy Optimization (PPO)
   train_qrdqn       train using Quantile Regression DQN (QRDQN)
+  spectate          watch a trained model play VCMI
   benchmark         evaluate the actions/s achievable with this env
   test              for testing purposes only
   help              print this help message
