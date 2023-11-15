@@ -78,9 +78,9 @@ class VcmiEnv(gym.Env):
         return
 
     def close(self):
+        # graceful shutdown of VCMI is not impossible (by design)
+        # The 10+ running threads lead to segfaults on any such attempt anyway
         gym.logger.warn("Graceful shutdown not yet implemented for VcmiEnv")
-        # self.connector.shutdown()
-        pass
 
     def error_summary(self):
         res = "Error summary:\n"
