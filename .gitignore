@@ -2,6 +2,7 @@
 build
 rel
 data/
+/wandb
 *.egg-info
 CMakeUserPresets.json
 conan-generated/

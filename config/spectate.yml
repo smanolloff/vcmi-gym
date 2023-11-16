@@ -1,11 +1,17 @@
 ---
 fps: 10
 reset_delay: 5
-model_file: "data/PPO-d4o3ydol/model_3000000_steps.zip"
+model_file: "data/PPO-sf8fp1v2/model_3000000_steps.zip"
 model_mod: "stable_baselines3"
 model_cls: "PPO"
+
+# model_file: "data/QRDQN-qfo6cz71/model_2000000_steps.zip"
+# model_mod: "sb3_contrib"
+# model_cls: "QRDQN"
+
 env_kwargs:
   __include__: "config/env.yml"
   render_each_step: true
+  consecutive_error_reward_factor: -2
 
 env_wrappers: []
