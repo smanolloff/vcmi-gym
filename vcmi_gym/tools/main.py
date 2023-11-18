@@ -12,7 +12,9 @@ from . import common
 # $ defaults write org.python.python ApplePersistenceIgnoreState NO
 
 
-def run(action, cfg, tag=None):
+# "extras" is an arbitary object which is action-dependent
+# It is used when calling "run" from raytune, for example.
+def run(action, cfg, extras=None):
     cwd = os.getcwd()
     env_wrappers = cfg.pop("env_wrappers", {})
     env_kwargs = cfg.pop("env_kwargs", {})
@@ -36,12 +38,17 @@ def run(action, cfg, tag=None):
                     "seed": seed,
                     "run_id": run_id,
                     "model_load_file": cfg.get("model_load_file", None),
+                    "model_load_update": cfg.get("model_load_update", False),
                     "out_dir_template": out_dir_template,
                     "log_tensorboard": cfg.get("log_tensorboard", False),
+                    "progress_bar": cfg.get("progress_bar", True),
+                    "reset_num_timesteps": cfg.get("reset_num_timesteps", False),
                     "learner_kwargs": cfg.get("learner_kwargs", {}),
                     "total_timesteps": cfg.get("total_timesteps", 1000000),
                     "max_episode_steps": cfg.get("max_episode_steps", 5000),
                     "n_checkpoints": cfg.get("n_checkpoints", 5),
+                    "extras": extras,
+                    "learning_rate": cfg.get("learning_rate", None),
                     "learner_lr_schedule": cfg.get(
                         "learner_lr_schedule", "const_0.003"
                     ),

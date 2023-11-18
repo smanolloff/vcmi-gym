@@ -2,6 +2,7 @@
 program: wandb-agent.py
 project: vcmi
 method: grid
+name: PPO-3
 metric:
   name: rollout/ep_rew_mean
   goal: maximize
@@ -12,7 +13,7 @@ parameters:
       model_load_file: { value: ~ }
       out_dir_template: { value: "data/PPO-{run_id}" }
       log_tensorboard: { value: true }
-      total_timesteps: { value: !!float 3e6 }
+      total_timesteps: { value: !!float 15e6 }
       max_episode_steps: { value: 5000 }
       n_checkpoints: { value: 5 }
       learner_kwargs:
@@ -20,10 +21,10 @@ parameters:
           policy: { value: "MlpPolicy" }
           use_sde: { value: false }
           sde_sample_freq: { value: -1 }
-          n_steps: { value: 2048 }
+          n_steps: { value: 512 }
           batch_size: { value: 64 }
           n_epochs: { value: 10 }
-          gamma: { value: 0.99 }
+          gamma: { values: 0.999 }
           gae_lambda: { value: 0.98 }
           clip_range: { value: 0.4 }
           normalize_advantage: { value: true }
@@ -32,9 +33,8 @@ parameters:
           max_grad_norm: { value: 0.5 }
       learner_lr_schedule:
         values:
-          - "exp_decay_0.03_0.0001_0.5_10"
-          - "const_0.0003"
+          - "const_0.0001"
       env_kwargs:
         parameters:
           mapname: { value: "AI-1.vmap" }
-          consecutive_error_reward_factor: { values: [-1, -2] }
+          consecutive_error_reward_factor: { values: [-2] }

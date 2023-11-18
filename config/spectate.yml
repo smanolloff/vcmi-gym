@@ -1,7 +1,7 @@
 ---
 fps: 10
 reset_delay: 5
-model_file: "data/PPO-sf8fp1v2/model_3000000_steps.zip"
+model_file: "data/PPO-5diii5kk/model_3000000_steps.zip"
 model_mod: "stable_baselines3"
 model_cls: "PPO"
 

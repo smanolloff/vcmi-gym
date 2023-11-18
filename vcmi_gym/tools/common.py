@@ -183,10 +183,16 @@ def make_absolute(cwd, p):
 def play_model(env, fps, model, obs):
     terminated = False
     clock = Clock(fps)
+    last_errors = 0
 
     while not terminated:
         action, _states = model.predict(obs)
         obs, reward, terminated, truncated, info = env.step(action)
-        clock.tick()
+
         if terminated:
             break
+
+        if info["errors"] == last_errors:
+            clock.tick()
+
+        last_errors = info["errors"]

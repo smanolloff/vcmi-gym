@@ -4,7 +4,7 @@ run_id: ~
 model_load_file: ~
 out_dir_template: "data/PPO-{run_id}"
 log_tensorboard: true
-total_timesteps: 5_000_000
+total_timesteps: 15_000_000
 max_episode_steps: 5000
 n_checkpoints: 5
 learner_kwargs:
@@ -12,12 +12,12 @@ learner_kwargs:
   use_sde: false
   sde_sample_freq: -1
 
-  n_steps: 2048
+  n_steps: 512
   batch_size: 64
   n_epochs: 10
 
   gamma: 0.99
-  gae_lambda: 0.95
+  gae_lambda: 0.98
   clip_range: 0.2
   normalize_advantage: true
   ent_coef: 0.0001
@@ -28,8 +28,9 @@ learner_kwargs:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.0003"
+learner_lr_schedule: "const_0.0001"
 
 env_kwargs:
   __include__: "config/env.yml"
+  consecutive_error_reward_factor: -2
 env_wrappers: []

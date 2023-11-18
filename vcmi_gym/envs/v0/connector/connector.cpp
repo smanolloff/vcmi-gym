@@ -204,6 +204,9 @@ const P_Result Connector::start() {
         // py::gil_scoped_acquire acquire2;
     }
 
+    auto newcwd = std::filesystem::current_path();
+    std::cout << "OLDCWD: " << oldcwd << "\nNEWCWD: " << newcwd << "\n";
+
     // NOTE: changing CWD here *sometimes* fails with exception:
     // std::__1::ios_base::failure: could not open file: unspecified iostream_category error
     // (sometimes = fails on benchmark, works on test...)

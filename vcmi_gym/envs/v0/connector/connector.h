@@ -13,7 +13,7 @@
 #define DLL_EXPORT __attribute__ ((visibility("default")))
 #include "aitypes.h" // "vendor" header file
 
-#define VERBOSE false
+#define VERBOSE true
 
 #define LOG(msg) if(VERBOSE) { std::cout << "<" << std::this_thread::get_id() << ">[" << std::filesystem::path(__FILE__).filename().string() << "] (" << __FUNCTION__ << ") " << msg << "\n"; }
 #define LOGSTR(msg, a1) if (VERBOSE) { std::cout << "<" << std::this_thread::get_id() << ">[" << std::filesystem::path(__FILE__).filename().string() << "] (" << __FUNCTION__ << ") " << msg << a1 << "\n"; }

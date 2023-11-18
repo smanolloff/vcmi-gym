@@ -18,7 +18,8 @@ class LogCallback(BaseCallback):
     """Logs user-defined `info` values into tensorboard"""
 
     def _on_step(self) -> bool:
-        for k in VcmiEnv.INFO_KEYS:
+        env = self.training_env.envs[0].unwrapped
+        for k in env.info_keys:
             v = safe_mean([ep_info[k] for ep_info in self.model.ep_info_buffer])
             self.model.logger.record(f"user/{k}", v)
 
@@ -27,6 +28,8 @@ def init_model(
     venv,
     seed,
     model_load_file,
+    model_load_update,
+    model_load_checkpoint,
     learner_cls,
     learner_kwargs,
     learning_rate,
@@ -43,11 +46,21 @@ def init_model(
         case _:
             raise Exception("Unexpected learner_cls: %s" % learner_cls)
 
+    model = None
+
     if model_load_file:
         print("Loading %s model from %s" % (alg.__name__, model_load_file))
         model = alg.load(model_load_file, env=venv)
+    elif model_load_checkpoint:
+        with model_load_checkpoint.as_directory() as checkpoint_dir:
+            f = os.path.join(checkpoint_dir, "model.zip")
+            print("Loading %s model from checkpoint file: %s" % (alg.__name__, f))
+            kwargs = dict(learner_kwargs, learning_rate=learning_rate, seed=seed)
+            print("------------------ 1: %s" % kwargs)
+            model = alg.load(f, env=venv, kwargs=kwargs)
     else:
         kwargs = dict(learner_kwargs, learning_rate=learning_rate, seed=seed)
+        print("------------------ 2: %s" % kwargs)
         model = alg(env=venv, **kwargs)
 
     if log_tensorboard:
@@ -90,24 +103,39 @@ def train_sb3(
     seed,
     run_id,
     model_load_file,
+    model_load_update,
     learner_kwargs,
+    learning_rate,
     learner_lr_schedule,
     total_timesteps,
     max_episode_steps,
     n_checkpoints,
     out_dir_template,
     log_tensorboard,
+    progress_bar,
+    reset_num_timesteps,
+    extras,
 ):
     venv = create_vec_env(seed, max_episode_steps)
 
     try:
         out_dir = common.out_dir_from_template(out_dir_template, seed, run_id)
-        learning_rate = common.lr_from_schedule(learner_lr_schedule)
+
+        if learner_lr_schedule:
+            assert learning_rate is None, "both learner_lr_schedule and learning_rate given"
+            learning_rate = common.lr_from_schedule(learner_lr_schedule)
+        else:
+            assert learning_rate is not None, "neither learner_lr_schedule nor learning_rate given"
+
+        if extras is None:
+            extras = {}
 
         model = init_model(
             venv=venv,
             seed=seed,
             model_load_file=model_load_file,
+            model_load_update=model_load_update,
+            model_load_checkpoint=extras.get("checkpoint", None),
             learner_cls=learner_cls,
             learner_kwargs=learner_kwargs,
             learning_rate=learning_rate,
@@ -115,23 +143,24 @@ def train_sb3(
             out_dir=out_dir,
         )
 
+        callbacks = [LogCallback()]
+
+        if n_checkpoints > 0:
+            callbacks.append(CheckpointCallback(
+                save_freq=math.ceil(total_timesteps / n_checkpoints),
+                save_path=out_dir,
+                name_prefix="model",
+            ))
+
+        if "train_sb3.callback" in extras:
+            callbacks.append(extras["train_sb3.callback"])
+
         model.learn(
             total_timesteps=total_timesteps,
-            reset_num_timesteps=False,
-            progress_bar=True,
-            # progress_bar=False,
-            callback=[
-                LogCallback(),
-                CheckpointCallback(
-                    save_freq=math.ceil(total_timesteps / n_checkpoints),
-                    save_path=out_dir,
-                    name_prefix="model",
-                ),
-            ],
+            reset_num_timesteps=reset_num_timesteps,
+            progress_bar=progress_bar,
+            callback=callbacks
         )
-
-        # The CheckpointCallback kinda makes this redundant...
-        common.save_model(out_dir, model)
 
         return {"out_dir": out_dir}
     finally:
