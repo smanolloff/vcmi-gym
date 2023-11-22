@@ -1,12 +1,9 @@
 from vcmi_gym.tools.main import run
 
-import string
-import random
 import sys
 import os
 import numpy as np
 import ast
-import time
 import wandb
 
 

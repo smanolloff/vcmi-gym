@@ -6,6 +6,7 @@ import numpy as np
 import string
 import random
 import time
+import importlib
 import gymnasium as gym
 
 from .. import VcmiEnv
@@ -65,7 +66,6 @@ def lin_decay_fn(initial_value, final_value, decay_fraction):
     assert initial_value > final_value
     assert final_value > 0
     assert decay_fraction >= 0 and decay_fraction <= 1
-    const_fraction = 1 - decay_fraction
 
     def func(progress_remaining: float) -> float:
         return max(0, 1 + (initial_value * progress_remaining - 1) / decay_fraction)
@@ -104,10 +104,10 @@ def lr_from_schedule(schedule):
     exit(1)
 
 
-def out_dir_from_template(tmpl, seed, run_id):
+def out_dir_from_template(tmpl, seed, run_id, allow_existing=False):
     out_dir = tmpl.format(seed=seed, run_id=run_id)
 
-    if os.path.exists(out_dir):
+    if os.path.exists(out_dir) and not allow_existing:
         raise Exception("Output directory already exists: %s" % out_dir)
 
     return out_dir
@@ -158,7 +158,7 @@ def save_model(out_dir, model):
     model.save(model_file)
 
 
-def register_env(env_kwargs={}, env_wrappers=[]):
+def register_env(env_kwargs={}, env_wrappers=[], overwrite_env=False):
     def wrapped_env_creator(**kwargs):
         env = VcmiEnv(**kwargs)
 
@@ -169,9 +169,12 @@ def register_env(env_kwargs={}, env_wrappers=[]):
 
         return env
 
-    gym.envs.register(
-        id="local/VCMI-v0", entry_point=wrapped_env_creator, kwargs=env_kwargs
-    )
+    envid = "local/VCMI-v0"
+
+    if overwrite_env and envid in gym.registry:
+        del gym.registry[envid]
+
+    gym.envs.register(id=envid, entry_point=wrapped_env_creator, kwargs=env_kwargs)
 
 
 def make_absolute(cwd, p):

@@ -4,7 +4,6 @@ from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.utils import safe_mean
 from gymnasium.wrappers import TimeLimit
 import os
-import time
 import math
 import stable_baselines3
 import sb3_contrib
@@ -18,8 +17,7 @@ class LogCallback(BaseCallback):
     """Logs user-defined `info` values into tensorboard"""
 
     def _on_step(self) -> bool:
-        env = self.training_env.envs[0].unwrapped
-        for k in env.info_keys:
+        for k in VcmiEnv.INFO_KEYS:
             v = safe_mean([ep_info[k] for ep_info in self.model.ep_info_buffer])
             self.model.logger.record(f"user/{k}", v)
 
@@ -54,13 +52,13 @@ def init_model(
     elif model_load_checkpoint:
         with model_load_checkpoint.as_directory() as checkpoint_dir:
             f = os.path.join(checkpoint_dir, "model.zip")
-            print("Loading %s model from checkpoint file: %s" % (alg.__name__, f))
+            # print("Loading %s model from checkpoint file: %s" % (alg.__name__, f))
             kwargs = dict(learner_kwargs, learning_rate=learning_rate, seed=seed)
-            print("------------------ 1: %s" % kwargs)
+            # print("------------------ 1: %s" % kwargs)
             model = alg.load(f, env=venv, kwargs=kwargs)
     else:
         kwargs = dict(learner_kwargs, learning_rate=learning_rate, seed=seed)
-        print("------------------ 2: %s" % kwargs)
+        # print("------------------ 2: %s" % kwargs)
         model = alg(env=venv, **kwargs)
 
     if log_tensorboard:
@@ -86,9 +84,10 @@ def init_model(
 # access to the SB3 log - and that's how user-defined values in `info`
 # (set by QwopEnv) can be logged into tensorboard.
 #
-def create_vec_env(seed, max_episode_steps):
+def create_vec_env(seed, n_envs, max_episode_steps):
     venv = make_vec_env(
         "local/VCMI-v0",
+        n_envs=n_envs,
         env_kwargs={"seed": seed},
         monitor_kwargs={"info_keywords": VcmiEnv.INFO_KEYS},
         wrapper_class=TimeLimit,
@@ -110,25 +109,23 @@ def train_sb3(
     total_timesteps,
     max_episode_steps,
     n_checkpoints,
+    n_envs,
     out_dir_template,
     log_tensorboard,
     progress_bar,
     reset_num_timesteps,
     extras,
 ):
-    venv = create_vec_env(seed, max_episode_steps)
+    venv = create_vec_env(seed, n_envs, max_episode_steps)
 
     try:
-        out_dir = common.out_dir_from_template(out_dir_template, seed, run_id)
+        out_dir = common.out_dir_from_template(out_dir_template, seed, run_id, extras is not None)
 
         if learner_lr_schedule:
             assert learning_rate is None, "both learner_lr_schedule and learning_rate given"
             learning_rate = common.lr_from_schedule(learner_lr_schedule)
         else:
             assert learning_rate is not None, "neither learner_lr_schedule nor learning_rate given"
-
-        if extras is None:
-            extras = {}
 
         model = init_model(
             venv=venv,

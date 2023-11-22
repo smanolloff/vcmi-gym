@@ -172,7 +172,7 @@ const P_Result Connector::start() {
     std::unique_lock lock1(m1);
     LOG("obtain lock1: done");
 
-    auto oldcwd = std::filesystem::current_path();
+    // auto oldcwd = std::filesystem::current_path();
 
     // This must happen in the main thread (SDL requires it)
     LOG("call init_vcmi(...)");
@@ -204,8 +204,8 @@ const P_Result Connector::start() {
         // py::gil_scoped_acquire acquire2;
     }
 
-    auto newcwd = std::filesystem::current_path();
-    std::cout << "OLDCWD: " << oldcwd << "\nNEWCWD: " << newcwd << "\n";
+    // auto newcwd = std::filesystem::current_path();
+    // std::cout << "OLDCWD: " << oldcwd << "\nNEWCWD: " << newcwd << "\n";
 
     // NOTE: changing CWD here *sometimes* fails with exception:
     // std::__1::ios_base::failure: could not open file: unspecified iostream_category error

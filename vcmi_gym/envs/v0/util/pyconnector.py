@@ -1,6 +1,8 @@
 import multiprocessing
 import ctypes
 import numpy as np
+import os
+import signal
 
 from . import log
 
@@ -63,21 +65,22 @@ class PyConnector():
     #
     # MAIN PROCESS
     #
-    def __init__(self, *args):
+    def __init__(self, loglevel, *args):
         self.started = False
+        self.loglevel = loglevel
         self.connargs = args
 
     def start(self):
         assert not self.started, "Already started"
         self.started = True
-        self.logger = log.get_logger("PyConnector", "DEBUG")
+        self.logger = log.get_logger("PyConnector", self.loglevel)
 
         self.v_statesize = multiprocessing.Value(ctypes.c_int)
         self.v_nactions = multiprocessing.Value(ctypes.c_int)
         self.v_errflags = multiprocessing.Value(PyErrflags)
         self.v_action = multiprocessing.Value(PyAction)
         self.v_result_act = multiprocessing.Value(PyRawResult)
-        self.v_result_render_ansi = PyRenderAnsiResult = multiprocessing.Array(ctypes.c_char, 5000)
+        self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 5000)
         self.v_command_type = multiprocessing.Value(ctypes.c_int)
 
         # Process synchronization:
@@ -86,7 +89,17 @@ class PyConnector():
         self.cond = multiprocessing.Condition()
         self.cond.acquire()
 
-        self.proc = multiprocessing.Process(target=self.start_connector, args=self.connargs)
+        self.proc = multiprocessing.Process(
+            target=self.start_connector,
+            args=self.connargs,
+            name="VCMI",
+            daemon=True
+        )
+
+        if os.name == "posix":
+            signal.signal(signal.SIGINT, self.handle_sigint)
+            signal.signal(signal.SIGTERM, self.handle_sigterm)
+
         self.proc.start()
         self.cond.wait()
 
@@ -96,6 +109,20 @@ class PyConnector():
             self.v_nactions.value,
             list(self.v_errflags)
         )
+
+    def shutdown(self):
+        self.logger.info("Terminating VCMI PID=%s" % self.proc.pid)
+
+        # attempt to prevent log duplication from ray PB2 training
+        for handler in self.logger.handlers:
+            self.logger.removeHandler(handler)
+            handler.close()
+
+        self.proc.terminate()
+        self.proc.join()
+        self.proc.close()
+        self.cond.release()
+        self.cond = None
 
     def reset(self):
         self.v_command_type.value = PyConnector.COMMAND_TYPE_RESET
@@ -116,6 +143,17 @@ class PyConnector():
         self.cond.wait()
         return self.v_result_render_ansi.value.decode("utf-8")
 
+    def handle_sigint(self, sig, _frame):
+        self.handle_signal("SIGINT")
+
+    def handle_sigterm(self, sig, _frame):
+        self.handle_signal("SIGTERM")
+
+    def handle_signal(self, signame):
+        if self.cond:
+            self.logger.warn(f"{signame} received, shutting down...")
+            self.shutdown()
+
     #
     # This method is the SUB-PROCESS
     # It enters an infinite loop, waiting for commands
@@ -125,9 +163,10 @@ class PyConnector():
         #       in the newly created process
         from ..connector.build import connector
 
-        self.logger = log.get_logger("PyConnector-sub", "DEBUG")
+        self.logger = log.get_logger("PyConnector-sub", self.loglevel)
 
-        self.logger.debug("Starting with args: %s" % str(args))
+        self.logger.info("Starting VCMI")
+        self.logger.debug("VCMI args: %s" % str(args))
         # XXX: self.__connector is ONLY available in the sub-process!
         self.__connector = connector.Connector(*args)
 
@@ -160,7 +199,6 @@ class PyConnector():
             self.cond.notify()
 
     def set_v_result_act(self, result):
-        x = result.get_state()
         self.v_result_act.state = np.ctypeslib.as_ctypes(result.get_state())
         self.v_result_act.errmask = ctypes.c_ushort(result.get_errmask())
         self.v_result_act.dmg_dealt = ctypes.c_int(result.get_dmg_dealt())

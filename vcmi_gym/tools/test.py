@@ -53,7 +53,7 @@ def _test(env_kwargs):
         # logging.debug("======== info: %s" % info)
         # action += 1
 
-        if env.unwrapped.n_errors_last == 0:
+        if env.unwrapped.last_action_was_valid:
             time.sleep(1)
             print(env.render())
         if term:

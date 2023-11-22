@@ -1,10 +1,8 @@
 import os
 import yaml
 import argparse
-import gymnasium as gym
 from copy import deepcopy
 
-from vcmi_gym import VcmiEnv
 from . import common
 
 # NOTE (MacOS ONLY):
@@ -12,14 +10,18 @@ from . import common
 # $ defaults write org.python.python ApplePersistenceIgnoreState NO
 
 
-# "extras" is an arbitary object which is action-dependent
+# "extras" is an arbitary dict object which is action-dependent
 # It is used when calling "run" from raytune, for example.
-def run(action, cfg, extras=None):
+def run(action, cfg, extras={}):
+    # print("**** ENV WANDB_RUN_ID: %s" % os.environ["WANDB_RUN_ID"])
+    # import wandb
+    # print("**** wandb.run.id: %s" % wandb.run.id)
+
     cwd = os.getcwd()
     env_wrappers = cfg.pop("env_wrappers", {})
     env_kwargs = cfg.pop("env_kwargs", {})
     expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
-    common.register_env(expanded_env_kwargs, env_wrappers)
+    common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
 
     match action:
         case "train_ppo" | "train_qrdqn":
@@ -47,6 +49,7 @@ def run(action, cfg, extras=None):
                     "total_timesteps": cfg.get("total_timesteps", 1000000),
                     "max_episode_steps": cfg.get("max_episode_steps", 5000),
                     "n_checkpoints": cfg.get("n_checkpoints", 5),
+                    "n_envs": cfg.get("n_envs", 1),
                     "extras": extras,
                     "learning_rate": cfg.get("learning_rate", None),
                     "learner_lr_schedule": cfg.get(

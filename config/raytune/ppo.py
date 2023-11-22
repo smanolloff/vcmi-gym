@@ -1,13 +1,40 @@
-from ray import tune
-
 # https://docs.ray.io/en/latest/tune/api/search_space.html
-
 config = {
     "wandb_project": "Wandb_example",
+    "results_dir": "data",
+    "population_size": 6,
 
-    # used for calculating perturbation_interval
-    # based on total_timesteps and n_steps
-    "desired_perturbations": 100,
+    # Training speed is:
+    #   ~2 rollouts/s (beginning, with many invalid actions)
+    #   ~1.3 rollouts/s (end)
+    #
+    # HOW TO CHOOSE:
+    #   such that perturbation is performed once every 10? minutes
+    #
+    # Example:
+    #   1000 ~= 500..769 seconds/pertrubation
+    #
+    "perturbation_interval": 1000,
+
+    # Reduce ray reporting to once every X rollouts
+    # (equivalent of learner_kwargs.log_interval for tensorboard)
+    #
+    # Episode length is:
+    #   ~400 steps (beginning)
+    #   ~75 steps (end)
+    # Rollout size is 512 steps (learner_kwargs.n_steps), ie.:
+    #   7 episodes (beginning)
+    #   1.25 episodes (end)
+    #
+    # HOW TO CHOOSE:
+    #   such that there at least 100 episodes between reports
+    #
+    # Example:
+    #   50 ~= 350..62 episodes/report
+    #   20 ~= 140..25 episodes/report
+    #
+    # NOTE: perturbation_interval will be recalculated accordingly
+    "reduction_factor": 25,
 
     # """
     # Parameters are transferred from the top quantile_fraction
@@ -17,15 +44,6 @@ config = {
     # """
     "quantile_fraction": 0.25,
 
-    # NOTE:
-    # """
-    # Tune will sample uniformly between the bounds provided by
-    # hyperparam_bounds for the initial hyperparameter values if
-    # the corresponding hyperparameters are not present in a
-    # trial’s initial config.
-    # """
-    # NOTE: apparently, only floats are supported here.
-    #
     "hyperparam_bounds": {
         "learner_kwargs": {
             "gamma": [0.9, 0.99],
@@ -40,11 +58,12 @@ config = {
         "model_load_file": None,
         "model_load_update": True,
         "progress_bar": False,
-        "reset_num_timesteps": True,
-        "out_dir_template": "data/PPO-{run_id}",
+        "reset_num_timesteps": False,
+        # this is added programattically based on top-level "results_dir" param
+        # "out_dir_template": "data/{experiment_name}/{trial_id}",
         "log_tensorboard": True,
-        "total_timesteps": 3000e3,
-        "max_episode_steps": 5000,
+        "total_timesteps": 10e6,
+        "max_episode_steps": 500,
         "n_checkpoints": 0,  # no saves
         "learner_kwargs": {
             "policy": "MlpPolicy",
@@ -59,14 +78,17 @@ config = {
             "normalize_advantage": True,
             # "ent_coef": tune.uniform(0, 0.001),
             "vf_coef": 0.5,
-            "max_grad_norm": 0.5
+            "max_grad_norm": 0.5,
+            # this is added programatically based on top-level "reduction_factor"
+            # "log_interval": 25
         },
         "learner_lr_schedule": None,
         # "learning_rate": tune.uniform(0.00001, 0.0002),
         "env_kwargs": {
             "mapname": "AI-1.vmap",
             "vcmi_loglevel_global": "error",
-            "vcmi_loglevel_ai": "warn",
+            "vcmi_loglevel_ai": "error",
+            "vcmienv_loglevel": "WARN",
             # "consecutive_error_reward_factor": tune.uniform(-1, -5),
         }
     }

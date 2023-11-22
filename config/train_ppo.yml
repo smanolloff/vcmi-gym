@@ -7,6 +7,7 @@ log_tensorboard: true
 total_timesteps: 15_000_000
 max_episode_steps: 5000
 n_checkpoints: 5
+n_envs: 4
 learner_kwargs:
   policy: "MlpPolicy"
   use_sde: false
