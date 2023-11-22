@@ -6,15 +6,15 @@ import signal
 
 from . import log
 
+#
 # NOTE: those are hard-coded here as there is no way
-#       to obtain them without importing connector
-PyAction = ctypes.c_int16
-PyState = ctypes.c_float * 334      # !!! SYNC with aitypes.h !!!
-PyErrnames = ctypes.c_wchar * 9     # !!! SYNC with aitypes.h !!!
-PyErrflags = ctypes.c_uint16 * 9    # !!! SYNC with aitypes.h !!!
+#       to obtain them without importing connector first
+#
 
-ERRNAMES = [
-    # !!! SYNC with aitypes.h !!!
+N_ACTIONS = 1323    # !!! SYNC with aitypes.h !!!
+STATE_SIZE = 334    # !!! SYNC with aitypes.h !!!
+ERRSIZE = 9         # !!! SYNC with aitypes.h !!!
+ERRNAMES = [        # !!! SYNC with aitypes.h !!!
     "ERR_ALREADY_WAITED",
     "ERR_MOVE_SELF",
     "ERR_HEX_UNREACHABLE",
@@ -25,6 +25,11 @@ ERRNAMES = [
     "ERR_MOVE_SHOOT",
     "ERR_ATTACK_IMPOSSIBLE",
 ]
+
+PyAction = ctypes.c_int16
+PyState = ctypes.c_float * STATE_SIZE
+PyErrnames = ctypes.c_wchar * ERRSIZE
+PyErrflags = ctypes.c_uint16 * ERRSIZE
 
 
 class PyRawResult(ctypes.Structure):
@@ -80,7 +85,7 @@ class PyConnector():
         self.v_errflags = multiprocessing.Value(PyErrflags)
         self.v_action = multiprocessing.Value(PyAction)
         self.v_result_act = multiprocessing.Value(PyRawResult)
-        self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 5000)
+        self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 8192)
         self.v_command_type = multiprocessing.Value(ctypes.c_int)
 
         # Process synchronization:
@@ -96,19 +101,10 @@ class PyConnector():
             daemon=True
         )
 
-        if os.name == "posix":
-            signal.signal(signal.SIGINT, self.handle_sigint)
-            signal.signal(signal.SIGTERM, self.handle_sigterm)
-
         self.proc.start()
         self.cond.wait()
 
-        return (
-            PyResult(self.v_result_act),
-            self.v_statesize.value,
-            self.v_nactions.value,
-            list(self.v_errflags)
-        )
+        return PyResult(self.v_result_act), list(self.v_errflags)
 
     def shutdown(self):
         self.logger.info("Terminating VCMI PID=%s" % self.proc.pid)
@@ -143,22 +139,15 @@ class PyConnector():
         self.cond.wait()
         return self.v_result_render_ansi.value.decode("utf-8")
 
-    def handle_sigint(self, sig, _frame):
-        self.handle_signal("SIGINT")
-
-    def handle_sigterm(self, sig, _frame):
-        self.handle_signal("SIGTERM")
-
-    def handle_signal(self, signame):
-        if self.cond:
-            self.logger.warn(f"{signame} received, shutting down...")
-            self.shutdown()
-
     #
     # This method is the SUB-PROCESS
     # It enters an infinite loop, waiting for commands
     #
     def start_connector(self, *args):
+        # The sub-process is a daemon, it shouldn't handle SIGINT
+        if os.name == "posix":
+            signal.signal(signal.SIGINT, self.ignore_signal)
+
         # NOTE: import is done here to ensure VCMI inits
         #       in the newly created process
         from ..connector.build import connector
@@ -172,19 +161,22 @@ class PyConnector():
 
         self.v_statesize.value = connector.get_state_size()
         self.v_nactions.value = connector.get_n_actions()
+        errmapping = connector.get_error_mapping()
 
-        i = 0
+        # Sync sanity-check
+        assert self.v_statesize.value == STATE_SIZE
+        assert self.v_nactions.value == N_ACTIONS
+        assert len(errmapping) == ERRSIZE
+
         errnames = []
 
-        for (errflag, (errname, _)) in connector.get_error_mapping().items():
+        for (i, (errflag, (errname, _))) in enumerate(errmapping.items()):
             errnames.append(errname)
             self.v_errflags[i] = ctypes.c_uint16(errflag)
             i += 1
 
         # Sync sanity-check
-        assert i == len(connector.get_error_mapping())
         assert errnames == ERRNAMES
-        assert self.v_result_act.state._length_ == self.v_statesize.value
 
         self.cond.acquire()
         self.set_v_result_act(self.__connector.start())
@@ -220,3 +212,6 @@ class PyConnector():
                 self.v_result_render_ansi.value = bytes(self.__connector.renderAnsi(), 'utf-8')
             case _:
                 raise Exception("Unknown command: %s" % self.v_command_type.value)
+
+    def ignore_signal(self, _sig, _frame):
+        pass

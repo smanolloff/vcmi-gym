@@ -2,8 +2,8 @@ import numpy as np
 import gymnasium as gym
 
 from .util import log
-from .util.pyconnector import PyConnector, ERRNAMES
 from .util.analyzer import Analyzer
+from .util.pyconnector import PyConnector, ERRNAMES, STATE_SIZE, N_ACTIONS
 
 # the numpy data type (pytorch works best with float32)
 DTYPE = np.float32
@@ -25,6 +25,32 @@ class VcmiEnv(gym.Env):
         ["errors", "net_value", "is_success"]
     )
 
+    #
+    # A note on the static methods
+    # Initially simply instance methods, I wanted to rip off the
+    # reference to "self" as it introduced bugs related to the env state
+    # (eg. some instance vars being used in calculations were not yet updated)
+    # This approach is justified for training-critical methods only
+    # (ie. no need to abstract out `render`, for example)
+
+    @staticmethod
+    def build_info(res, analysis):
+        info = {name: count for (name, count) in zip(ERRNAMES, analysis.error_counters_ep)}
+        info["errors"] = analysis.errors_count_ep
+        info["net_value"] = analysis.net_value_ep
+        info["is_success"] = res.is_victorious
+        return info
+
+    @staticmethod
+    def calc_reward(analysis, consecutive_error_reward_factor):
+        # Penalize with ever-increasing amounts to prevent
+        # it from just making errors forever
+        if analysis.errors_count > 0:
+            return analysis.errors_consecutive_count * consecutive_error_reward_factor
+
+        # XXX: pikemen value=80, life=10
+        return analysis.net_value + 5 * analysis.net_dmg
+
     def __init__(
         self,
         mapname,
@@ -40,17 +66,23 @@ class VcmiEnv(gym.Env):
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
 
         self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
+        self.connector = PyConnector(
+            vcmienv_loglevel,
+            mapname,
+            vcmi_loglevel_global,
+            vcmi_loglevel_ai
+        )
 
-        self.connector = PyConnector(vcmienv_loglevel, mapname, vcmi_loglevel_global, vcmi_loglevel_ai)
-        (self.result, statesize, nactions, errflags) = self.connector.start()
+        (result, self.errflags) = self.connector.start()
 
         # NOTE: removing action=0 (retreat) which is used for resetting...
         #       => start from 1 and reduce total actions by 1
         #          XXX: there seems to be a bug as start=1 causes this error:
         #          index 1322 is out of bounds for dimension 2 with size 1322
         #       => just start from 0, reduce max by 1, and manually add +1
-        self.action_space = gym.spaces.Discrete(nactions - 1)
-        self.observation_space = gym.spaces.Box(shape=(statesize,), low=-1, high=1, dtype=DTYPE)
+        self.action_offset = 1
+        self.action_space = gym.spaces.Discrete(N_ACTIONS - self.action_offset)
+        self.observation_space = gym.spaces.Box(shape=(STATE_SIZE,), low=-1, high=1, dtype=DTYPE)
 
         # <params>
         self.render_mode = render_mode
@@ -58,43 +90,31 @@ class VcmiEnv(gym.Env):
         self.consecutive_error_reward_factor = consecutive_error_reward_factor
         # </params>
 
-        # needed for reset
-        self.errflags = errflags
-        self.analyzer = Analyzer(self.action_space.n, self.errflags)
-        self.reset(seed=seed)
+        # required to init vars
+        self.reset_vars(result)
 
     def step(self, action):
-        action += 1  # see note for action_space
+        action += self.action_offset  # see note for action_space
 
         if self.terminated:
             raise Exception("Reset needed")
 
         res = self.connector.act(action)
         analysis = self.analyzer.analyze(action, res)
-        rew = self.calc_reward(analysis)
+        rew = VcmiEnv.calc_reward(analysis, self.consecutive_error_reward_factor)
         obs = res.state
         term = res.is_battle_over
-        info = self.build_info(res, analysis)
+        info = VcmiEnv.build_info(res, analysis)
 
-        self.update_state(res, rew, term)
+        self.update_vars_after_step(analysis, res, rew, term)
         self.maybe_render(analysis)
 
         return obs, rew, term, False, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-
-        if self.analyzer.actions_count > 0:
-            self.result = self.connector.reset()
-
-        self.analyzer = Analyzer(self.action_space.n, self.errflags)
-        self.analyzer = Analyzer(self.action_space.n, self.errflags)
-        self.terminated = False
-        self.reward = 0
-        self.reward_total = 0
-        self.n_renders_skipped = 0
-        self.terminated = False
-
+        self.reset_vars(res=None)
+        self.result = self.connector.reset()
         return self.result.state, {}
 
     def render(self):
@@ -102,8 +122,8 @@ class VcmiEnv(gym.Env):
             footer = (
                 f"Reward: {self.reward}\n"
                 f"Total reward: {self.reward_total}\n"
-                f"Total value: {self.analyzer.net_value_ep}\n"
-                f"n_steps: {self.analyzer.actions_count_ep}"
+                f"Total value: {self.analyzer.net_value}\n"
+                f"n_steps: {self.analyzer.actions_count}"
             )
 
             return "%s\n%s" % (self.connector.render_ansi(), footer)
@@ -130,28 +150,23 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def calc_reward(self, analysis):
-        # Penalize with ever-increasing amounts to prevent
-        # it from just making errors forever, avoiding any damage
-        if analysis.n_errors > 0:
-            return analysis.errors_consecutive_count * self.consecutive_error_reward_factor
-
-        # XXX: pikemen value=80, life=10
-        return analysis.net_value + 5 * analysis.net_dmg
-
-    def build_info(_, res, analysis):
-        info = {name: count for (name, count) in zip(ERRNAMES, analysis.error_counters_ep)}
-        info["errors"] = analysis.errors_count_ep
-        info["net_value"] = analysis.net_value_ep
-        info["is_success"] = res.is_victorious
-        return info
-
-    def update_state(self, analysis, res, rew, term):
-        self.last_action_was_valid = (analysis.errors_count == 0)
-        self.terminated = term
+    def update_vars_after_step(self, analysis, res, rew, term):
         self.result = res
         self.reward = rew
         self.reward_total += rew
+        self.terminated = term
+        self.last_action_was_valid = (analysis.errors_count == 0)
+
+    def reset_vars(self, res=None):
+        self.result = res
+        self.reward = 0
+        self.reward_total = 0
+        self.terminated = False
+        self.last_action_was_valid = True
+
+        # Vars updated after other events
+        self.n_renders_skipped = 0
+        self.analyzer = Analyzer(self.action_space.n, self.errflags)
 
     def maybe_render(self, analysis):
         if self.render_each_step:
@@ -160,3 +175,45 @@ class VcmiEnv(gym.Env):
                 self.n_renders_skipped = 0
             else:
                 self.n_renders_skipped += 1
+
+
+def rendcheck(obs):
+    nocol = "\033[0m"
+    enemycol = "\033[31m"
+    allycol = "\033[32m"
+    activecol = "\033[32m\033[1m"
+    aslot = obs[STATE_SIZE-1]
+
+    res = "-" * 34
+    for i in range(165):
+        hexstate = (obs[i]+1)*8
+
+        if i % 15 == 0:
+            res += "\n| " if i % 2 == 0 else "\n|"
+
+        res += " "
+
+        match hexstate:
+            case 0:
+                res += "○"
+            case 1:
+                res += "\033[90m◌\033[0m"
+            case 2:
+                res += "\033[90m▦\033[0m"
+            case _:
+                nstack = hexstate - 3
+                nstackvis = nstack + 1
+                color = nocol
+
+                if nstack > 6:
+                    nstackvis -= 7
+                    color = enemycol
+                else:
+                    color = activecol if aslot == nstack else allycol
+
+                res += "%s%d%s" % (color, nstackvis, nocol)
+
+                if (i % 15 == 14):
+                    res += " |" if i % 2 == 0 else "  |"
+
+    return res

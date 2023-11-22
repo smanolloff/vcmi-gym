@@ -2,16 +2,10 @@ import collections
 import enum
 import numpy as np
 
-from .pyconnector import ERRNAMES
+from .pyconnector import ERRNAMES, N_ACTIONS
 
 # the numpy data type (pytorch works best with float32)
 DTYPE = np.float32
-
-ActionType = enum.IntEnum("Color", [
-    "WAIT", "MOVE", "MOVE1",
-    "MOVE2", "MOVE3", "MOVE4",
-    "MOVE5", "MOVE6", "MOVE7",
-])
 
 Analysis = collections.namedtuple("Analysis", [
     "action_type",                      # int <ActionType>
@@ -35,6 +29,25 @@ Analysis = collections.namedtuple("Analysis", [
 ])
 
 
+class ActionType(enum.IntEnum):
+    # 3 non-move actions
+    RETREAT = 0
+    DEFEND = enum.auto()
+    WAIT = enum.auto()
+
+    # 8 move actions (associated with 1 of 165 hexes)
+    MOVE = enum.auto()
+    MOVE1 = enum.auto()
+    MOVE2 = enum.auto()
+    MOVE3 = enum.auto()
+    MOVE4 = enum.auto()
+    MOVE5 = enum.auto()
+    MOVE6 = enum.auto()
+    MOVE7 = enum.auto()
+
+    assert N_ACTIONS == 3 + 165*8
+
+
 class Analyzer():
     # NOTES on action_type and action_hex counters:
     # The idea is to visualise action_type as a heatmap where
@@ -52,12 +65,8 @@ class Analyzer():
     # y-axis is diveded into 11 regions (bfield hex height)
     # The hexes will be colored according to their at time T
 
-    def __init__(self, n_actions, errflags):
+    def __init__(self, action_offset, errflags):
         self.errflags = errflags
-
-        # def, wait, 165*8 moves
-        exp_n_actions = 2 + 165*8
-        assert n_actions == exp_n_actions, "Expected %d actions, got: %d" % (exp_n_actions, n_actions)
 
         self.actions_count = 0
         self.actions_valid_count = 0
@@ -98,7 +107,7 @@ class Analyzer():
         net_value = res.value_killed - res.value_lost
         self.net_value += net_value
 
-        return Analyzer.Analysis(
+        return Analysis(
             action_type=action_type,
             action_type_counters_ep=self.action_type_counters,
             action_type_valid_counters_ep=self.action_type_valid_counters,
@@ -135,23 +144,25 @@ class Analyzer():
         return n_errors, errcounters
 
     """
-    act => act0
-    0 = defend                => DEFEND
-    1 = wait                  => WAIT
-    2 = move(0,0)             => MOVE
-    3 = move(0,0)+Attack#1    => MOVE1
+    act => ActionType
+    0 = retreat               => RETREAT
+    1 = defend                => DEFEND
+    2 = wait                  => WAIT
+    3 = move(0,0)             => MOVE
+    4 = move(0,0)+Attack#1    => MOVE1
     ...
-    9  = move(0,0)+Attack#7   => MOVE7
-    10 = move(1,0)            => MOVE
+    10 = move(0,0)+Attack#7   => MOVE7
+    11 = move(1,0)            => MOVE
+    12 = move(1,0)+Attack#1   => MOVE1
     ...
     1322 = move(15,11)+Attack#7 => MOVE7
     """
     def _action_type_and_hex(self, act):
-        if act < 2:
+        if act < 3:
             return ActionType(act), None
         else:
-            act0 = act - 2
-            return ActionType(act0 % 8), act0 / 8
+            hexact = act - 3
+            return ActionType(hexact % 8), hexact // 8
 
     def _update_metrics(self, analysis):
         if analysis.n_errors:
