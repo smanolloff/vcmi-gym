@@ -91,7 +91,7 @@ class VcmiEnv(gym.Env):
         # </params>
 
         # required to init vars
-        self.reset_vars(result)
+        self._reset_vars(result)
 
     def step(self, action):
         action += self.action_offset  # see note for action_space
@@ -106,14 +106,14 @@ class VcmiEnv(gym.Env):
         term = res.is_battle_over
         info = VcmiEnv.build_info(res, analysis)
 
-        self.update_vars_after_step(analysis, res, rew, term)
-        self.maybe_render(analysis)
+        self._update_vars_after_step(analysis, res, rew, term)
+        self._maybe_render(analysis)
 
         return obs, rew, term, False, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.reset_vars(res=None)
+        self._reset_vars(res=None)
         self.result = self.connector.reset()
         return self.result.state, {}
 
@@ -140,24 +140,18 @@ class VcmiEnv(gym.Env):
             self.logger.removeHandler(handler)
             handler.close()
 
-    def error_summary(self):
-        res = "Error summary:\n"
-        for i, name in enumerate(self.errnames):
-            res += "%25s: %d\n" % (name, self.errcounters[i])
-        return res
-
     #
     # private
     #
 
-    def update_vars_after_step(self, analysis, res, rew, term):
+    def _update_vars_after_step(self, analysis, res, rew, term):
         self.result = res
         self.reward = rew
         self.reward_total += rew
         self.terminated = term
         self.last_action_was_valid = (analysis.errors_count == 0)
 
-    def reset_vars(self, res=None):
+    def _reset_vars(self, res=None):
         self.result = res
         self.reward = 0
         self.reward_total = 0
@@ -168,52 +162,10 @@ class VcmiEnv(gym.Env):
         self.n_renders_skipped = 0
         self.analyzer = Analyzer(self.action_space.n, self.errflags)
 
-    def maybe_render(self, analysis):
+    def _maybe_render(self, analysis):
         if self.render_each_step:
             if analysis.errors_count == 0:
                 print("%s\nSkipped renders: %s" % (self.render(), self.n_renders_skipped))
                 self.n_renders_skipped = 0
             else:
                 self.n_renders_skipped += 1
-
-
-def rendcheck(obs):
-    nocol = "\033[0m"
-    enemycol = "\033[31m"
-    allycol = "\033[32m"
-    activecol = "\033[32m\033[1m"
-    aslot = obs[STATE_SIZE-1]
-
-    res = "-" * 34
-    for i in range(165):
-        hexstate = (obs[i]+1)*8
-
-        if i % 15 == 0:
-            res += "\n| " if i % 2 == 0 else "\n|"
-
-        res += " "
-
-        match hexstate:
-            case 0:
-                res += "○"
-            case 1:
-                res += "\033[90m◌\033[0m"
-            case 2:
-                res += "\033[90m▦\033[0m"
-            case _:
-                nstack = hexstate - 3
-                nstackvis = nstack + 1
-                color = nocol
-
-                if nstack > 6:
-                    nstackvis -= 7
-                    color = enemycol
-                else:
-                    color = activecol if aslot == nstack else allycol
-
-                res += "%s%d%s" % (color, nstackvis, nocol)
-
-                if (i % 15 == 14):
-                    res += " |" if i % 2 == 0 else "  |"
-
-    return res

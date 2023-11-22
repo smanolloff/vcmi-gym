@@ -56,6 +56,13 @@ def _test(env_kwargs):
         if env.unwrapped.last_action_was_valid:
             time.sleep(1)
             print(env.render())
+        else:
+            pass
+            # s = "Error summary:\n"
+            # for i, name in enumerate(self.errnames):
+            #     s += "%25s: %d\n" % (name, self.errcounters[i])
+            # print(s)
+
         if term:
             break
 
