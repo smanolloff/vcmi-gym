@@ -7,12 +7,12 @@
   "width": 300,
   "height": 200,
   "transform": [
-    {"filter": "datum._step >= ${string:min_step:0} && (${string:max_step:0} == 0 || datum._step <= ${string:max_step:0})"}
+    {"filter": "datum._step >= ${string:min_rollout:0} && (${string:max_rollout:0} == 0 || datum._step <= ${string:max_rollout:0})"}
   ],
   "encoding": {
     "x": {
       "bin": {"maxbins":60},
-      "field": "_step",
+      "field": "rollout",
       "type": "quantitative",
       "title": ""
     },

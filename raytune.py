@@ -34,9 +34,6 @@ class RaytuneCallback(BaseCallback):
         self.leaf_params = self._get_leaf_keys(hyperparam_bounds)
         self.metric_aggregations = {
             "rew_mean": np.zeros(reduction_factor, dtype=np.float32),
-            "success_rate": np.zeros(reduction_factor, dtype=np.float32),
-            "net_value_mean": np.zeros(reduction_factor, dtype=np.float32),
-            "n_errors_mean": np.zeros(reduction_factor, dtype=np.float32),
         }
         # print("RAyTUNE CALLBACK INIT")
 
@@ -65,12 +62,9 @@ class RaytuneCallback(BaseCallback):
         # See notes in train_sb3 regarding Monitor wrapper.
         # We use ep_info["r"], here to calc rew_mean, code copied from:
         # https://github.com/DLR-RM/stable-baselines3/blob/v2.2.1/stable_baselines3/common/on_policy_algorithm.py#L292
-        metrics = {
-            "rew_mean": safe_mean([ep_info["r"] for ep_info in self.model.ep_info_buffer]),
-        }
+        metrics = {"rew_mean": safe_mean([ep_info["r"] for ep_info in self.model.ep_info_buffer])}
 
         rem = self.n_rollouts % self.reduction_factor
-
         for (k, v) in metrics.items():
             self.metric_aggregations[k][rem-1] = v
 
@@ -81,15 +75,13 @@ class RaytuneCallback(BaseCallback):
 
         # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/tune/examples/pbt_function.py#L81-L86
         # Based on these metrics, run may stop (see run_config)
-        log = {k: np.mean(self.metric_aggregations[k]) for k in metrics.keys()}
-        report = {"rew_mean": log["rew_mean"]}
+        report = {"rew_mean": np.mean(self.metric_aggregations["rew_mean"])}
 
         # print("aggregations[rew_mean]: %s" % self.metric_aggregations["rew_mean"])
         # print("report: %s" % report)
 
         if self.n_rollouts_reduced % self.perturbation_interval == 0:
             self.n_perturbations += 1
-            log["n_perturbations"] = self.n_perturbations
             with tempfile.TemporaryDirectory() as tempdir:
                 f = os.path.join(tempdir, "model.zip")
                 # print("Model checkpoint: %s" % f)
@@ -138,7 +130,7 @@ def update_param_space(hyperparam_bounds, param_space):
 
 # A ray callback for logging ray-specific metrics
 # NOT WORKING: this object living in the main PID and thread
-# But the trials are other PIDs and threads => wandb is not inited here...
+# wandb is not inited here... (the trials are other PIDs and threads)
 # class MyWandbLoggerCallback(tune.logger.LoggerCallback):
 
 #

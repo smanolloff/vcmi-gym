@@ -6,7 +6,6 @@ import os
 import math
 import stable_baselines3
 import sb3_contrib
-import torch
 import numpy as np
 import importlib
 
@@ -35,13 +34,7 @@ class LogCallback(BaseCallback):
 
     def _on_rollout_end(self):
         self.rollouts += 1
-
-        wdb_log = {
-            "n_steps": self.num_timesteps,
-            "rollout/n_episodes": self.rollout_episodes,
-            "rollout/count": self.rollouts
-        }
-
+        wdb_log = {"rollout/n_episodes": self.rollout_episodes}
         self.rollout_episodes = 0
 
         if self.rollouts % self.locals["log_interval"] != 0:
@@ -52,8 +45,12 @@ class LogCallback(BaseCallback):
             self.model.logger.record(f"{k}", v)
             wdb_log[k] = v
 
+        # From here on it's W&B stuff only
         if not self.wandb:
             return
+
+        wdb_log["num_timesteps"] = self.num_timesteps
+        wdb_log["rollout/count"] = self.rollouts
 
         # Also add sb3's Monitor info keys: "r" (reward) and "l" (length)
         # (these are already recorded to TB by sb3, but not in W&B)
@@ -69,8 +66,9 @@ class LogCallback(BaseCallback):
 
             # In SB3's logger, Tensor objects are logged as a Histogram
             # https://github.com/DLR-RM/stable-baselines3/blob/v1.8.0/stable_baselines3/common/logger.py#L412
-            tb_data = torch.as_tensor(ary)
-            self.model.logger.record(f"user/{k}", tb_data)
+            # NOT logging this to TB, it's not visualized well there
+            # tb_data = torch.as_tensor(ary)
+            # self.model.logger.record(f"user/{k}", tb_data)
 
             # In W&B, we need to unpivot into a name/count table
             # NOTE: reserved column names: "id", "name", "_step" and "color"
