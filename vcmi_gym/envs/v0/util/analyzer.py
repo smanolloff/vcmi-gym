@@ -95,23 +95,24 @@ class Analyzer():
             self.actions_valid_count += 1
             self.actions_valid_consecutive += 1
             self.action_type_valid_counters[action_type] += 1
+
+            net_dmg = res.dmg_dealt - res.dmg_received
+            net_value = res.value_killed - res.value_lost
+            self.net_dmg += net_dmg
+            self.net_value += net_value
         else:
             self.actions_valid_consecutive = 0
             self.errors_count += errors_count
             self.error_counters += error_counters
             self.errors_consecutive_count += 1
+            net_dmg = 0
+            net_value = 0
 
         if coords:
             x, y = coords
             self.action_coords_counters[y][x] += 1
             if errors_count == 0:
                 self.action_coords_valid_counters[y][x] += 1
-
-        net_dmg = res.dmg_dealt - res.dmg_received
-        self.net_dmg += net_dmg
-
-        net_value = res.value_killed - res.value_lost
-        self.net_value += net_value
 
         return Analysis(
             action_type=action_type,

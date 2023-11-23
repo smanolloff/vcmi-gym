@@ -1,7 +1,7 @@
 ---
 fps: -1
 reset_delay: 5
-model_file: "data/PPO-PB2-2023-11-23_04:45:05/5024c_00002_2_ent_coef=0.0029,gamma=0.9500,learning_rate=0.0005_2023-11-23_04-45-07/checkpoint_000003/model.zip"
+model_file: "data/M2-PPO-20231123_123144/80b61_00000_0_ent_coef=0.0011,gamma=0.9953,learning_rate=0.0009_2023-11-23_12-31-46/checkpoint_000004/model.zip"
 model_mod: "stable_baselines3"
 model_cls: "PPO"
 

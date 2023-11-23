@@ -200,7 +200,7 @@ def main():
             #       is much better
             # wandb.tensorboard.patch(root_logdir=out_root_dir)
         else:
-            atexit(wandb.finish, quiet=True)
+            atexit.register(wandb.finish, quiet=True)
 
         # print("[%s] INITWANDB: PID: %s, trial_id: %s" % (time.time(), os.getpid(), trial_id))
         # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/air/integrations/wandb.py#L601-L607
