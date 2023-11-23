@@ -24,8 +24,8 @@ class RaytuneCallback(BaseCallback):
     def __init__(self, perturbation_interval, reduction_factor, hyperparam_bounds):
         super().__init__()
 
-        self.perturbation_interval = perturbation_interval
         self.reduction_factor = reduction_factor
+        self.perturbation_interval = perturbation_interval  # already reduced
         self.n_rollouts = 0
         self.n_rollouts_reduced = 0
         self.n_perturbations = 0
@@ -47,9 +47,9 @@ class RaytuneCallback(BaseCallback):
 
         for name in self.leaf_params:
             if hasattr(self.model, name):
-                params[name] = getattr(self.model, name)
+                params[f"config/{name}"] = getattr(self.model, name)
             elif hasattr(env, name):
-                params[name] = getattr(env, name)
+                params[f"config/{name}"] = getattr(env, name)
             else:
                 raise Exception("Could not find value for %s" % name)
 
@@ -63,11 +63,7 @@ class RaytuneCallback(BaseCallback):
         # https://github.com/DLR-RM/stable-baselines3/blob/v2.2.1/stable_baselines3/common/on_policy_algorithm.py#L292
         metrics = {
             "rew_mean": safe_mean([ep_info["r"] for ep_info in self.model.ep_info_buffer]),
-            "success_rate": safe_mean([ep_info["is_success"] for ep_info in self.model.ep_info_buffer]),
-            "net_value_mean": safe_mean([ep_info["net_value"] for ep_info in self.model.ep_info_buffer]),
-            "n_errors_mean": safe_mean([ep_info["errors"] for ep_info in self.model.ep_info_buffer]),
         }
-        # print("metrics: %s" % metrics)
 
         rem = self.n_rollouts % self.reduction_factor
 
@@ -89,6 +85,7 @@ class RaytuneCallback(BaseCallback):
 
         if self.n_rollouts_reduced % self.perturbation_interval == 0:
             self.n_perturbations += 1
+            log["n_perturbations"] = self.n_perturbations
             with tempfile.TemporaryDirectory() as tempdir:
                 f = os.path.join(tempdir, "model.zip")
                 # print("Model checkpoint: %s" % f)
@@ -97,10 +94,6 @@ class RaytuneCallback(BaseCallback):
 
         else:
             train.report(report)
-
-        log["n_steps"] = self.num_timesteps
-        log["n_perturbations"] = self.n_perturbations
-        wandb.log(log)
 
     def _get_leaf_keys(self, data):
         leaf_keys = []
@@ -123,6 +116,22 @@ def get_leaf_paths(data, parent_keys=[]):
     return paths
 
 
+def update_param_space(hyperparam_bounds, param_space):
+    for key, value in hyperparam_bounds.items():
+        if isinstance(value, dict):
+            for inner_key, inner_value in value.items():
+                if isinstance(inner_value, list):
+                    param_space[key][inner_key] = tune.uniform(inner_value[0], inner_value[1])
+                else:
+                    param_space[key][inner_key] = tune.uniform(inner_value, inner_value)
+        else:
+            if isinstance(value, list):
+                param_space[key] = tune.uniform(value[0], value[1])
+            else:
+                tune.uniform(value, value)
+    return param_space
+
+
 # A ray callback for logging ray-specific metrics
 # NOT WORKING: this object living in the main PID and thread
 # But the trials are other PIDs and threads => wandb is not inited here...
@@ -143,6 +152,12 @@ def main():
     if alg not in ["PPO"]:
         raise Exception("Only PPO is supported for raytune currently")
 
+    # NOTE:
+    # Apparently, tune also needs those defined as ranges in param_space
+    # https://discuss.ray.io/t/pb2-seems-stuck-in-space-margins-and-raises-exceptions-with-lambdas/467/8
+
+    update_param_space(config["hyperparam_bounds"], config["param_space"])
+
     # Increase for shorter population iteration cycles
     # total_timesteps = config["param_space"]["total_timesteps"]
     # learner_n_steps = config["param_space"]["learner_kwargs"]["n_steps"]
@@ -151,11 +166,11 @@ def main():
 
     perturbation_interval = config["perturbation_interval"]
     reduction_factor = config["reduction_factor"]
-    config["param_space"]["learner_kwargs"]["log_interval"] = reduction_factor
+    config["param_space"]["log_interval"] = reduction_factor
 
     # Reporting will be reduced by the same factor
     # => no *real* change in perturbation interval
-    perturbation_interval /= reduction_factor
+    perturbation_interval //= reduction_factor
 
     results_dir = config["results_dir"]
     if not os.path.isabs(results_dir):
@@ -193,7 +208,7 @@ def main():
         # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/air/integrations/wandb.py#L601-L607
         wandb_run = wandb.init(
             id=trial_id,
-            name=trial_name,
+            name="PB2_%s" % trial_name.split("_")[-1],
             resume="allow",
             reinit=True,
             allow_val_change=True,
@@ -213,6 +228,7 @@ def main():
         cfg = dict(cfg, run_id=wandb_run.id, seed=seed, out_dir_template=out_dir)
         cb = RaytuneCallback(perturbation_interval, reduction_factor, config["hyperparam_bounds"])
         extras = {
+            "wandb_run": wandb_run,
             "train_sb3.callback": cb,
             "checkpoint": train.get_checkpoint(),
             "overwrite_env": True,
@@ -248,10 +264,8 @@ def main():
         local_dir=results_dir,
     )
 
-    # def trial_name_creator(trial):
-    #     return f"{alg}-{trial.trial_id}"
-
     tune_config = tune.TuneConfig(
+        trial_name_creator=lambda t: t.trial_id,
         # trial_name_creator=trial_name_creator,
         scheduler=pb2,
         num_samples=config["population_size"]

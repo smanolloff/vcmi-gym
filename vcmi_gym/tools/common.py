@@ -27,6 +27,9 @@ class Clock:
 
         if sleep_for > 0:
             time.sleep(sleep_for)
+        elif self.fps < 0:
+            # manual mode
+            input("Press Enter to continue...")
 
         self.last_tick_at = tick_at + sleep_for
 
@@ -141,6 +144,7 @@ def measure(func, kwargs):
 
 
 def save_run_metadata(action, cfg, duration, values):
+    cfg = {k: v for k, v in cfg.items() if k != "extras"}
     out_dir = values["out_dir"]
     metadata = dict(values, action=action, config=cfg, duration=duration)
 

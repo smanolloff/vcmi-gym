@@ -3,6 +3,13 @@ import ctypes
 import numpy as np
 import os
 import signal
+import time
+# NOTE: There *will* be orphaned system resources when using ray
+#       as it seems we can't perform proper cleaning up.
+#       After a ray PB2 run, this is one way to manually cleanup:
+#           ps aux | grep multiprocessing | awk '{print $2}' | xargs kill -15
+import posix_ipc
+import atexit
 
 from . import log
 
@@ -70,12 +77,13 @@ class PyConnector():
     #
     # MAIN PROCESS
     #
-    def __init__(self, loglevel, *args):
+    def __init__(self, loglevel):
         self.started = False
         self.loglevel = loglevel
-        self.connargs = args
+        self.shutdown_lock = multiprocessing.Lock()
+        self.shutdown_complete = False
 
-    def start(self):
+    def start(self, *args):
         assert not self.started, "Already started"
         self.started = True
         self.logger = log.get_logger("PyConnector", self.loglevel)
@@ -93,31 +101,44 @@ class PyConnector():
         # cond.wait() will release the lock and wait (other proc now successfully acquires the lock)
         self.cond = multiprocessing.Condition()
         self.cond.acquire()
-
         self.proc = multiprocessing.Process(
             target=self.start_connector,
-            args=self.connargs,
+            args=args,
             name="VCMI",
             daemon=True
         )
 
-        self.proc.start()
-        self.cond.wait()
+        atexit.register(self.shutdown)
+
+        # Multiple VCMIs booting simultaneously is not OK
+        # (they all write to the same files at boot)
+        if not self._try_start(600, 0.1):
+            raise Exception("Failed to acquire semaphore")
 
         return PyResult(self.v_result_act), list(self.v_errflags)
 
     def shutdown(self):
+        with self.shutdown_lock:
+            if self.shutdown_complete:
+                return
+
+            self.shutdown_complete = True
+
         self.logger.info("Terminating VCMI PID=%s" % self.proc.pid)
+        self.proc.terminate()
+        self.proc.join()
+        self.proc.close()
+
+        try:
+            self.cond.release()
+        except Exception:
+            pass
 
         # attempt to prevent log duplication from ray PB2 training
         for handler in self.logger.handlers:
             self.logger.removeHandler(handler)
             handler.close()
 
-        self.proc.terminate()
-        self.proc.join()
-        self.proc.close()
-        self.cond.release()
         self.cond = None
 
     def reset(self):
@@ -139,6 +160,28 @@ class PyConnector():
         self.cond.wait()
         return self.v_result_render_ansi.value.decode("utf-8")
 
+    def _try_start(self, retries, retry_interval):
+        semaphore = posix_ipc.Semaphore(
+            "vcmi-gym",
+            flags=posix_ipc.O_CREAT,
+            mode=0o600,
+            initial_value=1
+        )
+
+        try:
+            for attempt in range(retries):
+                try:
+                    semaphore.acquire(timeout=0)
+                    self.proc.start()
+                    self.cond.wait()
+                    return True
+                except posix_ipc.BusyError:
+                    time.sleep(retry_interval)
+        finally:
+            semaphore.release()
+
+        return False
+
     #
     # This method is the SUB-PROCESS
     # It enters an infinite loop, waiting for commands
@@ -147,6 +190,8 @@ class PyConnector():
         # The sub-process is a daemon, it shouldn't handle SIGINT
         if os.name == "posix":
             signal.signal(signal.SIGINT, self.ignore_signal)
+
+        atexit.register(self.shutdown_proc)
 
         # NOTE: import is done here to ensure VCMI inits
         #       in the newly created process
@@ -215,3 +260,9 @@ class PyConnector():
 
     def ignore_signal(self, _sig, _frame):
         pass
+
+    def shutdown_proc(self):
+        try:
+            self.cond.release()
+        except Exception:
+            pass

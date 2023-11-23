@@ -22,7 +22,7 @@ if __name__ == "__main__":
     # (to suppresses wandb warnings from adversarial training)
     # DISABLED: it makes lognames from pure PPO training too long
     # wandb.tensorboard.patch(root_logdir=out_dir)
-    wandb.init(sync_tensorboard=True)
+    wandb.init(sync_tensorboard=False)
 
     action = wandb.config["action"]
     config = dict(
@@ -33,6 +33,6 @@ if __name__ == "__main__":
     )
 
     run(action, config)
-
     wandb.save(f"{out_dir}/model.zip", base_path=out_dir)
     wandb.save(f"{out_dir}/metadata.yml", base_path=out_dir)
+    wandb.finish()

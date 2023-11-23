@@ -1,7 +1,8 @@
 ---
 program: wandb-agent.py
 project: vcmi
-method: grid
+# method: grid
+method: random
 name: PPO-3
 metric:
   name: rollout/ep_rew_mean
@@ -13,8 +14,7 @@ parameters:
       model_load_file: { value: ~ }
       out_dir_template: { value: "data/PPO-{run_id}" }
       log_tensorboard: { value: true }
-      total_timesteps: { value: !!float 15e6 }
-      max_episode_steps: { value: 5000 }
+      total_timesteps: { value: !!float 10e3 }
       n_checkpoints: { value: 5 }
       learner_kwargs:
         parameters:
@@ -24,7 +24,7 @@ parameters:
           n_steps: { value: 512 }
           batch_size: { value: 64 }
           n_epochs: { value: 10 }
-          gamma: { values: 0.999 }
+          gamma: { value: 0.999 }
           gae_lambda: { value: 0.98 }
           clip_range: { value: 0.4 }
           normalize_advantage: { value: true }
@@ -37,4 +37,6 @@ parameters:
       env_kwargs:
         parameters:
           mapname: { value: "AI-1.vmap" }
+          max_steps: { value: 500 }
           consecutive_error_reward_factor: { values: [-2] }
+          sparse_info: { value: true }

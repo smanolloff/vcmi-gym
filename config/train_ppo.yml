@@ -4,10 +4,10 @@ run_id: ~
 model_load_file: ~
 out_dir_template: "data/PPO-{run_id}"
 log_tensorboard: true
-total_timesteps: 15_000_000
-max_episode_steps: 5000
+progress_bar: false
+total_timesteps: 10_000
 n_checkpoints: 5
-n_envs: 4
+n_envs: 1
 learner_kwargs:
   policy: "MlpPolicy"
   use_sde: false

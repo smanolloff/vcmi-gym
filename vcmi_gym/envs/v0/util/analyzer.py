@@ -11,9 +11,9 @@ Analysis = collections.namedtuple("Analysis", [
     "action_type",                      # int <ActionType>
     "action_type_counters_ep",          # int[len(ActionType)]
     "action_type_valid_counters_ep",    # int[len(ActionType)]
-    "action_hex",                       # int
-    "action_hex_counters_ep",           # int[len(15*11)]
-    "action_hex_valid_counters_ep",     # int[len(15*11)]
+    "action_coords",                    # (int, int) or None
+    "action_coords_counters_ep",        # int[11][15]
+    "action_coords_valid_counters_ep",  # int[11][15]
     "actions_count_ep",                 # int
     "actions_valid_count_ep",           # int
     "actions_valid_consecutive",        # int
@@ -49,21 +49,23 @@ class ActionType(enum.IntEnum):
 
 
 class Analyzer():
-    # NOTES on action_type and action_hex counters:
+    # NOTES on action_type and action_coords_counters counters:
+    #
     # The idea is to visualise action_type as a heatmap where
     # x-axis is divided into N regions (time intervals)
     # y-axis is diveded into 9 regions (action types)
+    # Colors coresponding to action_types' values at time T
     #
-    # For action_hex, the idea is a line chart with a heatmap popup:
+    # For action_coords_counters, the idea is a line chart with a heatmap popup:
     # x-axis is divided into N regions (time intervals)
-    # y-axis is divided into 165 regions (battlefield hexes)
-    # The line will show the AVG(value) of that hex at time T
-    # The line chart itself is not informative, BUT:
-    #
+    # y-axis is 0..1
+    # The line will show the mode of the distribution of actions across hexes at time T
+    # That line would indicate intervals at which single hexes have been heavily preferred
+    # An advanced approach would be to measure the distribution across clusters of hexes
     # On hover, a popup will show a 2D heatmap where:
     # x-axis is divided into 15 regions (bfield hex witdth)
     # y-axis is diveded into 11 regions (bfield hex height)
-    # The hexes will be colored according to their at time T
+    # The hexes will be colored according to their value at time T
 
     def __init__(self, action_offset, errflags):
         self.errflags = errflags
@@ -78,28 +80,32 @@ class Analyzer():
         self.net_value = 0
         self.action_type_counters = np.zeros(len(ActionType), dtype=DTYPE)
         self.action_type_valid_counters = np.zeros(len(ActionType), dtype=DTYPE)
-        self.action_hex_counters = np.zeros(15 * 11, dtype=DTYPE)
-        self.action_hex_valid_counters = np.zeros(15 * 11, dtype=DTYPE)
+        self.action_coords_counters = np.zeros((11, 15), dtype=DTYPE)
+        self.action_coords_valid_counters = np.zeros((11, 15), dtype=DTYPE)
 
     def analyze(self, act, res):
         self.actions_count += 1
 
         errors_count, error_counters = self._parse_errmask(res.errmask)
-        action_type, action_hex = self._action_type_and_hex(act)
+        action_type, coords = self._action_type_and_coords(act)
         self.action_type_counters[action_type] += 1
-        self.action_hex_counters[action_hex] += 1
 
-        if errors_count > 0:
-            self.actions_valid_consecutive = 0
-            self.errors_count += errors_count
-            self.error_counters += error_counters
-            self.errors_consecutive_count += 1
-        else:
+        if errors_count == 0:
             self.errors_consecutive_count = 0
             self.actions_valid_count += 1
             self.actions_valid_consecutive += 1
             self.action_type_valid_counters[action_type] += 1
-            self.action_hex_valid_counters[action_hex] += 1
+        else:
+            self.actions_valid_consecutive = 0
+            self.errors_count += errors_count
+            self.error_counters += error_counters
+            self.errors_consecutive_count += 1
+
+        if coords:
+            x, y = coords
+            self.action_coords_counters[y][x] += 1
+            if errors_count == 0:
+                self.action_coords_valid_counters[y][x] += 1
 
         net_dmg = res.dmg_dealt - res.dmg_received
         self.net_dmg += net_dmg
@@ -111,9 +117,9 @@ class Analyzer():
             action_type=action_type,
             action_type_counters_ep=self.action_type_counters,
             action_type_valid_counters_ep=self.action_type_valid_counters,
-            action_hex=action_hex,
-            action_hex_counters_ep=self.action_hex_counters,
-            action_hex_valid_counters_ep=self.action_hex_valid_counters,
+            action_coords=coords,
+            action_coords_counters_ep=self.action_coords_counters,
+            action_coords_valid_counters_ep=self.action_coords_valid_counters,
             actions_count_ep=self.actions_count,
             actions_valid_count_ep=self.actions_valid_count,
             actions_valid_consecutive=self.actions_valid_consecutive,
@@ -157,12 +163,14 @@ class Analyzer():
     ...
     1322 = move(15,11)+Attack#7 => MOVE7
     """
-    def _action_type_and_hex(self, act):
+    def _action_type_and_coords(self, act):
         if act < 3:
             return ActionType(act), None
         else:
             hexact = act - 3
-            return ActionType(hexact % 8), hexact // 8
+            hexnum = hexact // 8
+            hexcoords = (hexnum % 15, hexnum // 15)
+            return ActionType(3 + hexact % 8), hexcoords
 
     def _update_metrics(self, analysis):
         if analysis.n_errors:

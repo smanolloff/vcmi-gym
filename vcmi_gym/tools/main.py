@@ -47,7 +47,6 @@ def run(action, cfg, extras={}):
                     "reset_num_timesteps": cfg.get("reset_num_timesteps", False),
                     "learner_kwargs": cfg.get("learner_kwargs", {}),
                     "total_timesteps": cfg.get("total_timesteps", 1000000),
-                    "max_episode_steps": cfg.get("max_episode_steps", 5000),
                     "n_checkpoints": cfg.get("n_checkpoints", 5),
                     "n_envs": cfg.get("n_envs", 1),
                     "extras": extras,
@@ -127,6 +126,10 @@ examples:
     print("Loading configuration from %s" % args.c.name)
     cfg = yaml.safe_load(args.c)
     args.c.close()
+
+    # TESTING WANDB
+    # wandb_run = wandb.init(project="vcmi")
+    # run(args.action, cfg, extras={"wandb_run": wandb_run})
 
     run(args.action, cfg)
 

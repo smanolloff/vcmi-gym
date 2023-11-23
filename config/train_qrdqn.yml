@@ -4,7 +4,6 @@ run_id: ~
 out_dir_template: "data/QRDQN-{run_id}"
 log_tensorboard: true
 total_timesteps: 1_000_000
-max_episode_steps: 300
 n_checkpoints: 1
 learner_kwargs:
   policy: "MlpPolicy"

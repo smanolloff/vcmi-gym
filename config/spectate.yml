@@ -1,7 +1,7 @@
 ---
-fps: 10
+fps: -1
 reset_delay: 5
-model_file: "/Users/simo/Projects/vcmi-gym/data/PPO-PB2-2023-11-21_05:46:25/train_function_8cd85_00004_4_2023-11-21_05-46-27/checkpoint_000022/model.zip"
+model_file: "data/PPO-PB2-2023-11-23_04:45:05/5024c_00002_2_ent_coef=0.0029,gamma=0.9500,learning_rate=0.0005_2023-11-23_04-45-07/checkpoint_000003/model.zip"
 model_mod: "stable_baselines3"
 model_cls: "PPO"
 
@@ -12,6 +12,7 @@ model_cls: "PPO"
 env_kwargs:
   __include__: "config/env.yml"
   render_each_step: true
-  consecutive_error_reward_factor: -5
+  consecutive_error_reward_factor: -1
+  sparse_info: false
 
 env_wrappers: []

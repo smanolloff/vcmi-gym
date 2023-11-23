@@ -1,0 +1,32 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A simple line plot",
+  "data": {
+    "name": "wandb"
+  },
+  "mark": "rect",
+  "width": 300,
+  "height": 200,
+  "encoding": {
+    "x": {
+      "bin": {"maxbins":20},
+      "field": "_step",
+      "type": "quantitative"
+    },
+    "y": {
+      "field": "aname",
+      "type": "nominal"
+    },
+    "color": {
+      "field": "acount",
+      "aggregate": "sum",
+      "type": "quantitative",
+      "scale": {"range": ["#000066", "yellow"]}
+    }
+  },
+  "config": {
+    "view": {
+      "stroke": "transparent"
+    }
+  }
+}

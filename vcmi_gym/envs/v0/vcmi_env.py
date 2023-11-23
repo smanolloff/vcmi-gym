@@ -2,8 +2,9 @@ import numpy as np
 import gymnasium as gym
 
 from .util import log
-from .util.analyzer import Analyzer
+from .util.analyzer import Analyzer, ActionType
 from .util.pyconnector import PyConnector, ERRNAMES, STATE_SIZE, N_ACTIONS
+
 
 # the numpy data type (pytorch works best with float32)
 DTYPE = np.float32
@@ -11,69 +12,61 @@ ZERO = DTYPE(0)
 ONE = DTYPE(1)
 
 
+class InfoDict(dict):
+    SCALAR_VALUES = [
+        "errors",
+        "net_value",
+        "is_success",
+        "valid_actions",
+    ]
+
+    D1_ARRAY_VALUES = {
+        "error_counters": ERRNAMES,
+        "action_type_counters": [at.name for at in ActionType],
+        "action_type_valid_counters": [at.name for at in ActionType],
+    }
+
+    D2_ARRAY_VALUES = [
+        "action_coords_counters",
+        "action_coords_valid_counters",
+    ]
+
+    ALL_KEYS = SCALAR_VALUES + list(D1_ARRAY_VALUES.keys()) + D2_ARRAY_VALUES
+
+    def __setitem__(self, k, v):
+        assert k in InfoDict.ALL_KEYS, f"Unknown info key: '{k}'"
+        super().__setitem__(k, v)
+
+
 class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
-
-    INFO_ACTION_TYPE_KEY = ["action_type"]
-    INFO_ACTION_HEX_KEY = ["action_hex"]
-    INFO_KEYS = (
-        ERRNAMES +
-        INFO_ACTION_TYPE_KEY +
-        INFO_ACTION_HEX_KEY +
-        ["errors", "net_value", "is_success"]
-    )
-
-    #
-    # A note on the static methods
-    # Initially simply instance methods, I wanted to rip off the
-    # reference to "self" as it introduced bugs related to the env state
-    # (eg. some instance vars being used in calculations were not yet updated)
-    # This approach is justified for training-critical methods only
-    # (ie. no need to abstract out `render`, for example)
-
-    @staticmethod
-    def build_info(res, analysis):
-        info = {name: count for (name, count) in zip(ERRNAMES, analysis.error_counters_ep)}
-        info["errors"] = analysis.errors_count_ep
-        info["net_value"] = analysis.net_value_ep
-        info["is_success"] = res.is_victorious
-        return info
-
-    @staticmethod
-    def calc_reward(analysis, consecutive_error_reward_factor):
-        # Penalize with ever-increasing amounts to prevent
-        # it from just making errors forever
-        if analysis.errors_count > 0:
-            return analysis.errors_consecutive_count * consecutive_error_reward_factor
-
-        # XXX: pikemen value=80, life=10
-        return analysis.net_value + 5 * analysis.net_dmg
 
     def __init__(
         self,
         mapname,
         seed=None,  # not used currently
         render_mode="ansi",
+        max_steps=500,
         render_each_step=False,
         vcmi_loglevel_global="error",  # vcmi loglevel
         vcmi_loglevel_ai="error",  # vcmi loglevel
         vcmienv_loglevel="WARN",  # python loglevel
-        consecutive_error_reward_factor=-1
+        consecutive_error_reward_factor=-1,
+        sparse_info=False
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
 
         self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
-        self.connector = PyConnector(
-            vcmienv_loglevel,
+        self.connector = PyConnector(vcmienv_loglevel)
+
+        (result, self.errflags) = self.connector.start(
             mapname,
             vcmi_loglevel_global,
             vcmi_loglevel_ai
         )
-
-        (result, self.errflags) = self.connector.start()
 
         # NOTE: removing action=0 (retreat) which is used for resetting...
         #       => start from 1 and reduce total actions by 1
@@ -86,6 +79,8 @@ class VcmiEnv(gym.Env):
 
         # <params>
         self.render_mode = render_mode
+        self.sparse_info = sparse_info
+        self.max_steps = max_steps
         self.render_each_step = render_each_step
         self.consecutive_error_reward_factor = consecutive_error_reward_factor
         # </params>
@@ -96,7 +91,7 @@ class VcmiEnv(gym.Env):
     def step(self, action):
         action += self.action_offset  # see note for action_space
 
-        if self.terminated:
+        if self.terminated or self.truncated:
             raise Exception("Reset needed")
 
         res = self.connector.act(action)
@@ -104,12 +99,13 @@ class VcmiEnv(gym.Env):
         rew = VcmiEnv.calc_reward(analysis, self.consecutive_error_reward_factor)
         obs = res.state
         term = res.is_battle_over
-        info = VcmiEnv.build_info(res, analysis)
+        trunc = self.analyzer.actions_count >= self.max_steps
+        info = VcmiEnv.build_info(res, term, trunc, analysis, self.sparse_info)
 
-        self._update_vars_after_step(analysis, res, rew, term)
+        self._update_vars_after_step(res, rew, term, trunc, analysis)
         self._maybe_render(analysis)
 
-        return obs, rew, term, False, info
+        return obs, rew, term, trunc, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -144,11 +140,12 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def _update_vars_after_step(self, analysis, res, rew, term):
+    def _update_vars_after_step(self, res, rew, term, trunc, analysis):
         self.result = res
         self.reward = rew
         self.reward_total += rew
         self.terminated = term
+        self.truncated = trunc
         self.last_action_was_valid = (analysis.errors_count == 0)
 
     def _reset_vars(self, res=None):
@@ -156,6 +153,7 @@ class VcmiEnv(gym.Env):
         self.reward = 0
         self.reward_total = 0
         self.terminated = False
+        self.truncated = False
         self.last_action_was_valid = True
 
         # Vars updated after other events
@@ -169,3 +167,48 @@ class VcmiEnv(gym.Env):
                 self.n_renders_skipped = 0
             else:
                 self.n_renders_skipped += 1
+
+    #
+    # A note on the static methods
+    # Initially simply instance methods, I wanted to rip off the
+    # reference to "self" as it introduced bugs related to the env state
+    # (eg. some instance vars being used in calculations were not yet updated)
+    # This approach is justified for training-critical methods only
+    # (ie. no need to abstract out `render`, for example)
+
+    #
+    # NOTE:
+    # info is read only after env termination
+    # One-time values will be lost, put only only cumulatives/totals/etc.
+    #
+    @staticmethod
+    def build_info(res, term, trunc, analysis, sparse_info):
+        # Performance optimization
+        if not (term or trunc) and sparse_info:
+            return {}
+
+        info = InfoDict()
+
+        info["errors"] = analysis.errors_count_ep
+        info["net_value"] = analysis.net_value_ep
+        info["is_success"] = res.is_victorious
+        info["valid_actions"] = analysis.actions_valid_count_ep
+
+        info["error_counters"] = analysis.error_counters_ep
+        info["action_type_counters"] = analysis.action_type_counters_ep
+        info["action_type_valid_counters"] = analysis.action_type_valid_counters_ep
+        info["action_coords_counters"] = analysis.action_coords_counters_ep
+        info["action_coords_valid_counters"] = analysis.action_coords_valid_counters_ep
+
+        # Return regular dict (wrappers insert arbitary keys)
+        return dict(info)
+
+    @staticmethod
+    def calc_reward(analysis, consecutive_error_reward_factor):
+        # Penalize with ever-increasing amounts to prevent
+        # it from just making errors forever
+        if analysis.errors_count > 0:
+            return analysis.errors_consecutive_count * consecutive_error_reward_factor
+
+        # XXX: pikemen value=80, life=10
+        return analysis.net_value + 5 * analysis.net_dmg
