@@ -233,7 +233,7 @@ def main():
         }
 
         # this function never returns. Not even a try/catch works.
-        # print("<train_ppo> cfg: %s" % cfg)
+        print("<train_ppo> cfg: %s" % cfg)
         run("train_ppo", cfg, extras)
 
     # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.pb2.PB2.html#ray-tune-schedulers-pb2-pb2

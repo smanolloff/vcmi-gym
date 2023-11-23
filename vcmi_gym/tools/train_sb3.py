@@ -75,11 +75,11 @@ class LogCallback(BaseCallback):
             wk = f"table/{k}"
             rotated = [list(row) for row in zip(columns, ary)]
             if wk not in self.wdb_tables:
-                self.wdb_tables[wk] = self.wandb.Table(columns=["rollout", "key", "value"])
+                self.wdb_tables[wk] = self.wandb.Table(columns=["key", "value"])
 
             wb_table = self.wdb_tables[wk]
             for row in rotated:
-                wb_table.add_data(self.rollouts, *row)
+                wb_table.add_data(*row)
 
         for k in InfoDict.D2_ARRAY_VALUES:
             action_types_vec_3d = [ep_info[k] for ep_info in self.model.ep_info_buffer]
@@ -89,13 +89,13 @@ class LogCallback(BaseCallback):
             if wk not in self.wdb_tables:
                 # Also log the "rollout" so that inter-process logs (which are different _step)
                 # can be aggregated if needed
-                self.wdb_tables[wk] = self.wandb.Table(columns=["rollout", "x", "y", "value"])
+                self.wdb_tables[wk] = self.wandb.Table(columns=["x", "y", "value"])
 
             wb_table = self.wdb_tables[wk]
 
             for (y, row) in enumerate(ary_2d):
                 for (x, cell) in enumerate(row):
-                    wb_table.add_data(self.rollouts, x, y, cell)
+                    wb_table.add_data(x, y, cell)
 
         self.tablebatch += 1
         if self.tablebatch % 100 == 0:
