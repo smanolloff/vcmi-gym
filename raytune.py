@@ -2,10 +2,12 @@ import sys
 import os
 import tempfile
 import copy
+from pathlib import Path
 from datetime import datetime
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import safe_mean
+import atexit
 import wandb
 
 # MUST come BEFORE importing ray
@@ -52,6 +54,8 @@ class RaytuneCallback(BaseCallback):
                 params[f"config/{name}"] = getattr(env, name)
             else:
                 raise Exception("Could not find value for %s" % name)
+
+        # print("<CB> wandb logged params (from model): %s" % params)
 
         wandb.log(params)
 
@@ -203,6 +207,8 @@ def main():
             #       However, that is harmless, and the resulting wandb workspace
             #       is much better
             # wandb.tensorboard.patch(root_logdir=out_root_dir)
+        else:
+            atexit(wandb.finish, quiet=True)
 
         # print("[%s] INITWANDB: PID: %s, trial_id: %s" % (time.time(), os.getpid(), trial_id))
         # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/air/integrations/wandb.py#L601-L607
@@ -235,6 +241,7 @@ def main():
         }
 
         # this function never returns. Not even a try/catch works.
+        # print("<train_ppo> cfg: %s" % cfg)
         run("train_ppo", cfg, extras)
 
     # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.pb2.PB2.html#ray-tune-schedulers-pb2-pb2
@@ -253,9 +260,12 @@ def main():
         synch=True,
     )
 
+    mapname = Path(config["param_space"]["env_kwargs"]["mapname"]).stem
+    assert mapname.isalnum()
+
     # https://docs.ray.io/en/latest/train/api/doc/ray.train.RunConfig.html#ray-train-runconfig
     run_config = train.RunConfig(
-        name="PPO-PB2-%s" % datetime.now().strftime("%Y-%m-%d_%H:%M:%S"),
+        name="%s-PPO-%s" % (mapname, datetime.now().strftime("%Y%m%d_%H%M%S")),
         verbose=False,
         failure_config=train.FailureConfig(fail_fast=True),
         checkpoint_config=train.CheckpointConfig(num_to_keep=50),

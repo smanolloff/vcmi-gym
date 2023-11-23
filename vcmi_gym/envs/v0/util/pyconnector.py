@@ -112,7 +112,7 @@ class PyConnector():
 
         # Multiple VCMIs booting simultaneously is not OK
         # (they all write to the same files at boot)
-        if not self._try_start(600, 0.1):
+        if not self._try_start(300, 0.1):
             raise Exception("Failed to acquire semaphore")
 
         return PyResult(self.v_result_act), list(self.v_errflags)

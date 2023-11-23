@@ -85,7 +85,7 @@ config = {
         "learner_lr_schedule": None,
         "learning_rate": 0.00001,
         "env_kwargs": {
-            "mapname": "AI-1.vmap",
+            "mapname": "ai/M2.vmap",
             "max_steps": 500,
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",

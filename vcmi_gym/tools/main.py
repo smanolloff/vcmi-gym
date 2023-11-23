@@ -128,10 +128,11 @@ examples:
     args.c.close()
 
     # TESTING WANDB
-    # wandb_run = wandb.init(project="vcmi")
-    # run(args.action, cfg, extras={"wandb_run": wandb_run})
+    import wandb
+    wandb_run = wandb.init(project="vcmi")
+    run(args.action, cfg, extras={"wandb_run": wandb_run})
 
-    run(args.action, cfg)
+    # run(args.action, cfg)
 
 
 if __name__ == "__main__":

@@ -77,13 +77,11 @@ class LogCallback(BaseCallback):
             wk = f"table/{k}"
             rotated = [list(row) for row in zip(columns, ary)]
             if wk not in self.wdb_tables:
-                self.wdb_tables[wk] = self.wandb.Table(
-                    data=rotated,
-                    columns=["rollout", "key", "value"]
-                )
-            else:
-                for row in rotated:
-                    self.wdb_tables[wk].add_data(self.rollouts, *row)
+                self.wdb_tables[wk] = self.wandb.Table(columns=["rollout", "key", "value"])
+
+            wb_table = self.wdb_tables[wk]
+            for row in rotated:
+                wb_table.add_data(self.rollouts, *row)
 
         for k in InfoDict.D2_ARRAY_VALUES:
             action_types_vec_3d = [ep_info[k] for ep_info in self.model.ep_info_buffer]
@@ -142,8 +140,8 @@ def init_model(
             f = os.path.join(checkpoint_dir, "model.zip")
             # print("Loading %s model from checkpoint file: %s" % (alg.__name__, f))
             kwargs = dict(learner_kwargs, learning_rate=learning_rate, seed=seed)
-            # print("------------------ 1: %s" % kwargs)
-            model = alg.load(f, env=venv, kwargs=kwargs)
+            model = alg.load(f, env=venv, **kwargs)
+            # print("<train_sb3> Loading model from %s with kwargs: %s. New lr: %s" % (f, kwargs, model.learning_rate))
     else:
         kwargs = dict(learner_kwargs, learning_rate=learning_rate, seed=seed)
         # print("------------------ 2: %s" % kwargs)
