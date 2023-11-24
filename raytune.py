@@ -73,19 +73,26 @@ def main():
         synch=True,
     )
 
+    checkpoint_config = train.CheckpointConfig(
+        num_to_keep=10,
+        checkpoint_score_order="max",
+        checkpoint_score_attribute="rew_mean",
+    )
+
     # https://docs.ray.io/en/latest/train/api/doc/ray.train.RunConfig.html#ray-train-runconfig
     run_config = train.RunConfig(
         name=experiment_name,
         verbose=False,
         failure_config=train.FailureConfig(fail_fast=True),
-        checkpoint_config=train.CheckpointConfig(num_to_keep=50),
+        checkpoint_config=checkpoint_config,
         stop={"rew_mean": 2000},
         callbacks=[],
-        local_dir=results_dir,
+        storage_path=results_dir,
     )
 
     tune_config = tune.TuneConfig(
         trial_name_creator=lambda t: t.trial_id,
+        trial_dirname_creator=lambda t: t.trial_id,
         scheduler=pb2,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
         num_samples=config["population_size"]

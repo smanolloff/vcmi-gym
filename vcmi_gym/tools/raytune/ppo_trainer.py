@@ -60,7 +60,7 @@ class PPOTrainer(ray.tune.Trainable):
 
         self.sb3_callback = SB3Callback()
         self.leaf_keys = self._get_leaf_hyperparam_keys(self.hyperparam_bounds)
-        self.reset(cfg)
+        self.reset_config(cfg)
 
         self.venv = make_vec_env(
             "VCMI-v0",
@@ -85,6 +85,7 @@ class PPOTrainer(ray.tune.Trainable):
     def save_checkpoint(self, checkpoint_dir):
         f = os.path.join(checkpoint_dir, "model.zip")
         self.model.save(f)
+        return checkpoint_dir
 
     @debuglog
     def load_checkpoint(self, checkpoint_dir):
