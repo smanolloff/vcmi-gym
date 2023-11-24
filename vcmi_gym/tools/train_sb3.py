@@ -237,18 +237,17 @@ def train_sb3(
     reset_num_timesteps,
     extras,
 ):
-    venv = create_vec_env(seed, n_envs)
+
+    if extras.get("model", None):
+        # reuse env
+        venv = extras["model"].env
+    else:
+        venv = create_vec_env(seed, n_envs)
 
     try:
         out_dir = common.out_dir_from_template(out_dir_template, seed, run_id, extras is not None)
 
-        if learner_lr_schedule:
-            assert learning_rate is None, "both learner_lr_schedule and learning_rate given"
-            learning_rate = common.lr_from_schedule(learner_lr_schedule)
-        else:
-            assert learning_rate is not None, "neither learner_lr_schedule nor learning_rate given"
-
-        model = init_model(
+        model = extras.get("model", init_model(
             venv=venv,
             seed=seed,
             model_load_file=model_load_file,
@@ -259,16 +258,9 @@ def train_sb3(
             learning_rate=learning_rate,
             log_tensorboard=log_tensorboard,
             out_dir=out_dir,
-        )
+        ))
 
         callbacks = [LogCallback(wandb_run=extras.get("wandb_run", None))]
-
-        if n_checkpoints > 0:
-            callbacks.append(CheckpointCallback(
-                save_freq=math.ceil(total_timesteps / n_checkpoints),
-                save_path=out_dir,
-                name_prefix="model",
-            ))
 
         if "train_sb3.callback" in extras:
             callbacks.append(extras["train_sb3.callback"])

@@ -1,8 +1,6 @@
 import gymnasium as gym
 import time
 
-from vcmi_gym import VcmiEnv
-
 
 def benchmark(steps):
     env = gym.make("local/VCMI-v0")

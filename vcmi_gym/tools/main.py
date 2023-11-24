@@ -12,7 +12,7 @@ from . import common
 
 # "extras" is an arbitary dict object which is action-dependent
 # It is used when calling "run" from raytune, for example.
-def run(action, cfg, extras={}):
+def run(action, cfg, extras={}, rest=[]):
     # print("**** ENV WANDB_RUN_ID: %s" % os.environ["WANDB_RUN_ID"])
     # import wandb
     # print("**** wandb.run.id: %s" % wandb.run.id)
@@ -21,11 +21,11 @@ def run(action, cfg, extras={}):
     env_wrappers = cfg.pop("env_wrappers", {})
     env_kwargs = cfg.pop("env_kwargs", {})
     expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
-    common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
 
     match action:
         case "train_ppo" | "train_qrdqn":
             from .train_sb3 import train_sb3
+            common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
 
             learner_cls = action.split("_")[-1].upper()
             default_template = "data/%s-{run_id}" % learner_cls
@@ -72,6 +72,10 @@ def run(action, cfg, extras={}):
 
         case "spectate":
             from .spectate import spectate
+            common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
+
+            if len(rest) > 0:
+                cfg["model_file"] = rest[0]
 
             spectate(
                 fps=cfg.get("fps", 2),
@@ -83,11 +87,27 @@ def run(action, cfg, extras={}):
 
         case "benchmark":
             from .benchmark import benchmark
+            common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
             steps = cfg.get("steps", 10000)
             benchmark(steps)
 
+        case "play":
+            from .play import play
+
+            if len(rest) > 0:
+                env_kwargs["mapname"] = rest[0]
+
+            common.register_env(expanded_env_kwargs, env_wrappers)
+            play()
+
         case "test":
             from .test import test
+
+            if len(rest) > 0:
+                env_kwargs["mapname"] = rest[0]
+
+            common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
+
             test(env_kwargs)
 
         case _:
@@ -103,8 +123,9 @@ def main():
         type=argparse.FileType("r"),
         help="config file, defaults to config/<action>.yml",
     )
+    parser.add_argument('rest', nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
-    parser.usage = "%(prog)s [options] <action>"
+    parser.usage = "%(prog)s [options] <action> [<value>]"
     parser.epilog = """
 action:
   train_ppo         train using Proximal Policy Optimization (PPO)
@@ -132,7 +153,7 @@ examples:
     # wandb_run = wandb.init(project="vcmi")
     # run(args.action, cfg, extras={"wandb_run": wandb_run})
 
-    run(args.action, cfg)
+    run(args.action, cfg, rest=args.rest)
 
 
 if __name__ == "__main__":

@@ -4,37 +4,27 @@ config = {
     "results_dir": "data",
     "population_size": 6,
 
-    # Training speed is:
-    #   ~2 rollouts/s (beginning, with many invalid actions)
-    #   ~1.3 rollouts/s (end)
-    #
-    # HOW TO CHOOSE:
-    #   such that perturbation is performed once every 10? minutes
-    #
-    # Example:
-    #   1000 ~= 500..769 seconds/pertrubation
-    #
-    "perturbation_interval": 500,
+    # Perturb every N iterations
+    "perturbation_interval": 1,
 
-    # Reduce ray reporting to once every X rollouts
-    # (equivalent of learner_kwargs.log_interval for tensorboard)
     #
-    # Episode length is:
-    #   ~400 steps (beginning)
-    #   ~75 steps (end)
-    # Rollout size is 512 steps (learner_kwargs.n_steps), ie.:
-    #   1.25 episodes (beginning)
-    #   7 episodes (end)
+    # Duration in rollouts of 1 training iteration
+    #
+    # One rollout is: 512 steps (learner_kwargs.n_steps) and takes ~0.8s
+    # Episode length is: ~400 steps (beginning)...~75 steps (end)
     #
     # HOW TO CHOOSE:
-    #   such that there at least 100 episodes between reports
+    #   such that there at least 100 episodes between perturbations
+    #   (if perturbation_interval=1, choose rollouts_per_iteration > 100)
     #
-    # Example:
-    #   50 ~= 350..62 episodes/report
-    #   20 ~= 140..25 episodes/report
+    "rollouts_per_iteration": 100,
+
     #
-    # NOTE: perturbation_interval will be recalculated accordingly
-    "reduction_factor": 50,
+    # Number of logs per iteration
+    # Requirement is: rollouts_per_iteration % logs_per_iteration == 0
+    # 9 is a good number, since the 10th log is the trainer summary
+    #
+    "logs_per_iteration": 10,
 
     # """
     # Parameters are transferred from the top quantile_fraction
@@ -49,24 +39,16 @@ config = {
     # with a tune.uniform(min, max) automatically
     "hyperparam_bounds": {
         "learner_kwargs": {
+            "learning_rate": [0.00001, 0.001],
             "gamma": [0.9, 0.999],
             "ent_coef": [0, 0.005],
         },
-        "learning_rate": [0.00001, 0.001],
     },
     "param_space": {
-        "model_load_file": None,
-        "model_load_update": True,
-        "progress_bar": False,
-        "reset_num_timesteps": False,
-        # this is added programattically based on top-level "results_dir" param
-        # "out_dir_template": "data/{experiment_name}/{trial_id}",
-        "log_tensorboard": True,
-        "total_timesteps": 10e6,
-        "n_checkpoints": 0,  # no saves
         "learner_kwargs": {
             "policy": "MlpPolicy",
             "stats_window_size": 250,
+            "learning_rate": 0.00001,
             "use_sde": False,
             "sde_sample_freq": -1,
             "n_steps": 512,
@@ -80,12 +62,8 @@ config = {
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
         },
-        # this is added programatically based on top-level "reduction_factor"
-        # "log_interval": 25
-        "learner_lr_schedule": None,
-        "learning_rate": 0.00001,
         "env_kwargs": {
-            "mapname": "ai/M2.vmap",
+            "mapname": "ai/M4.vmap",
             "max_steps": 500,
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",

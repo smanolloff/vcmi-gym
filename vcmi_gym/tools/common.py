@@ -203,3 +203,5 @@ def play_model(env, fps, model, obs):
             clock.tick()
 
         last_errors = info["errors"]
+
+    clock.tick()

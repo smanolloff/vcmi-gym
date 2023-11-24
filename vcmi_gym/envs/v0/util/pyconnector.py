@@ -112,8 +112,17 @@ class PyConnector():
 
         # Multiple VCMIs booting simultaneously is not OK
         # (they all write to the same files at boot)
-        if not self._try_start(300, 0.1):
-            raise Exception("Failed to acquire semaphore")
+        # Boot time is <1s, 6 simultaneously procs should not take <10s
+        if not self._try_start(100, 0.1):
+            # self.semaphore.release()
+
+            # Is this needed?
+            # (NOTE: it might raise posix_ipc.ExistentialError)
+            # posix_ipc.unlink_semaphore(self.semaphore.name)
+
+            # try once again after releasing
+            if not self._try_start(1, 0):
+                raise Exception("Failed to acquire semaphore")
 
         return PyResult(self.v_result_act), list(self.v_errflags)
 
@@ -125,9 +134,12 @@ class PyConnector():
             self.shutdown_complete = True
 
         self.logger.info("Terminating VCMI PID=%s" % self.proc.pid)
-        self.proc.terminate()
-        self.proc.join()
-        self.proc.close()
+
+        # proc may not have been started at all (semaphore failed to acquire)
+        if self.proc:
+            self.proc.terminate()
+            self.proc.join()
+            self.proc.close()
 
         try:
             self.cond.release()
