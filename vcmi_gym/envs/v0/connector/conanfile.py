@@ -1,7 +1,4 @@
 from conan import ConanFile
-from conan.errors import ConanInvalidConfiguration
-from conan.tools.apple import is_apple_os
-from conan.tools.build import cross_building
 from conan.tools.cmake import CMakeDeps, CMakeToolchain
 from conans import tools
 
@@ -10,7 +7,7 @@ required_conan_version = ">=1.51.3"
 
 class Connector(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
-    requires = ["pybind11/[~2.7.1]", "boost/[^1.69]"]
+    requires = ["pybind11/[~2.11.1]", "boost/[^1.69]"]
 
     def generate(self):
         tc = CMakeToolchain(self)
@@ -35,7 +32,7 @@ class Connector(ConanFile):
 
     def configure(self):
         self.options["boost"].shared = True
-        self.options["boost"].without_context = True
+        # self.options["boost"].without_context = True
         self.options["boost"].without_contract = True
         self.options["boost"].without_coroutine = False
         self.options["boost"].without_fiber = True
