@@ -7,11 +7,24 @@ import copy
 # MUST come BEFORE importing ray
 os.environ["RAY_DEDUP_LOGS"] = "0"
 
+# this makes the "storage" arg redundant. By default, TUNE_RESULT_DIR
+# is $HOME/ray_results and "storage" just *copies* everything into data...
+os.environ["TUNE_RESULT_DIR"] = os.path.join(os.path.dirname(__file__), "data")
+
+# chdir seems redundant. Initially tried to disable wandb's warning
+# for requirements.txt, but it persists. However, it's better without
+# changing dirs anyway
+os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
+
+# this is to turn off tensorboard logger (side-effect turns off )
+# os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "1"
+
 from ray import train, tune  # noqa: E402
 from ray.tune.schedulers.pb2 import PB2  # noqa: E402
 
 from config.raytune.ppo import config  # noqa: E402
 from vcmi_gym.tools.raytune.ppo_trainer import PPOTrainer  # noqa: E402
+from vcmi_gym.tools.raytune.tbx_dummy_callback import TBXDummyCallback  # noqa: E402
 
 
 def update_param_space(hyperparam_bounds, param_space):
@@ -86,8 +99,8 @@ def main():
         failure_config=train.FailureConfig(fail_fast=True),
         checkpoint_config=checkpoint_config,
         stop={"rew_mean": 2000},
-        callbacks=[],
-        storage_path=results_dir,
+        callbacks=[TBXDummyCallback()],
+        # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
     )
 
     tune_config = tune.TuneConfig(

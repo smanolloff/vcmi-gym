@@ -17,7 +17,7 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #   (if perturbation_interval=1, choose rollouts_per_iteration > 100)
     #
-    "rollouts_per_iteration": 100,
+    "rollouts_per_iteration": 10,
 
     #
     # Number of logs per iteration
