@@ -19,7 +19,7 @@ from . import log
 #
 
 N_ACTIONS = 1323    # !!! SYNC with aitypes.h !!!
-STATE_SIZE = 334    # !!! SYNC with aitypes.h !!!
+STATE_SIZE = 306    # !!! SYNC with aitypes.h !!!
 ERRSIZE = 9         # !!! SYNC with aitypes.h !!!
 ERRNAMES = [        # !!! SYNC with aitypes.h !!!
     "ERR_ALREADY_WAITED",

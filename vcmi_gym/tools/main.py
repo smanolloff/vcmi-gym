@@ -20,11 +20,11 @@ def run(action, cfg, extras={}, rest=[]):
     cwd = os.getcwd()
     env_wrappers = cfg.pop("env_wrappers", {})
     env_kwargs = cfg.pop("env_kwargs", {})
-    expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
 
     match action:
         case "train_ppo" | "train_qrdqn":
             from .train_sb3 import train_sb3
+            expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
 
             learner_cls = action.split("_")[-1].upper()
@@ -72,6 +72,7 @@ def run(action, cfg, extras={}, rest=[]):
 
         case "spectate":
             from .spectate import spectate
+            expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
 
             if len(rest) > 0:
@@ -87,6 +88,7 @@ def run(action, cfg, extras={}, rest=[]):
 
         case "benchmark":
             from .benchmark import benchmark
+            expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
             steps = cfg.get("steps", 10000)
             benchmark(steps)
@@ -97,6 +99,7 @@ def run(action, cfg, extras={}, rest=[]):
             if len(rest) > 0:
                 env_kwargs["mapname"] = rest[0]
 
+            expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             common.register_env(expanded_env_kwargs, env_wrappers)
             play()
 
@@ -106,6 +109,7 @@ def run(action, cfg, extras={}, rest=[]):
             if len(rest) > 0:
                 env_kwargs["mapname"] = rest[0]
 
+            expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
 
             test(env_kwargs)

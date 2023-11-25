@@ -17,12 +17,11 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #   (if perturbation_interval=1, choose rollouts_per_iteration > 100)
     #
-    "rollouts_per_iteration": 10,
+    "rollouts_per_iteration": 100,
 
     #
     # Number of logs per iteration
     # Requirement is: rollouts_per_iteration % logs_per_iteration == 0
-    # 9 is a good number, since the 10th log is the trainer summary
     #
     "logs_per_iteration": 10,
 
@@ -39,15 +38,18 @@ config = {
     # with a tune.uniform(min, max) automatically
     "hyperparam_bounds": {
         "learner_kwargs": {
-            "learning_rate": [0.00001, 0.001],
-            "gamma": [0.9, 0.999],
-            "ent_coef": [0, 0.005],
+            "learning_rate": [0.000001, 0.001],
+            "gamma": [0.9, 0.9999],
+            "ent_coef": [0, 0.01],
+            "clip_range": [0.1, 0.5],
+            "gae_lambda": [0.8, 0.99],
+            "n_epochs": [4, 20]
         },
     },
     "param_space": {
         "learner_kwargs": {
             "policy": "MlpPolicy",
-            "stats_window_size": 250,
+            "stats_window_size": 100,
             "learning_rate": 0.00001,
             "use_sde": False,
             "sde_sample_freq": -1,
@@ -68,7 +70,7 @@ config = {
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",
             "vcmienv_loglevel": "WARN",
-            "consecutive_error_reward_factor": -1,
+            "consecutive_error_reward_factor": -2,
             "sparse_info": True,
         }
     }

@@ -115,14 +115,17 @@ class VcmiEnv(gym.Env):
 
     def render(self):
         if self.render_mode == "ansi":
-            footer = (
-                f"Reward: {self.reward}\n"
-                f"Total reward: {self.reward_total}\n"
-                f"Total value: {self.analyzer.net_value}\n"
-                f"n_steps: {self.analyzer.actions_count}"
+            return (
+                "%s\n"
+                "Reward:    %-5s (total: %s)\n"
+                "Net value: %-5s (total: %s)"
+            ) % (
+                self.connector.render_ansi(),
+                self.reward,
+                self.reward_total,
+                self.net_value_last,
+                self.analyzer.net_value
             )
-
-            return "%s\n%s" % (self.connector.render_ansi(), footer)
 
         elif self.render_mode == "rgb_array":
             gym.logger.warn("Rendering RGB arrays not yet implemented for VcmiEnv")
@@ -144,6 +147,7 @@ class VcmiEnv(gym.Env):
         self.result = res
         self.reward = rew
         self.reward_total += rew
+        self.net_value_last = analysis.net_value
         self.terminated = term
         self.truncated = trunc
         self.last_action_was_valid = (analysis.errors_count == 0)
@@ -152,6 +156,7 @@ class VcmiEnv(gym.Env):
         self.result = res
         self.reward = 0
         self.reward_total = 0
+        self.net_value_last = 0
         self.terminated = False
         self.truncated = False
         self.last_action_was_valid = True
@@ -163,7 +168,11 @@ class VcmiEnv(gym.Env):
     def _maybe_render(self, analysis):
         if self.render_each_step:
             if analysis.errors_count == 0:
-                print("%s\nSkipped renders: %s" % (self.render(), self.n_renders_skipped))
+                print("%s\nTotal steps: %s" % (
+                    self.render(),
+                    self.analyzer.actions_count,
+                    # self.n_renders_skipped
+                ))
                 self.n_renders_skipped = 0
             else:
                 self.n_renders_skipped += 1

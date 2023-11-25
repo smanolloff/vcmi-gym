@@ -97,7 +97,7 @@ class PPOTrainer(ray.tune.Trainable):
         self.model.env.reset()
 
         wlog = self._get_perturbed_config()
-        wlog["iteration"] = self.iteration
+        wlog["trial/iteration"] = self.iteration
 
         # Commit will be done by the callback's first log
         wandb.log(wlog, commit=False)
@@ -117,27 +117,17 @@ class PPOTrainer(ray.tune.Trainable):
 
         assert diff_rollouts == iter_rollouts, f"expected {iter_rollouts}, got: {diff_rollouts}"
 
+        # TODO: add net_value to result (to be saved as checkpoint metadata)
         report = {"rew_mean": self.sb3_callback.ep_rew_mean}
         return report
 
     @debuglog
     def log_result(self, result):
-        # Perform the last log for the teration
-        # 'rew_mean': -10411.09756097561
-        # 'training_iteration': 5
-        # 'trial_id': '874e0_00001'
-        # 'date': '2023-11-24_15-58-42'
-        # 'timestamp': 1700834322
-        # 'time_this_iter_s': 2.4910812377929688
-        # 'time_total_s': 12.411049842834473
-        # 'pid': 43232
-        # 'hostname': 'Simeons-MacBook-Pro.local'
-        # 'node_ip': '127.0.0.1'
-        # 'config': {...}
-        # 'time_since_restore': 12.411049842834473
-        # 'iterations_since_restore': 5
-        assert self.sb3_callback.uncommitted_log, "Expected uncommitted sb3 cb log"
-        wandb.log({"trial/time_this_iter_s": result["time_this_iter_s"]})
+        assert self.sb3_callback.uncommitted_log
+        assert self.sb3_callback.wdb_tables
+        wdb_log = dict(self.sb3_callback.wdb_tables)
+        wdb_log["trial/time_this_iter_s"] = result["time_this_iter_s"]
+        wandb.log(wdb_log)
 
     #
     # private
@@ -179,6 +169,9 @@ class PPOTrainer(ray.tune.Trainable):
     # NOTE: This could be extracted from self.cfg
     #       However, extracting those values from the objects is more accurate
     #       and has proved useful in the past
+    #
+    # TODO: `clip_range` is returned as a schedule fn and logged as a string
+    #       Need to figure out how to convert it to float
     def _get_perturbed_config(self):
         params = {}
         env = self.model.env.envs[0].unwrapped
@@ -201,5 +194,8 @@ class PPOTrainer(ray.tune.Trainable):
                 assert key in cfg and isinstance(cfg[key], dict)
                 self._fix_floats(cfg[key], value)
             else:
-                cfg[key] = float(cfg[key])
+                if key == "n_epochs":
+                    cfg[key] = int(cfg[key])
+                else:
+                    cfg[key] = float(cfg[key])
         return cfg

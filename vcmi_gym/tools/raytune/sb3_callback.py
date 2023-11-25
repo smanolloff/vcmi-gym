@@ -13,10 +13,9 @@ class SB3Callback(BaseCallback):
         self.rollouts = 0
         self.ep_rew_mean = 0
 
-        # batch table reduces the number of W&B artifacts
-        self.tablebatch = 0
+        # wdb tables are logged only once, at end of the iteration
+        # (ie. once every config["rollouts_per_iteration"])
         self.wdb_tables = {}
-
         self.uncommitted_log = False
 
     def _on_step(self):
@@ -25,7 +24,9 @@ class SB3Callback(BaseCallback):
     def _on_rollout_start(self):
         if self.uncommitted_log:
             # Must log *something* to commit the rest
-            wandb.log({"num_timesteps": self.num_timesteps})
+            # Since timesteps are preserved between checkpoint loads,
+            # mark this as a trial-related metric
+            wandb.log({"trial/num_timesteps": self.num_timesteps})
             self.uncommitted_log = False
 
     def _on_rollout_end(self):
@@ -89,11 +90,6 @@ class SB3Callback(BaseCallback):
             for (y, row) in enumerate(ary_2d):
                 for (x, cell) in enumerate(row):
                     wb_table.add_data(x, y, cell)
-
-        self.tablebatch += 1
-        if self.tablebatch % 100 == 0:
-            wdb_log = dict(wdb_log, **self.wdb_tables)
-            self.wdb_tables = {}
 
         # Commit will be done either:
         #   a) on_rollout_start()

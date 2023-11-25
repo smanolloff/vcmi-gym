@@ -12,8 +12,8 @@ model_cls: "PPO"
 env_kwargs:
   __include__: "config/env.yml"
   render_each_step: true
-  consecutive_error_reward_factor: -1
+  consecutive_error_reward_factor: -2
   sparse_info: false
-  mapname: "ai/M4.vmap"
+  mapname: "ai/M5.vmap"
 
 env_wrappers: []
