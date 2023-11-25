@@ -41,9 +41,6 @@ config = {
             "learning_rate": [0.000001, 0.001],
             "gamma": [0.9, 0.9999],
             "ent_coef": [0, 0.01],
-            "clip_range": [0.1, 0.5],
-            "gae_lambda": [0.8, 0.99],
-            "n_epochs": [4, 20]
         },
     },
     "param_space": {
@@ -65,7 +62,7 @@ config = {
             "max_grad_norm": 0.5,
         },
         "env_kwargs": {
-            "mapname": "ai/M4.vmap",
+            "mapname": "ai/M5.vmap",
             "max_steps": 500,
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",
