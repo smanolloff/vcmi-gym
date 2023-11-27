@@ -22,7 +22,7 @@ os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 
 from ray import train, tune  # noqa: E402
 from ray.tune.schedulers.pb2 import PB2  # noqa: E402
-from ray.tune.search.optuna import OptunaSearch
+from ray.tune.search.bayesopt import BayesOptSearch
 
 from vcmi_gym.tools.raytune.tbx_dummy_callback import TBXDummyCallback  # noqa: E402
 
@@ -115,13 +115,28 @@ def main():
         # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
     )
 
+    # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.search.bayesopt.BayesOptSearch.html#ray.tune.search.bayesopt.BayesOptSearch
+    search_alg = BayesOptSearch(
+        metric="rew_mean",
+        mode="max"
+        # verbose=0,
+
+        # TODO: what do they mean by "repeating the trial"?
+        # Terminate the trial after N repetitions
+        # patience=5
+
+        # TODO: Initial parameter suggestions to be run first.
+        # (some good parameters you want to run first)
+        # points_to_evaluate={}
+    )
+
     tune_config = tune.TuneConfig(
         trial_name_creator=lambda t: t.trial_id,
         trial_dirname_creator=lambda t: t.trial_id,
         scheduler=pb2,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
         num_samples=config["population_size"],
-        search_alg=OptunaSearch(),
+        search_alg=search_alg,
     )
 
     trainer_initargs = {
