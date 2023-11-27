@@ -3,12 +3,12 @@ import ctypes
 import numpy as np
 import os
 import signal
-import time
+# import time
 # NOTE: There *will* be orphaned system resources when using ray
 #       as it seems we can't perform proper cleaning up.
 #       After a ray PB2 run, this is one way to manually cleanup:
 #           ps aux | grep multiprocessing | awk '{print $2}' | xargs kill -15
-import posix_ipc
+# import posix_ipc
 import atexit
 
 from . import log
@@ -172,30 +172,41 @@ class PyConnector():
         self.cond.wait()
         return self.v_result_render_ansi.value.decode("utf-8")
 
-    def _try_start(self, retries, retry_interval):
-        semaphore = posix_ipc.Semaphore(
-            "vcmi-gym",
-            flags=posix_ipc.O_CREAT,
-            mode=0o600,
-            initial_value=1
-        )
+    # XXX: DISABLED as it does not work OK:
+    #      At some point simply ANYONE can acquire the semaphore at ANY TIME
+    #      Initially that's not the case, but after some ray tune runs it gets
+    #      screwed and semaphore.acquire() becomes a no-op...
+    #      Instead, with vcmi commit c2daffa43 I just removed writing to files
+    #
+    # def _try_start(self, retries, retry_interval):
+    #     semaphore = posix_ipc.Semaphore(
+    #         "vcmi-gym",
+    #         flags=posix_ipc.O_CREAT,
+    #         mode=0o600,
+    #         initial_value=1
+    #     )
 
-        try:
-            for attempt in range(retries):
-                try:
-                    semaphore.acquire(timeout=0)
-                    self.logger.info("SEMAPHORE ACQUIRED")
-                    self.proc.start()
-                    self.cond.wait()
-                    return True
-                except posix_ipc.BusyError:
-                    time.sleep(retry_interval)
-        finally:
-            semaphore.release()
-            semaphore.close()
-            self.logger.info("SEMAPHORE RELEASED")
+    #     try:
+    #         for attempt in range(retries):
+    #             try:
+    #                 semaphore.acquire(timeout=0)
+    #                 self.logger.warn("SEMAPHORE ACQUIRED")
+    #                 self.proc.start()
+    #                 self.cond.wait()
+    #                 return True
+    #             except posix_ipc.BusyError:
+    #                 time.sleep(retry_interval)
+    #     finally:
+    #         semaphore.release()
+    #         semaphore.close()
+    #         self.logger.warn("SEMAPHORE RELEASED")
+    #
+    #     return False
 
-        return False
+    def _try_start(self, _retries, _retry_interval):
+        self.proc.start()
+        self.cond.wait()
+        return True
 
     #
     # This method is the SUB-PROCESS
