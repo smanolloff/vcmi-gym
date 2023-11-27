@@ -122,7 +122,11 @@ def main():
         num_samples=config["population_size"]
     )
 
-    trainer_initargs = {"config": orig_config, "experiment_name": experiment_name}
+    trainer_initargs = {
+        "config": orig_config,
+        "experiment_name": experiment_name,
+        "root_dir": os.getcwd(),
+    }
 
     tuner = tune.Tuner(
         tune.with_parameters(trainer_cls, initargs=trainer_initargs),

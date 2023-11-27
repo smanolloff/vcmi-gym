@@ -21,7 +21,7 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #   (if perturbation_interval=1, choose rollouts_per_iteration > 100)
     #
-    "rollouts_per_iteration": 100,
+    "rollouts_per_iteration": 500,
 
     #
     # Number of logs per iteration
@@ -43,8 +43,7 @@ config = {
     "hyperparam_bounds": {
         "learner_kwargs": {
             "learning_rate": [0.00001, 0.001],
-            "gamma": [0.9, 0.999],
-            "ent_coef": [0, 0.005],
+            "ent_coef": [0.001, 0.003],
         },
     },
     "param_space": {
@@ -57,7 +56,7 @@ config = {
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.999,
+            "gamma": 0.901,
             "gae_lambda": 0.98,
             "clip_range": 0.4,
             "normalize_advantage": True,

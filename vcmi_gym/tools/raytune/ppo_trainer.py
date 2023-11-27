@@ -1,5 +1,6 @@
 import os
 import copy
+import re
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 import ray.tune
@@ -17,9 +18,9 @@ def debuglog(func):
         return func
 
     def wrapper(*args, **kwargs):
-        PPOTrainer.log("[%s] Start: %s (args=%s, kwargs=%s)\n" % (args[0].trial_name, func.__name__, args[1:], kwargs))
+        args[0].log("Start: %s (args=%s, kwargs=%s)\n" % (func.__name__, args[1:], kwargs))
         result = func(*args, **kwargs)
-        PPOTrainer.log("[%s] End: %s (return %s)" % (args[0].trial_name, func.__name__, result))
+        args[0].log("End: %s (return %s)" % (func.__name__, result))
         return result
 
     return wrapper
@@ -29,15 +30,15 @@ def debuglog(func):
 class PPOTrainer(ray.tune.Trainable):
     # logfile = None
 
-    @classmethod
-    def log(cls, msg):
+    def log(self, msg):
         # if not cls.logfile:
         #     cls.logfile = tempfile.NamedTemporaryFile(mode="w")
         #     print("-- %s [%s] Logfile: %s\n" % (time.time(), os.getpid(), cls.logfile.name))
 
         # cls.logfile.write("%s\n" % msg)
         # cls.logfile.flush()
-        print(msg)
+        # print(msg)
+        print("[%s] %s" % (self.trial_name, msg))
 
     @staticmethod
     def default_resource_request(_config):
@@ -55,8 +56,9 @@ class PPOTrainer(ray.tune.Trainable):
         self.rollouts_per_iteration = initargs["config"]["rollouts_per_iteration"]
         self.logs_per_iteration = initargs["config"]["logs_per_iteration"]
         self.hyperparam_bounds = initargs["config"]["hyperparam_bounds"]
+        self.experiment_name = initargs["experiment_name"]
 
-        self._wandb_init(initargs["experiment_name"], initargs["config"])
+        self._wandb_init(self.experiment_name, initargs["config"])
 
         self.sb3_callback = SB3Callback()
         self.leaf_keys = self._get_leaf_hyperparam_keys(self.hyperparam_bounds)
@@ -88,12 +90,23 @@ class PPOTrainer(ray.tune.Trainable):
     def save_checkpoint(self, checkpoint_dir):
         f = os.path.join(checkpoint_dir, "model.zip")
         self.model.save(f)
+        self.log("Saved %s" % f.split(self.experiment_name)[1])
         return checkpoint_dir
 
     @debuglog
     def load_checkpoint(self, checkpoint_dir):
         f = os.path.join(checkpoint_dir, "model.zip")
+
+        relpath = re.match(fr".+/{self.trial_name}/(.+)", f).group(1)
+        # => "6e59d_00004/checkpoint_000038/model.zip"
+
         self.model = self._model_load(f, venv=self.venv, **self.cfg["learner_kwargs"])
+        self.log("Loaded %s" % relpath)
+
+        origin = int(re.match(r".+?_(\d+)/.+", relpath).group(1))
+        # => int("00004") => 4
+
+        wandb.log({"trial/checkpoint_origin": origin}, commit=False)
 
     @debuglog
     def step(self):
