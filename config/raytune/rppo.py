@@ -16,12 +16,13 @@ config = {
     #
     # One rollout is: 512 steps (learner_kwargs.n_steps) and takes ~0.8s
     # Episode length is: ~400 steps (beginning)...~75 steps (end)
+    # Episodes per rollout is: 1..6
     #
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #   (if perturbation_interval=1, choose rollouts_per_iteration > 100)
     #
-    "rollouts_per_iteration": 100,
+    "rollouts_per_iteration": 500,
 
     #
     # Number of logs per iteration
@@ -42,13 +43,14 @@ config = {
     # with a tune.uniform(min, max) automatically
     "hyperparam_bounds": {
         "learner_kwargs": {
-            "learning_rate": [0.00001, 0.001],
-            "gamma": [0.995, 0.9995],
+            "learning_rate": [0.0001, 0.0005],
+            "gamma": [0.95, 0.995],
+            "ent_coef": [0.001, 0.01],
         },
     },
     "param_space": {
         "learner_kwargs": {
-            "policy": "MlpPolicy",
+            "policy": "MlpLstmPolicy",
             "stats_window_size": 100,
             "learning_rate": 0.00001,
             "use_sde": False,
@@ -56,9 +58,9 @@ config = {
             "n_steps": 128,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.999,
-            "gae_lambda": 0.98,
-            "clip_range": 0.4,
+            "gamma": 0.99,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
             "normalize_advantage": True,
             "ent_coef": 0.001,
             "vf_coef": 0.5,

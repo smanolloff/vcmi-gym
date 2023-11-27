@@ -27,7 +27,7 @@ def debuglog(func):
 
 # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.Trainable.html
 class PPOTrainer(ray.tune.Trainable):
-    logfile = None
+    # logfile = None
 
     @classmethod
     def log(cls, msg):
@@ -69,7 +69,10 @@ class PPOTrainer(ray.tune.Trainable):
             monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
         )
 
-        self.model = PPO(env=self.venv, **self.cfg["learner_kwargs"])
+        if initargs["config"]["initial_checkpoint"]:
+            self.model = self.load_checkpoint(initargs["config"]["initial_checkpoint"])
+        else:
+            self.model = self._model_init(venv=self.venv, **self.cfg["learner_kwargs"])
 
         assert self.rollouts_per_iteration % self.logs_per_iteration == 0
         self.log_interval = self.rollouts_per_iteration // self.logs_per_iteration
@@ -90,7 +93,7 @@ class PPOTrainer(ray.tune.Trainable):
     @debuglog
     def load_checkpoint(self, checkpoint_dir):
         f = os.path.join(checkpoint_dir, "model.zip")
-        self.model = PPO.load(f, env=self.venv, **self.cfg["learner_kwargs"])
+        self.model = self._model_load(f, venv=self.venv, **self.cfg["learner_kwargs"])
 
     @debuglog
     def step(self):
@@ -154,6 +157,12 @@ class PPOTrainer(ray.tune.Trainable):
             sync_tensorboard=False,
         )
         # print("[%s] DONE WITH INITWANDB" % time.time())
+
+    def _model_init(self, venv, **learner_kwargs):
+        return PPO(env=venv, **learner_kwargs)
+
+    def _model_load(self, f, venv, **learner_kwargs):
+        return PPO.load(f, env=venv, **learner_kwargs)
 
     def _get_leaf_hyperparam_keys(self, data):
         leaf_keys = []

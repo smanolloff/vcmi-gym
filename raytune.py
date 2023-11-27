@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 import copy
+import importlib
 
 # MUST come BEFORE importing ray
 os.environ["RAY_DEDUP_LOGS"] = "0"
@@ -22,8 +23,6 @@ os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 from ray import train, tune  # noqa: E402
 from ray.tune.schedulers.pb2 import PB2  # noqa: E402
 
-from config.raytune.ppo import config  # noqa: E402
-from vcmi_gym.tools.raytune.ppo_trainer import PPOTrainer  # noqa: E402
 from vcmi_gym.tools.raytune.tbx_dummy_callback import TBXDummyCallback  # noqa: E402
 
 
@@ -53,8 +52,14 @@ def main():
 
     alg = sys.argv[1]
 
-    if alg not in ["PPO"]:
-        raise Exception("Only PPO is supported for raytune currently")
+    if alg not in ["PPO", "RPPO"]:
+        raise Exception("Only PPO, RPPO is supported for raytune currently")
+
+    config_mod = importlib.import_module("config.raytune.%s" % alg.lower())
+    trainer_mod = importlib.import_module("vcmi_gym.tools.raytune.%s_trainer" % alg.lower())
+
+    config = config_mod.config
+    trainer_cls = getattr(trainer_mod, "%sTrainer" % alg)
 
     orig_config = copy.deepcopy(config)
 
@@ -65,7 +70,11 @@ def main():
 
     mapname = Path(config["param_space"]["env_kwargs"]["mapname"]).stem
     assert mapname.isalnum()
-    experiment_name = "%s-PPO-%s" % (mapname, datetime.now().strftime("%Y%m%d_%H%M%S"))
+    experiment_name = "%s-%s-%s" % (
+        mapname,
+        alg,
+        datetime.now().strftime("%Y%m%d_%H%M%S")
+    )
 
     results_dir = config["results_dir"]
     if not os.path.isabs(results_dir):
@@ -88,8 +97,10 @@ def main():
 
     checkpoint_config = train.CheckpointConfig(
         num_to_keep=10,
-        checkpoint_score_order="max",
-        checkpoint_score_attribute="rew_mean",
+        # XXX: can't use score as it may delete the *latest* checkpoint
+        #      and then fail when attempting to load it after perturb...
+        # checkpoint_score_order="max",
+        # checkpoint_score_attribute="rew_mean",
     )
 
     # https://docs.ray.io/en/latest/train/api/doc/ray.train.RunConfig.html#ray-train-runconfig
@@ -114,7 +125,7 @@ def main():
     trainer_initargs = {"config": orig_config, "experiment_name": experiment_name}
 
     tuner = tune.Tuner(
-        tune.with_parameters(PPOTrainer, initargs=trainer_initargs),
+        tune.with_parameters(trainer_cls, initargs=trainer_initargs),
         run_config=run_config,
         tune_config=tune_config,
         param_space=config["param_space"],

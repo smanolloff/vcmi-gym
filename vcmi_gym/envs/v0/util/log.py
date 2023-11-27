@@ -11,7 +11,9 @@ def get_logger(name, level):
     logger = logging.getLogger(name.split(".")[-1])
     logger.setLevel(getattr(logging, level))
 
-    fmt = "-- %(reltime)ss (%(process)d) [%(name)s] %(levelname)s: %(message)s"
+    # fmt = "-- %(reltime)ss (%(process)d) [%(name)s] %(levelname)s: %(message)s"
+    fmt = "-- %(asctime)s (%(process)d) [%(name)s] %(levelname)s: %(message)s"
+
     formatter = RelativeTimeFormatter(fmt)
 
     loghandler = logging.StreamHandler()

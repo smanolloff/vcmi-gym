@@ -184,6 +184,7 @@ class PyConnector():
             for attempt in range(retries):
                 try:
                     semaphore.acquire(timeout=0)
+                    self.logger.info("SEMAPHORE ACQUIRED")
                     self.proc.start()
                     self.cond.wait()
                     return True
@@ -191,6 +192,8 @@ class PyConnector():
                     time.sleep(retry_interval)
         finally:
             semaphore.release()
+            semaphore.close()
+            self.logger.info("SEMAPHORE RELEASED")
 
         return False
 

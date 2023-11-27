@@ -106,13 +106,29 @@ def run(action, cfg, extras={}, rest=[]):
         case "test":
             from .test import test
 
-            if len(rest) > 0:
-                env_kwargs["mapname"] = rest[0]
+            # Example:
+            # python vcmi-gym.py test test/M6
+            #
+            # will open file "test/M6". File structure:
+            # - comments: (anything starting with "#")
+            # - first non-comment line: MAP location
+            # - everything else: integer actions (as seen by BAI, ie. w/o offest)
+
+            actions = []
+            with open(os.path.join(rest[0]), "r") as f:
+                actions = f.read()
+
+            actions = [a.strip() for a in actions.split("\n") if a.strip()]
+            comments = [a for a in actions if a.startswith("#")]
+            actions = [a for a in actions if a not in comments]
+            env_kwargs["mapname"] = actions[0]
+            actions = [int(a) for a in actions[1:]]
 
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
 
-            test(env_kwargs)
+            test(env_kwargs, actions)
+            print("\nCommentary:\n%s" % "\n".join(comments))
 
         case _:
             print("Unknown action: %s" % action)
