@@ -156,7 +156,7 @@ class PPOTrainer(ray.tune.Trainable):
     #
 
     def _wandb_init(self, experiment_name, config):
-        wandb_init("PB2", self.trial_id, self.trial_name, experiment_name, config)
+        wandb_init(self.trial_id, self.trial_name, experiment_name, config)
 
     def _model_init(self, venv, **learner_kwargs):
         origin = int(self.trial_id.split("_")[1])
@@ -210,7 +210,8 @@ class PPOTrainer(ray.tune.Trainable):
 
     # Needed as Tune passes `float32` objects,
     # but SB3 expects regular `float` objects
-    # Also needed as for PBT where values can go out of bounds
+    # Also needed for PBT as values can go out of bounds:
+    # https://github.com/ray-project/ray/issues/5035
     def _fix_floats(self, cfg, hyperparam_bounds):
         for key, value in hyperparam_bounds.items():
             if isinstance(value, dict):

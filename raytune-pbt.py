@@ -45,7 +45,7 @@ def main():
 
     mapname = Path(config["all_params"]["env_kwargs"]["mapname"]).stem
     assert mapname.isalnum()
-    experiment_name = "%s-%s-%s" % (
+    experiment_name = "%s-PBT-%s-%s" % (
         mapname,
         alg,
         datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -105,11 +105,11 @@ def main():
         tune.with_parameters(trainer_cls, initargs=trainer_initargs),
         run_config=run_config,
         tune_config=tune_config,
-        param_space={"learner_kwargs": {
-            "learning_rate": 0.0001234,
-            "gamma": 0.9123,
-            "ent_coef": 0.09876,
-        }},
+        # param_space={"learner_kwargs": {
+        #     "learning_rate": 0.0001234,
+        #     "gamma": 0.9123,
+        #     "ent_coef": 0.09876,
+        # }},
     )
 
     tuner.fit()

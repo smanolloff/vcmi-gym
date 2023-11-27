@@ -36,6 +36,9 @@ config = {
             "learning_rate": tune.uniform(0.000001, 0.001),
             "gamma": tune.uniform(0.9, 0.9999),
             "ent_coef": tune.uniform(0.0, 0.01),
+            "env_kwargs": {
+              "consecutive_error_reward_factor": tune.uniform(-1, -20)
+            }
         },
     },
 
@@ -66,7 +69,7 @@ config = {
             "max_grad_norm": 0.5,
         },
         "env_kwargs": {
-            "mapname": "ai/M2.vmap",
+            "mapname": "ai/M6.vmap",
             "max_steps": 500,
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",

@@ -59,7 +59,7 @@ def main():
 
     mapname = Path(config["all_params"]["env_kwargs"]["mapname"]).stem
     assert mapname.isalnum()
-    experiment_name = "%s-%s-%s" % (
+    experiment_name = "%s-PB2-%s-%s" % (
         mapname,
         alg,
         datetime.now().strftime("%Y%m%d_%H%M%S")

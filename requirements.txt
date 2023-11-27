@@ -10,5 +10,3 @@ ray
 ray[train]
 GPy
 scikit-learn
-#posix_ipc
-bayesian-optimization
