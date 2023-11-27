@@ -21,7 +21,7 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #   (if perturbation_interval=1, choose rollouts_per_iteration > 100)
     #
-    "rollouts_per_iteration": 500,
+    "rollouts_per_iteration": 100,
 
     #
     # Number of logs per iteration
@@ -42,8 +42,9 @@ config = {
     # with a tune.uniform(min, max) automatically
     "hyperparam_bounds": {
         "learner_kwargs": {
-            "learning_rate": [0.00001, 0.001],
-            "ent_coef": [0.001, 0.003],
+            "learning_rate": [0.000001, 0.001],
+            "ent_coef": [0, 0.01],
+            "gamma": [0.9, 0.9999]
         },
     },
     "param_space": {

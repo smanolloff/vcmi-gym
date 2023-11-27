@@ -90,23 +90,14 @@ class PPOTrainer(ray.tune.Trainable):
     def save_checkpoint(self, checkpoint_dir):
         f = os.path.join(checkpoint_dir, "model.zip")
         self.model.save(f)
-        self.log("Saved %s" % f.split(self.experiment_name)[1])
+        # self.log("(save): self.experiment_name: '%s', f: '%s'" % (self.experiment_name, f))
+        # self.log("Saved %s" % f.split(self.experiment_name)[1])
         return checkpoint_dir
 
     @debuglog
     def load_checkpoint(self, checkpoint_dir):
         f = os.path.join(checkpoint_dir, "model.zip")
-
-        relpath = re.match(fr".+/{self.trial_name}/(.+)", f).group(1)
-        # => "6e59d_00004/checkpoint_000038/model.zip"
-
         self.model = self._model_load(f, venv=self.venv, **self.cfg["learner_kwargs"])
-        self.log("Loaded %s" % relpath)
-
-        origin = int(re.match(r".+?_(\d+)/.+", relpath).group(1))
-        # => int("00004") => 4
-
-        wandb.log({"trial/checkpoint_origin": origin}, commit=False)
 
     @debuglog
     def step(self):
@@ -172,9 +163,22 @@ class PPOTrainer(ray.tune.Trainable):
         # print("[%s] DONE WITH INITWANDB" % time.time())
 
     def _model_init(self, venv, **learner_kwargs):
+        origin = int(self.trial_id.split("_")[1])
+        # => int("00002") => 2
+
+        wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         return PPO(env=venv, **learner_kwargs)
 
     def _model_load(self, f, venv, **learner_kwargs):
+        # Checkpoint tracking: log the trial ID of the checkpoint we are restoring now
+        relpath = re.match(fr".+/{self.experiment_name}/(.+)", f).group(1)
+        # => "6e59d_00004/checkpoint_000038/model.zip"
+
+        origin = int(re.match(r".+?_(\d+)/.+", relpath).group(1))
+        # => int("00004") => 4
+
+        wandb.log({"trial/checkpoint_origin": origin}, commit=False)
+        self.log("Load %s (origin: %d)" % (relpath, origin))
         return PPO.load(f, env=venv, **learner_kwargs)
 
     def _get_leaf_hyperparam_keys(self, data):

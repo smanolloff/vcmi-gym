@@ -29,6 +29,10 @@
 				"vcmi_gym/envs/v0/vcmi/scripts",
 				"vcmi_gym/envs/v0/vcmi/rpm",
 				"vcmi_gym/envs/v0/vcmi/win",
+				"data/",
+
+				// NOTE: also hides config/wandb :( but I dont use it anyway
+				"wandb/",
 			],
 			"binary_file_patterns": [
 				"testing/maps/*.vmap",

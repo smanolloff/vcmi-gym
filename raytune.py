@@ -22,6 +22,7 @@ os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 
 from ray import train, tune  # noqa: E402
 from ray.tune.schedulers.pb2 import PB2  # noqa: E402
+from ray.tune.search.optuna import OptunaSearch
 
 from vcmi_gym.tools.raytune.tbx_dummy_callback import TBXDummyCallback  # noqa: E402
 
@@ -119,7 +120,8 @@ def main():
         trial_dirname_creator=lambda t: t.trial_id,
         scheduler=pb2,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
-        num_samples=config["population_size"]
+        num_samples=config["population_size"],
+        search_alg=OptunaSearch(),
     )
 
     trainer_initargs = {
