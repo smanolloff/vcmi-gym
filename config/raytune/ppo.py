@@ -43,17 +43,18 @@ config = {
     "hyperparam_bounds": {
         "learner_kwargs": {
             "learning_rate": [0.00001, 0.001],
-            "gamma": [0.995, 0.9995],
+            "gamma": [0.9, 0.999],
+            "ent_coef": [0, 0.005],
         },
     },
     "param_space": {
         "learner_kwargs": {
             "policy": "MlpPolicy",
-            "stats_window_size": 100,
+            "stats_window_size": 250,
             "learning_rate": 0.00001,
             "use_sde": False,
             "sde_sample_freq": -1,
-            "n_steps": 128,
+            "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
             "gamma": 0.999,
@@ -65,12 +66,12 @@ config = {
             "max_grad_norm": 0.5,
         },
         "env_kwargs": {
-            "mapname": "ai/M5.vmap",
+            "mapname": "ai/M2.vmap",
             "max_steps": 500,
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",
             "vcmienv_loglevel": "WARN",
-            "consecutive_error_reward_factor": -2,
+            "consecutive_error_reward_factor": -1,
             "sparse_info": True,
         }
     }
