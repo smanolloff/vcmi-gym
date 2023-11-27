@@ -7,8 +7,9 @@ import ray.tune
 import ray.train
 import wandb
 
-from .sb3_callback import SB3Callback
-from ... import InfoDict
+from ..sb3_callback import SB3Callback
+from ..wandb_init import wandb_init
+from .... import InfoDict
 
 DEBUG = False
 
@@ -24,6 +25,18 @@ def debuglog(func):
         return result
 
     return wrapper
+
+
+def deepmerge(a: dict, b: dict, path=[]):
+    for key in b:
+        if key in a:
+            if isinstance(a[key], dict) and isinstance(b[key], dict):
+                deepmerge(a[key], b[key], path + [str(key)])
+            elif a[key] != b[key]:
+                a[key] = b[key]
+        else:
+            raise Exception("Key not found: %s" % key)
+    return a
 
 
 # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.Trainable.html
@@ -57,6 +70,7 @@ class PPOTrainer(ray.tune.Trainable):
         self.logs_per_iteration = initargs["config"]["logs_per_iteration"]
         self.hyperparam_bounds = initargs["config"]["hyperparam_bounds"]
         self.experiment_name = initargs["experiment_name"]
+        self.all_params = copy.deepcopy(initargs["config"]["all_params"])
 
         self._wandb_init(self.experiment_name, initargs["config"])
 
@@ -81,6 +95,7 @@ class PPOTrainer(ray.tune.Trainable):
 
     @debuglog
     def reset_config(self, cfg):
+        cfg = deepmerge(copy.deepcopy(self.all_params), cfg)
         self.cfg = self._fix_floats(copy.deepcopy(cfg), self.hyperparam_bounds)
         steps_per_rollout = cfg["learner_kwargs"]["n_steps"]
         self.total_timesteps = steps_per_rollout * self.rollouts_per_iteration
@@ -141,26 +156,7 @@ class PPOTrainer(ray.tune.Trainable):
     #
 
     def _wandb_init(self, experiment_name, config):
-        # print("[%s] INITWANDB: PID: %s, trial_id: %s" % (time.time(), os.getpid(), trial_id))
-
-        # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/air/integrations/wandb.py#L601-L607
-        wandb.init(
-            id=self.trial_id,
-            name="PB2_%s" % self.trial_name.split("_")[-1],
-            resume="allow",
-            reinit=True,
-            allow_val_change=True,
-            # To disable System/ stats:
-            # settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
-            group=experiment_name,
-            project=config["wandb_project"],
-            config=config,
-            # NOTE: this takes a lot of time, better to have detailed graphs
-            #       tb-only (local) and log only most important info to wandb
-            # sync_tensorboard=True,
-            sync_tensorboard=False,
-        )
-        # print("[%s] DONE WITH INITWANDB" % time.time())
+        wandb_init("PB2", self.trial_id, self.trial_name, experiment_name, config)
 
     def _model_init(self, venv, **learner_kwargs):
         origin = int(self.trial_id.split("_")[1])
@@ -185,10 +181,10 @@ class PPOTrainer(ray.tune.Trainable):
         leaf_keys = []
 
         for key, value in data.items():
-            if isinstance(value, list):
-                leaf_keys.append(key)
-            else:
+            if isinstance(value, dict):
                 leaf_keys.extend(self._get_leaf_hyperparam_keys(value))
+            else:
+                leaf_keys.append(key)
 
         return leaf_keys
 
@@ -214,6 +210,7 @@ class PPOTrainer(ray.tune.Trainable):
 
     # Needed as Tune passes `float32` objects,
     # but SB3 expects regular `float` objects
+    # Also needed as for PBT where values can go out of bounds
     def _fix_floats(self, cfg, hyperparam_bounds):
         for key, value in hyperparam_bounds.items():
             if isinstance(value, dict):
@@ -224,4 +221,10 @@ class PPOTrainer(ray.tune.Trainable):
                     cfg[key] = int(cfg[key])
                 else:
                     cfg[key] = float(cfg[key])
+
+                # XXX: PBT only
+                if hasattr(value, "lower"):
+                    cfg[key] = min(cfg[key], value.upper)
+                    cfg[key] = max(cfg[key], value.lower)
+
         return cfg

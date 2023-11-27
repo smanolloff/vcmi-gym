@@ -4,8 +4,8 @@ run_id: ~
 model_load_file: ~
 out_dir_template: "data/PPO-{run_id}"
 log_tensorboard: true
-progress_bar: false
-total_timesteps: 10_000
+progress_bar: true
+total_timesteps: !!float 15e6
 n_checkpoints: 5
 n_envs: 1
 learner_kwargs:
@@ -17,11 +17,11 @@ learner_kwargs:
   batch_size: 64
   n_epochs: 10
 
-  gamma: 0.99
+  gamma: 0.901
   gae_lambda: 0.98
   clip_range: 0.2
   normalize_advantage: true
-  ent_coef: 0.0001
+  ent_coef: 0.002474
   vf_coef: 0.5
   max_grad_norm: 0.5
 
@@ -29,9 +29,10 @@ learner_kwargs:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.0001"
+learner_lr_schedule: "const_0.000515"
 
 env_kwargs:
   __include__: "config/env.yml"
-  consecutive_error_reward_factor: -2
+  mapname: "ai/M2.vmap"
+  consecutive_error_reward_factor: -1
 env_wrappers: []

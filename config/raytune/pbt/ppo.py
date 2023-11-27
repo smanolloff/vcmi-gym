@@ -1,3 +1,5 @@
+from ray import tune
+
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
     "wandb_project": "vcmi",
@@ -29,6 +31,14 @@ config = {
     #
     "logs_per_iteration": 10,
 
+    "hyperparam_mutations": {
+        "learner_kwargs": {
+            "learning_rate": tune.uniform(0.000001, 0.001),
+            "gamma": tune.uniform(0.9, 0.9999),
+            "ent_coef": tune.uniform(0.0, 0.01),
+        },
+    },
+
     # """
     # Parameters are transferred from the top quantile_fraction
     # fraction of trials to the bottom quantile_fraction fraction.
@@ -37,27 +47,17 @@ config = {
     # """
     "quantile_fraction": 0.25,
 
-    # NOTE:
-    # Each of those params will be set in param_space
-    # with a tune.uniform(min, max) automatically
-    "hyperparam_bounds": {
-        "learner_kwargs": {
-            "learning_rate": [0.000001, 0.001],
-            "ent_coef": [0, 0.01],
-            "gamma": [0.9, 0.9999]
-        },
-    },
-    "param_space": {
+    "all_params": {
         "learner_kwargs": {
             "policy": "MlpPolicy",
             "stats_window_size": 250,
-            "learning_rate": 0.00001,
+            "learning_rate": 0.0003,
             "use_sde": False,
             "sde_sample_freq": -1,
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.901,
+            "gamma": 0.99,
             "gae_lambda": 0.98,
             "clip_range": 0.4,
             "normalize_advantage": True,

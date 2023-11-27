@@ -246,6 +246,7 @@ def train_sb3(
 
     try:
         out_dir = common.out_dir_from_template(out_dir_template, seed, run_id, extras is not None)
+        learning_rate = common.lr_from_schedule(learner_lr_schedule)
 
         model = extras.get("model", init_model(
             venv=venv,

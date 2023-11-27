@@ -21,32 +21,11 @@ os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 # os.environ["TUNE_DISABLE_AUTO_CALLBACK_LOGGERS"] = "1"
 
 from ray import train, tune  # noqa: E402
-from ray.tune.schedulers.pb2 import PB2  # noqa: E402
-from ray.tune.search.bayesopt import BayesOptSearch
+from ray.tune.schedulers import PopulationBasedTraining  # noqa: E402
 
 from vcmi_gym.tools.raytune.tbx_dummy_callback import TBXDummyCallback  # noqa: E402
 
 
-def update_param_space(hyperparam_bounds, param_space):
-    for key, value in hyperparam_bounds.items():
-        if isinstance(value, dict):
-            for inner_key, inner_value in value.items():
-                if isinstance(inner_value, list):
-                    param_space[key][inner_key] = tune.uniform(inner_value[0], inner_value[1])
-                else:
-                    param_space[key][inner_key] = tune.uniform(inner_value, inner_value)
-        else:
-            if isinstance(value, list):
-                param_space[key] = tune.uniform(value[0], value[1])
-            else:
-                tune.uniform(value, value)
-    return param_space
-
-
-#
-# PB2 Example (from ray docs):
-# https://docs.ray.io/en/latest/tune/examples/includes/pb2_example.html#pb2-example
-#
 def main():
     if len(sys.argv) != 2:
         raise Exception("Expected alg name as the only argument, eg. PPO")
@@ -56,20 +35,15 @@ def main():
     if alg not in ["PPO", "RPPO"]:
         raise Exception("Only PPO, RPPO is supported for raytune currently")
 
-    config_mod = importlib.import_module("config.raytune.%s" % alg.lower())
-    trainer_mod = importlib.import_module("vcmi_gym.tools.raytune.%s_trainer" % alg.lower())
+    config_mod = importlib.import_module("config.raytune.pbt.%s" % alg.lower())
+    trainer_mod = importlib.import_module("vcmi_gym.tools.raytune.pbt.%s_trainer" % alg.lower())
 
     config = config_mod.config
     trainer_cls = getattr(trainer_mod, "%sTrainer" % alg)
 
     orig_config = copy.deepcopy(config)
 
-    # NOTE:
-    # Apparently, tune also needs those defined as ranges in param_space
-    # https://discuss.ray.io/t/pb2-seems-stuck-in-space-margins-and-raises-exceptions-with-lambdas/467/8
-    update_param_space(config["hyperparam_bounds"], config["param_space"])
-
-    mapname = Path(config["param_space"]["env_kwargs"]["mapname"]).stem
+    mapname = Path(config["all_params"]["env_kwargs"]["mapname"]).stem
     assert mapname.isalnum()
     experiment_name = "%s-%s-%s" % (
         mapname,
@@ -81,15 +55,13 @@ def main():
     if not os.path.isabs(results_dir):
         results_dir = os.path.join(os.getcwd(), results_dir)
 
-    # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.pb2.PB2.html#ray-tune-schedulers-pb2-pb2
-    pb2 = PB2(
-        # XXX: if synch=True, time_attr must NOT be the default "time_total_s"
-        # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/tune/schedulers/pb2.py#L316-L317
+    # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.PopulationBasedTraining.html
+    pbt = PopulationBasedTraining(
         time_attr="training_iteration",
         metric="rew_mean",
         mode="max",
         perturbation_interval=config["perturbation_interval"],
-        hyperparam_bounds=config["hyperparam_bounds"],
+        hyperparam_mutations=config["hyperparam_mutations"],
         quantile_fraction=config["quantile_fraction"],
         log_config=False,  # used for reconstructing the config schedule
         require_attrs=True,
@@ -115,28 +87,12 @@ def main():
         # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
     )
 
-    # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.search.bayesopt.BayesOptSearch.html#ray.tune.search.bayesopt.BayesOptSearch
-    search_alg = BayesOptSearch(
-        metric="rew_mean",
-        mode="max"
-        # verbose=0,
-
-        # TODO: what do they mean by "repeating the trial"?
-        # Terminate the trial after N repetitions
-        # patience=5
-
-        # TODO: Initial parameter suggestions to be run first.
-        # (some good parameters you want to run first)
-        # points_to_evaluate={}
-    )
-
     tune_config = tune.TuneConfig(
         trial_name_creator=lambda t: t.trial_id,
         trial_dirname_creator=lambda t: t.trial_id,
-        scheduler=pb2,
+        scheduler=pbt,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
         num_samples=config["population_size"],
-        search_alg=search_alg,
     )
 
     trainer_initargs = {
@@ -149,7 +105,11 @@ def main():
         tune.with_parameters(trainer_cls, initargs=trainer_initargs),
         run_config=run_config,
         tune_config=tune_config,
-        param_space=config["param_space"],
+        param_space={"learner_kwargs": {
+            "learning_rate": 0.0001234,
+            "gamma": 0.9123,
+            "ent_coef": 0.09876,
+        }},
     )
 
     tuner.fit()
