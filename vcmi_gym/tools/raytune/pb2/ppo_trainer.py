@@ -51,7 +51,7 @@ class PPOTrainer(ray.tune.Trainable):
         # cls.logfile.write("%s\n" % msg)
         # cls.logfile.flush()
         # print(msg)
-        print("[%s] %s" % (self.trial_name, msg))
+        print("[%s I=%d] %s" % (self.trial_name, self.iteration, msg))
 
     @staticmethod
     def default_resource_request(_config):
@@ -86,7 +86,11 @@ class PPOTrainer(ray.tune.Trainable):
         )
 
         if initargs["config"]["initial_checkpoint"]:
-            self.model = self.load_checkpoint(initargs["config"]["initial_checkpoint"])
+            self.model = self._model_init_load(
+                f=initargs["config"]["initial_checkpoint"],
+                venv=self.venv,
+                **self.cfg["learner_kwargs"]
+            )
         else:
             self.model = self._model_init(venv=self.venv, **self.cfg["learner_kwargs"])
 
@@ -112,7 +116,7 @@ class PPOTrainer(ray.tune.Trainable):
     @debuglog
     def load_checkpoint(self, checkpoint_dir):
         f = os.path.join(checkpoint_dir, "model.zip")
-        self.model = self._model_load(f, venv=self.venv, **self.cfg["learner_kwargs"])
+        self.model = self._model_checkpoint_load(f, venv=self.venv, **self.cfg["learner_kwargs"])
 
     @debuglog
     def step(self):
@@ -159,13 +163,23 @@ class PPOTrainer(ray.tune.Trainable):
         wandb_init(self.trial_id, self.trial_name, experiment_name, config)
 
     def _model_init(self, venv, **learner_kwargs):
+        # at init, we are the origin
         origin = int(self.trial_id.split("_")[1])
         # => int("00002") => 2
 
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         return PPO(env=venv, **learner_kwargs)
 
-    def _model_load(self, f, venv, **learner_kwargs):
+    def _model_init_load(self, f, venv, **learner_kwargs):
+        # at init, we are the origin
+        origin = int(self.trial_id.split("_")[1])
+        # => int("00002") => 2
+
+        wandb.log({"trial/checkpoint_origin": origin}, commit=False)
+        self.log("Load %s (initial)" % f)
+        return PPO.load(f, env=venv, **learner_kwargs)
+
+    def _model_checkpoint_load(self, f, venv, **learner_kwargs):
         # Checkpoint tracking: log the trial ID of the checkpoint we are restoring now
         relpath = re.match(fr".+/{self.experiment_name}/(.+)", f).group(1)
         # => "6e59d_00004/checkpoint_000038/model.zip"

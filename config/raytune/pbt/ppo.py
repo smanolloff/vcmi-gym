@@ -1,4 +1,5 @@
-from ray import tune
+from ray.tune.search.sample import Integer, Float
+
 
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
@@ -7,8 +8,8 @@ config = {
     "population_size": 6,
 
     # Initial checkpoint to start from
-    # "initial_checkpoint": "data/M4-PPO-20231125_020041/ad8ef_00002/checkpoint_000149/model.zip",
-    "initial_checkpoint": None,
+    # "initial_checkpoint": None,
+    "initial_checkpoint": "data/M6-PBT-PPO-20231128_000849/8c180_00004/checkpoint_000020/model.zip",
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -23,7 +24,7 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #   (if perturbation_interval=1, choose rollouts_per_iteration > 100)
     #
-    "rollouts_per_iteration": 100,
+    "rollouts_per_iteration": 1000,
 
     #
     # Number of logs per iteration
@@ -33,13 +34,12 @@ config = {
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            "learning_rate": tune.uniform(0.000001, 0.001),
-            "gamma": tune.uniform(0.9, 0.9999),
-            "ent_coef": tune.uniform(0.0, 0.01),
-            "env_kwargs": {
-              "consecutive_error_reward_factor": tune.uniform(-1, -20)
-            }
+            "learning_rate": Float(0.00001, 0.001),
+            "gamma": Float(0.8, 0.999),
         },
+        "env_kwargs": {
+          "consecutive_error_reward_factor": Integer(-1000, -1)
+        }
     },
 
     # """
@@ -53,24 +53,24 @@ config = {
     "all_params": {
         "learner_kwargs": {
             "policy": "MlpPolicy",
-            "stats_window_size": 250,
-            "learning_rate": 0.0003,
+            "stats_window_size": 100,
+            "learning_rate": 0.0007,
             "use_sde": False,
             "sde_sample_freq": -1,
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.99,
+            "gamma": 0.907,
             "gae_lambda": 0.98,
             "clip_range": 0.4,
             "normalize_advantage": True,
-            "ent_coef": 0.001,
+            "ent_coef": 0.007,
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
         },
         "env_kwargs": {
-            "mapname": "ai/M6.vmap",
-            "max_steps": 500,
+            "mapname": "ai/M7.vmap",
+            "max_steps": 5000,
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",
             "vcmienv_loglevel": "WARN",

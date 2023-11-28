@@ -26,6 +26,14 @@ from ray.tune.schedulers import PopulationBasedTraining  # noqa: E402
 from vcmi_gym.tools.raytune.tbx_dummy_callback import TBXDummyCallback  # noqa: E402
 
 
+def validate_hyperparams(params):
+    for k, v in params.items():
+        if isinstance(v, dict):
+            validate_hyperparams(v)
+        else:
+            assert v.lower < v.upper, "%s: v.lower => v.upper (%s >= %s)" % (k, v.lower, v.upper)
+
+
 def main():
     if len(sys.argv) != 2:
         raise Exception("Expected alg name as the only argument, eg. PPO")
@@ -55,6 +63,8 @@ def main():
     if not os.path.isabs(results_dir):
         results_dir = os.path.join(os.getcwd(), results_dir)
 
+    validate_hyperparams(config["hyperparam_mutations"])
+
     # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.PopulationBasedTraining.html
     pbt = PopulationBasedTraining(
         time_attr="training_iteration",
@@ -82,7 +92,7 @@ def main():
         verbose=False,
         failure_config=train.FailureConfig(fail_fast=True),
         checkpoint_config=checkpoint_config,
-        stop={"rew_mean": 2000},
+        stop={"rew_mean": 10_000},
         callbacks=[TBXDummyCallback()],
         # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
     )
