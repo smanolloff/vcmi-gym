@@ -133,7 +133,7 @@ class PPOTrainer(ray.tune.Trainable):
         self.model.learn(
             total_timesteps=self.total_timesteps,
             log_interval=self.log_interval,
-            reset_num_timesteps=False,
+            reset_num_timesteps=(self.iteration == 0),
             progress_bar=False,
             callback=self.sb3_callback
         )

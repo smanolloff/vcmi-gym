@@ -24,7 +24,7 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #   (if perturbation_interval=1, choose rollouts_per_iteration > 100)
     #
-    "rollouts_per_iteration": 1000,
+    "rollouts_per_iteration": 500,
 
     #
     # Number of logs per iteration
@@ -37,9 +37,6 @@ config = {
             "learning_rate": Float(0.00001, 0.001),
             "gamma": Float(0.8, 0.999),
         },
-        "env_kwargs": {
-          "consecutive_error_reward_factor": Integer(-1000, -1)
-        }
     },
 
     # """
@@ -69,8 +66,8 @@ config = {
             "max_grad_norm": 0.5,
         },
         "env_kwargs": {
-            "mapname": "ai/M7.vmap",
-            "max_steps": 5000,
+            "mapname": "ai/M8.vmap",
+            "max_steps": 1000,
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",
             "vcmienv_loglevel": "WARN",

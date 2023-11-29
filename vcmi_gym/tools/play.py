@@ -25,7 +25,7 @@ Actions:
         elif words[0] == "d" and len(words) == 1:
             return th.defend()
         elif len(words) == 2 \
-                and re.match(r"^([1-9]|(1[0-4]))$", words[0]) \
+                and re.match(r"^([1-9]|(1[0-5]))$", words[0]) \
                 and re.match(r"^([1-9]|(1[01]))$", words[1]):
             return th.move(int(words[0]), int(words[1]))
         elif len(words) == 3 and re.match(r"^[1-9]|(1[0-4])$", words[0]) and re.match(r"^[1-9]|(1[01])$", words[1]) and re.match(r"^[1-7]$", words[2]):
