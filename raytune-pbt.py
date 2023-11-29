@@ -34,6 +34,20 @@ def validate_hyperparams(params):
             assert v.lower < v.upper, "%s: v.lower => v.upper (%s >= %s)" % (k, v.lower, v.upper)
 
 
+# start with a=all_params, b=hyperparam_mutations
+def extract_initial_params(a: dict, b: dict, res={}):
+    for key in b:
+        if key in a:
+            if isinstance(a[key], dict) and isinstance(b[key], dict):
+                res[key] = {}
+                extract_initial_params(a[key], b[key], res[key])
+            else:
+                res[key] = a[key]
+        else:
+            raise Exception("Hyperparam %s not found in all_params" % key)
+    return res
+
+
 def main():
     if len(sys.argv) != 2:
         raise Exception("Expected alg name as the only argument, eg. PPO")
@@ -111,15 +125,15 @@ def main():
         "root_dir": os.getcwd(),
     }
 
+    initial_params = None
+    if config["use_initial_values"]:
+        print("initial values: %s" % extract_initial_params(config["all_params"], config["hyperparam_mutations"]))
+
     tuner = tune.Tuner(
         tune.with_parameters(trainer_cls, initargs=trainer_initargs),
         run_config=run_config,
         tune_config=tune_config,
-        # param_space={"learner_kwargs": {
-        #     "learning_rate": 0.0001234,
-        #     "gamma": 0.9123,
-        #     "ent_coef": 0.09876,
-        # }},
+        param_space=initial_params
     )
 
     tuner.fit()
