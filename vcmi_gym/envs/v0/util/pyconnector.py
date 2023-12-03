@@ -18,10 +18,10 @@ from . import log
 #       to obtain them without importing connector first
 #
 
-N_ACTIONS = 1323    # !!! SYNC with aitypes.h !!!
-STATE_SIZE = 306    # !!! SYNC with aitypes.h !!!
-ERRSIZE = 9         # !!! SYNC with aitypes.h !!!
-ERRNAMES = [        # !!! SYNC with aitypes.h !!!
+N_ACTIONS = 1323    # !!! SYNC with mmai_export.h !!!
+STATE_SIZE = 306    # !!! SYNC with mmai_export.h !!!
+ERRSIZE = 9         # !!! SYNC with mmai_export.h !!!
+ERRNAMES = [        # !!! SYNC with mmai_export.h !!!
     "ERR_ALREADY_WAITED",
     "ERR_MOVE_SELF",
     "ERR_HEX_UNREACHABLE",

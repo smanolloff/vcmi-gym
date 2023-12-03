@@ -1,0 +1,1 @@
+../../vcmi/pyclient/mmai_export.h

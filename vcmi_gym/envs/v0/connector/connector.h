@@ -1,17 +1,18 @@
 #pragma once
 
-#include <filesystem>
+#include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
-#include <pybind11/pybind11.h>
-#include <sstream>
+
+#include <filesystem>
 #include <condition_variable>
 #include <thread>
 #include <cstdio>
+#include <iostream>
 
 #define DLL_EXPORT __attribute__ ((visibility("default")))
-#include "aitypes.h" // "vendor" header file
+#include "mmai_export.h" // "vendor" header file
 
 #define VERBOSE false
 
@@ -24,9 +25,9 @@ using P_State = py::array_t<float>;
 
 struct P_Result {
   P_Result(
-    MMAIExport::ResultType type_,
+    MMAI::Export::ResultType type_,
     P_State state_,
-    MMAIExport::ErrMask errmask_,
+    MMAI::Export::ErrMask errmask_,
     int dmg_dealt_,
     int dmg_received_,
     int units_lost_,
@@ -50,9 +51,9 @@ struct P_Result {
     is_victorious(is_victorious_),
     ansiRender(ansiRender_) {}
 
-  const MMAIExport::ResultType type;
+  const MMAI::Export::ResultType type;
   const py::array_t<float> state;
-  const MMAIExport::ErrMask errmask;
+  const MMAI::Export::ErrMask errmask;
   const int dmg_dealt;
   const int dmg_received;
   const int units_lost;
@@ -64,7 +65,7 @@ struct P_Result {
   const std::string ansiRender;
 
   const py::array_t<float> &get_state() const { return state; }
-  const MMAIExport::ErrMask &get_errmask() const { return errmask; }
+  const MMAI::Export::ErrMask &get_errmask() const { return errmask; }
   const int &get_dmg_dealt() const { return dmg_dealt; }
   const int &get_dmg_received() const { return dmg_received; }
   const int &get_units_lost() const { return units_lost; }
@@ -93,14 +94,14 @@ class Connector {
   const std::string loglevelGlobal;
   const std::string loglevelAI;
   std::thread vcmithread;
-  MMAIExport::F_Sys f_sys;
-  std::unique_ptr<MMAIExport::CBProvider> cbprovider = std::make_unique<MMAIExport::CBProvider>(nullptr);
-  MMAIExport::Action action;
-  const MMAIExport::Result * result;
+  MMAI::Export::F_Sys f_sys;
+  std::unique_ptr<MMAI::Export::CBProvider> cbprovider = std::make_unique<MMAI::Export::CBProvider>(nullptr);
+  MMAI::Export::Action action;
+  const MMAI::Export::Result * result;
 
-  const P_Result convertResult(const MMAIExport::Result * r);
-  MMAIExport::Action getAction(const MMAIExport::Result * r);
-  const MMAIExport::Action getActionDummy(MMAIExport::Result);
+  const P_Result convertResult(const MMAI::Export::Result * r);
+  MMAI::Export::Action getAction(const MMAI::Export::Result * r);
+  const MMAI::Export::Action getActionDummy(MMAI::Export::Result);
 
 public:
   Connector(
@@ -111,6 +112,6 @@ public:
 
   const P_Result start();
   const P_Result reset();
-  const P_Result act(const MMAIExport::Action a);
+  const P_Result act(const MMAI::Export::Action a);
   const std::string renderAnsi();
 };
