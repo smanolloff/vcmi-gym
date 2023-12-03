@@ -24,9 +24,9 @@ using P_State = py::array_t<float>;
 
 struct P_Result {
   P_Result(
-    MMAI::ResultType type_,
+    MMAIExport::ResultType type_,
     P_State state_,
-    MMAI::ErrMask errmask_,
+    MMAIExport::ErrMask errmask_,
     int dmg_dealt_,
     int dmg_received_,
     int units_lost_,
@@ -50,9 +50,9 @@ struct P_Result {
     is_victorious(is_victorious_),
     ansiRender(ansiRender_) {}
 
-  const MMAI::ResultType type;
+  const MMAIExport::ResultType type;
   const py::array_t<float> state;
-  const MMAI::ErrMask errmask;
+  const MMAIExport::ErrMask errmask;
   const int dmg_dealt;
   const int dmg_received;
   const int units_lost;
@@ -64,7 +64,7 @@ struct P_Result {
   const std::string ansiRender;
 
   const py::array_t<float> &get_state() const { return state; }
-  const MMAI::ErrMask &get_errmask() const { return errmask; }
+  const MMAIExport::ErrMask &get_errmask() const { return errmask; }
   const int &get_dmg_dealt() const { return dmg_dealt; }
   const int &get_dmg_received() const { return dmg_received; }
   const int &get_units_lost() const { return units_lost; }
@@ -93,14 +93,14 @@ class Connector {
   const std::string loglevelGlobal;
   const std::string loglevelAI;
   std::thread vcmithread;
-  MMAI::F_Sys f_sys;
-  std::unique_ptr<MMAI::CBProvider> cbprovider = std::make_unique<MMAI::CBProvider>(nullptr);
-  MMAI::Action action;
-  MMAI::Result result;
+  MMAIExport::F_Sys f_sys;
+  std::unique_ptr<MMAIExport::CBProvider> cbprovider = std::make_unique<MMAIExport::CBProvider>(nullptr);
+  MMAIExport::Action action;
+  const MMAIExport::Result * result;
 
-  const P_Result convertResult(MMAI::Result);
-  MMAI::Action getAction(MMAI::Result);
-  const MMAI::Action getActionDummy(MMAI::Result);
+  const P_Result convertResult(const MMAIExport::Result * r);
+  MMAIExport::Action getAction(const MMAIExport::Result * r);
+  const MMAIExport::Action getActionDummy(MMAIExport::Result);
 
 public:
   Connector(
@@ -111,6 +111,6 @@ public:
 
   const P_Result start();
   const P_Result reset();
-  const P_Result act(const MMAI::Action a);
+  const P_Result act(const MMAIExport::Action a);
   const std::string renderAnsi();
 };

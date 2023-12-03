@@ -2,28 +2,30 @@ import gymnasium as gym
 import time
 
 
-def benchmark(steps):
+def benchmark(total_steps, actions):
     env = gym.make("local/VCMI-v0")
     env.reset()
     resets = 0
+    steps = 0
+    time_start = time.time()
+    iactions = iter(actions)
 
     try:
-        env.reset()
-        time_start = time.time()
-
-        action = 2 + 75*8 + 1
-        for i in range(steps):
+        while steps < total_steps:
+            action = next(iactions) - 1
             obs, rew, term, trunc, info = env.step(action)
-            action += 1
 
             if term:
-                action = 2 + 75*8 + 1
+                assert next(iactions, None) is None, "expected no more actions"
+                iactions = iter(actions)
                 env.reset()
                 resets += 1
 
-            if i % 1000 == 0:
-                percentage = (i / steps) * 100
+            if steps % 1000 == 0:
+                percentage = (steps / total_steps) * 100
                 print("\r%d%%..." % percentage, end="", flush=True)
+
+            steps += 1
 
         seconds = time.time() - time_start
         sps = steps / seconds

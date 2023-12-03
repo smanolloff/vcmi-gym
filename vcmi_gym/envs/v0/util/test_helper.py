@@ -19,9 +19,10 @@ class TestHelper:
 
     # x: 1..15
     # y: 1..11
-    def move(self, x, y, stack=0):
+    # stack=8 means MOVE ONLY
+    def move(self, x, y, stack=8):
         assert x >= 1 and x <= 15
         assert x >= 1 and y <= 11
 
-        a = 2 + ((y-1)*15 + x-1)*8 + stack
+        a = 2 + ((y-1)*15 + x-1)*8 + stack-1
         return self._maybe_render(a)

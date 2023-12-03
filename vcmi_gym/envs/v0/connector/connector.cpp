@@ -14,23 +14,23 @@ Connector::Connector(
     loglevelGlobal(loglevelGlobal_),
     loglevelAI(loglevelAI_)
 {
-    cbprovider->f_getAction = [this](MMAI::Result r) {
+    cbprovider->f_getAction = [this](const MMAIExport::Result * r) {
         return this->getAction(r);
     };
 }
 
-const P_Result Connector::convertResult(MMAI::Result r) {
+const P_Result Connector::convertResult(const MMAIExport::Result * r) {
     LOG("Convert Result -> P_Result");
 
-    auto ps = P_State(r.state.size());
+    auto ps = P_State(r->state.size());
     auto md = ps.mutable_data();
-    for (int i=0; i<r.state.size(); i++)
-        md[i] = r.state[i].norm;
+    for (int i=0; i<r->state.size(); i++)
+        md[i] = r->state[i].norm;
 
     return P_Result(
-        result.type, ps, result.errmask, result.dmgDealt, result.dmgReceived,
-        result.unitsLost, result.unitsKilled, result.valueLost,
-        result.valueKilled, result.ended, result.victory, result.ansiRender
+        r->type, ps, r->errmask, r->dmgDealt, r->dmgReceived,
+        r->unitsLost, r->unitsKilled, r->valueLost,
+        r->valueKilled, r->ended, r->victory, r->ansiRender
     );
 }
 
@@ -41,8 +41,8 @@ const P_Result Connector::reset() {
     std::unique_lock lock1(m1);
     LOG("obtain lock1: done");
 
-    LOGSTR("set this->action = ", std::to_string(MMAI::ACTION_RESET));
-    action = MMAI::ACTION_RESET;
+    LOGSTR("set this->action = ", std::to_string(MMAIExport::ACTION_RESET));
+    action = MMAIExport::ACTION_RESET;
 
     LOG("set state = AWAITING_RESULT");
     state = ConnectorState::AWAITING_RESULT;
@@ -67,7 +67,7 @@ const P_Result Connector::reset() {
     LOG("obtain lock2: done");
 
     assert(state == ConnectorState::AWAITING_ACTION);
-    assert(result.type == MMAI::ResultType::REGULAR);
+    assert(result->type == MMAIExport::ResultType::REGULAR);
 
     LOG("release lock1 (return)");
     LOG("release lock2 (return)");
@@ -82,8 +82,8 @@ const std::string Connector::renderAnsi() {
     std::unique_lock lock1(m1);
     LOG("obtain lock1: done");
 
-    LOGSTR("set this->action = ", std::to_string(MMAI::ACTION_RENDER_ANSI));
-    action = MMAI::ACTION_RENDER_ANSI;
+    LOGSTR("set this->action = ", std::to_string(MMAIExport::ACTION_RENDER_ANSI));
+    action = MMAIExport::ACTION_RENDER_ANSI;
 
     LOG("set state = AWAITING_RESULT");
     state = ConnectorState::AWAITING_RESULT;
@@ -108,15 +108,15 @@ const std::string Connector::renderAnsi() {
     LOG("obtain lock2: done");
 
     assert(state == ConnectorState::AWAITING_ACTION);
-    assert(result.type == MMAI::ResultType::ANSI_RENDER);
+    assert(result->type == MMAIExport::ResultType::ANSI_RENDER);
 
     LOG("release lock1 (return)");
     LOG("release lock2 (return)");
     LOG("return P_Result");
-    return result.ansiRender;
+    return result->ansiRender;
 }
 
-const P_Result Connector::act(MMAI::Action a) {
+const P_Result Connector::act(MMAIExport::Action a) {
     assert(state == ConnectorState::AWAITING_ACTION);
 
     // Prevent control actions via `step`
@@ -152,7 +152,7 @@ const P_Result Connector::act(MMAI::Action a) {
     LOG("obtain lock2: done");
 
     assert(state == ConnectorState::AWAITING_ACTION);
-    assert(result.type == MMAI::ResultType::REGULAR);
+    assert(result->type == MMAIExport::ResultType::REGULAR);
 
     LOG("release lock1 (return)");
     LOG("release lock2 (return)");
@@ -222,7 +222,7 @@ const P_Result Connector::start() {
     // std::filesystem::current_path(oldcwd);
 
     assert(state == ConnectorState::AWAITING_ACTION);
-    assert(result.type == MMAI::ResultType::REGULAR);
+    assert(result->type == MMAIExport::ResultType::REGULAR);
 
     LOG("release lock1 (return)");
     LOG("release lock2 (return)");
@@ -231,7 +231,7 @@ const P_Result Connector::start() {
     return convertResult(result);
 }
 
-MMAI::Action Connector::getAction(MMAI::Result r) {
+MMAIExport::Action Connector::getAction(const MMAIExport::Result * r) {
 
     LOG("acquire Python GIL");
     py::gil_scoped_acquire acquire;
@@ -280,12 +280,12 @@ MMAI::Action Connector::getAction(MMAI::Result r) {
     return action;
 }
 
-static const int get_state_size() { return MMAI::STATE_SIZE; }
-static const int get_n_actions() { return MMAI::N_ACTIONS; }
-static const std::map<MMAI::ErrMask, std::tuple<std::string, std::string>> get_error_mapping() {
-  std::map<MMAI::ErrMask, std::tuple<std::string, std::string>> res;
+static const int get_state_size() { return MMAIExport::STATE_SIZE; }
+static const int get_n_actions() { return MMAIExport::N_ACTIONS; }
+static const std::map<MMAIExport::ErrMask, std::tuple<std::string, std::string>> get_error_mapping() {
+  std::map<MMAIExport::ErrMask, std::tuple<std::string, std::string>> res;
 
-  for (auto& [_err, tuple] : MMAI::ERRORS) {
+  for (auto& [_err, tuple] : MMAIExport::ERRORS) {
     res[std::get<0>(tuple)] = {std::get<1>(tuple), std::get<2>(tuple)};
   }
 

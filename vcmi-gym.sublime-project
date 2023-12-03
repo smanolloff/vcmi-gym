@@ -36,6 +36,7 @@
 			],
 			"binary_file_patterns": [
 				"testing/maps/*.vmap",
+				"test.out",
 			]
 		}
 	]
