@@ -126,18 +126,45 @@ def _explore(
                 )
                 operations[key] = "resample"
             else:
-                # Otherwise, perturb by multiplying the hyperparameter by one
-                # of the `perturbation_factors`
-                perturbation_factor = random.choice(perturbation_factors)
-                new_config[key] = config[key] * perturbation_factor
-                operations[key] = f"* {perturbation_factor}"
+                if hasattr(distribution, "lower") and hasattr(distribution, "upper"):
+                    # SIMO: use only the second perturbation factor (1.2)
+                    # Then subtract 1 and multiply it by the span
+                    # Then add or subtract to the result, respecting bounds
+                    #
+                    # Example:
+                    # hyperparam = gamma=0.987 (0.98..0.99)
+                    # perturbation_factors = (0.8, 1.2)
+                    # span = 0.01
+                    # amount = 0.002
+                    # => new param = 0.985 or 0.989
+
+                    low, high = sorted([distribution.lower, distribution.upper])
+                    factor = max(perturbation_factors) - 1
+                    amount = (high - low) * factor
+
+                    if config[key] >= distribution.upper:
+                        new_config[key] = config[key] - amount
+                        operations[key] = f"- {amount}"
+                    elif config[key] <= distribution.lower or random.randint(0, 1):
+                        new_config[key] = max((config[key] + amount, high))
+                        operations[key] = f"+ {amount}"
+                    else:
+                        new_config[key] = min((config[key] - amount, low))
+                        operations[key] = f"- {amount}"
+                else:
+                    # Otherwise, perturb by multiplying the hyperparameter by one
+                    # of the `perturbation_factors`
+                    perturbation_factor = random.choice(perturbation_factors)
+                    new_config[key] = config[key] * perturbation_factor
+                    operations[key] = f"* {perturbation_factor}"
+
             if isinstance(config[key], int):
                 # If this hyperparameter started out as an integer (ex: `batch_size`),
                 # convert the new value back
                 new_config[key] = int(new_config[key])
         else:
             raise ValueError(
-                f"Unsupported hyperparameter distribution type: {type(distribution)}"
+                f"Unsupported hyperparameter distribution type: {type(distribution)}. Value: {distribution}"
             )
     if custom_explore_fn:
         # The user can perform any additional hyperparameter exploration
