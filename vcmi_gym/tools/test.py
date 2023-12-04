@@ -37,3 +37,5 @@ def test(env_kwargs, actions):
 
         if term:
             break
+
+    print(env.render())

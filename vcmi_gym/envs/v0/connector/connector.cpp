@@ -9,12 +9,12 @@ Connector::Connector(
     loglevelGlobal(loglevelGlobal_),
     loglevelAI(loglevelAI_)
 {
-    cbprovider->f_getAction = [this](const MMAI::Export::Result * r) {
+    cbprovider->f_getAction = [this](const MMAI::Export::Result* r) {
         return this->getAction(r);
     };
 }
 
-const P_Result Connector::convertResult(const MMAI::Export::Result * r) {
+const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
     LOG("Convert Result -> P_Result");
 
     auto ps = P_State(r->state.size());
@@ -23,9 +23,11 @@ const P_Result Connector::convertResult(const MMAI::Export::Result * r) {
         md[i] = r->state[i].norm;
 
     return P_Result(
-        r->type, ps, r->errmask, r->dmgDealt, r->dmgReceived,
-        r->unitsLost, r->unitsKilled, r->valueLost,
-        r->valueKilled, r->ended, r->victory, r->ansiRender
+         r->type, ps, r->errmask, r->actmask,
+         r->dmgDealt, r->dmgReceived,
+         r->unitsLost, r->unitsKilled,
+         r->valueLost, r->valueKilled,
+         r->ended, r->victory, r->ansiRender
     );
 }
 
@@ -167,8 +169,8 @@ const P_Result Connector::start() {
     //      If resdir points to build/ instead of rel/, the DEBUG build
     //      will be loaded! (~15% slower)
     //
-    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
-    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
+    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
+    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
 
     LOG("obtain lock1");
     std::unique_lock lock1(m1);
@@ -226,7 +228,7 @@ const P_Result Connector::start() {
     return convertResult(result);
 }
 
-MMAI::Export::Action Connector::getAction(const MMAI::Export::Result * r) {
+MMAI::Export::Action Connector::getAction(const MMAI::Export::Result* r) {
 
     LOG("acquire Python GIL");
     py::gil_scoped_acquire acquire;
@@ -275,23 +277,7 @@ MMAI::Export::Action Connector::getAction(const MMAI::Export::Result * r) {
     return action;
 }
 
-static const int get_state_size() { return MMAI::Export::STATE_SIZE; }
-static const int get_n_actions() { return MMAI::Export::N_ACTIONS; }
-static const std::map<MMAI::Export::ErrMask, std::tuple<std::string, std::string>> get_error_mapping() {
-  std::map<MMAI::Export::ErrMask, std::tuple<std::string, std::string>> res;
-
-  for (auto& [_err, tuple] : MMAI::Export::ERRORS) {
-    res[std::get<0>(tuple)] = {std::get<1>(tuple), std::get<2>(tuple)};
-  }
-
-  return res;
-}
-
 PYBIND11_MODULE(connector, m) {
-    m.def("get_state_size", &get_state_size, "Get number of elements in state");
-    m.def("get_n_actions", &get_n_actions, "Get max expected value of action");
-    m.def("get_error_mapping", &get_error_mapping, "Get available error names and flags");
-
     py::class_<P_Result>(m, "P_Result")
         .def("get_state", &P_Result::get_state)
         .def("get_errmask", &P_Result::get_errmask)

@@ -172,13 +172,3 @@ class Analyzer():
             hexnum = hexact // 8
             hexcoords = (hexnum % 15, hexnum // 15)
             return ActionType(3 + hexact % 8), hexcoords
-
-    def _update_metrics(self, analysis):
-        if analysis.n_errors:
-            assert analysis.net_value == 0
-            self.errcounters += analysis.errcounters
-            self.n_errors_consecutive += analysis.n_errors
-        else:
-            self.net_value += analysis.net_value
-            self.n_steps_successful += 1
-            self.n_errors_consecutive = 0

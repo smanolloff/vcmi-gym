@@ -3,35 +3,17 @@ import ctypes
 import numpy as np
 import os
 import signal
-# import time
-# NOTE: There *will* be orphaned system resources when using ray
-#       as it seems we can't perform proper cleaning up.
-#       After a ray PB2 run, this is one way to manually cleanup:
-#           ps aux | grep multiprocessing | awk '{print $2}' | xargs kill -15
-# import posix_ipc
 import atexit
 
 from . import log
 
-#
-# NOTE: those are hard-coded here as there is no way
-#       to obtain them without importing connector first
-#
+from ..connector.build import connexport
 
-N_ACTIONS = 1323    # !!! SYNC with mmai_export.h !!!
-STATE_SIZE = 306    # !!! SYNC with mmai_export.h !!!
-ERRSIZE = 9         # !!! SYNC with mmai_export.h !!!
-ERRNAMES = [        # !!! SYNC with mmai_export.h !!!
-    "ERR_ALREADY_WAITED",
-    "ERR_MOVE_SELF",
-    "ERR_HEX_UNREACHABLE",
-    "ERR_HEX_BLOCKED",
-    "ERR_STACK_NA",
-    "ERR_STACK_DEAD",
-    "ERR_STACK_INVALID",
-    "ERR_MOVE_SHOOT",
-    "ERR_ATTACK_IMPOSSIBLE",
-]
+N_ACTIONS = connexport.get_n_actions()
+STATE_SIZE = connexport.get_state_size()
+ERRMAP = connexport.get_error_mapping()
+ERRSIZE = len(ERRMAP)
+ERRNAMES = [errname for (errname, _) in ERRMAP.values()]
 
 PyAction = ctypes.c_int16
 PyState = ctypes.c_float * STATE_SIZE
@@ -88,8 +70,6 @@ class PyConnector():
         self.started = True
         self.logger = log.get_logger("PyConnector", self.loglevel)
 
-        self.v_statesize = multiprocessing.Value(ctypes.c_int)
-        self.v_nactions = multiprocessing.Value(ctypes.c_int)
         self.v_errflags = multiprocessing.Value(PyErrflags)
         self.v_action = multiprocessing.Value(PyAction)
         self.v_result_act = multiprocessing.Value(PyRawResult)
@@ -172,37 +152,6 @@ class PyConnector():
         self.cond.wait()
         return self.v_result_render_ansi.value.decode("utf-8")
 
-    # XXX: DISABLED as it does not work OK:
-    #      At some point simply ANYONE can acquire the semaphore at ANY TIME
-    #      Initially that's not the case, but after some ray tune runs it gets
-    #      screwed and semaphore.acquire() becomes a no-op...
-    #      Instead, with vcmi commit c2daffa43 I just removed writing to files
-    #
-    # def _try_start(self, retries, retry_interval):
-    #     semaphore = posix_ipc.Semaphore(
-    #         "vcmi-gym",
-    #         flags=posix_ipc.O_CREAT,
-    #         mode=0o600,
-    #         initial_value=1
-    #     )
-
-    #     try:
-    #         for attempt in range(retries):
-    #             try:
-    #                 semaphore.acquire(timeout=0)
-    #                 self.logger.warn("SEMAPHORE ACQUIRED")
-    #                 self.proc.start()
-    #                 self.cond.wait()
-    #                 return True
-    #             except posix_ipc.BusyError:
-    #                 time.sleep(retry_interval)
-    #     finally:
-    #         semaphore.release()
-    #         semaphore.close()
-    #         self.logger.warn("SEMAPHORE RELEASED")
-    #
-    #     return False
-
     def _try_start(self, _retries, _retry_interval):
         self.proc.start()
         self.cond.wait()
@@ -229,25 +178,6 @@ class PyConnector():
         self.logger.debug("VCMI args: %s" % str(args))
         # XXX: self.__connector is ONLY available in the sub-process!
         self.__connector = connector.Connector(*args)
-
-        self.v_statesize.value = connector.get_state_size()
-        self.v_nactions.value = connector.get_n_actions()
-        errmapping = connector.get_error_mapping()
-
-        # Sync sanity-check
-        assert self.v_statesize.value == STATE_SIZE
-        assert self.v_nactions.value == N_ACTIONS
-        assert len(errmapping) == ERRSIZE
-
-        errnames = []
-
-        for (i, (errflag, (errname, _))) in enumerate(errmapping.items()):
-            errnames.append(errname)
-            self.v_errflags[i] = ctypes.c_uint16(errflag)
-            i += 1
-
-        # Sync sanity-check
-        assert errnames == ERRNAMES
 
         self.cond.acquire()
         self.set_v_result_act(self.__connector.start())

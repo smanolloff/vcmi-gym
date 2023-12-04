@@ -28,6 +28,7 @@ struct P_Result {
     MMAI::Export::ResultType type_,
     P_State state_,
     MMAI::Export::ErrMask errmask_,
+    MMAI::Export::ActMask actmask_,
     int dmg_dealt_,
     int dmg_received_,
     int units_lost_,
@@ -40,6 +41,7 @@ struct P_Result {
   )
   : type(type_),
     errmask(errmask_),
+    actmask(actmask_),
     state(state_),
     dmg_dealt(dmg_dealt_),
     dmg_received(dmg_received_),
@@ -54,6 +56,7 @@ struct P_Result {
   const MMAI::Export::ResultType type;
   const py::array_t<float> state;
   const MMAI::Export::ErrMask errmask;
+  const MMAI::Export::ActMask actmask;
   const int dmg_dealt;
   const int dmg_received;
   const int units_lost;

@@ -117,10 +117,12 @@ class VcmiEnv(gym.Env):
         if self.render_mode == "ansi":
             return (
                 "%s\n"
+                "Step:      %-5s\n"
                 "Reward:    %-5s (total: %s)\n"
                 "Net value: %-5s (total: %s)"
             ) % (
                 self.connector.render_ansi(),
+                self.analyzer.actions_count,
                 self.reward,
                 self.reward_total,
                 self.net_value_last,
