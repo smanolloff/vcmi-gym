@@ -8,7 +8,7 @@ config = {
     "population_size": 6,
 
     # Initial checkpoint to start from
-    "initial_checkpoint": None,
+    "initial_checkpoint": "data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip",
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -35,6 +35,12 @@ config = {
         "learner_kwargs": {
             "learning_rate": Float(0.00001, 0.001),
             "gamma": Float(0.8, 0.999),
+            "batch_size": Integer(32, 256),
+            "n_epochs": Integer(4, 20),
+            "gae_lambda": Float(0.8, 1.0),
+            "clip_range": Float(0.1, 0.5),
+            "vf_coef": Float(0.1, 1.0),
+            "max_grad_norm": Float(0.5, 5)
         },
     },
 
