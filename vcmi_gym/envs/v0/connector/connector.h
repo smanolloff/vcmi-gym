@@ -22,99 +22,100 @@
 namespace py = pybind11;
 
 using P_State = py::array_t<float>;
+using P_ActMask = py::array_t<bool>;
 
 struct P_Result {
-  P_Result(
-    MMAI::Export::ResultType type_,
-    P_State state_,
-    MMAI::Export::ErrMask errmask_,
-    MMAI::Export::ActMask actmask_,
-    int dmg_dealt_,
-    int dmg_received_,
-    int units_lost_,
-    int units_killed_,
-    int value_lost_,
-    int value_killed_,
-    bool is_battle_over_,
-    bool is_victorious_,
-    std::string ansiRender_
-  )
-  : type(type_),
-    errmask(errmask_),
-    actmask(actmask_),
-    state(state_),
-    dmg_dealt(dmg_dealt_),
-    dmg_received(dmg_received_),
-    is_battle_over(is_battle_over_),
-    units_lost(units_lost_),
-    units_killed(units_killed_),
-    value_lost(value_lost_),
-    value_killed(value_killed_),
-    is_victorious(is_victorious_),
-    ansiRender(ansiRender_) {}
+    P_Result(
+        MMAI::Export::ResultType type_,
+        P_State state_,
+        P_ActMask actmask_,
+        MMAI::Export::ErrMask errmask_,
+        int dmg_dealt_,
+        int dmg_received_,
+        int units_lost_,
+        int units_killed_,
+        int value_lost_,
+        int value_killed_,
+        bool is_battle_over_,
+        bool is_victorious_,
+        std::string ansiRender_
+    )
+    : type(type_),
+        errmask(errmask_),
+        actmask(actmask_),
+        state(state_),
+        dmg_dealt(dmg_dealt_),
+        dmg_received(dmg_received_),
+        is_battle_over(is_battle_over_),
+        units_lost(units_lost_),
+        units_killed(units_killed_),
+        value_lost(value_lost_),
+        value_killed(value_killed_),
+        is_victorious(is_victorious_),
+        ansiRender(ansiRender_) {}
 
-  const MMAI::Export::ResultType type;
-  const py::array_t<float> state;
-  const MMAI::Export::ErrMask errmask;
-  const MMAI::Export::ActMask actmask;
-  const int dmg_dealt;
-  const int dmg_received;
-  const int units_lost;
-  const int units_killed;
-  const int value_lost;
-  const int value_killed;
-  const bool is_battle_over;
-  const bool is_victorious;
-  const std::string ansiRender;
-
-  const py::array_t<float> &get_state() const { return state; }
-  const MMAI::Export::ErrMask &get_errmask() const { return errmask; }
-  const int &get_dmg_dealt() const { return dmg_dealt; }
-  const int &get_dmg_received() const { return dmg_received; }
-  const int &get_units_lost() const { return units_lost; }
-  const int &get_units_killed() const { return units_killed; }
-  const int &get_value_lost() const { return value_lost; }
-  const int &get_value_killed() const { return value_killed; }
-  const bool &get_is_battle_over() const { return is_battle_over; }
-  const bool &get_is_victorious() const { return is_victorious; }
+    const MMAI::Export::ResultType type;
+    const py::array_t<float> state;
+    const py::array_t<bool> actmask;
+    const MMAI::Export::ErrMask errmask;
+    const int dmg_dealt;
+    const int dmg_received;
+    const int units_lost;
+    const int units_killed;
+    const int value_lost;
+    const int value_killed;
+    const bool is_battle_over;
+    const bool is_victorious;
+    const std::string ansiRender;
+    const py::array_t<float> &get_state() const { return state; }
+    const py::array_t<bool> &get_actmask() const { return actmask; }
+    const MMAI::Export::ErrMask &get_errmask() const { return errmask; }
+    const int &get_dmg_dealt() const { return dmg_dealt; }
+    const int &get_dmg_received() const { return dmg_received; }
+    const int &get_units_lost() const { return units_lost; }
+    const int &get_units_killed() const { return units_killed; }
+    const int &get_value_lost() const { return value_lost; }
+    const int &get_value_killed() const { return value_killed; }
+    const bool &get_is_battle_over() const { return is_battle_over; }
+    const bool &get_is_victorious() const { return is_victorious; }
 };
 
 enum ConnectorState {
-  NEW,
-  AWAITING_ACTION,
-  AWAITING_RESULT,
+    NEW,
+    AWAITING_ACTION,
+    AWAITING_RESULT,
 };
 
 class Connector {
-  std::mutex m1;
-  std::mutex m2;
-  std::condition_variable cond1;
-  std::condition_variable cond2;
+    std::mutex m1;
+    std::mutex m2;
+    std::condition_variable cond1;
+    std::condition_variable cond2;
 
-  ConnectorState state = ConnectorState::NEW;
+    ConnectorState state = ConnectorState::NEW;
 
-  const std::string mapname;
-  const std::string loglevelGlobal;
-  const std::string loglevelAI;
-  std::thread vcmithread;
-  MMAI::Export::F_Sys f_sys;
-  std::unique_ptr<MMAI::Export::CBProvider> cbprovider = std::make_unique<MMAI::Export::CBProvider>(nullptr);
-  MMAI::Export::Action action;
-  const MMAI::Export::Result * result;
+    const std::string mapname;
+    const std::string loglevelGlobal;
+    const std::string loglevelAI;
+    std::thread vcmithread;
+    MMAI::Export::F_Sys f_sys;
+    std::unique_ptr<MMAI::Export::CBProvider> cbprovider = std::make_unique<MMAI::Export::CBProvider>(nullptr);
+    MMAI::Export::Action action;
+    const MMAI::Export::Result * result;
 
-  const P_Result convertResult(const MMAI::Export::Result * r);
-  MMAI::Export::Action getAction(const MMAI::Export::Result * r);
-  const MMAI::Export::Action getActionDummy(MMAI::Export::Result);
+    const P_Result convertResult(const MMAI::Export::Result * r);
+    MMAI::Export::Action getAction(const MMAI::Export::Result * r);
+    const MMAI::Export::Action getActionDummy(MMAI::Export::Result);
 
 public:
-  Connector(
-    const std::string mapname,
-    const std::string loglevelGlobal,
-    const std::string loglevelAI
-  );
+    Connector(
+        const std::string mapname,
+        const std::string loglevelGlobal,
+        const std::string loglevelAI
+    );
 
-  const P_Result start();
-  const P_Result reset();
-  const P_Result act(const MMAI::Export::Action a);
-  const std::string renderAnsi();
+    const P_Result start();
+    const P_Result reset();
+    const P_Result act(const MMAI::Export::Action a);
+    const std::string renderAnsi();
 };

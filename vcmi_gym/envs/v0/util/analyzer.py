@@ -2,7 +2,7 @@ import collections
 import enum
 import numpy as np
 
-from .pyconnector import ERRNAMES, N_ACTIONS
+from .pyconnector import ERRNAMES, N_ACTIONS, ERRFLAGS
 
 # the numpy data type (pytorch works best with float32)
 DTYPE = np.float32
@@ -67,9 +67,7 @@ class Analyzer():
     # y-axis is diveded into 11 regions (bfield hex height)
     # The hexes will be colored according to their value at time T
 
-    def __init__(self, action_offset, errflags):
-        self.errflags = errflags
-
+    def __init__(self, action_offset):
         self.actions_count = 0
         self.actions_valid_count = 0
         self.actions_valid_consecutive = 0
@@ -141,9 +139,9 @@ class Analyzer():
 
     def _parse_errmask(self, errmask):
         n_errors = 0
-        errcounters = np.zeros(len(self.errflags), dtype=DTYPE)
+        errcounters = np.zeros(len(ERRFLAGS), dtype=DTYPE)
 
-        for i, flag in enumerate(self.errflags):
+        for i, flag in enumerate(ERRFLAGS):
             if errmask & flag:
                 errcounters[i] += 1
                 n_errors += 1

@@ -14,16 +14,17 @@ STATE_SIZE = connexport.get_state_size()
 ERRMAP = connexport.get_error_mapping()
 ERRSIZE = len(ERRMAP)
 ERRNAMES = [errname for (errname, _) in ERRMAP.values()]
+ERRFLAGS = list(ERRMAP.keys())
 
-PyAction = ctypes.c_int16
 PyState = ctypes.c_float * STATE_SIZE
-PyErrnames = ctypes.c_wchar * ERRSIZE
-PyErrflags = ctypes.c_uint16 * ERRSIZE
+PyAction = ctypes.c_int16
+PyActmask = ctypes.c_bool * N_ACTIONS
 
 
 class PyRawResult(ctypes.Structure):
     _fields_ = [
         ("state", PyState),
+        ("actmask", PyActmask),
         ("errmask", ctypes.c_ushort),
         ("dmg_dealt", ctypes.c_int),
         ("dmg_received", ctypes.c_int),
@@ -36,10 +37,11 @@ class PyRawResult(ctypes.Structure):
     ]
 
 
-# Same as PyResult, but converts state to a numpy array
+# Same as connector's P_Result, but with values converted to ctypes
 class PyResult():
     def __init__(self, cres):
         self.state = np.ctypeslib.as_array(cres.state)
+        self.actmask = np.ctypeslib.as_array(cres.actmask)
         self.errmask = cres.errmask
         self.dmg_dealt = cres.dmg_dealt
         self.dmg_received = cres.dmg_received
@@ -70,7 +72,6 @@ class PyConnector():
         self.started = True
         self.logger = log.get_logger("PyConnector", self.loglevel)
 
-        self.v_errflags = multiprocessing.Value(PyErrflags)
         self.v_action = multiprocessing.Value(PyAction)
         self.v_result_act = multiprocessing.Value(PyRawResult)
         self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 8192)
@@ -104,7 +105,7 @@ class PyConnector():
             if not self._try_start(1, 0):
                 raise Exception("Failed to acquire semaphore")
 
-        return PyResult(self.v_result_act), list(self.v_errflags)
+        return PyResult(self.v_result_act)
 
     def shutdown(self):
         with self.shutdown_lock:
@@ -193,6 +194,7 @@ class PyConnector():
 
     def set_v_result_act(self, result):
         self.v_result_act.state = np.ctypeslib.as_ctypes(result.get_state())
+        self.v_result_act.actmask = np.ctypeslib.as_ctypes(result.get_actmask())
         self.v_result_act.errmask = ctypes.c_ushort(result.get_errmask())
         self.v_result_act.dmg_dealt = ctypes.c_int(result.get_dmg_dealt())
         self.v_result_act.dmg_received = ctypes.c_int(result.get_dmg_received())

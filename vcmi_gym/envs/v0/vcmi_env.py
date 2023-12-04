@@ -62,7 +62,7 @@ class VcmiEnv(gym.Env):
         self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
         self.connector = PyConnector(vcmienv_loglevel)
 
-        (result, self.errflags) = self.connector.start(
+        result = self.connector.start(
             mapname,
             vcmi_loglevel_global,
             vcmi_loglevel_ai
@@ -141,6 +141,9 @@ class VcmiEnv(gym.Env):
             self.logger.removeHandler(handler)
             handler.close()
 
+    def action_masks(self):
+        return self.result.actmask[self.action_offset:]
+
     #
     # private
     #
@@ -165,7 +168,7 @@ class VcmiEnv(gym.Env):
 
         # Vars updated after other events
         self.n_renders_skipped = 0
-        self.analyzer = Analyzer(self.action_space.n, self.errflags)
+        self.analyzer = Analyzer(self.action_space.n)
 
     def _maybe_render(self, analysis):
         if self.render_each_step:
