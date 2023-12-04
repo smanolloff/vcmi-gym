@@ -14,21 +14,21 @@ ONE = DTYPE(1)
 
 class InfoDict(dict):
     SCALAR_VALUES = [
-        "errors",
+        # "errors",  # redundant for MPPO (no errors)
         "net_value",
         "is_success",
-        "valid_actions",
+        # "valid_actions",  # redundant for MPPO (=rollout/ep_len_mean)
     ]
 
     D1_ARRAY_VALUES = {
-        "error_counters": ERRNAMES,
+        # "error_counters": ERRNAMES,  # redundant for MPPO (no errors)
         "action_type_counters": [at.name for at in ActionType],
-        "action_type_valid_counters": [at.name for at in ActionType],
+        # "action_type_valid_counters": [at.name for at in ActionType],  # redundant for MPPO (no errors)
     }
 
     D2_ARRAY_VALUES = [
         "action_coords_counters",
-        "action_coords_valid_counters",
+        # "action_coords_valid_counters",  # redundant for MPPO (no errors)
     ]
 
     ALL_KEYS = SCALAR_VALUES + list(D1_ARRAY_VALUES.keys()) + D2_ARRAY_VALUES
@@ -203,16 +203,16 @@ class VcmiEnv(gym.Env):
 
         info = InfoDict()
 
-        info["errors"] = analysis.errors_count_ep
+        # info["errors"] = analysis.errors_count_ep  # redundant
         info["net_value"] = analysis.net_value_ep
         info["is_success"] = res.is_victorious
-        info["valid_actions"] = analysis.actions_valid_count_ep
+        # info["valid_actions"] = analysis.actions_valid_count_ep  # redundant
 
-        info["error_counters"] = analysis.error_counters_ep
+        # info["error_counters"] = analysis.error_counters_ep  # redundant
         info["action_type_counters"] = analysis.action_type_counters_ep
-        info["action_type_valid_counters"] = analysis.action_type_valid_counters_ep
+        # info["action_type_valid_counters"] = analysis.action_type_valid_counters_ep  # redundant
         info["action_coords_counters"] = analysis.action_coords_counters_ep
-        info["action_coords_valid_counters"] = analysis.action_coords_valid_counters_ep
+        # info["action_coords_valid_counters"] = analysis.action_coords_valid_counters_ep  # redundant
 
         # Return regular dict (wrappers insert arbitary keys)
         return dict(info)

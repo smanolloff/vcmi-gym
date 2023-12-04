@@ -35,7 +35,7 @@ config = {
         "learner_kwargs": {
             "learning_rate": Float(0.00001, 0.001),
             "gamma": Float(0.8, 0.999),
-            "batch_size": Integer(32, 256),
+            # "batch_size": Integer(32, 256),  # breaks loading from file
             "n_epochs": Integer(4, 20),
             "gae_lambda": Float(0.8, 1.0),
             "clip_range": Float(0.1, 0.5),
@@ -70,7 +70,7 @@ config = {
         },
         "env_kwargs": {
             "mapname": "ai/M8.vmap",
-            "max_steps": 1000,
+            "max_steps": 1000,  # not used with MPPO
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",
             "vcmienv_loglevel": "WARN",

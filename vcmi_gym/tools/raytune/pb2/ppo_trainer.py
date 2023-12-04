@@ -11,7 +11,7 @@ from ..sb3_callback import SB3Callback
 from ..wandb_init import wandb_init
 from .... import InfoDict
 
-DEBUG = True
+DEBUG = False
 
 
 def debuglog(func):

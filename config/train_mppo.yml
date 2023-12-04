@@ -1,7 +1,7 @@
 ---
 seed: ~
 run_id: ~
-model_load_file: ~
+model_load_file: "data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip"
 out_dir_template: "data/MPPO-{run_id}"
 log_tensorboard: true
 progress_bar: true
