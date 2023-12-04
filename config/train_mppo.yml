@@ -31,6 +31,6 @@ learner_lr_schedule: "const_0.000515"
 
 env_kwargs:
   __include__: "config/env.yml"
-  mapname: "ai/M2.vmap"
+  mapname: "ai/M8.vmap"
   consecutive_error_reward_factor: -1
 env_wrappers: []

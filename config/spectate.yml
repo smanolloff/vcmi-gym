@@ -14,6 +14,6 @@ env_kwargs:
   render_each_step: true
   consecutive_error_reward_factor: -1
   sparse_info: false
-  mapname: "ai/M2.vmap"
+  mapname: "ai/M8.vmap"
 
 env_wrappers: []

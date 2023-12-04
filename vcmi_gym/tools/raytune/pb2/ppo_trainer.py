@@ -177,7 +177,7 @@ class PPOTrainer(ray.tune.Trainable):
 
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         self.log("Load %s (initial)" % f)
-        return PPO.load(f, env=venv, **learner_kwargs)
+        return self._model_load(f, venv=venv, **learner_kwargs)
 
     def _model_checkpoint_load(self, f, venv, **learner_kwargs):
         # Checkpoint tracking: log the trial ID of the checkpoint we are restoring now
@@ -189,6 +189,9 @@ class PPOTrainer(ray.tune.Trainable):
 
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         self.log("Load %s (origin: %d)" % (relpath, origin))
+        return self._model_load(f, venv=venv, **learner_kwargs)
+
+    def _model_load(self, f, venv, **learner_kwargs):
         return PPO.load(f, env=venv, **learner_kwargs)
 
     def _get_leaf_hyperparam_keys(self, data):

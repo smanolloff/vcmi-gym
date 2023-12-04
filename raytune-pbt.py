@@ -40,8 +40,8 @@ def main():
 
     alg = sys.argv[1]
 
-    if alg not in ["PPO", "RPPO"]:
-        raise Exception("Only PPO, RPPO is supported for raytune currently")
+    if alg not in ["PPO", "RPPO", "MPPO"]:
+        raise Exception("Only PPO, RPPO, MPPO is supported for raytune currently")
 
     config_mod = importlib.import_module("config.raytune.pbt.%s" % alg.lower())
     trainer_mod = importlib.import_module("vcmi_gym.tools.raytune.pbt.%s_trainer" % alg.lower())
