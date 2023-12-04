@@ -142,14 +142,17 @@ def _explore(
                     factor = max(perturbation_factors) - 1
                     amount = (high - low) * factor
 
-                    if config[key] >= distribution.upper:
+                    if config[key] >= high:
                         new_config[key] = config[key] - amount
                         operations[key] = f"- {amount}"
-                    elif config[key] <= distribution.lower or random.randint(0, 1):
-                        new_config[key] = max((config[key] + amount, high))
+                    elif config[key] <= low:
+                        new_config[key] = config[key] + amount
+                        operations[key] = f"+ {amount}"
+                    elif random.randint(0, 1):
+                        new_config[key] = min(config[key] + amount, high)
                         operations[key] = f"+ {amount}"
                     else:
-                        new_config[key] = min((config[key] - amount, low))
+                        new_config[key] = max(config[key] - amount, low)
                         operations[key] = f"- {amount}"
                 else:
                     # Otherwise, perturb by multiplying the hyperparameter by one
