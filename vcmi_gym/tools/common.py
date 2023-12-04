@@ -162,7 +162,7 @@ def save_model(out_dir, model):
     model.save(model_file)
 
 
-def register_env(env_kwargs={}, env_wrappers=[], overwrite_env=False):
+def register_env(env_kwargs={}, env_wrappers=[]):
     def wrapped_env_creator(**kwargs):
         env = VcmiEnv(**kwargs)
 
@@ -174,9 +174,6 @@ def register_env(env_kwargs={}, env_wrappers=[], overwrite_env=False):
         return env
 
     envid = "local/VCMI-v0"
-
-    if overwrite_env and envid in gym.registry:
-        del gym.registry[envid]
 
     gym.envs.register(id=envid, entry_point=wrapped_env_creator, kwargs=env_kwargs)
 
@@ -193,10 +190,14 @@ def play_model(env, fps, model, obs):
     last_errors = 0
 
     while not terminated:
-        action, _states = model.predict(obs)
+        if model.__class__.__name__ == "MaskablePPO":
+            action, _states = model.predict(obs, action_masks=env.unwrapped.action_masks())
+        else:
+            action, _states = model.predict(obs)
+
         obs, reward, terminated, truncated, info = env.step(action)
 
-        if terminated:
+        if terminated or truncated:
             break
 
         if info["errors"] == last_errors:

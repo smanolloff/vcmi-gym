@@ -10,9 +10,7 @@ from . import common
 # $ defaults write org.python.python ApplePersistenceIgnoreState NO
 
 
-# "extras" is an arbitary dict object which is action-dependent
-# It is used when calling "run" from raytune, for example.
-def run(action, cfg, extras={}, rest=[]):
+def run(action, cfg, rest=[]):
     # print("**** ENV WANDB_RUN_ID: %s" % os.environ["WANDB_RUN_ID"])
     # import wandb
     # print("**** wandb.run.id: %s" % wandb.run.id)
@@ -22,10 +20,10 @@ def run(action, cfg, extras={}, rest=[]):
     env_kwargs = cfg.pop("env_kwargs", {})
 
     match action:
-        case "train_ppo" | "train_qrdqn":
+        case "train_ppo" | "train_qrdqn" | "train_mppo":
             from .train_sb3 import train_sb3
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
-            common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
+            common.register_env(expanded_env_kwargs, env_wrappers)
 
             learner_cls = action.split("_")[-1].upper()
             default_template = "data/%s-{run_id}" % learner_cls
@@ -49,7 +47,6 @@ def run(action, cfg, extras={}, rest=[]):
                     "total_timesteps": cfg.get("total_timesteps", 1000000),
                     "n_checkpoints": cfg.get("n_checkpoints", 5),
                     "n_envs": cfg.get("n_envs", 1),
-                    "extras": extras,
                     "learning_rate": cfg.get("learning_rate", None),
                     "learner_lr_schedule": cfg.get(
                         "learner_lr_schedule", "const_0.003"
@@ -73,7 +70,7 @@ def run(action, cfg, extras={}, rest=[]):
         case "spectate":
             from .spectate import spectate
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
-            common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
+            common.register_env(expanded_env_kwargs, env_wrappers)
 
             if len(rest) > 0:
                 cfg["model_file"] = rest[0]
@@ -102,7 +99,7 @@ def run(action, cfg, extras={}, rest=[]):
             actions = [int(a) for a in actions[1:]]
 
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
-            common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
+            common.register_env(expanded_env_kwargs, env_wrappers)
 
             steps = cfg.get("steps", 10000)
             benchmark(steps, actions)
@@ -139,7 +136,7 @@ def run(action, cfg, extras={}, rest=[]):
             actions = [int(a) for a in actions[1:]]
 
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
-            common.register_env(expanded_env_kwargs, env_wrappers, extras.get("overwrite_env", False))
+            common.register_env(expanded_env_kwargs, env_wrappers)
 
             test(env_kwargs, actions)
             print("\nCommentary:\n%s" % "\n".join(comments))
@@ -181,11 +178,6 @@ examples:
     print("Loading configuration from %s" % args.c.name)
     cfg = yaml.safe_load(args.c)
     args.c.close()
-
-    # TESTING WANDB
-    # import wandb
-    # wandb_run = wandb.init(project="vcmi")
-    # run(args.action, cfg, extras={"wandb_run": wandb_run})
 
     run(args.action, cfg, rest=args.rest)
 

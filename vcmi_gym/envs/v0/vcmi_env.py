@@ -111,6 +111,10 @@ class VcmiEnv(gym.Env):
         super().reset(seed=seed)
         self._reset_vars(res=None)
         self.result = self.connector.reset()
+
+        if self.render_each_step:
+            print(self.render())
+
         return self.result.state, {}
 
     def render(self):
@@ -173,11 +177,7 @@ class VcmiEnv(gym.Env):
     def _maybe_render(self, analysis):
         if self.render_each_step:
             if analysis.errors_count == 0:
-                print("%s\nTotal steps: %s" % (
-                    self.render(),
-                    self.analyzer.actions_count,
-                    # self.n_renders_skipped
-                ))
+                print(self.render())
                 self.n_renders_skipped = 0
             else:
                 self.n_renders_skipped += 1
