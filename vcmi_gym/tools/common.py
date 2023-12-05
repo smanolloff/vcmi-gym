@@ -200,9 +200,9 @@ def play_model(env, fps, model, obs):
         if terminated or truncated:
             break
 
-        if info["errors"] == last_errors:
+        if info.get("errors", 0) == last_errors:
             clock.tick()
 
-        last_errors = info["errors"]
+        last_errors = info.get("errors", 0)
 
     clock.tick()
