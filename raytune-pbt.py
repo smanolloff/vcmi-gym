@@ -92,7 +92,7 @@ def main():
         verbose=False,
         failure_config=train.FailureConfig(fail_fast=True),
         checkpoint_config=checkpoint_config,
-        stop={"rew_mean": 10_000},
+        stop={"rew_mean": config["target_ep_rew_mean"]},
         callbacks=[TBXDummyCallback()],
         # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
     )

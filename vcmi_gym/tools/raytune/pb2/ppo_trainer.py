@@ -219,7 +219,7 @@ class PPOTrainer(ray.tune.Trainable):
             if name == "clip_range":
                 # clip_range is stored as a constant_fn callable
                 params[f"config/{name}"] = self.model.clip_range(1)
-            if hasattr(self.model, name):
+            elif hasattr(self.model, name):
                 params[f"config/{name}"] = getattr(self.model, name)
             elif hasattr(env, name):
                 params[f"config/{name}"] = getattr(env, name)

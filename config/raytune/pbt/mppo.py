@@ -6,9 +6,10 @@ config = {
     "wandb_project": "vcmi",
     "results_dir": "data",
     "population_size": 6,
+    "target_ep_rew_mean": 80000,
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "data/M8-PBT-MPPO-20231206_113004/0afa4_00005/checkpoint_000041/model.zip",
+    "initial_checkpoint": "data/M7-PBT-MPPO-20231206_165025/cb106_00004/checkpoint_000005/model.zip",
     # "initial_checkpoint": None,
 
     # Perturb every N iterations
