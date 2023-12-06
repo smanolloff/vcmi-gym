@@ -14,6 +14,7 @@ def load_model(mod_name, cls_name, file):
 def spectate(
     fps,
     reset_delay,
+    mapname,
     model_file,
     model_mod,
     model_cls,
@@ -25,12 +26,12 @@ def spectate(
 
 Consider using the *REAL* spectator experience by running
 
-    vcmi_gym/envs/v0/vcmi/rel/bin/mytest {gym.spec(envid).kwargs["mapname"]} MMAI {model_file}
+    vcmi_gym/envs/v0/vcmi/rel/bin/mytest {mapname} MMAI {model_file}
 
 """)
     time.sleep(2)
 
-    env = gym.make(envid)
+    env = gym.make(envid, mapname=mapname)
     model = load_model(model_mod, model_cls, model_file)
 
     try:

@@ -73,11 +73,14 @@ def run(action, cfg, rest=[]):
             common.register_env(expanded_env_kwargs, env_wrappers)
 
             if len(rest) > 0:
-                cfg["model_file"] = rest[0]
+                cfg["mapname"] = rest[0]
+            if len(rest) > 1:
+                cfg["model_file"] = rest[1]
 
             spectate(
                 fps=cfg.get("fps", 2),
                 reset_delay=cfg.get("reset_delay", 5),
+                mapname=cfg["mapname"],
                 model_file=cfg["model_file"],
                 model_mod=cfg.get("model_mod", "stable_baselines3"),
                 model_cls=cfg.get("model_cls", "PPO"),
