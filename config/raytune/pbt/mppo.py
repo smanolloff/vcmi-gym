@@ -8,7 +8,8 @@ config = {
     "population_size": 6,
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip",
+    # "initial_checkpoint": "data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip",
+    "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,

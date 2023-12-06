@@ -18,8 +18,20 @@ def spectate(
     model_mod,
     model_cls,
 ):
+    envid = "local/VCMI-v0"
+
+    print(f"""
+*** NOTE ***
+
+Consider using the *REAL* spectator experience by running
+
+    vcmi_gym/envs/v0/vcmi/rel/bin/mytest {gym.spec(envid).kwargs["mapname"]} MMAI {model_file}
+
+""")
+    time.sleep(2)
+
+    env = gym.make(envid)
     model = load_model(model_mod, model_cls, model_file)
-    env = gym.make("local/VCMI-v0")
 
     try:
         while True:

@@ -75,7 +75,7 @@ class VcmiEnv(gym.Env):
         #       => just start from 0, reduce max by 1, and manually add +1
         self.action_offset = 1
         self.action_space = gym.spaces.Discrete(N_ACTIONS - self.action_offset)
-        self.observation_space = gym.spaces.Box(shape=(STATE_SIZE,), low=-1, high=1, dtype=DTYPE)
+        self.observation_space = gym.spaces.Box(shape=(STATE_SIZE,), low=0, high=1, dtype=DTYPE)
 
         # <params>
         self.render_mode = render_mode
