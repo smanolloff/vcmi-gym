@@ -8,8 +8,8 @@ config = {
     "population_size": 6,
 
     # Initial checkpoint to start from
-    # "initial_checkpoint": "data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip",
-    "initial_checkpoint": None,
+    "initial_checkpoint": "data/M8-PBT-MPPO-20231206_113004/0afa4_00005/checkpoint_000041/model.zip",
+    # "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -70,7 +70,7 @@ config = {
             "max_grad_norm": 0.5,
         },
         "env_kwargs": {
-            "mapname": "ai/M8.vmap",
+            "mapname": "ai/M7.vmap",
             "max_steps": 1000,  # not used with MPPO
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",
