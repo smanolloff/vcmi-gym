@@ -216,6 +216,9 @@ class PPOTrainer(ray.tune.Trainable):
         env = self.model.env.envs[0].unwrapped
 
         for name in self.leaf_keys:
+            if name == "clip_range":
+                # clip_range is stored as a constant_fn callable
+                params[f"config/{name}"] = self.model.clip_range(1)
             if hasattr(self.model, name):
                 params[f"config/{name}"] = getattr(self.model, name)
             elif hasattr(env, name):
