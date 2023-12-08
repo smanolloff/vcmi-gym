@@ -44,6 +44,7 @@ def run(action, cfg, rest=[]):
                     "progress_bar": cfg.get("progress_bar", True),
                     "reset_num_timesteps": cfg.get("reset_num_timesteps", False),
                     "learner_kwargs": cfg.get("learner_kwargs", {}),
+                    "vcmi_cnn_kwargs": cfg.get("vcmi_cnn_kwargs", None),
                     "total_timesteps": cfg.get("total_timesteps", 1000000),
                     "n_checkpoints": cfg.get("n_checkpoints", 5),
                     "n_envs": cfg.get("n_envs", 1),

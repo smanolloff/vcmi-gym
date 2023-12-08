@@ -3,7 +3,13 @@ import gymnasium as gym
 
 from .util import log
 from .util.analyzer import Analyzer, ActionType
-from .util.pyconnector import PyConnector, ERRNAMES, STATE_SIZE, N_ACTIONS
+from .util.pyconnector import (
+    PyConnector,
+    STATE_SIZE,
+    N_ACTIONS,
+    NV_MAX,
+    NV_MIN,
+)
 
 
 # the numpy data type (pytorch works best with float32)
@@ -14,24 +20,15 @@ ONE = DTYPE(1)
 
 class InfoDict(dict):
     SCALAR_VALUES = [
-        # "errors",  # redundant for MPPO (no errors)
         "net_value",
         "is_success",
-        # "valid_actions",  # redundant for MPPO (=rollout/ep_len_mean)
     ]
 
     D1_ARRAY_VALUES = {
-        # "error_counters": ERRNAMES,  # redundant for MPPO (no errors)
         "action_type_counters": [at.name for at in ActionType],
-        # "action_type_valid_counters": [at.name for at in ActionType],  # redundant for MPPO (no errors)
     }
 
-    D2_ARRAY_VALUES = [
-        "action_coords_counters",
-        # "action_coords_valid_counters",  # redundant for MPPO (no errors)
-    ]
-
-    ALL_KEYS = SCALAR_VALUES + list(D1_ARRAY_VALUES.keys()) + D2_ARRAY_VALUES
+    ALL_KEYS = SCALAR_VALUES + list(D1_ARRAY_VALUES.keys())
 
     def __setitem__(self, k, v):
         assert k in InfoDict.ALL_KEYS, f"Unknown info key: '{k}'"
@@ -53,7 +50,7 @@ class VcmiEnv(gym.Env):
         vcmi_loglevel_global="error",  # vcmi loglevel
         vcmi_loglevel_ai="error",  # vcmi loglevel
         vcmienv_loglevel="WARN",  # python loglevel
-        consecutive_error_reward_factor=-1,
+        consecutive_error_reward_factor=-1,  # unused
         sparse_info=False
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
@@ -75,14 +72,13 @@ class VcmiEnv(gym.Env):
         #       => just start from 0, reduce max by 1, and manually add +1
         self.action_offset = 1
         self.action_space = gym.spaces.Discrete(N_ACTIONS - self.action_offset)
-        self.observation_space = gym.spaces.Box(shape=(STATE_SIZE,), low=0, high=1, dtype=DTYPE)
+        self.observation_space = gym.spaces.Box(shape=(STATE_SIZE,), low=NV_MIN, high=NV_MAX, dtype=DTYPE)
 
         # <params>
         self.render_mode = render_mode
         self.sparse_info = sparse_info
         self.max_steps = max_steps
         self.render_each_step = render_each_step
-        self.consecutive_error_reward_factor = consecutive_error_reward_factor
         # </params>
 
         # required to init vars
@@ -96,7 +92,7 @@ class VcmiEnv(gym.Env):
 
         res = self.connector.act(action)
         analysis = self.analyzer.analyze(action, res)
-        rew = VcmiEnv.calc_reward(analysis, self.consecutive_error_reward_factor)
+        rew = VcmiEnv.calc_reward(analysis)
         obs = res.state
         term = res.is_battle_over
         trunc = self.analyzer.actions_count >= self.max_steps
@@ -159,7 +155,6 @@ class VcmiEnv(gym.Env):
         self.net_value_last = analysis.net_value
         self.terminated = term
         self.truncated = trunc
-        self.last_action_was_valid = (analysis.errors_count == 0)
 
     def _reset_vars(self, res=None):
         self.result = res
@@ -168,19 +163,13 @@ class VcmiEnv(gym.Env):
         self.net_value_last = 0
         self.terminated = False
         self.truncated = False
-        self.last_action_was_valid = True
 
         # Vars updated after other events
-        self.n_renders_skipped = 0
         self.analyzer = Analyzer(self.action_space.n)
 
     def _maybe_render(self, analysis):
         if self.render_each_step:
-            if analysis.errors_count == 0:
-                print(self.render())
-                self.n_renders_skipped = 0
-            else:
-                self.n_renders_skipped += 1
+            print(self.render())
 
     #
     # A note on the static methods
@@ -202,27 +191,13 @@ class VcmiEnv(gym.Env):
             return {}
 
         info = InfoDict()
-
-        # info["errors"] = analysis.errors_count_ep  # redundant
         info["net_value"] = analysis.net_value_ep
         info["is_success"] = res.is_victorious
-        # info["valid_actions"] = analysis.actions_valid_count_ep  # redundant
-
-        # info["error_counters"] = analysis.error_counters_ep  # redundant
         info["action_type_counters"] = analysis.action_type_counters_ep
-        # info["action_type_valid_counters"] = analysis.action_type_valid_counters_ep  # redundant
-        info["action_coords_counters"] = analysis.action_coords_counters_ep
-        # info["action_coords_valid_counters"] = analysis.action_coords_valid_counters_ep  # redundant
 
         # Return regular dict (wrappers insert arbitary keys)
         return dict(info)
 
     @staticmethod
-    def calc_reward(analysis, consecutive_error_reward_factor):
-        # Penalize with ever-increasing amounts to prevent
-        # it from just making errors forever
-        if analysis.errors_count > 0:
-            return analysis.errors_consecutive_count * consecutive_error_reward_factor
-
-        # XXX: pikemen value=80, life=10
+    def calc_reward(analysis):
         return analysis.net_value + 5 * analysis.net_dmg

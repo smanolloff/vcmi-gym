@@ -8,7 +8,7 @@ import sb3_contrib
 import math
 
 from . import common
-from .. import InfoDict
+from .. import InfoDict, VcmiCNN
 
 
 class LogCallback(BaseCallback):
@@ -41,6 +41,7 @@ def init_model(
     learner_cls,
     learner_kwargs,
     learning_rate,
+    vcmi_cnn_kwargs,
     log_tensorboard,
     out_dir,
 ):
@@ -63,6 +64,14 @@ def init_model(
         model = alg.load(model_load_file, env=venv)
     else:
         kwargs = dict(learner_kwargs, learning_rate=learning_rate, seed=seed)
+
+        if vcmi_cnn_kwargs:
+            kwargs["policy"] = "CnnPolicy"
+            kwargs["policy_kwargs"] = dict(
+                features_extractor_class=VcmiCNN,
+                features_extractor_kwargs=vcmi_cnn_kwargs,
+            )
+
         # print("------------------ 2: %s" % kwargs)
         model = alg(env=venv, **kwargs)
 
@@ -149,6 +158,7 @@ def train_sb3(
     learner_kwargs,
     learning_rate,
     learner_lr_schedule,
+    vcmi_cnn_kwargs,
     total_timesteps,
     n_checkpoints,
     n_envs,
@@ -171,6 +181,7 @@ def train_sb3(
             learner_cls=learner_cls,
             learner_kwargs=learner_kwargs,
             learning_rate=learning_rate,
+            vcmi_cnn_kwargs=vcmi_cnn_kwargs,
             log_tensorboard=log_tensorboard,
             out_dir=out_dir,
         )

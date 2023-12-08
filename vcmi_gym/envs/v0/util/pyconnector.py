@@ -9,12 +9,24 @@ from . import log
 
 from ..connector.build import connexport
 
+N_NONHEX_ACTIONS = connexport.get_n_nonhex_actions()
+N_HEX_ACTIONS = connexport.get_n_hex_actions()
 N_ACTIONS = connexport.get_n_actions()
+
 STATE_SIZE = connexport.get_state_size()
+N_STACK_ATTRS = connexport.get_n_stack_attrs()
+N_HEX_ATTRS = connexport.get_n_hex_attrs()
+
+NV_MIN = connexport.get_nv_min()
+NV_MAX = connexport.get_nv_max()
+
+
 ERRMAP = connexport.get_error_mapping()
 ERRSIZE = len(ERRMAP)
 ERRNAMES = [errname for (errname, _) in ERRMAP.values()]
 ERRFLAGS = list(ERRMAP.keys())
+
+
 
 PyState = ctypes.c_float * STATE_SIZE
 PyAction = ctypes.c_int16

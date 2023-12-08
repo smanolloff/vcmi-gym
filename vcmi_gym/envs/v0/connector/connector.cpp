@@ -174,8 +174,8 @@ const P_Result Connector::start() {
     //      If resdir points to build/ instead of rel/, the DEBUG build
     //      will be loaded! (~15% slower)
     //
-    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
-    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
+    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
+    //std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
 
     LOG("obtain lock1");
     std::unique_lock lock1(m1);

@@ -8,6 +8,11 @@ progress_bar: true
 total_timesteps: !!float 1e6
 n_checkpoints: 5
 n_envs: 1
+
+# vcmi_cnn_kwargs: ~  # use "~" for generic MlpPolicy
+vcmi_cnn_kwargs:
+  features_dim: 128  # TODO: experiment with 16, 512, etc.
+
 learner_kwargs:
   policy: "MlpPolicy"
 
