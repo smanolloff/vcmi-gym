@@ -2,7 +2,6 @@ from .pyconnector import (
     N_NONHEX_ACTIONS,
     N_HEX_ACTIONS,
     N_HEX_ATTRS,
-    N_STACK_ATTRS
 )
 
 
@@ -56,16 +55,17 @@ class TestHelper:
         # XXX: using slot to ensure 2-hex stacks are present with their "latest" hex
         stacks = {}  # {slot => (i, queuepos)}
 
-        for i in range(165):
-            # i_qty = state index of the Qty stack attribute at i-th hex
-            i0 = i*N_HEX_ATTRS + (N_HEX_ATTRS - N_STACK_ATTRS)
-            is_enemy = self.obs[i0+11]
+        for y in range(11):
+            for x in range(15):
+                i = x * N_HEX_ATTRS
+                hex = self.obs[0][y][i:i+N_HEX_ATTRS]
+                is_enemy = hex[12]
 
-            if is_enemy > 0 and is_enemy < 1:
-                slot = self.obs[i0+12]
-                queue = self.obs[i0+10]
-                stacks[slot] = (i, queue)
+                if is_enemy > 0 and is_enemy < 1:
+                    slot = hex[13]
+                    queue = hex[11]
+                    stacks[slot] = ((x, y), queue)
 
         # Find the "i" of the stack with the lowest QueuePos
-        _, (mi, _) = min(stacks.items(), key=lambda x: x[1][1])
-        return self.move(1 + mi % 15, 1 + mi // 15)
+        _, ((x, y), _) = min(stacks.items(), key=lambda x: x[1][1])
+        return self.move(x+1, y+1)

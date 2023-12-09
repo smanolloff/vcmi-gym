@@ -47,12 +47,14 @@ class VcmiCNN(BaseFeaturesExtractor):
         n = observation_space.shape[2] // 15
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=(1, n), stride=(1, n), padding=0),
+            nn.Conv2d(in_channels, 8, kernel_size=(1, n), stride=(1, n), padding=0),
             nn.ReLU(),
-            # => (32, 11, 15)
+            # => (64, 11, 15)
 
-            nn.Conv2d(32, 64, kernel_size=1, stride=1, padding=1),
-            nn.ReLU(),
+
+            # XXX: is kernel_size=1 is redundant for CNN?
+            # nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=0),
+            # nn.ReLU(),
             # => (64, 11, 15)
 
             # nn.Conv2d(64, 64, kernel_size=5, stride=2, padding=0),

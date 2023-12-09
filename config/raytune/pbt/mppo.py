@@ -9,8 +9,8 @@ config = {
     "target_ep_rew_mean": 150000,
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "data/M7-PBT-MPPO-20231206_180127/b7d87_00000/checkpoint_000023/model.zip",
-    # "initial_checkpoint": None,
+    # "initial_checkpoint": "data/M7-PBT-MPPO-20231206_180127/b7d87_00000/checkpoint_000023/model.zip",
+    "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
