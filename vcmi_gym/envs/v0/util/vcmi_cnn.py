@@ -8,7 +8,7 @@ class VcmiCNN(BaseFeaturesExtractor):
     # x1 = hex 1
     # n = hexstate + n-1 stack attributes
 
-    # Observation (11, 15, n):
+    # Observation is a 2D array of shape (11, 15*n):
     # [
     #   [x1_1,   ...   x1_n, | x2_1,   ...   x2_n, | ... | x15_1,  ...  x15_n],
     #   [x16_1,  ...  x16_n, | x17_1,  ...  x17_n, | ... | x30_1,  ...  x30_n],
@@ -24,17 +24,11 @@ class VcmiCNN(BaseFeaturesExtractor):
     #   x x x ... x
     #  ...
     #
-    # We can only represent a grid where each hex is n consecutive elements:
+    # Essentially a grid where each hex is n consecutive elements:
     #  __hex__  __hex__  __hex__     __hex__
     #  x x...x  x x...x  x x...x ... x x...x
     #  ...
     #
-    # We flatten it to a (11, 15*n) (the size of 1hex is (1,n) aka. (n,))
-    # The kernel is (3, 3*n) (ie. 3x3 hexes).
-    # The stride is (1, n) (ie. 1 hex)
-    # The padding is (1, n) (ie. 1 hex each side).
-    #   NOTE: padding_mode=zeros assumes a "0" hexstate is an INVALID hex!
-
     def __init__(
         self,
         observation_space: gym.Space,
@@ -43,20 +37,30 @@ class VcmiCNN(BaseFeaturesExtractor):
         assert isinstance(observation_space, gym.spaces.Box)
         super().__init__(observation_space, features_dim)
 
-        assert len(observation_space.shape) == 2, "unexpected shape"
-        assert observation_space.shape[0] == 11, "unexpected height"
-        assert observation_space.shape[1] % 15 == 0, "unexpected width"
+        # It does not work if we don't have an explicit "channel" dim in obs
+        assert len(observation_space.shape) == 3, "unexpected shape"
+        assert observation_space.shape[0] == 1, "expected channels=1"
+        assert observation_space.shape[1] == 11, "expected height=11"
+        assert observation_space.shape[2] % 15 == 0, "expected width divisible by 15"
 
-        n = observation_space.shape[1] // 15
+        in_channels = observation_space.shape[0]
+        n = observation_space.shape[2] // 15
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=(1, n), stride=(1, n), padding=0),
+            nn.Conv2d(in_channels, 32, kernel_size=(1, n), stride=(1, n), padding=0),
             nn.ReLU(),
-            # => (11, 15) matrix
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            # => (32, 11, 15)
+
+            nn.Conv2d(32, 64, kernel_size=1, stride=1, padding=1),
             nn.ReLU(),
-            # => (11, 15) matrix
+            # => (64, 11, 15)
+
+            # nn.Conv2d(64, 64, kernel_size=5, stride=2, padding=0),
+            # nn.ReLU(),
+            # => (64, 6, 4)
+
             nn.Flatten(),
+            # => (64, 165)
         )
 
         # Compute shape by doing one forward pass

@@ -5,7 +5,9 @@ from .util import log
 from .util.analyzer import Analyzer, ActionType
 from .util.pyconnector import (
     PyConnector,
-    STATE_SIZE,
+    STATE_SIZE_X,
+    STATE_SIZE_Y,
+    STATE_SIZE_Z,
     N_ACTIONS,
     NV_MAX,
     NV_MIN,
@@ -72,7 +74,12 @@ class VcmiEnv(gym.Env):
         #       => just start from 0, reduce max by 1, and manually add +1
         self.action_offset = 1
         self.action_space = gym.spaces.Discrete(N_ACTIONS - self.action_offset)
-        self.observation_space = gym.spaces.Box(shape=(STATE_SIZE,), low=NV_MIN, high=NV_MAX, dtype=DTYPE)
+        self.observation_space = gym.spaces.Box(
+            shape=(STATE_SIZE_Z, STATE_SIZE_Y, STATE_SIZE_X),
+            low=NV_MIN,
+            high=NV_MAX,
+            dtype=DTYPE
+        )
 
         # <params>
         self.render_mode = render_mode

@@ -10,12 +10,13 @@ n_checkpoints: 5
 n_envs: 1
 
 # vcmi_cnn_kwargs: ~  # use "~" for generic MlpPolicy
-vcmi_cnn_kwargs:
-  # TODO: experiment a lot with those. Try 16, 512, etc.
-  features_dim: 128
+# vcmi_cnn_kwargs:
+#   # TODO: experiment a lot with those. Try 16, 512, etc.
+#   features_dim: 128
 
 learner_kwargs:
-  policy: "MlpPolicy"  # XXX: replaced by CnnPolicy if vcmi_cnn_kwargs is present
+  # XXX: replaced by CnnPolicy if vcmi_cnn_kwargs is present
+  policy: "MlpPolicy"
   use_sde: false
   sde_sample_freq: -1
 
