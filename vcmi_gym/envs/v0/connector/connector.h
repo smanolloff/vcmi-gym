@@ -30,7 +30,7 @@ class Connector {
 
     std::thread vcmithread;
     MMAI::Export::F_Sys f_sys;
-    std::unique_ptr<MMAI::Export::CBProvider> cbprovider = std::make_unique<MMAI::Export::CBProvider>(nullptr);
+    std::unique_ptr<MMAI::Export::Baggage> baggage;
     MMAI::Export::Action action;
     const MMAI::Export::Result * result;
 
@@ -38,6 +38,7 @@ class Connector {
     MMAI::Export::Action getAction(const MMAI::Export::Result * r);
     const MMAI::Export::Action getActionDummy(MMAI::Export::Result);
 
+    MMAI::Export::Baggage initBaggage();
 public:
     Connector(
         const std::string mapname,
@@ -54,5 +55,5 @@ public:
 
     // Called when VcmiGym is started from within VCMI itself
     // (ie. VCMI is started normally, and vcmi-gym is started as its AI)
-    const MMAI::Export::CBProvider* getCBProvider();
+    const MMAI::Export::Baggage* getCBProvider();
 };

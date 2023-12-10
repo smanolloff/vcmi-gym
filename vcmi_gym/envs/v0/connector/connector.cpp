@@ -11,11 +11,13 @@ Connector::Connector(
     loglevelGlobal(loglevelGlobal_),
     loglevelAI(loglevelAI_),
     enemyAImodel(enemyAImodel_),
-    enemyAItype(enemyAItype_)
-{
-    cbprovider->f_getAction = [this](const MMAI::Export::Result* r) {
+    enemyAItype(enemyAItype_),
+    baggage(std::make_unique<MMAI::Export::Baggage>(initBaggage())) {}
+
+MMAI::Export::Baggage Connector::initBaggage() {
+    return MMAI::Export::Baggage([this](const MMAI::Export::Result* r) {
         return this->getAction(r);
-    };
+    });
 }
 
 const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
@@ -195,7 +197,7 @@ const P_Result Connector::start() {
         loglevelAI,
         enemyAImodel,
         enemyAItype,
-        cbprovider.get()
+        baggage.get()
     );
 
     LOG("set state = AWAITING_RESULT");
