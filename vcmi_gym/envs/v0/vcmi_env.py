@@ -53,6 +53,8 @@ class VcmiEnv(gym.Env):
         vcmi_loglevel_ai="error",  # vcmi loglevel
         vcmienv_loglevel="WARN",  # python loglevel
         consecutive_error_reward_factor=-1,  # unused
+        enemy_ai_model=None,
+        enemy_ai_type=None,  # "MPPO"
         sparse_info=False
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
@@ -64,7 +66,9 @@ class VcmiEnv(gym.Env):
         result = self.connector.start(
             mapname,
             vcmi_loglevel_global,
-            vcmi_loglevel_ai
+            vcmi_loglevel_ai,
+            enemy_ai_model or "",
+            enemy_ai_type or ""
         )
 
         # NOTE: removing action=0 (retreat) which is used for resetting...
@@ -86,6 +90,8 @@ class VcmiEnv(gym.Env):
         self.sparse_info = sparse_info
         self.max_steps = max_steps
         self.render_each_step = render_each_step
+        self.enemy_ai_model = enemy_ai_model
+        self.enemy_ai_type = enemy_ai_type
         # </params>
 
         # required to init vars

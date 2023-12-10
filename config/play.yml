@@ -1,7 +1,5 @@
 ---
 env_kwargs:
   __include__: "config/env.yml"
-  consecutive_error_reward_factor: -1
-  mapname: "ai/M4.vmap"
 
 env_wrappers: []

@@ -15,14 +15,10 @@
 namespace py = pybind11;
 using namespace pybind11::literals;
 
-// start the interpreter and keep it alive until shutdown
-// Apparently, loading the shared lib multiple times will not duplicate
-// any resources, so global vars remain
-// https://stackoverflow.com/a/22863121
-auto guard = new py::scoped_interpreter();
+py::scoped_interpreter* guard;
 
 py::object* model;
-PyThreadState *_save;
+PyThreadState* _save;
 
 // low-level acquire/release
 #define GIL_LOW_ACQUIRE() { LOG("ACQUIRING GIL..."); assert(_save); PyEval_RestoreThread(_save); _save = nullptr; LOG("ACQUIRED GIL."); }
@@ -34,6 +30,25 @@ PyThreadState *_save;
 void ConnectorLoader_init(std::string path) {
     LOG("start");
 
+    // This ptr will call the destructor once it goes out of scope
+    std::unique_ptr<py::gil_scoped_acquire> acquire;
+
+    auto wasInitialized = Py_IsInitialized();
+
+    if (wasInitialized) {
+        LOG("*** Interpreter already initialized ***");
+        // Interpreter running - means PID started as Python code
+        // Just acquire the GIL in this case
+        acquire = std::make_unique<py::gil_scoped_acquire>();
+    } else {
+        // Interpreter not running - means PID started as C++ code
+        // start the interpreter and keep it alive until shutdown
+        // (it will automatically acquire the GIL)
+        LOG("!!! Starting embedded Python interpreter !!!");
+        guard = new py::scoped_interpreter();
+    }
+
+    // at this point, there must be a python interpreter
     assert(PyGILState_Check());
 
     LOGSTR("Loading model from ", path);
@@ -46,16 +61,19 @@ void ConnectorLoader_init(std::string path) {
         model = new py::object(model_cls(path).cast<py::object>());
     }
 
+    // If the interpreter was just started, it automatically acquired the
     // the only way to do a non-scoped GIL release is directly via PyEval_SaveThread()
-    GIL_LOW_RELEASE();
+    if (!wasInitialized)
+        GIL_LOW_RELEASE();
+
     LOG("return");
 }
 
 MMAI::Export::Action ConnectorLoader_getAction(const MMAI::Export::Result* r) {
     LOG("start");
 
-    if (!guard) {
-        throw std::runtime_error("Already shutdown");
+    if (!Py_IsInitialized()) {
+        throw std::runtime_error("Not initialized or already shutdown");
     }
 
     MMAI::Export::Action result;

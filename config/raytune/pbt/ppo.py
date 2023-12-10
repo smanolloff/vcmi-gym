@@ -10,6 +10,7 @@ config = {
     # Initial checkpoint to start from
     # "initial_checkpoint": None,
     "initial_checkpoint": "data/M6-PBT-PPO-20231128_000849/8c180_00004/checkpoint_000020/model.zip",
+    "enemy_checkpoint": "data/M6-PBT-PPO-20231128_000849/8c180_00004/checkpoint_000020/model.zip",
 
     # Perturb every N iterations
     "perturbation_interval": 1,

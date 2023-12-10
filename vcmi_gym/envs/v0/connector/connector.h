@@ -25,6 +25,9 @@ class Connector {
     const std::string mapname;
     const std::string loglevelGlobal;
     const std::string loglevelAI;
+    const std::string enemyAImodel;
+    const std::string enemyAItype;
+
     std::thread vcmithread;
     MMAI::Export::F_Sys f_sys;
     std::unique_ptr<MMAI::Export::CBProvider> cbprovider = std::make_unique<MMAI::Export::CBProvider>(nullptr);
@@ -39,7 +42,9 @@ public:
     Connector(
         const std::string mapname,
         const std::string loglevelGlobal,
-        const std::string loglevelAI
+        const std::string loglevelAI,
+        const std::string enemyAImodel,
+        const std::string enemyAItype
     );
 
     const P_Result start();

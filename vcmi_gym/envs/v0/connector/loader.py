@@ -1,6 +1,4 @@
-import numpy as np
 from sb3_contrib import MaskablePPO
-
 
 # XXX: maybe import VcmiEnv and load offset from there?
 ACTION_OFFSET = 1
