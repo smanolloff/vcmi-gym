@@ -11,6 +11,30 @@ def load_model(mod_name, cls_name, file):
     return getattr(mod, cls_name).load(file)
 
 
+def play_model(env, fps, model, obs):
+    terminated = False
+    clock = common.Clock(fps)
+    last_errors = 0
+
+    while not terminated:
+        if model.__class__.__name__ == "MaskablePPO":
+            action, _states = model.predict(obs, action_masks=env.unwrapped.action_masks())
+        else:
+            action, _states = model.predict(obs)
+
+        obs, reward, terminated, truncated, info = env.step(action)
+
+        if terminated or truncated:
+            break
+
+        if info.get("errors", 0) == last_errors:
+            clock.tick()
+
+        last_errors = info.get("errors", 0)
+
+    clock.tick()
+
+
 def spectate(
     fps,
     reset_delay,
@@ -37,7 +61,7 @@ Consider using the *REAL* spectator experience by running
     try:
         while True:
             obs, info = env.reset()
-            common.play_model(env, fps, model, obs)
+            play_model(env, fps, model, obs)
             time.sleep(reset_delay)
     finally:
         env.close()

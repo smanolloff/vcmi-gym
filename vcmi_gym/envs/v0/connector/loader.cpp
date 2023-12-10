@@ -68,8 +68,13 @@ MMAI::Export::Action ConnectorLoader_getAction(const MMAI::Export::Result* r) {
         py::gil_scoped_acquire acquire;
         auto ps = P_State(r->state.size());
         auto psmd = ps.mutable_data();
-        for (int i=0; i < r->state.size(); i++)
+        for (int i=0; i < r->state.size(); i++) {
+            if (r->state[i].norm > 1 || r->state[i].norm < 0) {
+                printf("Bad state[%d]: %f\n", i, r->state[i].norm);
+            }
+
             psmd[i] = r->state[i].norm;
+        }
 
         LOG("inbetween")
 

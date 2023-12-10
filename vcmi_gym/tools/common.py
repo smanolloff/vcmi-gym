@@ -182,27 +182,3 @@ def make_absolute(cwd, p):
     if os.path.isabs(p):
         return p
     return f"{cwd}/{p}"
-
-
-def play_model(env, fps, model, obs):
-    terminated = False
-    clock = Clock(fps)
-    last_errors = 0
-
-    while not terminated:
-        if model.__class__.__name__ == "MaskablePPO":
-            action, _states = model.predict(obs, action_masks=env.unwrapped.action_masks())
-        else:
-            action, _states = model.predict(obs)
-
-        obs, reward, terminated, truncated, info = env.step(action)
-
-        if terminated or truncated:
-            break
-
-        if info.get("errors", 0) == last_errors:
-            clock.tick()
-
-        last_errors = info.get("errors", 0)
-
-    clock.tick()
