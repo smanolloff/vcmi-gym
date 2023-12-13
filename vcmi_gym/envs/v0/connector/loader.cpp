@@ -2,6 +2,7 @@
 #include <cstdio>
 
 // https://pybind11.readthedocs.io/en/stable/advanced/embedding.html
+#include <filesystem>
 #include <pybind11/embed.h>
 #include <pybind11/gil.h>
 #include <pybind11/pybind11.h>
@@ -11,13 +12,14 @@
 
 #include "loader.h"
 #include "conncommon.h"
+#include "mmai_export.h"
 
 namespace py = pybind11;
 using namespace pybind11::literals;
 
 py::scoped_interpreter* guard;
 
-py::object* model;
+std::map<MMAI::Export::Side, py::object*> models;
 PyThreadState* _save;
 
 // low-level acquire/release
@@ -27,7 +29,7 @@ PyThreadState* _save;
 #define GIL_ACQUIRE() LOG("ACQUIRING GIL..."); auto gstate = PyGILState_Ensure(); LOG("ACQUIRED GIL.");
 #define GIL_RELEASE() LOG("RELEASING GIL..."); PyGILState_Release(gstate); LOG("ACQUIRED GIL.");
 
-void ConnectorLoader_init(std::string path) {
+void init(MMAI::Export::Side side, std::string gymdir, std::string modelpath) {
     LOG("start");
 
     // This ptr will call the destructor once it goes out of scope
@@ -51,14 +53,18 @@ void ConnectorLoader_init(std::string path) {
     // at this point, there must be a python interpreter
     assert(PyGILState_Check());
 
-    LOGSTR("Loading model from ", path);
+    LOG("Loading model " + std::to_string(static_cast<int>(side)) + " from " + modelpath);
 
     {
+        auto oldwd = std::filesystem::current_path();
+        std::filesystem::current_path(gymdir);
         py::module sys = py::module::import("sys");
-        sys.attr("path").attr("insert")(1, "/Users/simo/Projects/vcmi-gym/.venv/lib/python3.10/site-packages");
-        py::eval_file("/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/connector/loader.py");
+        sys.attr("path").attr("insert")(1, ".venv/lib/python3.10/site-packages");
+        py::eval_file(("vcmi_gym/envs/v0/connector/loader.py"));
         auto model_cls = py::object(py::eval("Loader.MPPO").cast<py::object>());
-        model = new py::object(model_cls(path).cast<py::object>());
+        assert(models.count(side) == 0);
+        models[side] = new py::object(model_cls(modelpath).cast<py::object>());
+        std::filesystem::current_path(oldwd);
     }
 
     // If the interpreter was just started, it automatically acquired the
@@ -69,7 +75,19 @@ void ConnectorLoader_init(std::string path) {
     LOG("return");
 }
 
-MMAI::Export::Action ConnectorLoader_getAction(const MMAI::Export::Result* r) {
+void ConnectorLoader_initAttacker(std::string gymdir, std::string modelpath) {
+    auto side = MMAI::Export::Side::ATTACKER;
+    LOG("Initializing model for ATTACKER (#" + std::to_string(static_cast<int>(side)) + ")");
+    init(side, gymdir, modelpath);
+}
+
+void ConnectorLoader_initDefender(std::string gymdir, std::string modelpath) {
+    auto side = MMAI::Export::Side::DEFENDER;
+    LOG("Initializing model for DEFENDER (#" + std::to_string(static_cast<int>(side)) + ")");
+    init(side, gymdir, modelpath);
+}
+
+MMAI::Export::Action getAction(MMAI::Export::Side side, const MMAI::Export::Result* &r) {
     LOG("start");
 
     if (!Py_IsInitialized()) {
@@ -84,6 +102,7 @@ MMAI::Export::Action ConnectorLoader_getAction(const MMAI::Export::Result* r) {
         // using higher-level PyGILState_Ensure + PyGILState_Release works (I think)
         // ...but py::gil_scoped_acquire also works and is the simplest approach
         py::gil_scoped_acquire acquire;
+        assert(models.count(side) == 1);
         auto ps = P_State(r->state.size());
         auto psmd = ps.mutable_data();
         for (int i=0; i < r->state.size(); i++) {
@@ -94,17 +113,24 @@ MMAI::Export::Action ConnectorLoader_getAction(const MMAI::Export::Result* r) {
             psmd[i] = r->state[i].norm;
         }
 
-        LOG("inbetween")
-
         auto pam = P_ActMask(r->actmask.size());
         auto pammd = pam.mutable_data();
         for (int i=0; i < r->actmask.size(); i++)
             pammd[i] = r->actmask[i];
 
-        auto predict = model->attr("predict");
+        auto predict = models[side]->attr("predict");
         result = predict(ps, pam).cast<MMAI::Export::Action>();
     }
 
-    LOGSTR("return ", std::to_string(result));
+    LOG("return action for #" + std::to_string(static_cast<int>(side)) + ": " + std::to_string(result));
     return result;
+}
+
+
+MMAI::Export::Action ConnectorLoader_getActionDefender(const MMAI::Export::Result* r) {
+    return getAction(MMAI::Export::Side::DEFENDER, r);
+}
+
+MMAI::Export::Action ConnectorLoader_getActionAttacker(const MMAI::Export::Result* r) {
+    return getAction(MMAI::Export::Side::ATTACKER, r);
 }

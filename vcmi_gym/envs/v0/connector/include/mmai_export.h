@@ -1,1 +1,1 @@
-../../vcmi/pyclient/mmai_export.h
+../../vcmi/myclient/mmai_export.h

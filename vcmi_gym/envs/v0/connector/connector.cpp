@@ -1,5 +1,5 @@
 #include "connector.h"
-#include "pyclient.h"
+#include "myclient.h"
 
 Connector::Connector(
     const std::string mapname_,
@@ -180,8 +180,10 @@ const P_Result Connector::start() {
     //      If resdir points to build/ instead of rel/, the DEBUG build
     //      will be loaded! (~15% slower)
     //
-    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
-    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
+    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
+    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
+
+    std::string gymdir = "/Users/simo/Projects/vcmi-gym";
 
     LOG("obtain lock1");
     std::unique_lock lock1(m1);
@@ -191,23 +193,27 @@ const P_Result Connector::start() {
 
     // This must happen in the main thread (SDL requires it)
     LOG("call init_vcmi(...)");
-    f_sys = init_vcmi(
+    init_vcmi(
+        baggage.get(),
+        gymdir,
         resdir,
+        mapname,
         loglevelGlobal,
         loglevelAI,
-        enemyAImodel,
-        enemyAItype,
-        baggage.get()
+        AI_MMAI_USER,
+        AI_STUPIDAI,
+        "",
+        "",
+        true
     );
 
     LOG("set state = AWAITING_RESULT");
     state = ConnectorState::AWAITING_RESULT;
 
     LOG("launch new thread");
-    auto map = mapname;
-    vcmithread = std::thread([map]() {
+    vcmithread = std::thread([] {
         LOG("[thread] Start VCMI");
-        start_vcmi(map);
+        start_vcmi();
         assert(false); // should never happen
     });
 

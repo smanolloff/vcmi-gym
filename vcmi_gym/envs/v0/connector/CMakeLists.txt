@@ -17,7 +17,7 @@ pybind11_add_module(connector conncommon.h connector.h connector.cpp)
 pybind11_add_module(connexport connexport.cpp)
 target_include_directories(connector PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(connexport PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(connector PRIVATE pyclient)
+target_link_libraries(connector PRIVATE myclient)
 
 add_library(loader SHARED conncommon.h loader.h loader.cpp)
 target_include_directories(loader PUBLIC ${CMAKE_SOURCE_DIR}/include)

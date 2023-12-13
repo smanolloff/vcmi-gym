@@ -9,16 +9,15 @@ int main() {
         printf("Error loading the library: %s\n", dlerror());
         return 1;
     }
-    std::function<MMAI::Export::Action(MMAI::Export::Result* r)> f_getAction;
 
-    auto f_init = reinterpret_cast<decltype(&ConnectorLoader_init)>(dlsym(handle, "ConnectorLoader_init"));
+    auto f_init = reinterpret_cast<decltype(&ConnectorLoader_initAttacker)>(dlsym(handle, "ConnectorLoader_initAttacker"));
     if (!f_init) {
         printf("Error getting the f_init: %s\n", dlerror());
         dlclose(handle); // Close the library
         return 1;
     }
 
-    f_getAction = reinterpret_cast<decltype(&ConnectorLoader_getAction)>(dlsym(handle, "ConnectorLoader_getAction"));
+    auto f_getAction = reinterpret_cast<decltype(&ConnectorLoader_getActionAttacker)>(dlsym(handle, "ConnectorLoader_getActionAttacker"));
     if (!f_getAction) {
         printf("Error getting the f_getAction: %s\n", dlerror());
         dlclose(handle); // Close the library
@@ -36,8 +35,9 @@ int main() {
 
 
     printf("IN MAIN\n");
-    auto path = "/Users/simo/Projects/vcmi-gym/data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip";
-    f_init(path);
+    auto gympath = "/Users/simo/Projects/vcmi-gym";
+    auto modelpath = "data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip";
+    f_init(gympath, modelpath);
 
     auto state = MMAI::Export::State{};
 

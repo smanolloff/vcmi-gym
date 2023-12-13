@@ -29,7 +29,6 @@ class Connector {
     const std::string enemyAItype;
 
     std::thread vcmithread;
-    MMAI::Export::F_Sys f_sys;
     std::unique_ptr<MMAI::Export::Baggage> baggage;
     MMAI::Export::Action action;
     const MMAI::Export::Result * result;
