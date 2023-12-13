@@ -25,8 +25,10 @@ class Connector {
     const std::string mapname;
     const std::string loglevelGlobal;
     const std::string loglevelAI;
-    const std::string enemyAImodel;
-    const std::string enemyAItype;
+    const std::string attacker;
+    const std::string defender;
+    const std::string attackerModel;
+    const std::string defenderModel;
 
     std::thread vcmithread;
     std::unique_ptr<MMAI::Export::Baggage> baggage;
@@ -43,8 +45,10 @@ public:
         const std::string mapname,
         const std::string loglevelGlobal,
         const std::string loglevelAI,
-        const std::string enemyAImodel,
-        const std::string enemyAItype
+        const std::string attacker,
+        const std::string defender,
+        const std::string attackerModel,
+        const std::string defenderModel
     );
 
     const P_Result start();

@@ -59,10 +59,12 @@ class TestHelper:
             for x in range(15):
                 i = x * N_HEX_ATTRS
                 hex = self.obs[0][y][i:i+N_HEX_ATTRS]
-                is_enemy = hex[12]
+                side = hex[12]
 
-                if is_enemy > 0 and is_enemy < 1:
+                if side > 0 and side < 1:
                     slot = hex[13]
+                    if side < 1:
+                        slot += 7
                     queue = hex[11]
                     stacks[slot] = ((x, y), queue)
 

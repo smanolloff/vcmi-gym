@@ -12,7 +12,7 @@
 
 #include "mmai_export.h" // "vendor" header file
 
-#define VERBOSE true
+#define VERBOSE false
 
 #define LOG(msg) if(VERBOSE) { std::cout << "<" << std::this_thread::get_id() << ">[" << std::filesystem::path(__FILE__).filename().string() << "][" << (PyGILState_Check() ? "GIL=1" : "GIL=0") << "] (" << __FUNCTION__ << ") " << msg << "\n"; }
 #define LOGSTR(msg, a1) if (VERBOSE) { std::cout << "<" << std::this_thread::get_id() << ">[" << std::filesystem::path(__FILE__).filename().string() << "][" << (PyGILState_Check() ? "GIL=1" : "GIL=0") << "] (" << __FUNCTION__ << ") " << msg << a1 << "\n"; }

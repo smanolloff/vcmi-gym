@@ -191,7 +191,7 @@ class PyConnector():
         self.logger = log.get_logger("PyConnector-sub", self.loglevel)
 
         self.logger.info("Starting VCMI")
-        self.logger.debug("VCMI args: %s" % str(args))
+        self.logger.debug("VCMI connector args: %s" % str(args))
         # XXX: self.__connector is ONLY available in the sub-process!
         self.__connector = connector.Connector(*args)
 

@@ -41,6 +41,7 @@ class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
+    ROLES = ["MMAI_USER", "MMAI_MODEL", "StupidAI", "BattleAI"]
 
     def __init__(
         self,
@@ -53,12 +54,18 @@ class VcmiEnv(gym.Env):
         vcmi_loglevel_ai="error",  # vcmi loglevel
         vcmienv_loglevel="WARN",  # python loglevel
         consecutive_error_reward_factor=-1,  # unused
-        enemy_ai_model=None,
-        enemy_ai_type=None,  # "MPPO"
+        attacker="MMAI_USER",  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
+        defender="StupidAI",  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
+        attacker_model=None,  # MPPO zip model (if attacker=MMAI_MODEL)
+        defender_model=None,  # MPPO zip model (if defender=MMAI_MODEL)
         sparse_info=False
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
+        assert attacker in VcmiEnv.ROLES
+        assert defender in VcmiEnv.ROLES
+
+        assert attacker == "MMAI_USER" or defender == "MMAI_USER", "an MMAI_USER role is required"
 
         self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
         self.connector = PyConnector(vcmienv_loglevel)
@@ -67,8 +74,10 @@ class VcmiEnv(gym.Env):
             mapname,
             vcmi_loglevel_global,
             vcmi_loglevel_ai,
-            enemy_ai_model or "",
-            enemy_ai_type or ""
+            attacker,
+            defender,
+            attacker_model or "",
+            defender_model or ""
         )
 
         # NOTE: removing action=0 (retreat) which is used for resetting...
@@ -90,8 +99,10 @@ class VcmiEnv(gym.Env):
         self.sparse_info = sparse_info
         self.max_steps = max_steps
         self.render_each_step = render_each_step
-        self.enemy_ai_model = enemy_ai_model
-        self.enemy_ai_type = enemy_ai_type
+        self.attacker = attacker
+        self.defender = defender
+        self.attacker_model = attacker_model
+        self.defender_model = defender_model
         # </params>
 
         # required to init vars

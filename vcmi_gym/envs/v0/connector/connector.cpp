@@ -5,13 +5,17 @@ Connector::Connector(
     const std::string mapname_,
     const std::string loglevelGlobal_,
     const std::string loglevelAI_,
-    const std::string enemyAImodel_,
-    const std::string enemyAItype_
+    const std::string attacker_,
+    const std::string defender_,
+    const std::string attackerModel_,
+    const std::string defenderModel_
 ) : mapname(mapname_),
     loglevelGlobal(loglevelGlobal_),
     loglevelAI(loglevelAI_),
-    enemyAImodel(enemyAImodel_),
-    enemyAItype(enemyAItype_),
+    attacker(attacker_),
+    defender(defender_),
+    attackerModel(attackerModel_),
+    defenderModel(defenderModel_),
     baggage(std::make_unique<MMAI::Export::Baggage>(initBaggage())) {}
 
 MMAI::Export::Baggage Connector::initBaggage() {
@@ -180,8 +184,8 @@ const P_Result Connector::start() {
     //      If resdir points to build/ instead of rel/, the DEBUG build
     //      will be loaded! (~15% slower)
     //
-    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
-    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
+    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
+    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
 
     std::string gymdir = "/Users/simo/Projects/vcmi-gym";
 
@@ -200,11 +204,11 @@ const P_Result Connector::start() {
         mapname,
         loglevelGlobal,
         loglevelAI,
-        AI_MMAI_USER,
-        AI_STUPIDAI,
-        "",
-        "",
-        true
+        attacker,
+        defender,
+        attackerModel,
+        defenderModel,
+        true  // VCMI GUI requires main thread (where SDL loop runs forever)
     );
 
     LOG("set state = AWAITING_RESULT");
@@ -322,8 +326,10 @@ PYBIND11_MODULE(connector, m) {
             const std::string &, // mapname
             const std::string &, // loglevelGlobal
             const std::string &, // loglevelAI
-            const std::string &, // enemyAImodel
-            const std::string &  // enemyAItype
+            const std::string &, // attacker
+            const std::string &, // defender
+            const std::string &, // attackerModel
+            const std::string &  // defenderModel
         >())
         .def("start", &Connector::start)
         .def("reset", &Connector::reset)
