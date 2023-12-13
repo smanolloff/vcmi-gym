@@ -1,5 +1,6 @@
 import gymnasium as gym
 import re
+import sys
 from .. import TestHelper
 
 

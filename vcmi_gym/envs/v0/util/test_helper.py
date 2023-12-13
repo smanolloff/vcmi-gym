@@ -52,22 +52,42 @@ class TestHelper:
         return self._maybe_render(a)
 
     def defend(self):
-        # XXX: using slot to ensure 2-hex stacks are present with their "latest" hex
-        # XXX: the above will not work for BLUE
         stacks = {}  # {slot => (i, queuepos)}
 
+        #
+        # THE UGLIEST CODE
+        #
         for y in range(11):
             for x in range(15):
                 i = x * N_HEX_ATTRS
                 hex = self.obs[0][y][i:i+N_HEX_ATTRS]
                 side = hex[12]
 
-                if side > 0 and side < 1:
+                # >0 means stack is not N/A
+                if side > 0:
                     slot = hex[13]
+
+                    # 1 means RIGHT (defender)
                     if side == 1:
-                        slot += 7  # value is normalized, but doesnt matter
+                        # offset defender slots to be outside 0..1 range
+                        # (to prevent overwriting attacker slots)
+                        slot -= 1
+
                     queue = hex[11]
-                    stacks[slot] = ((x, y), queue)
+
+                    # print("(%s,%s) slot: %s, queue: %s" % (x+1, y+1, slot, queue))
+
+                    # If we have an entry for this slot => it's a 2-hex stack
+                    # We sweep bfield left-to-right and we want to keep the
+                    # rightmost hex for attacker => overwrite
+                    # for defender, we want leftmost hex => don't overwrite
+                    # XXX: the above will not work for BLUE
+                    if slot in stacks:
+                        # overwrite hex only for "left" side
+                        if side < 1:
+                            stacks[slot] = ((x, y), queue)
+                    else:
+                        stacks[slot] = ((x, y), queue)
 
         # Find the "i" of the stack with the lowest QueuePos
         _, ((x, y), _) = min(stacks.items(), key=lambda x: x[1][1])
