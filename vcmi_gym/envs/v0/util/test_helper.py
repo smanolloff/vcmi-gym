@@ -53,6 +53,7 @@ class TestHelper:
 
     def defend(self):
         # XXX: using slot to ensure 2-hex stacks are present with their "latest" hex
+        # XXX: the above will not work for BLUE
         stacks = {}  # {slot => (i, queuepos)}
 
         for y in range(11):
@@ -63,8 +64,8 @@ class TestHelper:
 
                 if side > 0 and side < 1:
                     slot = hex[13]
-                    if side < 1:
-                        slot += 7
+                    if side == 1:
+                        slot += 7  # value is normalized, but doesnt matter
                     queue = hex[11]
                     stacks[slot] = ((x, y), queue)
 
