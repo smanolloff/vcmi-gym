@@ -1,0 +1,36 @@
+removed (special effects)
+
+78845 Azure Dragon
+  fear
+
+19580 Faerie Dragon
+  spells
+
+
+1224 Pit Lord
+  raise demons
+
+1210 Enchanter
+  spells
+
+942 Master Genie
+  spells
+
+803 Dendroid Soldier
+517 Dendroid Guard
+  roots - speed appears normal
+
+1589 Scorpicore
+577 Medusa Queen
+517 Medusa
+552 Basilisk
+714 Greater Basilisk
+  paralyze
+
+72 Harpy
+238 Harpy Hag
+  attack + return handling?
+
+2030 War Unicorn
+1806 Unicorn
+  blind

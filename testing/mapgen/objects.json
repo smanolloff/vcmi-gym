@@ -1,0 +1,190 @@
+{
+	"cursedGround_0" : {
+		"l" : 0,
+		"subtype" : "object",
+		"template" : {
+			"animation" : "AVXcrsd0.def",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV"
+			],
+			"zIndex" : 100
+		},
+		"type" : "cursedGround",
+		"x" : 2,
+		"y" : 4
+	},
+	"garrisonVertical_1" : {
+		"l" : 0,
+		"options" : {
+			"army" : [
+				{
+					"amount" : 165,
+					"type" : "core:masterGremlin"
+				},
+				{
+					"amount" : 88,
+					"type" : "core:stoneGargoyle"
+				},
+				{
+					"amount" : 66,
+					"type" : "core:ironGolem"
+				},
+				{
+					"amount" : 44,
+					"type" : "core:mage"
+				},
+				{
+				},
+				{
+				},
+				{
+				}
+			],
+			"owner" : "blue",
+			"removableUnits" : true
+		},
+		"subtype" : "normal",
+		"template" : {
+			"animation" : "AVCvgr.def",
+			"editorAnimation" : "",
+			"mask" : [
+				"VV",
+				"VB",
+				"VA",
+				"VB"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "garrisonVertical",
+		"x" : 1,
+		"y" : 2
+	},
+	"hero_0" : {
+		"l" : 0,
+		"options" : {
+			"army" : [
+				{
+					"amount" : 150,
+					"type" : "core:pikeman"
+				},
+				{
+					"amount" : 80,
+					"type" : "core:archer"
+				},
+				{
+					"amount" : 60,
+					"type" : "core:griffin"
+				},
+				{
+					"amount" : 40,
+					"type" : "core:swordsman"
+				},
+				{
+				},
+				{
+				},
+				{
+				}
+			],
+			"experience" : 1000000,
+			"formation" : "wide",
+			"owner" : "red",
+			"portrait" : "core:piquedram",
+			"spellBook" : [
+				"core:shield"
+			],
+			"type" : "core:piquedram"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 1,
+		"y" : 1
+	},
+	"town_0" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "red",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "castle",
+		"template" : {
+			"animation" : "AVCCAST0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 3,
+		"y" : 0
+	},
+	"town_1" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "blue",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "castle",
+		"template" : {
+			"animation" : "AVCCAST0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 2,
+		"y" : 0
+	}
+}

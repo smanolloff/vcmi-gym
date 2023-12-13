@@ -1,0 +1,98 @@
+{
+	"allowedArtifacts" : {
+		"anyOf" : [
+			"core:pendantOfFreeWill"
+		]
+	},
+	"defeatIconIndex" : 3,
+	"description" : "AI training map template\n",
+	"difficulty" : "NORMAL",
+	"mapLevels" : {
+		"surface" : {
+			"height" : 2,
+			"index" : 0,
+			"width" : 2
+		}
+	},
+	"mods" : null,
+	"name" : "P-TEMPLATE",
+	"players" : {
+		"blue" : {
+			"canPlay" : "AIOnly",
+			"heroes" : {
+				"hero_1" : {
+					"type" : "core:lorelei"
+				}
+			}
+		},
+		"red" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_0" : {
+					"type" : "core:thorgrim"
+				}
+			}
+		}
+	},
+	"rumors" : [
+	],
+	"triggeredEvents" : {
+		"specialVictory" : {
+			"condition" : [
+				"allOf",
+				[
+					"isHuman",
+					{
+						"value" : 1
+					}
+				],
+				[
+					"haveResources",
+					{
+						"type" : 0,
+						"value" : 100
+					}
+				]
+			],
+			"effect" : {
+				"type" : "victory"
+			},
+			"message" : {
+				"exactStrings" : null,
+				"localStrings" : null,
+				"message" : [
+					2
+				],
+				"numbers" : null,
+				"stringsTextID" : [
+					"core.genrltxt.278"
+				]
+			}
+		},
+		"standardDefeat" : {
+			"condition" : [
+				"daysWithoutTown",
+				{
+					"value" : 7
+				}
+			],
+			"effect" : {
+				"type" : "defeat"
+			},
+			"message" : {
+				"exactStrings" : null,
+				"localStrings" : null,
+				"message" : [
+					2
+				],
+				"numbers" : null,
+				"stringsTextID" : [
+					"core.genrltxt.7"
+				]
+			}
+		}
+	},
+	"versionMajor" : 1,
+	"versionMinor" : 1,
+	"victoryIconIndex" : 2
+}
