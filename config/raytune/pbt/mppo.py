@@ -9,8 +9,8 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    # "initial_checkpoint": "data/M7-PBT-MPPO-20231206_180127/b7d87_00000/checkpoint_000023/model.zip",
-    "initial_checkpoint": None,
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231214_180530/9bee5_00002/checkpoint_000023/model.zip",  # noqa: E501
+    # "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -84,7 +84,9 @@ config = {
             # "defender": "StupidAI"
         },
         "map_pool": [
-            "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
+            # GEN-PBT-MPPO-20231214_180530
+            # "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap"
+
             "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
             "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
             "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",

@@ -184,10 +184,10 @@ class PPOTrainer(ray.tune.Trainable):
             monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
         )
 
-    def __model_load(self, f, venv, **learner_kwargs):
+    def _model_internal_load(self, f, venv, **learner_kwargs):
         return PPO.load(f, env=venv, **learner_kwargs)
 
-    def __model_init(self, venv, **learner_kwargs):
+    def _model_internal_init(self, venv, **learner_kwargs):
         return PPO(env=venv, **learner_kwargs)
 
     def _model_init(self):
@@ -202,9 +202,9 @@ class PPOTrainer(ray.tune.Trainable):
 
         if self.initial_checkpoint:
             self.log("Load %s (initial)" % self.initial_checkpoint)
-            return self.__model_load(self.initial_checkpoint, self.venv, **self.cfg["learner_kwargs"])
+            return self._model_internal_load(self.initial_checkpoint, self.venv, **self.cfg["learner_kwargs"])
 
-        return self.__model_init(self.venv, **self.cfg["learner_kwargs"])
+        return self._model_internal_init(self.venv, **self.cfg["learner_kwargs"])
 
     def _model_checkpoint_load(self, f):
         if not self.venv:
@@ -220,7 +220,7 @@ class PPOTrainer(ray.tune.Trainable):
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         self.log("Load %s (origin: %d)" % (relpath, origin))
 
-        return self.__model_load(f, self.venv, **self.cfg["learner_kwargs"])
+        return self._model_internal_load(f, self.venv, **self.cfg["learner_kwargs"])
 
     def _get_leaf_hyperparam_keys(self, data):
         leaf_keys = []

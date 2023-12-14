@@ -7,7 +7,7 @@ DEBUG = False
 
 
 class MPPOTrainer(PPOTrainer):
-    def __model_init(self, venv, **learner_kwargs):
+    def _model_internal_init(self, venv, **learner_kwargs):
         learner_kwargs = dict(
             learner_kwargs,
             policy="CnnPolicy",
@@ -19,7 +19,7 @@ class MPPOTrainer(PPOTrainer):
 
         return MaskablePPO(env=venv, **learner_kwargs)
 
-    def __model_load(self, f, venv, **learner_kwargs):
+    def _model_internal_load(self, f, venv, **learner_kwargs):
         learner_kwargs = dict(
             learner_kwargs,
             policy="CnnPolicy",
