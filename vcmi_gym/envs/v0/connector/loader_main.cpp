@@ -49,7 +49,7 @@ int main() {
         actmask[i] = (i % 2 == 0);
     }
 
-    auto result = MMAI::Export::Result(state, actmask, 0, 0, 0, 0, 0, 0);
+    auto result = MMAI::Export::Result(state, actmask, MMAI::Export::Side(0), 0, 0, 0, 0, 0, 0);
     printf("IN MAIN: GOT ACTION: %d\n", f_getAction(&result));
     printf("IN MAIN: GOT ACTION: %d\n", f_getAction(&result));
     printf("IN MAIN: GOT ACTION: %d\n", f_getAction(&result));

@@ -11,7 +11,7 @@ from ..sb3_callback import SB3Callback
 from ..wandb_init import wandb_init
 from .... import InfoDict
 
-DEBUG = False
+DEBUG = True
 
 
 def debuglog(func):
@@ -95,6 +95,8 @@ class PPOTrainer(ray.tune.Trainable):
             commit=False
         )
 
+        self.log("creating env: %s" % env_kwargs)
+
         self.venv = make_vec_env(
             "VCMI-v0",
             n_envs=1,
@@ -112,6 +114,7 @@ class PPOTrainer(ray.tune.Trainable):
             self.model = self._model_init(venv=self.venv, **self.cfg["learner_kwargs"])
 
         assert self.rollouts_per_iteration % self.logs_per_iteration == 0
+        self.log("2222222")
         self.log_interval = self.rollouts_per_iteration // self.logs_per_iteration
 
     @debuglog
@@ -137,7 +140,9 @@ class PPOTrainer(ray.tune.Trainable):
 
     @debuglog
     def step(self):
+        self.log("3333")
         self.model.env.reset()
+        self.log("4444")
 
         wlog = self._get_perturbed_config()
         wlog["trial/iteration"] = self.iteration
@@ -146,12 +151,13 @@ class PPOTrainer(ray.tune.Trainable):
         wandb.log(wlog, commit=False)
 
         old_rollouts = self.sb3_callback.rollouts
+        self.log("5555")
 
         self.model.learn(
             total_timesteps=self.total_timesteps,
             log_interval=self.log_interval,
             reset_num_timesteps=(self.iteration == 0),
-            progress_bar=False,
+            progress_bar=True,
             callback=self.sb3_callback
         )
 
@@ -159,6 +165,7 @@ class PPOTrainer(ray.tune.Trainable):
         iter_rollouts = self.rollouts_per_iteration
 
         assert diff_rollouts == iter_rollouts, f"expected {iter_rollouts}, got: {diff_rollouts}"
+        self.log("666666")
 
         # TODO: add net_value to result (to be saved as checkpoint metadata)
         report = {"rew_mean": self.sb3_callback.ep_rew_mean}

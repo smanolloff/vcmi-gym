@@ -28,6 +28,7 @@ struct P_Result {
         P_State state_,
         P_ActMask actmask_,
         MMAI::Export::ErrMask errmask_,
+        MMAI::Export::Side side_,
         int dmg_dealt_,
         int dmg_received_,
         int units_lost_,
@@ -42,6 +43,7 @@ struct P_Result {
         errmask(errmask_),
         actmask(actmask_),
         state(state_),
+        side(static_cast<int>(side_)),
         dmg_dealt(dmg_dealt_),
         dmg_received(dmg_received_),
         is_battle_over(is_battle_over_),
@@ -56,6 +58,7 @@ struct P_Result {
     const py::array_t<float> state;
     const py::array_t<bool> actmask;
     const MMAI::Export::ErrMask errmask;
+    const int side;
     const int dmg_dealt;
     const int dmg_received;
     const int units_lost;
@@ -65,9 +68,11 @@ struct P_Result {
     const bool is_battle_over;
     const bool is_victorious;
     const std::string ansiRender;
+
     const py::array_t<float> &get_state() const { return state; }
     const py::array_t<bool> &get_actmask() const { return actmask; }
     const MMAI::Export::ErrMask &get_errmask() const { return errmask; }
+    const int &get_side() const { return side; }
     const int &get_dmg_dealt() const { return dmg_dealt; }
     const int &get_dmg_received() const { return dmg_received; }
     const int &get_units_lost() const { return units_lost; }

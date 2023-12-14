@@ -4,7 +4,7 @@ from ray.tune.search.sample import Integer, Float
 config = {
     "wandb_project": "vcmi",
     "results_dir": "data",
-    "population_size": 6,
+    "population_size": 1,
 
     # Initial checkpoint to start from
     # "initial_checkpoint": None,

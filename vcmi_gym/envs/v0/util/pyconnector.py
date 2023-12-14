@@ -41,6 +41,7 @@ class PyRawResult(ctypes.Structure):
         ("state", PyState),
         ("actmask", PyActmask),
         ("errmask", ctypes.c_ushort),
+        ("side", ctypes.c_int),
         ("dmg_dealt", ctypes.c_int),
         ("dmg_received", ctypes.c_int),
         ("units_lost", ctypes.c_int),
@@ -58,6 +59,7 @@ class PyResult():
         self.state = np.ctypeslib.as_array(cres.state).reshape(STATE_SIZE_Z, STATE_SIZE_Y, STATE_SIZE_X)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
         self.errmask = cres.errmask
+        self.side = cres.side
         self.dmg_dealt = cres.dmg_dealt
         self.dmg_received = cres.dmg_received
         self.units_lost = cres.units_lost
@@ -211,6 +213,7 @@ class PyConnector():
         self.v_result_act.state = np.ctypeslib.as_ctypes(result.get_state())
         self.v_result_act.actmask = np.ctypeslib.as_ctypes(result.get_actmask())
         self.v_result_act.errmask = ctypes.c_ushort(result.get_errmask())
+        self.v_result_act.side = ctypes.c_int(result.get_side())
         self.v_result_act.dmg_dealt = ctypes.c_int(result.get_dmg_dealt())
         self.v_result_act.dmg_received = ctypes.c_int(result.get_dmg_received())
         self.v_result_act.units_lost = ctypes.c_int(result.get_units_lost())

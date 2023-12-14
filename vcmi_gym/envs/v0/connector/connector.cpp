@@ -38,7 +38,7 @@ const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
         pammd[i] = r->actmask[i];
 
     return P_Result(
-         r->type, ps, pam, r->errmask,
+         r->type, ps, pam, r->errmask, r->side,
          r->dmgDealt, r->dmgReceived,
          r->unitsLost, r->unitsKilled,
          r->valueLost, r->valueKilled,
@@ -180,13 +180,6 @@ const P_Result Connector::start() {
 
     // TODO: read config
     //
-    // XXX: this affects the dynamic loading of AI shared libs in VCMI
-    //      If resdir points to build/ instead of rel/, the DEBUG build
-    //      will be loaded! (~15% slower)
-    //
-    // std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/build/bin";
-    std::string resdir = "/Users/simo/Projects/vcmi-gym/vcmi_gym/envs/v0/vcmi/rel/bin";
-
     std::string gymdir = "/Users/simo/Projects/vcmi-gym";
 
     LOG("obtain lock1");
@@ -200,7 +193,6 @@ const P_Result Connector::start() {
     init_vcmi(
         baggage.get(),
         gymdir,
-        resdir,
         mapname,
         loglevelGlobal,
         loglevelAI,
@@ -310,6 +302,7 @@ PYBIND11_MODULE(connector, m) {
         .def("get_state", &P_Result::get_state)
         .def("get_actmask", &P_Result::get_actmask)
         .def("get_errmask", &P_Result::get_errmask)
+        .def("get_side", &P_Result::get_side)
         .def("get_dmg_dealt", &P_Result::get_dmg_dealt)
         .def("get_dmg_received", &P_Result::get_dmg_received)
         .def("get_units_lost", &P_Result::get_units_lost)
