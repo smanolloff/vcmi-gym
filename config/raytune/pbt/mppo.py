@@ -5,7 +5,7 @@ from ray.tune.search.sample import Integer, Float
 config = {
     "wandb_project": "vcmi",
     "results_dir": "data",
-    "population_size": 1,
+    "population_size": 6,
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
@@ -72,9 +72,9 @@ config = {
         },
         "env_kwargs": {
             "max_steps": 1000,  # not used with MPPO
-            "vcmi_loglevel_global": "debug",
-            "vcmi_loglevel_ai": "debug",
-            "vcmienv_loglevel": "DEBUG",
+            "vcmi_loglevel_global": "error",
+            "vcmi_loglevel_ai": "error",
+            "vcmienv_loglevel": "WARN",
             "consecutive_error_reward_factor": -1,  # not used with MPPO
             "sparse_info": True,
 

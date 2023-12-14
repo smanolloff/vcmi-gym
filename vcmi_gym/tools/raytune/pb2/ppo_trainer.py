@@ -11,7 +11,7 @@ from ..sb3_callback import SB3Callback
 from ..wandb_init import wandb_init
 from .... import InfoDict
 
-DEBUG = True
+DEBUG = False
 
 
 def debuglog(func):
@@ -69,6 +69,7 @@ class PPOTrainer(ray.tune.Trainable):
         self.rollouts_per_iteration = initargs["config"]["rollouts_per_iteration"]
         self.logs_per_iteration = initargs["config"]["logs_per_iteration"]
         self.hyperparam_bounds = initargs["config"]["hyperparam_bounds"]
+        self.initial_checkpoint = initargs["config"]["initial_checkpoint"]
         self.experiment_name = initargs["experiment_name"]
         self.all_params = copy.deepcopy(initargs["config"]["all_params"])
 
@@ -78,44 +79,14 @@ class PPOTrainer(ray.tune.Trainable):
         self.leaf_keys = self._get_leaf_hyperparam_keys(self.hyperparam_bounds)
         self.reset_config(cfg)
 
-        env_kwargs = dict(self.cfg["env_kwargs"], attacker="StupidAI", defender="StupidAI")
-        mpool = self.all_params["map_pool"]
-
-        # Switch sides on each iteration
-        role = "attacker" if self.iteration % 2 == 0 else "defender"
-        # Play on each map for 4 iterations (2 times attacker, 2 times defender)
-        mid = self.iteration // 4 % len(mpool)
-
-        env_kwargs[role] = "MMAI_USER"
-        env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
-
-        wandb.log(
-            # 0=attacker, 1=defender
-            {"map_pool_idx": mid, "role": ["attacker", "defender"].index(role)},
-            commit=False
-        )
-
-        self.log("creating env: %s" % env_kwargs)
-
-        self.venv = make_vec_env(
-            "VCMI-v0",
-            n_envs=1,
-            env_kwargs=env_kwargs,
-            monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
-        )
-
-        if initargs["config"]["initial_checkpoint"]:
-            self.model = self._model_init_load(
-                f=initargs["config"]["initial_checkpoint"],
-                venv=self.venv,
-                **self.cfg["learner_kwargs"]
-            )
-        else:
-            self.model = self._model_init(venv=self.venv, **self.cfg["learner_kwargs"])
-
         assert self.rollouts_per_iteration % self.logs_per_iteration == 0
-        self.log("2222222")
         self.log_interval = self.rollouts_per_iteration // self.logs_per_iteration
+
+        # The model and env should be inited here
+        # However, self.iteration is wrong (always 0) in setup()
+        # => do lazy init in step()
+        self.model = None
+        self.venv = None
 
     @debuglog
     def reset_config(self, cfg):
@@ -136,13 +107,15 @@ class PPOTrainer(ray.tune.Trainable):
     @debuglog
     def load_checkpoint(self, checkpoint_dir):
         f = os.path.join(checkpoint_dir, "model.zip")
-        self.model = self._model_checkpoint_load(f, venv=self.venv, **self.cfg["learner_kwargs"])
+        self.model = self._model_checkpoint_load(f)
 
     @debuglog
     def step(self):
-        self.log("3333")
+        # see note in setup()
+        if not self.model:
+            self.model = self._model_init()
+
         self.model.env.reset()
-        self.log("4444")
 
         wlog = self._get_perturbed_config()
         wlog["trial/iteration"] = self.iteration
@@ -151,13 +124,12 @@ class PPOTrainer(ray.tune.Trainable):
         wandb.log(wlog, commit=False)
 
         old_rollouts = self.sb3_callback.rollouts
-        self.log("5555")
 
         self.model.learn(
             total_timesteps=self.total_timesteps,
             log_interval=self.log_interval,
             reset_num_timesteps=(self.iteration == 0),
-            progress_bar=True,
+            progress_bar=False,
             callback=self.sb3_callback
         )
 
@@ -165,7 +137,6 @@ class PPOTrainer(ray.tune.Trainable):
         iter_rollouts = self.rollouts_per_iteration
 
         assert diff_rollouts == iter_rollouts, f"expected {iter_rollouts}, got: {diff_rollouts}"
-        self.log("666666")
 
         # TODO: add net_value to result (to be saved as checkpoint metadata)
         report = {"rew_mean": self.sb3_callback.ep_rew_mean}
@@ -186,24 +157,59 @@ class PPOTrainer(ray.tune.Trainable):
     def _wandb_init(self, experiment_name, config):
         wandb_init(self.trial_id, self.trial_name, experiment_name, config)
 
-    def _model_init(self, venv, **learner_kwargs):
-        # at init, we are the origin
-        origin = int(self.trial_id.split("_")[1])
-        # => int("00002") => 2
+    def _venv_init(self):
+        env_kwargs = dict(self.cfg["env_kwargs"], attacker="StupidAI", defender="StupidAI")
+        mpool = self.all_params["map_pool"]
 
-        wandb.log({"trial/checkpoint_origin": origin}, commit=False)
+        # Switch sides on each iteration
+        role = "attacker" if self.iteration % 2 == 0 else "defender"
+        # Play on each map for 4 iterations (2 times attacker, 2 times defender)
+        mid = self.iteration // 4 % len(mpool)
+
+        env_kwargs[role] = "MMAI_USER"
+        env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
+
+        wandb.log(
+            # 0=attacker, 1=defender
+            {"map_pool_idx": mid, "role": ["attacker", "defender"].index(role)},
+            commit=False
+        )
+
+        self.log("Env kwargs: %s" % env_kwargs)
+
+        return make_vec_env(
+            "VCMI-v0",
+            n_envs=1,
+            env_kwargs=env_kwargs,
+            monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
+        )
+
+    def __model_load(self, f, venv, **learner_kwargs):
+        return PPO.load(f, env=venv, **learner_kwargs)
+
+    def __model_init(self, venv, **learner_kwargs):
         return PPO(env=venv, **learner_kwargs)
 
-    def _model_init_load(self, f, venv, **learner_kwargs):
+    def _model_init(self):
+        if not self.venv:
+            self.venv = self._venv_init()
+
         # at init, we are the origin
         origin = int(self.trial_id.split("_")[1])
         # => int("00002") => 2
 
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
-        self.log("Load %s (initial)" % f)
-        return self._model_load(f, venv=venv, **learner_kwargs)
 
-    def _model_checkpoint_load(self, f, venv, **learner_kwargs):
+        if self.initial_checkpoint:
+            self.log("Load %s (initial)" % self.initial_checkpoint)
+            return self.__model_load(self.initial_checkpoint, self.venv, **self.cfg["learner_kwargs"])
+
+        return self.__model_init(self.venv, **self.cfg["learner_kwargs"])
+
+    def _model_checkpoint_load(self, f):
+        if not self.venv:
+            self.venv = self._venv_init()
+
         # Checkpoint tracking: log the trial ID of the checkpoint we are restoring now
         relpath = re.match(fr".+/{self.experiment_name}/(.+)", f).group(1)
         # => "6e59d_00004/checkpoint_000038/model.zip"
@@ -213,10 +219,8 @@ class PPOTrainer(ray.tune.Trainable):
 
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         self.log("Load %s (origin: %d)" % (relpath, origin))
-        return self._model_load(f, venv=venv, **learner_kwargs)
 
-    def _model_load(self, f, venv, **learner_kwargs):
-        return PPO.load(f, env=venv, **learner_kwargs)
+        return self.__model_load(f, self.venv, **self.cfg["learner_kwargs"])
 
     def _get_leaf_hyperparam_keys(self, data):
         leaf_keys = []
