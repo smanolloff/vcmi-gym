@@ -78,10 +78,27 @@ class PPOTrainer(ray.tune.Trainable):
         self.leaf_keys = self._get_leaf_hyperparam_keys(self.hyperparam_bounds)
         self.reset_config(cfg)
 
+        env_kwargs = dict(self.cfg["env_kwargs"], attacker="StupidAI", defender="StupidAI")
+        mpool = self.all_params["map_pool"]
+
+        # Switch sides on each iteration
+        role = "attacker" if self.iteration % 2 == 0 else "defender"
+        # Play on each map for 4 iterations (2 times attacker, 2 times defender)
+        mid = self.iteration // 4 % len(mpool)
+
+        env_kwargs[role] = "MMAI_USER"
+        env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
+
+        wandb.log(
+            # 0=attacker, 1=defender
+            {"map_pool_idx": mid, "role": ["attacker", "defender"].index(role)},
+            commit=False
+        )
+
         self.venv = make_vec_env(
             "VCMI-v0",
             n_envs=1,
-            env_kwargs=self.cfg["env_kwargs"],
+            env_kwargs=env_kwargs,
             monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
         )
 

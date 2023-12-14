@@ -51,10 +51,7 @@ def main():
 
     orig_config = copy.deepcopy(config)
 
-    mapname = Path(config["all_params"]["env_kwargs"]["mapname"]).stem
-    assert mapname.isalnum()
-    experiment_name = "%s-PBT-%s-%s" % (
-        mapname,
+    experiment_name = "GEN-PBT-%s-%s" % (
         alg,
         datetime.now().strftime("%Y%m%d_%H%M%S")
     )
