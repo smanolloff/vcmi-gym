@@ -15,10 +15,8 @@ enum ConnectorState {
 };
 
 class Connector {
-    std::mutex m1;
-    std::mutex m2;
-    std::condition_variable cond1;
-    std::condition_variable cond2;
+    std::mutex m;
+    std::condition_variable cond;
 
     ConnectorState state = ConnectorState::NEW;
 

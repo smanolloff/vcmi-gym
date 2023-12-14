@@ -49,9 +49,8 @@ const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
 const P_Result Connector::reset() {
     assert(state == ConnectorState::AWAITING_ACTION);
 
-    LOG("obtain lock1");
-    std::unique_lock lock1(m1);
-    LOG("obtain lock1: done");
+    std::unique_lock lock(m);
+    LOG("obtain lock: done");
 
     LOGSTR("set this->action = ", std::to_string(MMAI::Export::ACTION_RESET));
     action = MMAI::Export::ACTION_RESET;
@@ -59,30 +58,25 @@ const P_Result Connector::reset() {
     LOG("set state = AWAITING_RESULT");
     state = ConnectorState::AWAITING_RESULT;
 
-    LOG("cond2.notify_one()");
-    cond2.notify_one();
+    LOG("cond.notify_one()");
+    cond.notify_one();
 
     {
         LOG("release Python GIL");
         py::gil_scoped_release release;
 
-        LOG("cond1.wait(lock1)");
-        cond1.wait(lock1);
-        LOG("cond1.wait(lock1): done");
+        LOG("cond.wait(lock)");
+        cond.wait(lock);
+        LOG("cond.wait(lock): done");
 
         LOG("acquire Python GIL (scope-auto)");
         // py::gil_scoped_acquire acquire2;
     }
 
-    LOG("obtain lock2");
-    std::unique_lock lock2(m2);
-    LOG("obtain lock2: done");
-
     assert(state == ConnectorState::AWAITING_ACTION);
     assert(result->type == MMAI::Export::ResultType::REGULAR);
 
-    LOG("release lock1 (return)");
-    LOG("release lock2 (return)");
+    LOG("release lock (return)");
     LOG("return P_Result");
     return convertResult(result);
 }
@@ -90,9 +84,9 @@ const P_Result Connector::reset() {
 const std::string Connector::renderAnsi() {
     assert(state == ConnectorState::AWAITING_ACTION);
 
-    LOG("obtain lock1");
-    std::unique_lock lock1(m1);
-    LOG("obtain lock1: done");
+    LOG("obtain lock");
+    std::unique_lock lock(m);
+    LOG("obtain lock: done");
 
     LOGSTR("set this->action = ", std::to_string(MMAI::Export::ACTION_RENDER_ANSI));
     action = MMAI::Export::ACTION_RENDER_ANSI;
@@ -100,30 +94,24 @@ const std::string Connector::renderAnsi() {
     LOG("set state = AWAITING_RESULT");
     state = ConnectorState::AWAITING_RESULT;
 
-    LOG("cond2.notify_one()");
-    cond2.notify_one();
+    LOG("cond.notify_one()");
+    cond.notify_one();
 
     {
         LOG("release Python GIL");
         py::gil_scoped_release release;
 
-        LOG("cond1.wait(lock1)");
-        cond1.wait(lock1);
-        LOG("cond1.wait(lock1): done");
+        LOG("cond.wait(lock)");
+        cond.wait(lock);
+        LOG("cond.wait(lock): done");
 
         LOG("acquire Python GIL (scope-auto)");
-        // py::gil_scoped_acquire acquire2;
     }
-
-    LOG("obtain lock2");
-    std::unique_lock lock2(m2);
-    LOG("obtain lock2: done");
 
     assert(state == ConnectorState::AWAITING_ACTION);
     assert(result->type == MMAI::Export::ResultType::ANSI_RENDER);
 
-    LOG("release lock1 (return)");
-    LOG("release lock2 (return)");
+    LOG("release lock (return)");
     LOG("return P_Result");
     return result->ansiRender;
 }
@@ -134,9 +122,9 @@ const P_Result Connector::act(MMAI::Export::Action a) {
     // Prevent control actions via `step`
     assert(a > 0);
 
-    LOG("obtain lock1");
-    std::unique_lock lock1(m1);
-    LOG("obtain lock1: done");
+    LOG("obtain lock");
+    std::unique_lock lock(m);
+    LOG("obtain lock: done");
 
     LOGSTR("set this->action = ", std::to_string(a));
     action = a;
@@ -144,30 +132,24 @@ const P_Result Connector::act(MMAI::Export::Action a) {
     LOG("set state = AWAITING_RESULT");
     state = ConnectorState::AWAITING_RESULT;
 
-    LOG("cond2.notify_one()");
-    cond2.notify_one();
+    LOG("cond.notify_one()");
+    cond.notify_one();
 
     {
         LOG("release Python GIL");
         py::gil_scoped_release release;
 
-        LOG("cond1.wait(lock1)");
-        cond1.wait(lock1);
-        LOG("cond1.wait(lock1): done");
+        LOG("cond.wait(lock)");
+        cond.wait(lock);
+        LOG("cond.wait(lock): done");
 
         LOG("acquire Python GIL (scope-auto)");
-        // py::gil_scoped_acquire acquire2;
     }
-
-    LOG("obtain lock2");
-    std::unique_lock lock2(m2);
-    LOG("obtain lock2: done");
 
     assert(state == ConnectorState::AWAITING_ACTION);
     assert(result->type == MMAI::Export::ResultType::REGULAR);
 
-    LOG("release lock1 (return)");
-    LOG("release lock2 (return)");
+    LOG("release lock (return)");
     LOG("return P_Result");
     return convertResult(result);
 }
@@ -182,9 +164,9 @@ const P_Result Connector::start() {
     //
     std::string gymdir = "/Users/simo/Projects/vcmi-gym";
 
-    LOG("obtain lock1");
-    std::unique_lock lock1(m1);
-    LOG("obtain lock1: done");
+    LOG("obtain lock");
+    std::unique_lock lock(m);
+    LOG("obtain lock: done");
 
     // auto oldcwd = std::filesystem::current_path();
 
@@ -220,9 +202,9 @@ const P_Result Connector::start() {
         LOG("release Python GIL");
         py::gil_scoped_release release;
 
-        LOG("cond1.wait(lock1)");
-        cond1.wait(lock1);
-        LOG("cond1.wait(lock1): done");
+        LOG("cond.wait(lock)");
+        cond.wait(lock);
+        LOG("cond.wait(lock): done");
 
         LOG("acquire Python GIL (scope-auto)");
         // py::gil_scoped_acquire acquire2;
@@ -241,8 +223,7 @@ const P_Result Connector::start() {
     assert(state == ConnectorState::AWAITING_ACTION);
     assert(result->type == MMAI::Export::ResultType::REGULAR);
 
-    LOG("release lock1 (return)");
-    LOG("release lock2 (return)");
+    LOG("release lock (return)");
     LOG("return P_Result");
 
     return convertResult(result);
@@ -253,9 +234,9 @@ MMAI::Export::Action Connector::getAction(const MMAI::Export::Result* r) {
     LOG("acquire Python GIL");
     py::gil_scoped_acquire acquire;
 
-    LOG("obtain lock1");
-    std::unique_lock lock1(m1);
-    LOG("obtain lock1: done");
+    LOG("obtain lock");
+    std::unique_lock lock(m);
+    LOG("obtain lock: done");
 
     assert(state == ConnectorState::AWAITING_RESULT);
 
@@ -265,15 +246,8 @@ MMAI::Export::Action Connector::getAction(const MMAI::Export::Result* r) {
     LOG("set state = AWAITING_ACTION");
     state = ConnectorState::AWAITING_ACTION;
 
-    LOG("cond1.notify_one()");
-    cond1.notify_one();
-
-    LOG("obtain lock2");
-    std::unique_lock lock2(m2);
-    LOG("obtain lock2: done");
-
-    LOG("release lock1");
-    lock1.unlock();
+    LOG("cond.notify_one()");
+    cond.notify_one();
 
     assert(state == ConnectorState::AWAITING_ACTION);
 
@@ -282,9 +256,9 @@ MMAI::Export::Action Connector::getAction(const MMAI::Export::Result* r) {
         py::gil_scoped_release release;
 
         // Now wait again (will unblock once step/reset have been called)
-        LOG("cond2.wait(lock2)");
-        cond2.wait(lock2);
-        LOG("cond2.wait(lock2): done");
+        LOG("cond.wait(lock)");
+        cond.wait(lock);
+        LOG("cond.wait(lock): done");
 
         LOG("acquire Python GIL (scope-auto)");
         // py::gil_scoped_acquire acquire2;
@@ -292,7 +266,7 @@ MMAI::Export::Action Connector::getAction(const MMAI::Export::Result* r) {
 
     assert(state == ConnectorState::AWAITING_RESULT);
 
-    LOG("release lock2 (return)");
+    LOG("release lock (return)");
     LOGSTR("return Action: ", std::to_string(action));
     return action;
 }
