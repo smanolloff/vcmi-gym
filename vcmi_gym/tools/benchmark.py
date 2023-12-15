@@ -3,6 +3,17 @@ import time
 import random
 
 
+def random_valid_action(mask):
+    valid_action_indexes = [i for i, v in enumerate(mask) if v]
+    return random.choice(valid_action_indexes)
+
+
+def first_valid_action(mask):
+    for (i, m) in enumerate(mask):
+        if m:
+            return i
+
+
 def benchmark(total_steps):
     env = gym.make("local/VCMI-v0")
     obs, info = env.reset()
@@ -28,6 +39,7 @@ def benchmark(total_steps):
     print("")
 
     was_term = False
+    termside = -1
     two_users = ew.attacker == "MMAI_USER" and ew.defender == "MMAI_USER"
 
     try:
@@ -43,25 +55,29 @@ def benchmark(total_steps):
                 term = False
                 trunc = False
             elif was_term and two_users:
+                raise Exception("asdasd")
                 # means we just processed 1st env's terminal obs, now 2nd
                 was_term = False
+                assert termside != info["side"]
+                if info["side"] == benchside:
+                    resets += 1
+                    tmpresets += 1
                 obs, info = env.reset()
             else:
-                valid_action_indexes = [i for i, v in enumerate(ew.action_masks()) if v]
-                act = random.choice(valid_action_indexes)
+                act = random_valid_action(ew.action_masks())
                 obs, _, term, trunc, info = env.step(act)
 
             # reset is also a "step" (aka. a round-trip to VCMI)
             steps += 1
+            tmpsteps += 1
 
             if steps % update_every == 0:
-                tmpsteps += update_every
                 percentage = (steps / total_steps) * 100
                 print("\r%d%%..." % percentage, end="", flush=True)
 
                 if steps % (update_every*report_every) == 0:
                     s = time.time() - t0
-                    print(" steps/s: %-6.2f resets/s: %-6.2f" % (tmpsteps/s, tmpresets/s))
+                    print(" steps/s: %-6.0f resets/s: %-6.2f" % (tmpsteps/s, tmpresets/s))
                     tmpsteps = 0
                     tmpresets = 0
                     t0 = time.time()
@@ -69,8 +85,10 @@ def benchmark(total_steps):
                     if percentage < 100:
                         print("\r%d%%..." % percentage, end="", flush=True)
 
+        s = time.time() - tstart
+        print("Average: steps/s: %-6.0f resets/s: %-6.2f" % (steps/s, resets/s))
         print("")
-        print("* Total time: %.2f seconds" % (time.time() - tstart))
+        print("* Total time: %.2f seconds" % s)
         print("* Total steps: %d" % steps)
         print("* Total resets: %d" % resets)
     finally:

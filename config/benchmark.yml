@@ -1,7 +1,8 @@
 ---
-steps: 2000
+steps: 50000
 env_kwargs:
   __include__: "config/env.yml"
+  max_steps: 100000
   attacker: "MMAI_USER"  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
   defender: "MMAI_MODEL"   # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
   attacker_model: ~  # MPPO zip model (if attacker=MMAI_MODEL)
