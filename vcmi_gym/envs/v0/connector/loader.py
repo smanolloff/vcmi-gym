@@ -1,7 +1,13 @@
 from sb3_contrib import MaskablePPO
 
+# TODO: update sys.path in loader.cpp to allow importing connexport
+# print(sys.path)
+from build import connexport
+
+
 # XXX: maybe import VcmiEnv and load offset from there?
 ACTION_OFFSET = 1
+OBS_SHAPE = (1, 11, 15 * connexport.get_n_hex_attrs())
 
 
 class Loader:
@@ -16,7 +22,7 @@ class Loader:
             # np.copyto(self.actmasks, actmasks)
 
             action, _states = self.model.predict(
-                obs.reshape(1, 11, 210),
+                obs.reshape(OBS_SHAPE),
                 action_masks=actmasks[ACTION_OFFSET:]
             )
 

@@ -90,23 +90,13 @@ def run(action, cfg, rest=[]):
         case "benchmark":
             from .benchmark import benchmark
 
-            # See comment in "test"
-            # (here we use the actions only)
-            actions = []
-            with open(os.path.join(rest[0]), "r") as f:
-                actions = f.read()
-
-            actions = [a.strip() for a in actions.split("\n") if a.strip()]
-            comments = [a for a in actions if a.startswith("#")]
-            actions = [a for a in actions if a not in comments]
-            env_kwargs["mapname"] = actions[0]
-            actions = [int(a) for a in actions[1:]]
+            if len(rest) > 0:
+                env_kwargs["mapname"] = rest[0]
 
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             common.register_env(expanded_env_kwargs, env_wrappers)
-
             steps = cfg.get("steps", 10000)
-            benchmark(steps, actions)
+            benchmark(steps)
 
         case "play":
             from .play import play

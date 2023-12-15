@@ -1,4 +1,8 @@
 ---
-steps: 100_000
+steps: 2000
 env_kwargs:
   __include__: "config/env.yml"
+  attacker: "MMAI_USER"  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
+  defender: "MMAI_MODEL"   # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
+  attacker_model: ~  # MPPO zip model (if attacker=MMAI_MODEL)
+  defender_model: "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231214_202918/b290f_00002/checkpoint_000298/model.zip"  # MPPO zip model (if defender=MMAI_MODEL)

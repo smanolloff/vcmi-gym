@@ -60,6 +60,7 @@ void init(MMAI::Export::Side side, std::string gymdir, std::string modelpath) {
         std::filesystem::current_path(gymdir);
         py::module sys = py::module::import("sys");
         sys.attr("path").attr("insert")(1, ".venv/lib/python3.10/site-packages");
+        sys.attr("path").attr("insert")(1, "vcmi_gym/envs/v0/connector");
         py::eval_file(("vcmi_gym/envs/v0/connector/loader.py"));
         auto model_cls = py::object(py::eval("Loader.MPPO").cast<py::object>());
         assert(models.count(side) == 0);
@@ -118,8 +119,12 @@ MMAI::Export::Action getAction(MMAI::Export::Side side, const MMAI::Export::Resu
         for (int i=0; i < r->actmask.size(); i++)
             pammd[i] = r->actmask[i];
 
-        auto predict = models[side]->attr("predict");
-        result = predict(ps, pam).cast<MMAI::Export::Action>();
+        if (r->ended) {
+            result = MMAI::Export::ACTION_RESET;
+        } else {
+            auto predict = models[side]->attr("predict");
+            result = predict(ps, pam).cast<MMAI::Export::Action>();
+        }
     }
 
     LOG("return action for #" + std::to_string(static_cast<int>(side)) + ": " + std::to_string(result));

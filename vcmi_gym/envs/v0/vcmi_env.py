@@ -22,6 +22,7 @@ ONE = DTYPE(1)
 
 class InfoDict(dict):
     SCALAR_VALUES = [
+        "side",
         "net_value",
         "is_success",
     ]
@@ -99,6 +100,7 @@ class VcmiEnv(gym.Env):
         self.sparse_info = sparse_info
         self.max_steps = max_steps
         self.render_each_step = render_each_step
+        self.mapname = mapname
         self.attacker = attacker
         self.defender = defender
         self.attacker_model = attacker_model
@@ -135,7 +137,7 @@ class VcmiEnv(gym.Env):
         if self.render_each_step:
             print(self.render())
 
-        return self.result.state, {}
+        return self.result.state, {"side": self.result.side}
 
     def render(self):
         if self.render_mode == "ansi":
@@ -212,9 +214,11 @@ class VcmiEnv(gym.Env):
     def build_info(res, term, trunc, analysis, sparse_info):
         # Performance optimization
         if not (term or trunc) and sparse_info:
-            return {}
+            return {"side": res.side}
 
+        # XXX: do not use constructor args (bypasses validations)
         info = InfoDict()
+        info["side"] = res.side
         info["net_value"] = analysis.net_value_ep
         info["is_success"] = res.is_victorious
         info["action_type_counters"] = analysis.action_type_counters_ep
