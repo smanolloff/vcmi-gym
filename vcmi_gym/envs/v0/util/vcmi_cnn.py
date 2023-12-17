@@ -32,7 +32,7 @@ class VcmiCNN(BaseFeaturesExtractor):
     def __init__(
         self,
         observation_space: gym.Space,
-        features_dim: int = 1024,  # XXX: no idea how many "features" to set...
+        features_dim: int = 512,  # XXX: no idea how many "features" to set...
     ) -> None:
         assert isinstance(observation_space, gym.spaces.Box)
         super().__init__(observation_space, features_dim)
@@ -47,7 +47,7 @@ class VcmiCNN(BaseFeaturesExtractor):
         n = observation_space.shape[2] // 15
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(in_channels, 16, kernel_size=(1, n), stride=(1, n), padding=0),
+            nn.Conv2d(in_channels, 8, kernel_size=(1, n), stride=(1, n), padding=0),
             nn.ReLU(),
             # => (64, 11, 15)
 
