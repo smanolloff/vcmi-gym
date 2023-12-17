@@ -9,8 +9,8 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231216_022754/f588c_00001/checkpoint_000019/model.zip",  # noqa: E501
-    # "initial_checkpoint": None,
+    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231216_022754/f588c_00001/checkpoint_000019/model.zip",  # noqa: E501
+    "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -97,7 +97,7 @@ config = {
             # "attacker": "MMAI_USER",
             # "defender": "StupidAI"
         },
-        "map_pool_idx_offset": 5,  # start with A06.vmap
+        "map_pool_idx_offset": 0,
         "map_pool": [
             "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
             "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
