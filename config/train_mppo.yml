@@ -11,7 +11,7 @@ n_envs: 1
 
 # vcmi_cnn_kwargs: ~  # use "~" for generic MlpPolicy
 vcmi_cnn_kwargs:
-  features_dim: 165  # TODO: experiment a lot with those. Try 16, 512, etc.
+  features_dim: 1024  # TODO: experiment a lot with those. Try 16, 512, etc.
 
 learner_kwargs:
   # XXX: replaced by CnnPolicy if vcmi_cnn_kwargs is present
