@@ -3,7 +3,7 @@ from .ppo_trainer import PPOTrainer
 
 from .... import VcmiCNN
 
-DEBUG = False
+DEBUG = True
 
 
 class MPPOTrainer(PPOTrainer):

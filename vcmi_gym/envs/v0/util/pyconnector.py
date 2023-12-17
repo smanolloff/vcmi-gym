@@ -4,6 +4,7 @@ import numpy as np
 import os
 import signal
 import atexit
+from datetime import datetime
 
 from . import log
 
@@ -125,10 +126,10 @@ class PyConnector():
         return PyResult(self.v_result_act)
 
     def shutdown(self):
-        with self.shutdown_lock:
-            if self.shutdown_complete:
-                return
+        if self.shutdown_complete:
+            return
 
+        with self.shutdown_lock:
             self.shutdown_complete = True
 
         self.logger.info("Terminating VCMI PID=%s" % self.proc.pid)
@@ -144,12 +145,22 @@ class PyConnector():
         except Exception:
             pass
 
+        # release all multiprocessing resources
+        del self.shutdown_lock
+        del self.v_action
+        del self.v_result_act
+        del self.v_result_render_ansi
+        del self.v_command_type
+        del self.cond
+        del self.proc
+
         # attempt to prevent log duplication from ray PB2 training
+        # Close logger last (because of the "Resources released" message)
+        self.logger.info("Resources released")
         for handler in self.logger.handlers:
             self.logger.removeHandler(handler)
             handler.close()
-
-        self.cond = None
+        del self.logger
 
     def reset(self):
         self.v_command_type.value = PyConnector.COMMAND_TYPE_RESET

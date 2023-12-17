@@ -1,17 +1,19 @@
 import os
 import copy
 import re
+import statistics
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 import ray.tune
 import ray.train
 import wandb
+from datetime import datetime
 
 from ..sb3_callback import SB3Callback
 from ..wandb_init import wandb_init
 from .... import InfoDict
 
-DEBUG = False
+DEBUG = True
 
 
 def debuglog(func):
@@ -51,7 +53,7 @@ class PPOTrainer(ray.tune.Trainable):
         # cls.logfile.write("%s\n" % msg)
         # cls.logfile.flush()
         # print(msg)
-        print("[%s I=%d] %s" % (self.trial_name, self.iteration, msg))
+        print("-- %s [%s I=%d] %s" % (datetime.now().isoformat(), self.trial_name, self.iteration, msg))
 
     @staticmethod
     def default_resource_request(_config):
@@ -61,12 +63,15 @@ class PPOTrainer(ray.tune.Trainable):
     #      during regular perturbation, it waits though
     @debuglog
     def cleanup(self):
-        self.venv.close()
+        self.venv.close()  # TODO: redundant
+        self.model.env.close()
         wandb.finish(quiet=True)
 
     @debuglog
     def setup(self, cfg, initargs):
         self.rollouts_per_iteration = initargs["config"]["rollouts_per_iteration"]
+        self.rollouts_per_role = initargs["config"]["rollouts_per_role"]
+        self.iterations_per_map = initargs["config"]["iterations_per_map"]
         self.logs_per_iteration = initargs["config"]["logs_per_iteration"]
         self.hyperparam_bounds = initargs["config"]["hyperparam_bounds"]
         self.initial_checkpoint = initargs["config"]["initial_checkpoint"]
@@ -82,18 +87,27 @@ class PPOTrainer(ray.tune.Trainable):
         assert self.rollouts_per_iteration % self.logs_per_iteration == 0
         self.log_interval = self.rollouts_per_iteration // self.logs_per_iteration
 
+        # Ensure both roles get equal amount of rollouts
+        assert self.rollouts_per_iteration % self.rollouts_per_role == 0
+        assert (self.rollouts_per_iteration // self.rollouts_per_role) % 2 == 0
+
+        # Ensure there's equal amount of logs for each role
+        assert self.rollouts_per_role % self.log_interval == 0
+
         # The model and env should be inited here
         # However, self.iteration is wrong (always 0) in setup()
         # => do lazy init in step()
         self.model = None
         self.venv = None
+        self.initial_side = "attacker"
 
     @debuglog
     def reset_config(self, cfg):
         cfg = deepmerge(copy.deepcopy(self.all_params), cfg)
         self.cfg = self._fix_floats(copy.deepcopy(cfg), self.hyperparam_bounds)
         steps_per_rollout = cfg["learner_kwargs"]["n_steps"]
-        self.total_timesteps = steps_per_rollout * self.rollouts_per_iteration
+        self.total_timesteps_per_iteration = steps_per_rollout * self.rollouts_per_iteration
+        self.total_timesteps_per_role = steps_per_rollout * self.rollouts_per_role
         return True
 
     @debuglog
@@ -111,11 +125,9 @@ class PPOTrainer(ray.tune.Trainable):
 
     @debuglog
     def step(self):
-        # see note in setup()
         if not self.model:
+            # lazy init model - see note in setup()
             self.model = self._model_init()
-
-        self.model.env.reset()
 
         wlog = self._get_perturbed_config()
         wlog["trial/iteration"] = self.iteration
@@ -124,14 +136,36 @@ class PPOTrainer(ray.tune.Trainable):
         wandb.log(wlog, commit=False)
 
         old_rollouts = self.sb3_callback.rollouts
+        rollouts_this_iteration = 0
+        side = self.initial_side
+        ep_rew_means = []
+        while rollouts_this_iteration < self.rollouts_per_iteration:
+            if len(ep_rew_means) > 0:
+                side = "attacker" if len(ep_rew_means) % 2 == 0 else "defender"
+                self.model.env.close()
+                self.model.env = self._venv_init(side)
+                self.model.env.reset()
 
-        self.model.learn(
-            total_timesteps=self.total_timesteps,
-            log_interval=self.log_interval,
-            reset_num_timesteps=(self.iteration == 0),
-            progress_bar=False,
-            callback=self.sb3_callback
-        )
+            rollouts_this_iteration += self.rollouts_per_role
+
+            self.model.learn(
+                total_timesteps=self.total_timesteps_per_role,
+                log_interval=self.log_interval,
+                reset_num_timesteps=(self.iteration == 0 and rollouts_this_iteration == 0),
+                progress_bar=False,
+                callback=self.sb3_callback
+            )
+
+            ep_rew_means.append(self.sb3_callback.ep_rew_mean)
+
+            # XXX: there seem to be leaked resources from the last created env
+            #      on each iteration. As if cleanup() is not awaited :?
+            #      Since we do 1 iteration per perturbation, we can simply
+            #      close the envs here
+            #      That should fix the issue, although .cleanup() should have
+            #      been awaited? So not sure if that is the real issue.
+            # TODO: uncomment but AFTER inspecting logs with DEBUG=true
+            # self.model.env.close()
 
         diff_rollouts = self.sb3_callback.rollouts - old_rollouts
         iter_rollouts = self.rollouts_per_iteration
@@ -139,7 +173,7 @@ class PPOTrainer(ray.tune.Trainable):
         assert diff_rollouts == iter_rollouts, f"expected {iter_rollouts}, got: {diff_rollouts}"
 
         # TODO: add net_value to result (to be saved as checkpoint metadata)
-        report = {"rew_mean": self.sb3_callback.ep_rew_mean}
+        report = {"rew_mean": statistics.mean(ep_rew_means)}
         return report
 
     @debuglog
@@ -157,21 +191,20 @@ class PPOTrainer(ray.tune.Trainable):
     def _wandb_init(self, experiment_name, config):
         wandb_init(self.trial_id, self.trial_name, experiment_name, config)
 
-    def _venv_init(self):
+    def _venv_init(self, role):
         env_kwargs = dict(self.cfg["env_kwargs"], attacker="StupidAI", defender="StupidAI")
+        env_kwargs[role] = "MMAI_USER"
         mpool = self.all_params["map_pool"]
 
-        # Switch sides on each iteration
-        role = "attacker" if self.iteration % 2 == 0 else "defender"
-        # Play on each map for 4 iterations (2 times attacker, 2 times defender)
-        mid = self.iteration // 4 % len(mpool)
-
-        env_kwargs[role] = "MMAI_USER"
+        # Play on each map for N iterations
+        offset = self.all_params["map_pool_idx_offset"]
+        mid = (offset + self.iteration // self.iterations_per_map) % len(mpool)
         env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
+        mapnum = int(re.match(r".+?([0-9]+)\.vmap", env_kwargs["mapname"]).group(1))
 
         wandb.log(
             # 0=attacker, 1=defender
-            {"map_pool_idx": mid, "role": ["attacker", "defender"].index(role)},
+            {"mapnum": mapnum, "role": ["attacker", "defender"].index(role)},
             commit=False
         )
 
@@ -192,7 +225,7 @@ class PPOTrainer(ray.tune.Trainable):
 
     def _model_init(self):
         if not self.venv:
-            self.venv = self._venv_init()
+            self.venv = self._venv_init(self.initial_side)
 
         # at init, we are the origin
         origin = int(self.trial_id.split("_")[1])
@@ -208,7 +241,7 @@ class PPOTrainer(ray.tune.Trainable):
 
     def _model_checkpoint_load(self, f):
         if not self.venv:
-            self.venv = self._venv_init()
+            self.venv = self._venv_init(self.initial_side)
 
         # Checkpoint tracking: log the trial ID of the checkpoint we are restoring now
         relpath = re.match(fr".+/{self.experiment_name}/(.+)", f).group(1)

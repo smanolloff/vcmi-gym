@@ -9,7 +9,7 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231214_180530/9bee5_00002/checkpoint_000023/model.zip",  # noqa: E501
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231216_022754/f588c_00001/checkpoint_000019/model.zip",  # noqa: E501
     # "initial_checkpoint": None,
 
     # Perturb every N iterations
@@ -25,13 +25,27 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 50,
+    "rollouts_per_iteration": 400,
 
     #
     # Number of logs per iteration
     # Requirement is: rollouts_per_iteration % logs_per_iteration == 0
     #
-    "logs_per_iteration": 10,
+    "logs_per_iteration": 20,
+
+    #
+    # Number of rollouts before swithing roles (attacker/defender)
+    # Requirements are:
+    #
+    # 1. Even number of roles per iteration:
+    #       (rollouts_per_iteration / rollouts_per_role) % 2 == 0
+    #
+    # 2. Equal number of logs per role:
+    #       rollouts_per_role % (rollouts_per_iteration/logs_per_iteration) == 0
+    #
+    "rollouts_per_role": 100,
+
+    "iterations_per_map": 5,
 
     "hyperparam_mutations": {
         "learner_kwargs": {
@@ -83,10 +97,9 @@ config = {
             # "attacker": "MMAI_USER",
             # "defender": "StupidAI"
         },
+        "map_pool_idx_offset": 5,  # start with A06.vmap
         "map_pool": [
-            # GEN-PBT-MPPO-20231214_180530
-            # "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap"
-
+            "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
             "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
             "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
             "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",

@@ -22,7 +22,6 @@ ONE = DTYPE(1)
 
 class InfoDict(dict):
     SCALAR_VALUES = [
-        "side",
         "net_value",
         "is_success",
     ]
@@ -31,7 +30,7 @@ class InfoDict(dict):
         "action_type_counters": [at.name for at in ActionType],
     }
 
-    ALL_KEYS = SCALAR_VALUES + list(D1_ARRAY_VALUES.keys())
+    ALL_KEYS = ["side"] + SCALAR_VALUES + list(D1_ARRAY_VALUES.keys())
 
     def __setitem__(self, k, v):
         assert k in InfoDict.ALL_KEYS, f"Unknown info key: '{k}'"
@@ -161,6 +160,7 @@ class VcmiEnv(gym.Env):
             gym.logger.warn("Cannot render with no render mode set")
 
     def close(self):
+        self.logger.info("Closing env...")
         self.connector.shutdown()
         self.logger.info("Env closed")
         for handler in self.logger.handlers:
