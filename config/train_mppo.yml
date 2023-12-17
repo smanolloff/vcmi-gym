@@ -23,12 +23,12 @@ learner_kwargs:
 
 
   gamma: 0.9796
-  gae_lambda: 0.8
+  gae_lambda: 0.98
   clip_range: 0.4
   normalize_advantage: true
   ent_coef: 0.002474
-  vf_coef: 0.1
-  max_grad_norm: 4.545
+  vf_coef: 0.5
+  max_grad_norm: 2
 
 # Examples:
 #   * "const_0.001"
