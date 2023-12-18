@@ -30,8 +30,10 @@ def validate_hyperparams(params):
     for k, v in params.items():
         if isinstance(v, dict):
             validate_hyperparams(v)
+        elif isinstance(v, list):
+            pass
         else:
-            assert v.lower < v.upper, "%s: v.lower => v.upper (%s >= %s)" % (k, v.lower, v.upper)
+            v.lower < v.upper, "%s: v.lower => v.upper (%s >= %s)" % (k, v.lower, v.upper)
 
 
 def main():

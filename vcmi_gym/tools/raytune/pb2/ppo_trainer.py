@@ -192,8 +192,8 @@ class PPOTrainer(ray.tune.Trainable):
         env_kwargs[role] = "MMAI_USER"
         mpool = self.all_params["map_pool"]
 
-        # Play on each map for N iterations
-        offset = self.maps_per_iteration * self.iteration
+        offset = self.all_params["map_pool_offset_idx"]
+        offset += self.maps_per_iteration * self.iteration
 
         mid = (offset + rollouts_this_iteration // self.rollouts_per_map) % len(mpool)
         env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
@@ -287,7 +287,7 @@ class PPOTrainer(ray.tune.Trainable):
         return params
 
     # Needed as Tune passes `float32` objects,
-    # but SB3 expects regular `float` objects
+    # but SB3 expects regular `float` objects (or int for some params)
     # Also needed for PBT as values can go out of bounds:
     # https://github.com/ray-project/ray/issues/5035
     def _fix_floats(self, cfg, hyperparam_bounds):
@@ -296,7 +296,7 @@ class PPOTrainer(ray.tune.Trainable):
                 assert key in cfg and isinstance(cfg[key], dict)
                 self._fix_floats(cfg[key], value)
             else:
-                if key == "n_epochs":
+                if key == "n_epochs" or key == "n_steps":
                     cfg[key] = int(cfg[key])
                 else:
                     cfg[key] = float(cfg[key])
