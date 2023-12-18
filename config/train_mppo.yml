@@ -17,18 +17,18 @@ learner_kwargs:
   # XXX: replaced by CnnPolicy if vcmi_cnn_kwargs is present
   policy: "MlpPolicy"
 
-  n_steps: 512
+  n_steps: 2048
   batch_size: 64
-  n_epochs: 11
+  n_epochs: 10
 
 
   gamma: 0.9796
-  gae_lambda: 0.98
+  gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
   ent_coef: 0.002474
-  vf_coef: 0.5
-  max_grad_norm: 2
+  vf_coef: 0.1
+  max_grad_norm: 4.545
 
 # Examples:
 #   * "const_0.001"
@@ -38,7 +38,7 @@ learner_lr_schedule: "const_0.0005169"
 
 env_kwargs:
   __include__: "config/env.yml"
-  mapname: "ai/M6.vmap"
+  mapname: "ai/generated/A01.vmap"
   consecutive_error_reward_factor: -1
 env_wrappers: []
 

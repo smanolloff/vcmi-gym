@@ -25,13 +25,13 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 400,
+    "rollouts_per_iteration": 2000,
 
     #
     # Number of logs per iteration
     # Requirement is: rollouts_per_iteration % logs_per_iteration == 0
     #
-    "logs_per_iteration": 20,
+    "logs_per_iteration": 200,
 
     #
     # Number of rollouts before swithing roles (attacker/defender)
@@ -45,18 +45,18 @@ config = {
     #
     "rollouts_per_role": 100,
 
-    "iterations_per_map": 5,
+    "maps_per_iteration": 5,
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            "learning_rate": Float(0.00001, 0.001),
-            "gamma": Float(0.8, 0.999),
+            "learning_rate": Float(0.0001, 0.006),
+            # "gamma": Float(0.8, 0.999),
             # "batch_size": Integer(32, 256),  # breaks loading from file
-            "n_epochs": Integer(4, 20),
-            "gae_lambda": Float(0.8, 1.0),
-            "clip_range": Float(0.1, 0.5),
+            # "n_epochs": Integer(4, 20),
+            # "gae_lambda": Float(0.8, 1.0),
+            # "clip_range": Float(0.1, 0.5),
             "vf_coef": Float(0.1, 1.0),
-            "max_grad_norm": Float(0.5, 5)
+            # "max_grad_norm": Float(0.5, 5)
         },
     },
 
@@ -76,13 +76,13 @@ config = {
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.907,
-            "gae_lambda": 0.98,
+            "gamma": 0.9796,
+            "gae_lambda": 0.8,
             "clip_range": 0.4,
             "normalize_advantage": True,
             "ent_coef": 0.007,
             "vf_coef": 0.5,
-            "max_grad_norm": 0.5,
+            "max_grad_norm": 4,
         },
         "env_kwargs": {
             "max_steps": 1000,  # not used with MPPO
@@ -97,7 +97,6 @@ config = {
             # "attacker": "MMAI_USER",
             # "defender": "StupidAI"
         },
-        "map_pool_idx_offset": 0,
         "map_pool": [
             "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
             "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",

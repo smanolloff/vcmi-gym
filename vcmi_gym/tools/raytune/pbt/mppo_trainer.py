@@ -13,7 +13,7 @@ class MPPOTrainer(PPOTrainer):
             policy="CnnPolicy",
             policy_kwargs=dict(
                 features_extractor_class=VcmiCNN,
-                features_extractor_kwargs=dict(features_dim=512)
+                features_extractor_kwargs=dict(features_dim=1024)
             ),
         )
 
@@ -25,7 +25,7 @@ class MPPOTrainer(PPOTrainer):
             policy="CnnPolicy",
             policy_kwargs=dict(
                 features_extractor_class=VcmiCNN,
-                features_extractor_kwargs=dict(features_dim=512)
+                features_extractor_kwargs=dict(features_dim=1024)
             ),
         )
 

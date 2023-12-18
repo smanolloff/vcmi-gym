@@ -71,7 +71,7 @@ class PPOTrainer(ray.tune.Trainable):
     def setup(self, cfg, initargs):
         self.rollouts_per_iteration = initargs["config"]["rollouts_per_iteration"]
         self.rollouts_per_role = initargs["config"]["rollouts_per_role"]
-        self.iterations_per_map = initargs["config"]["iterations_per_map"]
+        self.maps_per_iteration = initargs["config"]["maps_per_iteration"]
         self.logs_per_iteration = initargs["config"]["logs_per_iteration"]
         self.hyperparam_bounds = initargs["config"]["hyperparam_bounds"]
         self.initial_checkpoint = initargs["config"]["initial_checkpoint"]
@@ -93,6 +93,12 @@ class PPOTrainer(ray.tune.Trainable):
 
         # Ensure there's equal amount of logs for each role
         assert self.rollouts_per_role % self.log_interval == 0
+
+        assert self.rollouts_per_iteration % self.maps_per_iteration == 0
+        self.rollouts_per_map = self.rollouts_per_iteration // self.maps_per_iteration
+
+        assert self.rollouts_per_map % self.rollouts_per_role == 0
+        assert (self.rollouts_per_map // self.rollouts_per_role) % 2 == 0
 
         # The model and env should be inited here
         # However, self.iteration is wrong (always 0) in setup()
@@ -143,10 +149,8 @@ class PPOTrainer(ray.tune.Trainable):
             if len(ep_rew_means) > 0:
                 side = "attacker" if len(ep_rew_means) % 2 == 0 else "defender"
                 self.model.env.close()
-                self.model.env = self._venv_init(side)
+                self.model.env = self._venv_init(side, rollouts_this_iteration)
                 self.model.env.reset()
-
-            rollouts_this_iteration += self.rollouts_per_role
 
             self.model.learn(
                 total_timesteps=self.total_timesteps_per_role,
@@ -156,16 +160,8 @@ class PPOTrainer(ray.tune.Trainable):
                 callback=self.sb3_callback
             )
 
+            rollouts_this_iteration += self.rollouts_per_role
             ep_rew_means.append(self.sb3_callback.ep_rew_mean)
-
-            # XXX: there seem to be leaked resources from the last created env
-            #      on each iteration. As if cleanup() is not awaited :?
-            #      Since we do 1 iteration per perturbation, we can simply
-            #      close the envs here
-            #      That should fix the issue, although .cleanup() should have
-            #      been awaited? So not sure if that is the real issue.
-            # TODO: uncomment but AFTER inspecting logs with DEBUG=true
-            # self.model.env.close()
 
         diff_rollouts = self.sb3_callback.rollouts - old_rollouts
         iter_rollouts = self.rollouts_per_iteration
@@ -191,14 +187,15 @@ class PPOTrainer(ray.tune.Trainable):
     def _wandb_init(self, experiment_name, config):
         wandb_init(self.trial_id, self.trial_name, experiment_name, config)
 
-    def _venv_init(self, role):
+    def _venv_init(self, role, rollouts_this_iteration=0):
         env_kwargs = dict(self.cfg["env_kwargs"], attacker="StupidAI", defender="StupidAI")
         env_kwargs[role] = "MMAI_USER"
         mpool = self.all_params["map_pool"]
 
         # Play on each map for N iterations
-        offset = self.all_params["map_pool_idx_offset"]
-        mid = (offset + self.iteration // self.iterations_per_map) % len(mpool)
+        offset = self.maps_per_iteration * self.iteration
+
+        mid = (offset + rollouts_this_iteration // self.rollouts_per_map) % len(mpool)
         env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
         mapnum = int(re.match(r".+?([0-9]+)\.vmap", env_kwargs["mapname"]).group(1))
 
