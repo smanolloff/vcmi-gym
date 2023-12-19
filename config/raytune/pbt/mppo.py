@@ -9,8 +9,8 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231218_191816/6fe74_00005/checkpoint_000007/model.zip",  # noqa: E501
-    "initial_checkpoint": None,
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231219_182957/da59a_00005/checkpoint_000001/model.zip",  # noqa: E501
+    # "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -49,14 +49,14 @@ config = {
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            # "learning_rate": Float(0.0001, 0.006),
+            "learning_rate": [0.0001, 0.0005, 0.001],
             # "gamma": Float(0.8, 0.999),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
             # "clip_range": Float(0.1, 0.5),
-            "vf_coef": Float(0.1, 1.0),
-            "max_grad_norm": Float(0.5, 4),
+            # "vf_coef": Float(0.1, 1.0),
+            # "max_grad_norm": Float(0.5, 4),
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
     },
@@ -82,8 +82,8 @@ config = {
             "clip_range": 0.4,
             "normalize_advantage": True,
             "ent_coef": 0.007,
-            "vf_coef": 0.45,
-            "max_grad_norm": 4,
+            "vf_coef": 0.5,
+            "max_grad_norm": 2,
         },
         "env_kwargs": {
             "max_steps": 1000,  # not used with MPPO
