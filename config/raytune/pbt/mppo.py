@@ -9,7 +9,7 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231217_180148/967c5_00004/checkpoint_000007/model.zip",  # noqa: E501
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231218_191816/6fe74_00005/checkpoint_000007/model.zip",  # noqa: E501
     # "initial_checkpoint": None,
 
     # Perturb every N iterations
@@ -50,14 +50,14 @@ config = {
     "hyperparam_mutations": {
         "learner_kwargs": {
             # "learning_rate": Float(0.0001, 0.006),
-            # "gamma": Float(0.8, 0.999),
+            "gamma": Float(0.8, 0.999),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
             # "clip_range": Float(0.1, 0.5),
             # "vf_coef": Float(0.1, 1.0),
             # "max_grad_norm": Float(0.5, 5),
-            "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
+            # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
     },
 
@@ -74,7 +74,7 @@ config = {
             "policy": "MlpPolicy",
             "stats_window_size": 100,
             "learning_rate": 0.00126,
-            "n_steps": 4096,
+            "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
             "gamma": 0.9796,
@@ -98,7 +98,7 @@ config = {
             # "attacker": "MMAI_USER",
             # "defender": "StupidAI"
         },
-        "map_pool_offset_idx": 45,
+        "map_pool_offset_idx": 50,
         "map_pool": [
             "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
             "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
