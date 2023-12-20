@@ -49,8 +49,8 @@ config = {
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            "learning_rate": [0.0001, 0.0005, 0.001],
-            # "gamma": Float(0.8, 0.999),
+            # "learning_rate": [0.0001, 0.0005, 0.001],
+            "gamma": Float(0.8, 0.999),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
