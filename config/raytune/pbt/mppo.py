@@ -9,8 +9,8 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231219_182957/da59a_00005/checkpoint_000001/model.zip",  # noqa: E501
-    # "initial_checkpoint": None,
+    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231219_182957/da59a_00005/checkpoint_000001/model.zip",  # noqa: E501
+    "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,

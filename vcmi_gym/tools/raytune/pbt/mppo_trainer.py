@@ -12,7 +12,7 @@ class MPPOTrainer(PPOTrainer):
             learner_kwargs,
             policy="CnnPolicy",
             policy_kwargs=dict(
-                net_arch=[64, 128, 64],
+                # net_arch=[64, 128, 64],
                 features_extractor_class=VcmiCNN,
                 features_extractor_kwargs=dict(features_dim=1024)
             ),
@@ -25,7 +25,7 @@ class MPPOTrainer(PPOTrainer):
             learner_kwargs,
             policy="CnnPolicy",
             policy_kwargs=dict(
-                net_arch=[64, 128, 64],
+                # net_arch=[64, 128, 64],
                 features_extractor_class=VcmiCNN,
                 features_extractor_kwargs=dict(features_dim=1024)
             ),
