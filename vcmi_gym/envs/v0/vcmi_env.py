@@ -58,7 +58,8 @@ class VcmiEnv(gym.Env):
         defender="StupidAI",  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
         attacker_model=None,  # MPPO zip model (if attacker=MMAI_MODEL)
         defender_model=None,  # MPPO zip model (if defender=MMAI_MODEL)
-        sparse_info=False
+        sparse_info=False,
+        actions_log_file=None,  # DEBUG
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
@@ -104,6 +105,7 @@ class VcmiEnv(gym.Env):
         self.defender = defender
         self.attacker_model = attacker_model
         self.defender_model = defender_model
+        self.actions_log_file = actions_log_file
         # </params>
 
         # required to init vars
@@ -114,6 +116,9 @@ class VcmiEnv(gym.Env):
 
         if self.terminated or self.truncated:
             raise Exception("Reset needed")
+
+        if self.actfile:
+            self.actfile.write(f"{action}\n")
 
         res = self.connector.act(action)
         analysis = self.analyzer.analyze(action, res)
@@ -135,6 +140,11 @@ class VcmiEnv(gym.Env):
 
         if self.render_each_step:
             print(self.render())
+
+        if self.actions_log_file:
+            if hasattr(self, "actfile"):
+                self.actfile.close()
+            self.actfile = open(self.actions_log_file, "w")
 
         return self.result.state, {"side": self.result.side}
 
@@ -161,6 +171,7 @@ class VcmiEnv(gym.Env):
 
     def close(self):
         self.logger.info("Closing env...")
+        self.actfile.close()
         self.connector.shutdown()
         self.logger.info("Env closed")
         for handler in self.logger.handlers:

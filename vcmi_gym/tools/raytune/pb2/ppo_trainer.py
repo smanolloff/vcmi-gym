@@ -63,7 +63,6 @@ class PPOTrainer(ray.tune.Trainable):
     #      during regular perturbation, it waits though
     @debuglog
     def cleanup(self):
-        self.venv.close()  # TODO: redundant
         self.model.env.close()
         wandb.finish(quiet=True)
 
@@ -104,7 +103,6 @@ class PPOTrainer(ray.tune.Trainable):
         # However, self.iteration is wrong (always 0) in setup()
         # => do lazy init in step()
         self.model = None
-        self.venv = None
         self.initial_side = "attacker"
 
     @debuglog
@@ -199,6 +197,8 @@ class PPOTrainer(ray.tune.Trainable):
         env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
         mapnum = int(re.match(r".+?([0-9]+)\.vmap", env_kwargs["mapname"]).group(1))
 
+        env_kwargs["actions_log_file"] = f"/tmp/{self.trial_id}-actions.log"
+
         wandb.log(
             # 0=attacker, 1=defender
             {"mapnum": mapnum, "role": ["attacker", "defender"].index(role)},
@@ -221,8 +221,7 @@ class PPOTrainer(ray.tune.Trainable):
         return PPO(env=venv, **learner_kwargs)
 
     def _model_init(self):
-        if not self.venv:
-            self.venv = self._venv_init(self.initial_side)
+        venv = self._venv_init(self.initial_side)
 
         # at init, we are the origin
         origin = int(self.trial_id.split("_")[1])
@@ -232,13 +231,12 @@ class PPOTrainer(ray.tune.Trainable):
 
         if self.initial_checkpoint:
             self.log("Load %s (initial)" % self.initial_checkpoint)
-            return self._model_internal_load(self.initial_checkpoint, self.venv, **self.cfg["learner_kwargs"])
+            return self._model_internal_load(self.initial_checkpoint, venv, **self.cfg["learner_kwargs"])
 
-        return self._model_internal_init(self.venv, **self.cfg["learner_kwargs"])
+        return self._model_internal_init(venv, **self.cfg["learner_kwargs"])
 
     def _model_checkpoint_load(self, f):
-        if not self.venv:
-            self.venv = self._venv_init(self.initial_side)
+        venv = self._venv_init(self.initial_side)
 
         # Checkpoint tracking: log the trial ID of the checkpoint we are restoring now
         relpath = re.match(fr".+/{self.experiment_name}/(.+)", f).group(1)
@@ -250,7 +248,7 @@ class PPOTrainer(ray.tune.Trainable):
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         self.log("Load %s (origin: %d)" % (relpath, origin))
 
-        return self._model_internal_load(f, self.venv, **self.cfg["learner_kwargs"])
+        return self._model_internal_load(f, venv, **self.cfg["learner_kwargs"])
 
     def _get_leaf_hyperparam_keys(self, data):
         leaf_keys = []
