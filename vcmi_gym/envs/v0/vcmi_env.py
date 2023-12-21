@@ -94,6 +94,7 @@ class VcmiEnv(gym.Env):
             high=NV_MAX,
             dtype=DTYPE
         )
+        self.actfile = None
 
         # <params>
         self.render_mode = render_mode
@@ -142,7 +143,7 @@ class VcmiEnv(gym.Env):
             print(self.render())
 
         if self.actions_log_file:
-            if hasattr(self, "actfile"):
+            if self.actfile:
                 self.actfile.close()
             self.actfile = open(self.actions_log_file, "w")
 

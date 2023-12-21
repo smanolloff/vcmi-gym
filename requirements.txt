@@ -6,9 +6,10 @@ tensorflow
 tqdm
 rich
 pyyaml
-ray
+ray == 2.9.0
 ray[train]
 GPy
 scikit-learn
 json5
-wandb
+wandb == 0.16.1
+gymnasium
