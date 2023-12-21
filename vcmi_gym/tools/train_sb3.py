@@ -20,6 +20,7 @@ class LogCallback(BaseCallback):
 
     def _on_step(self):
         self.rollout_episodes += self.locals["dones"].sum()
+        return True
 
     def _on_rollout_end(self):
         self.rollouts += 1

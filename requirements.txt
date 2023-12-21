@@ -1,6 +1,6 @@
 numpy==1.23.5
-stable_baselines3 ~= 2.1
-sb3-contrib ~= 2.1
+stable_baselines3 ~= 2.1.0
+sb3-contrib ~= 2.1.0
 tensorboard
 tensorflow
 tqdm
@@ -11,3 +11,4 @@ ray[train]
 GPy
 scikit-learn
 json5
+wandb

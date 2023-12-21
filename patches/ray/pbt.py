@@ -1,7 +1,7 @@
 # [SIMO] hard-patch check:
 # $ ls -i patches/ray/pbt.py patches/site-packages/ray/tune/schedulers/pbt.py
-# 90773127 patches/ray/pbt.py
-# 90773127 patches/site-packages/ray/tune/schedulers/pbt.py
+# 100979896 patches/ray/pbt.py
+# 100979896 patches/site-packages/ray/tune/schedulers/pbt.py
 import copy
 import json
 import logging

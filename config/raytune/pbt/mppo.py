@@ -99,7 +99,7 @@ config = {
             # "defender": "StupidAI"
             # "actions_log_file": "/tmp/8fac9_00001-actions.log",
         },
-        "map_pool_offset_idx": 8,
+        "map_pool_offset_idx": 7,
         "map_pool": [
             "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
             "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
