@@ -9,7 +9,7 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231220_163918/8fac9_00001/checkpoint_000001/model.zip",  # noqa: E501
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231222_004948/3f63d_00004/checkpoint_000000/model.zip",  # noqa: E501
     # "initial_checkpoint": None,
 
     # Perturb every N iterations
@@ -25,13 +25,13 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 2000,
+    "rollouts_per_iteration": 200,
 
     #
     # Number of logs per iteration
     # Requirement is: rollouts_per_iteration % logs_per_iteration == 0
     #
-    "logs_per_iteration": 200,
+    "logs_per_iteration": 20,
 
     #
     # Number of rollouts before swithing roles (attacker/defender)
@@ -43,14 +43,14 @@ config = {
     # 2. Equal number of logs per role:
     #       rollouts_per_role % (rollouts_per_iteration/logs_per_iteration) == 0
     #
-    "rollouts_per_role": 100,
+    "rollouts_per_role": 10,
 
     "maps_per_iteration": 5,
 
     "hyperparam_mutations": {
         "learner_kwargs": {
             # "learning_rate": [0.0001, 0.0005, 0.001],
-            "gamma": Float(0.8, 0.999),
+            # "gamma": Float(0.8, 0.999),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
@@ -73,11 +73,11 @@ config = {
         "learner_kwargs": {
             "policy": "MlpPolicy",
             "stats_window_size": 100,
-            "learning_rate": 0.00126,
+            "learning_rate": 0.0005,
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.95,
+            "gamma": 0.9,
             "gae_lambda": 0.8,
             "clip_range": 0.4,
             "normalize_advantage": True,
@@ -99,7 +99,7 @@ config = {
             # "defender": "StupidAI"
             # "actions_log_file": "/tmp/8fac9_00001-actions.log",
         },
-        "map_pool_offset_idx": 7,
+        "map_pool_offset_idx": 0,
         "map_pool": [
             "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
             "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
