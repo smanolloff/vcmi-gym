@@ -20,7 +20,7 @@ def run(action, cfg, rest=[]):
     env_kwargs = cfg.pop("env_kwargs", {})
 
     match action:
-        case "train_ppo" | "train_qrdqn" | "train_mppo":
+        case "train_ppo" | "train_qrdqn" | "train_mppo" | "train_mqrdqn":
             from .train_sb3 import train_sb3
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             common.register_env(expanded_env_kwargs, env_wrappers)

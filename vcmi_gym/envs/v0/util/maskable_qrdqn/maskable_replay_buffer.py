@@ -30,10 +30,10 @@ class MaskableReplayBuffer(ReplayBuffer):
             raise ValueError(f"Unsupported action space {type(self.action_space)}")
 
         self.mask_dims = mask_dims
-        self.action_masks = np.ones((self.buffer_size, self.n_envs, self.mask_dims), dtype=np.float32)
+        self.action_masks = np.ones((self.buffer_size, self.n_envs, self.mask_dims), dtype=np.bool)
 
     def reset(self) -> None:
-        self.action_masks = np.ones((self.buffer_size, self.n_envs, self.mask_dims), dtype=np.float32)
+        self.action_masks = np.ones((self.buffer_size, self.n_envs, self.mask_dims), dtype=np.bool)
         super().reset()
 
     def add(self, *args, action_masks: Optional[np.ndarray] = None, **kwargs) -> None:
@@ -49,7 +49,6 @@ class MaskableReplayBuffer(ReplayBuffer):
             next_obs = self._normalize_obs(self.observations[(batch_inds + 1) % self.buffer_size, env_indices, :], env)
         else:
             next_obs = self._normalize_obs(self.next_observations[batch_inds, env_indices, :], env)
-
         data = (
             self._normalize_obs(self.observations[batch_inds, env_indices, :], env),
             self.actions[batch_inds, env_indices, :],

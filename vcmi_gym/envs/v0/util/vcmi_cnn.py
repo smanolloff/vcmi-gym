@@ -51,7 +51,6 @@ class VcmiCNN(BaseFeaturesExtractor):
             nn.ReLU(),
             # => (32, 11, 15)
 
-
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             # => (64, 11, 15)

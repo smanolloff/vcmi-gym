@@ -1,20 +1,25 @@
 ---
 seed: ~
 run_id: ~
-out_dir_template: "data/QRDQN-{run_id}"
+out_dir_template: "data/MQRDQN-{run_id}"
 log_tensorboard: true
+progress_bar: true
+# progress_bar: false
 total_timesteps: 1_000_000
 n_checkpoints: 10
 
 vcmi_cnn_kwargs: ~  # use "~" for generic MlpPolicy
-vcmi_cnn_kwargs:
-  # TODO: experiment a lot with those. Try 16, 512, etc.
-  features_dim: 1024
+# vcmi_cnn_kwargs:
+#   # TODO: experiment a lot with those. Try 16, 512, etc.
+#   features_dim: 1024
 
 learner_kwargs:
   policy: "MlpPolicy"
-  buffer_size: 400000
-  learning_starts: 10000
+  buffer_size: 400_000
+  learning_starts: 10_000
+  # buffer_size: 10
+  # learning_starts: 0
+
   batch_size: 32
   tau: 1.0
   gamma: 0.995
@@ -22,7 +27,7 @@ learner_kwargs:
   gradient_steps: 1
   target_update_interval: 10000
   exploration_fraction: 0.5
-  exploration_initial_eps: 0.01
+  exploration_initial_eps: 0.1
   exploration_final_eps: 0
 learner_lr_schedule: "const_0.003"
 env_kwargs:

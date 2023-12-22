@@ -6,6 +6,7 @@ import os
 import stable_baselines3
 import sb3_contrib
 import math
+import vcmi_gym
 
 from . import common
 from .. import InfoDict, VcmiCNN
@@ -55,6 +56,8 @@ def init_model(
             alg = sb3_contrib.MaskablePPO
         case "QRDQN":
             alg = sb3_contrib.QRDQN
+        case "MQRDQN":
+            alg = vcmi_gym.MaskableQRDQN
         case _:
             raise Exception("Unexpected learner_cls: %s" % learner_cls)
 
@@ -69,6 +72,7 @@ def init_model(
         if vcmi_cnn_kwargs:
             kwargs["policy"] = "CnnPolicy"
             kwargs["policy_kwargs"] = dict(
+                net_arch=[],
                 features_extractor_class=VcmiCNN,
                 features_extractor_kwargs=vcmi_cnn_kwargs,
             )

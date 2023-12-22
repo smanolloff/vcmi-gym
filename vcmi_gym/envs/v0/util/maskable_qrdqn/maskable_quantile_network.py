@@ -49,9 +49,9 @@ class MaskableQuantileNetwork(QuantileNetwork):
     def forward(self, obs: th.Tensor, action_masks: np.ndarray) -> th.Tensor:
         quantiles = self.quantile_net(self.extract_features(obs, self.features_extractor))
         view = quantiles.view(-1, self.n_quantiles, int(self.action_space.n))
-        # TODO: apply mask, zeroing out all values in rows
-        view[~action_masks] = 0
-        view
+        mask_false_indexes = th.nonzero(~th.as_tensor(action_masks)).flatten()
+        view[:, :, mask_false_indexes] = th.finfo(quantiles.dtype).min
+        return view
 
     def _predict(self, observation: th.Tensor, deterministic: bool = True, action_masks: Optional[np.ndarray] = None) -> th.Tensor:
         q_values = self(observation, action_masks).mean(dim=1)

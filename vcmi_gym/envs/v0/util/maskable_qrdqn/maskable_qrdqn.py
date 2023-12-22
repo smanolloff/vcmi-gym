@@ -100,14 +100,10 @@ class MaskableQRDQN(QRDQN):
         if deterministic or np.random.rand() >= self.exploration_rate:
             return self.policy.predict(observation, state, episode_start, deterministic, action_masks=action_masks)
 
-        if self.policy.is_vectorized_observation(observation):
-            if isinstance(observation, dict):
-                n_batch = observation[next(iter(observation.keys()))].shape[0]
-            else:
-                n_batch = observation.shape[0]
-            action = np.array([self.action_space.sample() for _ in range(n_batch)])
-        else:
-            action = np.array(self.action_space.sample())
+        action = np.zeros(len(action_masks), dtype=self.action_space.dtype)
+        for (i, amasks) in enumerate(action_masks):
+            mask_true_indexes = th.nonzero(th.as_tensor(amasks)).flatten()
+            action[i] = np.random.choice(mask_true_indexes) + self.action_space.start
 
         return action, state
 
@@ -121,10 +117,11 @@ class MaskableQRDQN(QRDQN):
         # Select action randomly or according to policy
         if self.num_timesteps < learning_starts and not (self.use_sde and self.use_sde_at_warmup):
             # Warmup phase
-            valid_action_indexes = np.where(action_masks)[0]
-            unscaled_action = np.array([
-                np.random.choice(valid_action_indexes) + self.action_space.start for _ in range(n_envs)
-            ])
+
+            unscaled_action = np.zeros(len(action_masks), dtype=self.action_space.dtype)
+            for (i, amasks) in enumerate(action_masks):
+                mask_true_indexes = th.nonzero(th.as_tensor(amasks)).flatten()
+                unscaled_action[i] = np.random.choice(mask_true_indexes) + self.action_space.start
         else:
             # Note: when using continuous actions,
             # we assume that the policy uses tanh to scale the action

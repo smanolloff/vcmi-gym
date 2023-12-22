@@ -5,12 +5,12 @@ from ray.tune.search.sample import Integer, Float
 config = {
     "wandb_project": "vcmi",
     "results_dir": "data",
-    "population_size": 6,
+    "population_size": 3,
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231222_004948/3f63d_00004/checkpoint_000000/model.zip",  # noqa: E501
-    # "initial_checkpoint": None,
+    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231222_004948/3f63d_00004/checkpoint_000000/model.zip",  # noqa: E501
+    "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
