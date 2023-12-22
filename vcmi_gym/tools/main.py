@@ -1,6 +1,8 @@
 import os
 import yaml
+import re
 import argparse
+import wandb
 from copy import deepcopy
 
 from . import common
@@ -26,27 +28,43 @@ def run(action, cfg, rest=[]):
             common.register_env(expanded_env_kwargs, env_wrappers)
 
             learner_cls = action.split("_")[-1].upper()
-            default_template = "data/%s-{run_id}" % learner_cls
+            default_template = "data/%s-{group_id}/{run_id}" % learner_cls
             out_dir_template = cfg.get("out_dir_template", default_template)
-            out_dir_template = common.make_absolute(cwd, out_dir_template)
             seed = cfg.get("seed", None) or common.gen_seed()
             run_id = cfg.get("run_id", None) or common.gen_id()
+
+            if len(rest) > 0:
+                group_id = rest[0]
+            else:
+                group_id = cfg.get("group_id", None) or run_id
+
+            assert re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]+[A-Za-z0-9]$", group_id), "invalid group_id: %s" % group_id
+
+            out_dir = out_dir_template.format(seed=seed, group_id=group_id, run_id=run_id)
+            print("Output dir: %s" % out_dir)
+            out_dir = common.make_absolute(cwd, out_dir)
+            os.makedirs(out_dir, exist_ok=True)
 
             # learner_cls is not part of the config
             run_config = deepcopy(
                 {
                     "seed": seed,
                     "run_id": run_id,
+                    "group_id": group_id,
                     "model_load_file": cfg.get("model_load_file", None),
                     "model_load_update": cfg.get("model_load_update", False),
-                    "out_dir_template": out_dir_template,
+                    "out_dir": out_dir,
                     "log_tensorboard": cfg.get("log_tensorboard", False),
                     "progress_bar": cfg.get("progress_bar", True),
                     "reset_num_timesteps": cfg.get("reset_num_timesteps", False),
                     "learner_kwargs": cfg.get("learner_kwargs", {}),
                     "vcmi_cnn_kwargs": cfg.get("vcmi_cnn_kwargs", None),
-                    "total_timesteps": cfg.get("total_timesteps", 1000000),
-                    "n_checkpoints": cfg.get("n_checkpoints", 5),
+                    "rollouts_total": cfg.get("rollouts_total", 0),
+                    "rollouts_per_map": cfg.get("rollouts_per_map", 100),
+                    "rollouts_per_role": cfg.get("rollouts_per_role", 10),
+                    "rollouts_per_log": cfg.get("rollouts_per_log", 5),
+                    "map_pool": cfg.get("map_pool", []),
+                    "map_pool_offset_idx": cfg.get("map_pool_offset_idx", 0),
                     "n_envs": cfg.get("n_envs", 1),
                     "learning_rate": cfg.get("learning_rate", None),
                     "learner_lr_schedule": cfg.get(
@@ -55,7 +73,14 @@ def run(action, cfg, rest=[]):
                 }
             )
 
+            run_config["config_log"] = {}
+            for (k, v) in cfg.get("logparams", {}).items():
+                run_config["config_log"][k] = common.extract_dict_value_by_path(run_config, v)
+
             print("Starting run %s with seed %s" % (run_id, seed))
+
+            os.environ["WANDB_SILENT"] = "true"
+            common.wandb_init(run_id, group_id, run_config)
 
             run_duration, run_values = common.measure(
                 train_sb3, dict(run_config, learner_cls=learner_cls)
@@ -153,12 +178,15 @@ def main():
     parser.usage = "%(prog)s [options] <action> [<value>]"
     parser.epilog = """
 action:
-  train_ppo         train using Proximal Policy Optimization (PPO)
-  train_qrdqn       train using Quantile Regression DQN (QRDQN)
-  spectate          watch a trained model play VCMI
-  benchmark         evaluate the actions/s achievable with this env
-  test              for testing purposes only
-  help              print this help message
+  train_ppo [group]     train using Proximal Policy Optimization (PPO)
+  train_mppo [group]    train using Maskable Proximal Policy Optimization (MPPO)
+  train_qrdqn [group]   train using Quantile Regression DQN (QRDQN)
+  train_mqrdqn [group]  train using Maskable Quantile Regression DQN (my impl)
+  spectate              watch a trained model play VCMI
+  benchmark [map]       evaluate the actions/s achievable with this env
+  test [map]            for testing purposes only
+  play [map]            play VCMI
+  help                  print this help message
 
 examples:
   %(prog)s train_qrdqn

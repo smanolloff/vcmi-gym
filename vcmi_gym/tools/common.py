@@ -8,6 +8,7 @@ import random
 import time
 import importlib
 import gymnasium as gym
+import wandb
 
 from .. import VcmiEnv
 
@@ -182,3 +183,35 @@ def make_absolute(cwd, p):
     if os.path.isabs(p):
         return p
     return f"{cwd}/{p}"
+
+
+def wandb_init(id, group, config):
+    # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/air/integrations/wandb.py#L601-L607
+    wandb.init(
+        id=id,
+        name=id,
+        resume="allow",
+        reinit=True,
+        allow_val_change=True,
+        # To disable System/ stats:
+        settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
+        group=group,
+        project="vcmi",
+        config=config,
+        # NOTE: this takes a lot of time, better to have detailed graphs
+        #       tb-only (local) and log only most important info to wandb
+        # sync_tensorboard=True,
+        sync_tensorboard=False,
+    )
+
+
+def extract_dict_value_by_path(data_dict, path):
+    keys = path.split('.')  # Split the path into individual keys
+    current = data_dict
+
+    try:
+        for key in keys:
+            current = current[key]
+        return current
+    except (KeyError, TypeError):
+        raise Exception("Value not found by path: %s" % path)

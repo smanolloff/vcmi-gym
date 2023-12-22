@@ -1,40 +1,70 @@
 ---
 seed: ~
 run_id: ~
+group_id: ~
 model_load_file: ~
-out_dir_template: "data/MPPO-{run_id}"
+out_dir_template: "data/MPPO-{group_id}/{run_id}"
 log_tensorboard: true
-progress_bar: true
-total_timesteps: !!float 100000
-n_checkpoints: 1
+progress_bar: false  # too annoying and noisy
+# total_timesteps: !!float 100000
+rollouts_total: 0
+rollouts_per_map: 200
+rollouts_per_role: 100
+rollouts_per_log: 10
 n_envs: 1
 
-# vcmi_cnn_kwargs: ~  # use "~" for generic MlpPolicy
-vcmi_cnn_kwargs:
-  features_dim: 512  # TODO: experiment a lot with those. Try 16, 512, etc.
+logparams:
+  "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
 
 learner_kwargs:
-  # XXX: replaced by CnnPolicy if vcmi_cnn_kwargs is present
-  policy: "MlpPolicy"
-
-  n_steps: 2048
+  n_steps: 512
   batch_size: 64
   n_epochs: 10
-
-
-  gamma: 0.9796
+  gamma: 0.88
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0.002474
-  vf_coef: 0.1
-  max_grad_norm: 4.545
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 2
+  policy: "CnnPolicy"
+  policy_kwargs:
+    net_arch: []
+    features_extractor_class_name: "VcmiCNN2"  # loaded from vcmi_gym
+    features_extractor_kwargs:
+      features_dim: 1024
+    optimizer_class_name: "AdamW"  # loaded from torch.optim
+    optimizer_kwargs:
+      weight_decay: 0.01
 
 # Examples:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.0005169"
+learner_lr_schedule: "const_0.00126"
+
+map_pool_offset_idx: 0
+map_pool: [
+    "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
+    "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
+    "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
+    "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
+    "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",
+    "A26.vmap", "A27.vmap", "A28.vmap", "A29.vmap", "A30.vmap",
+    "A31.vmap", "A32.vmap", "A33.vmap", "A34.vmap", "A35.vmap",
+    "A36.vmap", "A37.vmap", "A38.vmap", "A39.vmap", "A40.vmap",
+    "A41.vmap", "A42.vmap", "A43.vmap", "A44.vmap", "A45.vmap",
+    "A46.vmap", "A47.vmap", "A48.vmap", "A49.vmap", "A50.vmap",
+    "A51.vmap", "A52.vmap", "A53.vmap", "A54.vmap", "A55.vmap",
+    "A56.vmap", "A57.vmap", "A58.vmap", "A59.vmap", "A60.vmap",
+    "A61.vmap", "A62.vmap", "A63.vmap", "A64.vmap", "A65.vmap",
+    "A66.vmap", "A67.vmap", "A68.vmap", "A69.vmap", "A70.vmap",
+    "A71.vmap", "A72.vmap", "A73.vmap", "A74.vmap", "A75.vmap",
+    "A76.vmap", "A77.vmap", "A78.vmap", "A79.vmap", "A80.vmap",
+    "A81.vmap", "A82.vmap", "A83.vmap", "A84.vmap", "A85.vmap",
+    "A86.vmap", "A87.vmap", "A88.vmap", "A89.vmap", "A90.vmap",
+    "A91.vmap", "A92.vmap", "A93.vmap", "A94.vmap", "A95.vmap",
+    "A96.vmap", "A97.vmap", "A98.vmap", "A99.vmap"]
 
 env_kwargs:
   __include__: "config/env.yml"
