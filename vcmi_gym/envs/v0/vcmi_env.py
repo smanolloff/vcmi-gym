@@ -24,6 +24,8 @@ class InfoDict(dict):
     SCALAR_VALUES = [
         "net_value",
         "is_success",
+        "reward_clip_abs_total",
+        "reward_clip_abs_max",
     ]
 
     D1_ARRAY_VALUES = {
@@ -60,7 +62,7 @@ class VcmiEnv(gym.Env):
         defender_model=None,  # MPPO zip model (if defender=MMAI_MODEL)
         sparse_info=False,
         actions_log_file=None,  # DEBUG
-        reward_clip_mod=10000,  # clip at +/- this value
+        reward_clip_mod=None,  # clip at +/- this value
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
@@ -127,14 +129,23 @@ class VcmiEnv(gym.Env):
         assert res.errmask == 0
 
         analysis = self.analyzer.analyze(action, res)
-        rew = VcmiEnv.calc_reward(analysis, self.reward_clip_mod)
+        rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_clip_mod)
         obs = res.state
         term = res.is_battle_over
         trunc = self.analyzer.actions_count >= self.max_steps
-        info = VcmiEnv.build_info(res, term, trunc, analysis, self.sparse_info)
 
-        self._update_vars_after_step(res, rew, term, trunc, analysis)
+        self._update_vars_after_step(res, rew, rew_unclipped, term, trunc, analysis)
         self._maybe_render(analysis)
+
+        info = VcmiEnv.build_info(
+            res,
+            term,
+            trunc,
+            analysis,
+            self.reward_clip_abs_total,
+            self.reward_clip_abs_max,
+            self.sparse_info
+        )
 
         return obs, rew, term, trunc, info
 
@@ -192,10 +203,13 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def _update_vars_after_step(self, res, rew, term, trunc, analysis):
+    def _update_vars_after_step(self, res, rew, rew_unclipped, term, trunc, analysis):
+        reward_clip_abs = abs(rew - rew_unclipped)
         self.result = res
         self.reward = rew
         self.reward_total += rew
+        self.reward_clip_abs_total += reward_clip_abs
+        self.reward_clip_abs_max = max(reward_clip_abs, self.reward_clip_abs_max)
         self.net_value_last = analysis.net_value
         self.terminated = term
         self.truncated = trunc
@@ -204,6 +218,8 @@ class VcmiEnv(gym.Env):
         self.result = res
         self.reward = 0
         self.reward_total = 0
+        self.reward_clip_abs_total = 0
+        self.reward_clip_abs_max = 0
         self.net_value_last = 0
         self.terminated = False
         self.truncated = False
@@ -229,7 +245,7 @@ class VcmiEnv(gym.Env):
     # One-time values will be lost, put only only cumulatives/totals/etc.
     #
     @staticmethod
-    def build_info(res, term, trunc, analysis, sparse_info):
+    def build_info(res, term, trunc, analysis, rewclip_total, rewclip_max, sparse_info):
         # Performance optimization
         if not (term or trunc) and sparse_info:
             return {"side": res.side}
@@ -240,6 +256,8 @@ class VcmiEnv(gym.Env):
         info["net_value"] = analysis.net_value_ep
         info["is_success"] = res.is_victorious
         info["action_type_counters"] = analysis.action_type_counters_ep
+        info["reward_clip_abs_total"] = rewclip_total
+        info["reward_clip_abs_max"] = rewclip_max
 
         # Return regular dict (wrappers insert arbitary keys)
         return dict(info)
@@ -247,4 +265,5 @@ class VcmiEnv(gym.Env):
     @staticmethod
     def calc_reward(analysis, clip_mod):
         rew = analysis.net_value + 5 * analysis.net_dmg
-        return max(min(rew, clip_mod), -clip_mod)
+        clipped = max(min(rew, clip_mod), -clip_mod) if clip_mod else rew
+        return clipped, rew

@@ -35,7 +35,7 @@ learner_kwargs:
       features_dim: 1024
     optimizer_class_name: "AdamW"  # loaded from torch.optim
     optimizer_kwargs:
-      weight_decay: 0.01
+      weight_decay: 0.001
 
 # Examples:
 #   * "const_0.001"
