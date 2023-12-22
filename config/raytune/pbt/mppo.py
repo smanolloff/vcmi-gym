@@ -25,13 +25,13 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 200,
+    "rollouts_per_iteration": 1000,
 
     #
     # Number of logs per iteration
     # Requirement is: rollouts_per_iteration % logs_per_iteration == 0
     #
-    "logs_per_iteration": 20,
+    "logs_per_iteration": 200,
 
     #
     # Number of rollouts before swithing roles (attacker/defender)
@@ -43,13 +43,13 @@ config = {
     # 2. Equal number of logs per role:
     #       rollouts_per_role % (rollouts_per_iteration/logs_per_iteration) == 0
     #
-    "rollouts_per_role": 10,
+    "rollouts_per_role": 50,
 
     "maps_per_iteration": 5,
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            # "learning_rate": [0.0001, 0.0005, 0.001],
+            # "learning_rate": [0.0001, 0.0003, 0.0006, 0.0009, 0.0012],
             # "gamma": Float(0.8, 0.999),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
@@ -59,6 +59,9 @@ config = {
             # "max_grad_norm": Float(0.5, 4),
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
+        "env_kwargs": {
+            "reward_clip_mod": [500, 2000, 5000, 10_000]
+        }
     },
 
     # """
@@ -73,11 +76,11 @@ config = {
         "learner_kwargs": {
             "policy": "MlpPolicy",
             "stats_window_size": 100,
-            "learning_rate": 0.0005,
+            "learning_rate": 0.00126,
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.9,
+            "gamma": 0.88,
             "gae_lambda": 0.8,
             "clip_range": 0.4,
             "normalize_advantage": True,
@@ -92,6 +95,7 @@ config = {
             "vcmienv_loglevel": "WARN",
             "consecutive_error_reward_factor": -1,  # not used with MPPO
             "sparse_info": True,
+            "reward_clip_mod": 5000,
 
             # Dynamically changed during training
             # "mapname": "ai/generated/A01.vmap",

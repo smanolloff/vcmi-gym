@@ -60,6 +60,7 @@ class VcmiEnv(gym.Env):
         defender_model=None,  # MPPO zip model (if defender=MMAI_MODEL)
         sparse_info=False,
         actions_log_file=None,  # DEBUG
+        reward_clip_mod=10000,  # clip at +/- this value
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
@@ -107,6 +108,7 @@ class VcmiEnv(gym.Env):
         self.attacker_model = attacker_model
         self.defender_model = defender_model
         self.actions_log_file = actions_log_file
+        self.reward_clip_mod = reward_clip_mod
         # </params>
 
         # required to init vars
@@ -122,8 +124,10 @@ class VcmiEnv(gym.Env):
             self.actfile.write(f"{action}\n")
 
         res = self.connector.act(action)
+        assert res.errmask == 0
+
         analysis = self.analyzer.analyze(action, res)
-        rew = VcmiEnv.calc_reward(analysis)
+        rew = VcmiEnv.calc_reward(analysis, self.reward_clip_mod)
         obs = res.state
         term = res.is_battle_over
         trunc = self.analyzer.actions_count >= self.max_steps
@@ -172,7 +176,9 @@ class VcmiEnv(gym.Env):
 
     def close(self):
         self.logger.info("Closing env...")
-        self.actfile.close()
+        if self.actfile:
+            self.actfile.close()
+
         self.connector.shutdown()
         self.logger.info("Env closed")
         for handler in self.logger.handlers:
@@ -239,5 +245,6 @@ class VcmiEnv(gym.Env):
         return dict(info)
 
     @staticmethod
-    def calc_reward(analysis):
-        return analysis.net_value + 5 * analysis.net_dmg
+    def calc_reward(analysis, clip_mod):
+        rew = analysis.net_value + 5 * analysis.net_dmg
+        return max(min(rew, clip_mod), -clip_mod)

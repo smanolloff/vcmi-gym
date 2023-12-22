@@ -294,7 +294,7 @@ class PPOTrainer(ray.tune.Trainable):
                 assert key in cfg and isinstance(cfg[key], dict)
                 self._fix_floats(cfg[key], value)
             else:
-                if key == "n_epochs" or key == "n_steps":
+                if key in ["n_epochs", "n_steps", "reward_clip_mod"]:
                     cfg[key] = int(cfg[key])
                 else:
                     cfg[key] = float(cfg[key])
