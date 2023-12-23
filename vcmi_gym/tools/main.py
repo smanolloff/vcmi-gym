@@ -73,14 +73,17 @@ def run(action, cfg, rest=[]):
                 }
             )
 
+            # env_kwargs should be logged
+            all_cfg = dict(run_config, env_kwargs=env_kwargs)
+
             run_config["config_log"] = {}
             for (k, v) in cfg.get("logparams", {}).items():
-                run_config["config_log"][k] = common.extract_dict_value_by_path(run_config, v)
+                run_config["config_log"][k] = common.extract_dict_value_by_path(all_cfg, v)
 
             print("Starting run %s with seed %s" % (run_id, seed))
 
             os.environ["WANDB_SILENT"] = "true"
-            common.wandb_init(run_id, group_id, run_config)
+            common.wandb_init(run_id, group_id, all_cfg)
 
             run_duration, run_values = common.measure(
                 train_sb3, dict(run_config, learner_cls=learner_cls)

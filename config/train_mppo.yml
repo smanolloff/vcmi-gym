@@ -14,34 +14,37 @@ rollouts_per_log: 10
 n_envs: 1
 
 logparams:
-  "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
+  # "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
+  "config/features_extractor": "learner_kwargs.policy_kwargs.features_extractor_class_name"
+  # "config/optimizer": "learner_kwargs.policy_kwargs.optimizer_class_name"
+  "config/rew_clip": "env_kwargs.reward_clip_mod"
 
 learner_kwargs:
   n_steps: 512
   batch_size: 64
   n_epochs: 10
-  gamma: 0.88
+  gamma: 0.85
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0.01
-  vf_coef: 0.5
-  max_grad_norm: 2
+  ent_coef: 0.007
+  vf_coef: 0.2
+  max_grad_norm: 4
   policy: "CnnPolicy"
   policy_kwargs:
     net_arch: []
-    features_extractor_class_name: "VcmiCNN2"  # loaded from vcmi_gym
+    features_extractor_class_name: "VcmiCNN"  # loaded from vcmi_gym
     features_extractor_kwargs:
       features_dim: 1024
-    optimizer_class_name: "AdamW"  # loaded from torch.optim
-    optimizer_kwargs:
-      weight_decay: 0.001
+    # optimizer_class_name: "Adam"  # loaded from torch.optim
+    # optimizer_kwargs:
+    #   weight_decay: 0
 
 # Examples:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.00126"
+learner_lr_schedule: "const_0.001"
 
 map_pool_offset_idx: 0
 map_pool: [
@@ -70,5 +73,7 @@ env_kwargs:
   __include__: "config/env.yml"
   mapname: "ai/generated/A01.vmap"
   consecutive_error_reward_factor: -1
+  reward_clip_mod: ~
+
 env_wrappers: []
 

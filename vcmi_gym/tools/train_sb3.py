@@ -218,6 +218,7 @@ def train_sb3(
         )
 
         wandb.log(config_log, commit=False)
+        wandb.watch(model.policy, log="all")
 
         metric_log = dict((v, 0) for v in InfoDict.SCALAR_VALUES)
         metric_log["rollout/ep_rew_mean"] = 0
