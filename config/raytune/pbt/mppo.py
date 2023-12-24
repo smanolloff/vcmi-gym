@@ -9,7 +9,7 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231223_145426/6937a_00005/checkpoint_000000/model.zip",  # noqa: E501
+    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231218_191816/6fe74_00005/checkpoint_000007/model.zip",  # noqa: E501
     "initial_checkpoint": None,
 
     # Perturb every N iterations
@@ -49,19 +49,16 @@ config = {
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            # "learning_rate": [0.0001, 0.0003, 0.0006, 0.0009, 0.0012],
-            "gamma": Float(0.8, 0.999),
+            # "learning_rate": Float(0.0001, 0.006),
+            # "gamma": Float(0.8, 0.999),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
             # "clip_range": Float(0.1, 0.5),
-            # "vf_coef": Float(0.1, 1.0),
-            # "max_grad_norm": Float(0.5, 4),
+            "vf_coef": Float(0.1, 1.0),
+            "max_grad_norm": Float(0.5, 4),
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
-        # "env_kwargs": {
-        #     "reward_clip_mod": [2000, 5000, 10_000]
-        # }
     },
 
     # """
@@ -80,13 +77,13 @@ config = {
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.88,
+            "gamma": 0.95,
             "gae_lambda": 0.8,
             "clip_range": 0.4,
             "normalize_advantage": True,
             "ent_coef": 0.007,
-            "vf_coef": 0.5,
-            "max_grad_norm": 2,
+            "vf_coef": 0.45,
+            "max_grad_norm": 4,
         },
         "env_kwargs": {
             "max_steps": 1000,  # not used with MPPO
@@ -95,13 +92,11 @@ config = {
             "vcmienv_loglevel": "WARN",
             "consecutive_error_reward_factor": -1,  # not used with MPPO
             "sparse_info": True,
-            "reward_clip_mod": 0,
 
             # Dynamically changed during training
             # "mapname": "ai/generated/A01.vmap",
             # "attacker": "MMAI_USER",
             # "defender": "StupidAI"
-            # "actions_log_file": "/tmp/8fac9_00001-actions.log",
         },
         "map_pool_offset_idx": 0,
         "map_pool": [
