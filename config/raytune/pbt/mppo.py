@@ -5,11 +5,11 @@ from ray.tune.search.sample import Integer, Float
 config = {
     "wandb_project": "vcmi",
     "results_dir": "data",
-    "population_size": 3,
+    "population_size": 6,
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231222_004948/3f63d_00004/checkpoint_000000/model.zip",  # noqa: E501
+    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231223_145426/6937a_00005/checkpoint_000000/model.zip",  # noqa: E501
     "initial_checkpoint": None,
 
     # Perturb every N iterations
@@ -25,7 +25,7 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 1000,
+    "rollouts_per_iteration": 2000,
 
     #
     # Number of logs per iteration
@@ -43,14 +43,14 @@ config = {
     # 2. Equal number of logs per role:
     #       rollouts_per_role % (rollouts_per_iteration/logs_per_iteration) == 0
     #
-    "rollouts_per_role": 50,
+    "rollouts_per_role": 100,
 
     "maps_per_iteration": 5,
 
     "hyperparam_mutations": {
         "learner_kwargs": {
             # "learning_rate": [0.0001, 0.0003, 0.0006, 0.0009, 0.0012],
-            # "gamma": Float(0.8, 0.999),
+            "gamma": Float(0.8, 0.999),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
@@ -59,9 +59,9 @@ config = {
             # "max_grad_norm": Float(0.5, 4),
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
-        "env_kwargs": {
-            "reward_clip_mod": [2000, 5000, 10_000]
-        }
+        # "env_kwargs": {
+        #     "reward_clip_mod": [2000, 5000, 10_000]
+        # }
     },
 
     # """
@@ -84,7 +84,7 @@ config = {
             "gae_lambda": 0.8,
             "clip_range": 0.4,
             "normalize_advantage": True,
-            "ent_coef": 0.01,
+            "ent_coef": 0.007,
             "vf_coef": 0.5,
             "max_grad_norm": 2,
         },
@@ -95,7 +95,7 @@ config = {
             "vcmienv_loglevel": "WARN",
             "consecutive_error_reward_factor": -1,  # not used with MPPO
             "sparse_info": True,
-            "reward_clip_mod": 5000,
+            "reward_clip_mod": 0,
 
             # Dynamically changed during training
             # "mapname": "ai/generated/A01.vmap",

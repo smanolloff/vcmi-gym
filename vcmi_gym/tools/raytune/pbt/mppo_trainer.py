@@ -1,3 +1,4 @@
+import torch.optim
 from sb3_contrib import MaskablePPO
 from .ppo_trainer import PPOTrainer
 
@@ -14,7 +15,9 @@ class MPPOTrainer(PPOTrainer):
             policy_kwargs=dict(
                 net_arch=[],
                 features_extractor_class=VcmiCNN,
-                features_extractor_kwargs=dict(features_dim=1024)
+                features_extractor_kwargs=dict(features_dim=1024),
+                optimizer_class=torch.optim.AdamW,
+                optimizer_kwargs=dict(weight_decay=0.01)
             ),
         )
 
@@ -27,7 +30,9 @@ class MPPOTrainer(PPOTrainer):
             policy_kwargs=dict(
                 net_arch=[],
                 features_extractor_class=VcmiCNN,
-                features_extractor_kwargs=dict(features_dim=1024)
+                features_extractor_kwargs=dict(features_dim=1024),
+                optimizer_class=torch.optim.AdamW,
+                optimizer_kwargs=dict(weight_decay=0.01)
             ),
         )
 
