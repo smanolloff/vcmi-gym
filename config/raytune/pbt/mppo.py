@@ -55,9 +55,17 @@ config = {
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
             # "clip_range": Float(0.1, 0.5),
-            "vf_coef": Float(0.1, 1.0),
-            "max_grad_norm": Float(0.5, 4),
+            # "vf_coef": Float(0.1, 1.0),
+            # "max_grad_norm": Float(0.5, 4),
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
+            "policy_kwargs": {
+                "optimizer_kwargs": {
+                    "eps": [1e-7, 5e-6, 1e-6, 5e-5, 1e-5, 5e-4, 1e-4, 5e-3, 1e-3],
+                    # "eps": Float(1e-7, 1e-3),
+                    "weight_decay": [1e-4, 3e-4, 7e-4, 1e-3, 3e-3, 7e-3, 1e-2, 3e-2, 7e-2]
+                }
+            }
+
         },
     },
 
@@ -82,8 +90,20 @@ config = {
             "clip_range": 0.4,
             "normalize_advantage": True,
             "ent_coef": 0.007,
-            "vf_coef": 0.45,
-            "max_grad_norm": 4,
+            "vf_coef": 0.6,
+            "max_grad_norm": 2.5,
+            "policy_kwargs": {
+                "net_arch": [],
+                "features_extractor_class_name": "VcmiCNN",   # imported from vcmi_gym
+                "features_extractor_kwargs": {
+                    "features_dim": 1024
+                },
+                "optimizer_class_name": "AdamW",  # imported from torch.optim
+                "optimizer_kwargs": {
+                    "eps": 1e-5,
+                    "weight_decay": 0
+                }
+            }
         },
         "env_kwargs": {
             "max_steps": 1000,  # not used with MPPO

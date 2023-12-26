@@ -7,11 +7,14 @@ from stable_baselines3.common.env_util import make_vec_env
 import ray.tune
 import ray.train
 import wandb
+import torch.optim
 from datetime import datetime
 
 from ..sb3_callback import SB3Callback
 from ..wandb_init import wandb_init
-from .... import InfoDict
+# from .... import InfoDict
+import vcmi_gym
+from vcmi_gym import InfoDict
 
 DEBUG = True
 
@@ -214,6 +217,22 @@ class PPOTrainer(ray.tune.Trainable):
             monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
         )
 
+    def _process_learner_kwargs(self, learner_kwargs):
+        alg_kwargs = copy.deepcopy(learner_kwargs)
+        policy_kwargs = alg_kwargs.get("policy_kwargs", None)
+        if policy_kwargs:
+            fecn = policy_kwargs.get("features_extractor_class_name", None)
+            if fecn:
+                del policy_kwargs["features_extractor_class_name"]
+                policy_kwargs["features_extractor_class"] = getattr(vcmi_gym, fecn)
+
+            ocn = policy_kwargs.get("optimizer_class_name", None)
+            if ocn:
+                del policy_kwargs["optimizer_class_name"]
+                policy_kwargs["optimizer_class"] = getattr(torch.optim, ocn)
+
+        return alg_kwargs
+
     def _model_internal_load(self, f, venv, **learner_kwargs):
         return PPO.load(f, env=venv, **learner_kwargs)
 
@@ -229,11 +248,13 @@ class PPOTrainer(ray.tune.Trainable):
 
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
 
+        learner_kwargs = self._process_learner_kwargs(self.cfg["learner_kwargs"])
+
         if self.initial_checkpoint:
             self.log("Load %s (initial)" % self.initial_checkpoint)
-            return self._model_internal_load(self.initial_checkpoint, venv, **self.cfg["learner_kwargs"])
+            return self._model_internal_load(self.initial_checkpoint, venv, **learner_kwargs)
 
-        return self._model_internal_init(venv, **self.cfg["learner_kwargs"])
+        return self._model_internal_init(venv, **learner_kwargs)
 
     def _model_checkpoint_load(self, f):
         venv = self._venv_init(self.initial_side)
@@ -248,7 +269,8 @@ class PPOTrainer(ray.tune.Trainable):
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         self.log("Load %s (origin: %d)" % (relpath, origin))
 
-        return self._model_internal_load(f, venv, **self.cfg["learner_kwargs"])
+        learner_kwargs = self._process_learner_kwargs(self.cfg["learner_kwargs"])
+        return self._model_internal_load(f, venv, **learner_kwargs)
 
     def _get_leaf_hyperparam_keys(self, data):
         leaf_keys = []
