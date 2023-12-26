@@ -220,6 +220,7 @@ class PPOTrainer(ray.tune.Trainable):
     def _process_learner_kwargs(self, learner_kwargs):
         alg_kwargs = copy.deepcopy(learner_kwargs)
         policy_kwargs = alg_kwargs.get("policy_kwargs", None)
+
         if policy_kwargs:
             fecn = policy_kwargs.get("features_extractor_class_name", None)
             if fecn:
@@ -232,6 +233,34 @@ class PPOTrainer(ray.tune.Trainable):
                 policy_kwargs["optimizer_class"] = getattr(torch.optim, ocn)
 
         return alg_kwargs
+
+    # TODO:
+    # Optimizer is configured separately. Example:
+    # "optimizer": {
+    #   "class_name": "AdamW",
+    #   "weight_decay": 0.01
+    # }
+    #
+    # This is because if "optimizer_class" and "optimizer_kwargs" are given
+    # directly in "policy_kwars", SB3 does not allow to load a model
+    # with a different optimizer setup
+    # => always init SB3 models with "no" optimizer kwargs
+    # This means saving them will *not* store the REAL optimizer config
+    # and they will always be loaded with the default one
+    # => it's up to us to restore it after loading
+    # <<OR>> (better):
+    # init model with "optimizer_class" and "optimizer_kwargs" so theu are saved
+    # but load model with "custom_objects" kwarg to load
+    # TODO: See SB3's `json_to_data()` how this "custom_objects" is used
+
+    # def _process_optimizer_cfg(self, optimizer_cfg):
+    #     if not optimizer_cfg:
+    #         return {}
+    #
+    #     return {
+    #         "optimizer_class": getattr(torch.optim, optimizer_cfg["class_name"]),
+    #         "optimizer_kwargs": copy.deepcopy(optimizer_cfg["kwargs"])
+    #     }
 
     def _model_internal_load(self, f, venv, **learner_kwargs):
         return PPO.load(f, env=venv, **learner_kwargs)
@@ -301,6 +330,9 @@ class PPOTrainer(ray.tune.Trainable):
                 params[f"config/{name}"] = getattr(self.model, name)
             elif hasattr(env, name):
                 params[f"config/{name}"] = getattr(env, name)
+            elif name in self.model.policy.optimizer.param_groups[0]:
+                value = self.model.policy.optimizer.param_groups[0][name]
+                params[f"config/{name}"] = value
             else:
                 raise Exception("Could not find value for %s" % name)
 

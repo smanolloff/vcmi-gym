@@ -58,14 +58,6 @@ config = {
             # "vf_coef": Float(0.1, 1.0),
             # "max_grad_norm": Float(0.5, 4),
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
-            "policy_kwargs": {
-                "optimizer_kwargs": {
-                    "eps": [1e-7, 5e-6, 1e-6, 5e-5, 1e-5, 5e-4, 1e-4, 5e-3, 1e-3],
-                    # "eps": Float(1e-7, 1e-3),
-                    "weight_decay": [1e-4, 3e-4, 7e-4, 1e-3, 3e-3, 7e-3, 1e-2, 3e-2, 7e-2]
-                }
-            }
-
         },
     },
 
@@ -92,9 +84,12 @@ config = {
             "ent_coef": 0.007,
             "vf_coef": 0.6,
             "max_grad_norm": 2.5,
+            # "use_sde": False,  # n/a in MaskablePPO
+
+            # XXX: those are NOT perturbable
             "policy_kwargs": {
                 "net_arch": [],
-                "features_extractor_class_name": "VcmiCNN",   # imported from vcmi_gym
+                "features_extractor_class_name": "VcmiCNN2",   # imported from vcmi_gym
                 "features_extractor_kwargs": {
                     "features_dim": 1024
                 },
