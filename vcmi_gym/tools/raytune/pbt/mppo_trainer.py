@@ -17,7 +17,7 @@ class MPPOTrainer(PPOTrainer):
                 features_extractor_class=VcmiCNN,
                 features_extractor_kwargs=dict(features_dim=1024),
                 optimizer_class=torch.optim.Adam,
-                optimizer_kwargs=dict(weight_decay=0.01)
+                optimizer_kwargs=dict(weight_decay=0, eps=1e-5)
             ),
         )
 
@@ -32,7 +32,7 @@ class MPPOTrainer(PPOTrainer):
                 features_extractor_class=VcmiCNN,
                 features_extractor_kwargs=dict(features_dim=1024),
                 optimizer_class=torch.optim.Adam,
-                optimizer_kwargs=dict(weight_decay=0.01)
+                optimizer_kwargs=dict(weight_decay=0, eps=1e-5)
             ),
         )
 
