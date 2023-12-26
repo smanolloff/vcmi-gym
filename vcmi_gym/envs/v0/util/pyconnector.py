@@ -4,7 +4,6 @@ import numpy as np
 import os
 import signal
 import atexit
-from datetime import datetime
 
 from . import log
 

@@ -71,7 +71,6 @@ config = {
 
     "all_params": {
         "learner_kwargs": {
-            "policy": "MlpPolicy",
             "stats_window_size": 100,
             "learning_rate": 0.00126,
             "n_steps": 512,
@@ -85,19 +84,19 @@ config = {
             "vf_coef": 0.6,
             "max_grad_norm": 2.5,
             # "use_sde": False,  # n/a in MaskablePPO
-
-            # XXX: those are NOT perturbable
-            "policy_kwargs": {
-                "net_arch": [],
-                "features_extractor_class_name": "VcmiCNN2",   # imported from vcmi_gym
-                "features_extractor_kwargs": {
-                    "features_dim": 1024
-                },
-                "optimizer_class_name": "AdamW",  # imported from torch.optim
-                "optimizer_kwargs": {
-                    "eps": 1e-5,
-                    "weight_decay": 0
-                }
+        },
+        "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0}},
+        "net_arch": [],
+        "features_extractor": {
+            "class_name": "VcmiNN",
+            "kwargs": {
+                "output_dim": 1024,
+                "activation": "ReLU",
+                "layers": [
+                    {"_": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},
+                    {"_": "Conv2d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
+                    {"_": "Conv2d", "in_channels": 64, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
+                ]
             }
         },
         "env_kwargs": {
@@ -117,24 +116,24 @@ config = {
         "map_pool": [
             "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
             "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
-            "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
-            "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
-            "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",
-            "A26.vmap", "A27.vmap", "A28.vmap", "A29.vmap", "A30.vmap",
-            "A31.vmap", "A32.vmap", "A33.vmap", "A34.vmap", "A35.vmap",
-            "A36.vmap", "A37.vmap", "A38.vmap", "A39.vmap", "A40.vmap",
-            "A41.vmap", "A42.vmap", "A43.vmap", "A44.vmap", "A45.vmap",
-            "A46.vmap", "A47.vmap", "A48.vmap", "A49.vmap", "A50.vmap",
-            "A51.vmap", "A52.vmap", "A53.vmap", "A54.vmap", "A55.vmap",
-            "A56.vmap", "A57.vmap", "A58.vmap", "A59.vmap", "A60.vmap",
-            "A61.vmap", "A62.vmap", "A63.vmap", "A64.vmap", "A65.vmap",
-            "A66.vmap", "A67.vmap", "A68.vmap", "A69.vmap", "A70.vmap",
-            "A71.vmap", "A72.vmap", "A73.vmap", "A74.vmap", "A75.vmap",
-            "A76.vmap", "A77.vmap", "A78.vmap", "A79.vmap", "A80.vmap",
-            "A81.vmap", "A82.vmap", "A83.vmap", "A84.vmap", "A85.vmap",
-            "A86.vmap", "A87.vmap", "A88.vmap", "A89.vmap", "A90.vmap",
-            "A91.vmap", "A92.vmap", "A93.vmap", "A94.vmap", "A95.vmap",
-            "A96.vmap", "A97.vmap", "A98.vmap", "A99.vmap"
+            # "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
+            # "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
+            # "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",
+            # "A26.vmap", "A27.vmap", "A28.vmap", "A29.vmap", "A30.vmap",
+            # "A31.vmap", "A32.vmap", "A33.vmap", "A34.vmap", "A35.vmap",
+            # "A36.vmap", "A37.vmap", "A38.vmap", "A39.vmap", "A40.vmap",
+            # "A41.vmap", "A42.vmap", "A43.vmap", "A44.vmap", "A45.vmap",
+            # "A46.vmap", "A47.vmap", "A48.vmap", "A49.vmap", "A50.vmap",
+            # "A51.vmap", "A52.vmap", "A53.vmap", "A54.vmap", "A55.vmap",
+            # "A56.vmap", "A57.vmap", "A58.vmap", "A59.vmap", "A60.vmap",
+            # "A61.vmap", "A62.vmap", "A63.vmap", "A64.vmap", "A65.vmap",
+            # "A66.vmap", "A67.vmap", "A68.vmap", "A69.vmap", "A70.vmap",
+            # "A71.vmap", "A72.vmap", "A73.vmap", "A74.vmap", "A75.vmap",
+            # "A76.vmap", "A77.vmap", "A78.vmap", "A79.vmap", "A80.vmap",
+            # "A81.vmap", "A82.vmap", "A83.vmap", "A84.vmap", "A85.vmap",
+            # "A86.vmap", "A87.vmap", "A88.vmap", "A89.vmap", "A90.vmap",
+            # "A91.vmap", "A92.vmap", "A93.vmap", "A94.vmap", "A95.vmap",
+            # "A96.vmap", "A97.vmap", "A98.vmap", "A99.vmap"
         ]
     }
 }

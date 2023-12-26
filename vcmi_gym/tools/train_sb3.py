@@ -225,6 +225,8 @@ def train_sb3(
         metric_log["rollout/ep_len_mean"] = 0
         model.logger.record("config", logger.HParam(config_log, metric_log))
 
+        steps_per_rollout = model.train_freq if learner_cls == "MQRDQN" else model.n_steps
+
         while rollouts < rollouts_total:
             print(".", end="", flush=True)
             wandb.log({"iterations": rollouts // rollouts_per_role}, commit=False)
@@ -236,7 +238,7 @@ def train_sb3(
                 model.env.reset()
 
             model.learn(
-                total_timesteps=rollouts_per_role * model.n_steps,
+                total_timesteps=rollouts_per_role * steps_per_rollout,
                 log_interval=rollouts_per_log,
                 reset_num_timesteps=reset_num_timesteps,
                 progress_bar=progress_bar,

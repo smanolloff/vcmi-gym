@@ -6,6 +6,7 @@ DEBUG = True
 
 class MPPOTrainer(PPOTrainer):
     def _model_internal_init(self, venv, **learner_kwargs):
+        print("MaskablePPO(%s)" % learner_kwargs)
         return MaskablePPO(env=venv, **learner_kwargs)
 
     def _model_internal_load(self, f, venv, **learner_kwargs):

@@ -1,35 +1,71 @@
 ---
 seed: ~
 run_id: ~
-out_dir_template: "data/MQRDQN-{run_id}"
+group_id: ~
+model_load_file: ~
+out_dir_template: "data/MQRDQN-{group_id}/{run_id}"
 log_tensorboard: true
-progress_bar: true
-# progress_bar: false
-total_timesteps: 1_000_000
-n_checkpoints: 10
+progress_bar: false  # too annoying and noisy
+# total_timesteps: !!float 100000
+rollouts_total: 0
+rollouts_per_map: 200
+rollouts_per_role: 100   # 1 rollout = train_freq!
+rollouts_per_log: 10
+n_envs: 1
 
-vcmi_cnn_kwargs: ~  # use "~" for generic MlpPolicy
-# vcmi_cnn_kwargs:
-#   # TODO: experiment a lot with those. Try 16, 512, etc.
-#   features_dim: 1024
+logparams:
+  "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
+  "config/features_extractor": "learner_kwargs.policy_kwargs.features_extractor_class_name"
+  "config/optimizer": "learner_kwargs.policy_kwargs.optimizer_class_name"
+  "config/rew_clip": "env_kwargs.reward_clip_mod"
 
 learner_kwargs:
-  policy: "MlpPolicy"
   buffer_size: 400_000
   learning_starts: 10_000
-  # buffer_size: 10
-  # learning_starts: 0
-
   batch_size: 32
   tau: 1.0
-  gamma: 0.995
+  gamma: 0.99
   train_freq: 4
   gradient_steps: 1
-  target_update_interval: 10000
+  target_update_interval: 4000
   exploration_fraction: 0.5
-  exploration_initial_eps: 0.1
-  exploration_final_eps: 0
-learner_lr_schedule: "const_0.003"
+  exploration_initial_eps: 0.2
+  exploration_final_eps: 0.005
+  policy_kwargs:
+    net_arch: []
+    features_extractor_class_name: "VcmiCNN"  # loaded from vcmi_gym
+    features_extractor_kwargs:
+      features_dim: 1024
+    optimizer_class_name: "Adam"  # loaded from torch.optim
+    optimizer_kwargs:
+      weight_decay: 0
+learner_lr_schedule: "lin_decay_0.01_0.003_0.75"
+
+map_pool_offset_idx: 0
+map_pool: [
+    "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
+    "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
+    "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
+    "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
+    "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",
+    "A26.vmap", "A27.vmap", "A28.vmap", "A29.vmap", "A30.vmap",
+    "A31.vmap", "A32.vmap", "A33.vmap", "A34.vmap", "A35.vmap",
+    "A36.vmap", "A37.vmap", "A38.vmap", "A39.vmap", "A40.vmap",
+    "A41.vmap", "A42.vmap", "A43.vmap", "A44.vmap", "A45.vmap",
+    "A46.vmap", "A47.vmap", "A48.vmap", "A49.vmap", "A50.vmap",
+    "A51.vmap", "A52.vmap", "A53.vmap", "A54.vmap", "A55.vmap",
+    "A56.vmap", "A57.vmap", "A58.vmap", "A59.vmap", "A60.vmap",
+    "A61.vmap", "A62.vmap", "A63.vmap", "A64.vmap", "A65.vmap",
+    "A66.vmap", "A67.vmap", "A68.vmap", "A69.vmap", "A70.vmap",
+    "A71.vmap", "A72.vmap", "A73.vmap", "A74.vmap", "A75.vmap",
+    "A76.vmap", "A77.vmap", "A78.vmap", "A79.vmap", "A80.vmap",
+    "A81.vmap", "A82.vmap", "A83.vmap", "A84.vmap", "A85.vmap",
+    "A86.vmap", "A87.vmap", "A88.vmap", "A89.vmap", "A90.vmap",
+    "A91.vmap", "A92.vmap", "A93.vmap", "A94.vmap", "A95.vmap",
+    "A96.vmap", "A97.vmap", "A98.vmap", "A99.vmap"]
+
 env_kwargs:
   __include__: "config/env.yml"
-env_wrappers: []
+  mapname: "ai/generated/A01.vmap"
+  consecutive_error_reward_factor: -1
+  reward_clip_mod: ~

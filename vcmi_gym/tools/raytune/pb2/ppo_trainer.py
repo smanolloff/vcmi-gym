@@ -217,50 +217,50 @@ class PPOTrainer(ray.tune.Trainable):
             monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
         )
 
-    def _process_learner_kwargs(self, learner_kwargs):
-        alg_kwargs = copy.deepcopy(learner_kwargs)
-        policy_kwargs = alg_kwargs.get("policy_kwargs", None)
-
-        if policy_kwargs:
-            fecn = policy_kwargs.get("features_extractor_class_name", None)
-            if fecn:
-                del policy_kwargs["features_extractor_class_name"]
-                policy_kwargs["features_extractor_class"] = getattr(vcmi_gym, fecn)
-
-            ocn = policy_kwargs.get("optimizer_class_name", None)
-            if ocn:
-                del policy_kwargs["optimizer_class_name"]
-                policy_kwargs["optimizer_class"] = getattr(torch.optim, ocn)
-
-        return alg_kwargs
-
-    # TODO:
-    # Optimizer is configured separately. Example:
-    # "optimizer": {
-    #   "class_name": "AdamW",
-    #   "weight_decay": 0.01
-    # }
-    #
-    # This is because if "optimizer_class" and "optimizer_kwargs" are given
+    # If "optimizer_class" and/or "optimizer_kwargs" are given
     # directly in "policy_kwars", SB3 does not allow to load a model
-    # with a different optimizer setup
-    # => always init SB3 models with "no" optimizer kwargs
-    # This means saving them will *not* store the REAL optimizer config
-    # and they will always be loaded with the default one
-    # => it's up to us to restore it after loading
-    # <<OR>> (better):
-    # init model with "optimizer_class" and "optimizer_kwargs" so theu are saved
-    # but load model with "custom_objects" kwarg to load
-    # TODO: See SB3's `json_to_data()` how this "custom_objects" is used
+    # with a another setup unless explicitly specific in `custom_objects`
+    # => add them to "custom_objects" kwarg at load
+    # If both are blank, "custom_objects" will be {} and whatever was saved
+    # will be loaded.
+    def _policy_kwargs(self, net_arch, features_extractor_cfg, optimizer_cfg):
+        res = {"net_arch": net_arch}
 
-    # def _process_optimizer_cfg(self, optimizer_cfg):
-    #     if not optimizer_cfg:
-    #         return {}
-    #
-    #     return {
-    #         "optimizer_class": getattr(torch.optim, optimizer_cfg["class_name"]),
-    #         "optimizer_kwargs": copy.deepcopy(optimizer_cfg["kwargs"])
-    #     }
+        # Any custom features extractor is assumed to be a VcmiCNN-type policy
+        if features_extractor_cfg:
+            res["features_extractor_class"] = getattr(vcmi_gym, features_extractor_cfg["class_name"])
+            res["features_extractor_kwargs"] = features_extractor_cfg["kwargs"]
+
+        if optimizer_cfg:
+            res["optimizer_class"] = getattr(torch.optim, optimizer_cfg["class_name"])
+            res["optimizer_kwargs"] = optimizer_cfg["kwargs"]
+
+        return res
+
+    def _learner_kwargs_for_init(self):
+        res = copy.deepcopy(self.cfg["learner_kwargs"])
+
+        # "policy" is required by SB3, but redundant
+        res["policy"] = "MlpPolicy"
+        policy_kwargs = self._policy_kwargs(self.cfg["net_arch"], self.cfg["features_extractor"], self.cfg["optimizer"])
+
+        # PPO(...) expects policy_kwargs at the top-level
+        if policy_kwargs:
+            res["policy_kwargs"] = policy_kwargs
+
+        return res
+
+    def _learner_kwargs_for_load(self):
+        # PPO.load() compares the policy_kwargs at the top-level
+        # with the ones stored in the .zip file and will blow up on mismatch.
+        # Passing policy_kwargs under `custom_objects` will allow to
+        # load the model with different policy_kwargs
+        # (errors are thrown if the network arch itself is different though)
+        res = self._learner_kwargs_for_init()
+        if res["policy_kwargs"]:
+            res["custom_objects"] = {"policy_kwargs": res["policy_kwargs"]}
+
+        return res
 
     def _model_internal_load(self, f, venv, **learner_kwargs):
         return PPO.load(f, env=venv, **learner_kwargs)
@@ -277,13 +277,11 @@ class PPOTrainer(ray.tune.Trainable):
 
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
 
-        learner_kwargs = self._process_learner_kwargs(self.cfg["learner_kwargs"])
-
         if self.initial_checkpoint:
             self.log("Load %s (initial)" % self.initial_checkpoint)
-            return self._model_internal_load(self.initial_checkpoint, venv, **learner_kwargs)
+            return self._model_internal_load(self.initial_checkpoint, venv, **self._learner_kwargs_for_load())
 
-        return self._model_internal_init(venv, **learner_kwargs)
+        return self._model_internal_init(venv, **self._learner_kwargs_for_init())
 
     def _model_checkpoint_load(self, f):
         venv = self._venv_init(self.initial_side)
@@ -298,8 +296,7 @@ class PPOTrainer(ray.tune.Trainable):
         wandb.log({"trial/checkpoint_origin": origin}, commit=False)
         self.log("Load %s (origin: %d)" % (relpath, origin))
 
-        learner_kwargs = self._process_learner_kwargs(self.cfg["learner_kwargs"])
-        return self._model_internal_load(f, venv, **learner_kwargs)
+        return self._model_internal_load(f, venv, **self._learner_kwargs_for_load())
 
     def _get_leaf_hyperparam_keys(self, data):
         leaf_keys = []

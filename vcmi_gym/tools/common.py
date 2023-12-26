@@ -1,4 +1,5 @@
 import math
+import traceback
 import re
 import os
 import yaml
@@ -124,6 +125,7 @@ def expand_env_kwargs(env_kwargs):
         with open(env_include_cfg, "r") as f:
             env_kwargs = yaml.safe_load(f) | env_kwargs
 
+    print(env_kwargs)
     return env_kwargs
 
 
@@ -214,4 +216,4 @@ def extract_dict_value_by_path(data_dict, path):
             current = current[key]
         return current
     except (KeyError, TypeError):
-        raise Exception("Value not found by path: %s" % path)
+        raise Exception("Value not found by path: %s (%s)" % (path, traceback.format_exc()))
