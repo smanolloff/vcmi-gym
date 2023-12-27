@@ -50,7 +50,7 @@ config = {
     "hyperparam_mutations": {
         "learner_kwargs": {
             # "learning_rate": Float(0.0001, 0.006),
-            # "gamma": Float(0.8, 0.999),
+            "gamma": Float(0.8, 0.95),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
@@ -76,7 +76,7 @@ config = {
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.95,
+            "gamma": 0.8,
             "gae_lambda": 0.8,
             "clip_range": 0.4,
             "normalize_advantage": True,
