@@ -1,8 +1,5 @@
 from sb3_contrib import MaskablePPO
-
-# TODO: update sys.path in loader.cpp to allow importing connexport
-# print(sys.path)
-from build import connexport
+import connexport
 
 
 # XXX: maybe import VcmiEnv and load offset from there?

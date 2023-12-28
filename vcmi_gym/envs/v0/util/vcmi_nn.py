@@ -39,9 +39,9 @@ class VcmiNN(BaseFeaturesExtractor):
     # Example config
     #       VcmiNN(
     #           layers=[
-    #               {"_": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},
-    #               {"_": "Conv2d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
-    #               {"_": "Conv2d", "in_channels": 64, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
+    #               {"t": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},
+    #               {"t": "Conv2d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
+    #               {"t": "Conv2d", "in_channels": 64, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
     #           ],
     #           activation="ReLU",
     #           output_dim=1024,
@@ -78,7 +78,8 @@ class VcmiNN(BaseFeaturesExtractor):
 
         self.network = nn.Sequential()
         for (i, layer) in enumerate(layers):
-            layer_cls = getattr(nn, layer.pop("_"))
+            # fallback to Conv2d for old .zip models ("_" key not stored)
+            layer_cls = getattr(nn, layer.pop("t", "Conv2d"))
             layer_kwargs = dict(layer)  # copy
 
             if i == 0:
