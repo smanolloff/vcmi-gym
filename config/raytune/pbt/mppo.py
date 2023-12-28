@@ -9,8 +9,8 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231218_191816/6fe74_00005/checkpoint_000007/model.zip",  # noqa: E501
-    "initial_checkpoint": None,
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231227_001755/9f59b_00003/checkpoint_000001/model.zip",  # noqa: E501
+    # "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -50,7 +50,7 @@ config = {
     "hyperparam_mutations": {
         "learner_kwargs": {
             # "learning_rate": Float(0.0001, 0.006),
-            "gamma": Float(0.8, 0.95),
+            # "gamma": Float(0.83, 0.87),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
             # "gae_lambda": Float(0.8, 1.0),
@@ -59,6 +59,7 @@ config = {
             # "max_grad_norm": Float(0.5, 4),
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
+        "optimizer": {"kwargs": {"weight_decay": [0, 0.01, 0.1]}},
     },
 
     # """
@@ -76,7 +77,7 @@ config = {
             "n_steps": 512,
             "batch_size": 64,
             "n_epochs": 10,
-            "gamma": 0.8,
+            "gamma": 0.8425,
             "gae_lambda": 0.8,
             "clip_range": 0.4,
             "normalize_advantage": True,
@@ -85,7 +86,7 @@ config = {
             "max_grad_norm": 2.5,
             # "use_sde": False,  # n/a in MaskablePPO
         },
-        "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0}},
+        "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0.1}},
         "net_arch": [],
         "features_extractor": {
             "class_name": "VcmiNN",
