@@ -9,7 +9,7 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231227_001755/9f59b_00003/checkpoint_000001/model.zip",  # noqa: E501
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231229_095917/2c08f_00000/checkpoint_000000/model.zip",  # noqa: E501
     # "initial_checkpoint": None,
 
     # Perturb every N iterations
@@ -49,7 +49,7 @@ config = {
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            # "learning_rate": Float(0.0001, 0.006),
+            "learning_rate": [0.00001, 0.00003, 0.00007, 0.0001, 0.0003, 0.0007],
             # "gamma": Float(0.83, 0.87),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
@@ -59,7 +59,7 @@ config = {
             # "max_grad_norm": Float(0.5, 4),
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
-        "optimizer": {"kwargs": {"weight_decay": [0, 0.01, 0.1]}},
+        # "optimizer": {"kwargs": {"weight_decay": [0, 0.01, 0.1]}},
     },
 
     # """
@@ -95,8 +95,8 @@ config = {
                 "activation": "ReLU",
                 "layers": [
                     {"t": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},
-                    {"t": "Conv2d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
-                    {"t": "Conv2d", "in_channels": 64, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
+                    # {"t": "Conv2d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
+                    # {"t": "Conv2d", "in_channels": 64, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
                 ]
             }
         },
