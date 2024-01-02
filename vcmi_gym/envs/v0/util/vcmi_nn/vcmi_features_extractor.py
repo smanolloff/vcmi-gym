@@ -3,7 +3,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import torch as th
 from torch import nn
 
-from .pyconnector import (
+from ..pyconnector import (
     STATE_SIZE_X,
     STATE_SIZE_Y,
     STATE_SIZE_Z,
@@ -11,7 +11,7 @@ from .pyconnector import (
 )
 
 
-class VcmiNN(BaseFeaturesExtractor):
+class VcmiFeaturesExtractor(BaseFeaturesExtractor):
     # x1 = hex 1
     # n = hexstate + n-1 stack attributes
 
