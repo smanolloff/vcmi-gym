@@ -233,7 +233,10 @@ class PPOTrainer(ray.tune.Trainable):
         return dict(self.cfg["learner_kwargs"])
 
     def _learner_kwargs_for_init(self):
-        policy_kwargs = {"net_arch": self.cfg["net_arch"]}
+        policy_kwargs = {
+            "net_arch": self.cfg["net_arch"],
+            "activation_fn": getattr(torch.nn, self.cfg["activation"]),
+        }
 
         # Any custom features extractor is assumed to be a VcmiCNN-type policy
         if self.cfg["features_extractor"]:

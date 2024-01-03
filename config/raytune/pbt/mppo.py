@@ -5,12 +5,12 @@ from ray.tune.search.sample import Integer, Float
 config = {
     "wandb_project": "vcmi",
     "results_dir": "data",
-    "population_size": 6,
+    "population_size": 1,
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231229_095917/2c08f_00000/checkpoint_000000/model.zip",  # noqa: E501
-    # "initial_checkpoint": None,
+    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231229_095917/2c08f_00000/checkpoint_000000/model.zip",  # noqa: E501
+    "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -25,7 +25,7 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 2000,
+    "rollouts_per_iteration": 200,
 
     #
     # Number of logs per iteration
@@ -45,11 +45,11 @@ config = {
     #
     "rollouts_per_role": 100,
 
-    "maps_per_iteration": 5,
+    "maps_per_iteration": 1,
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            "learning_rate": [0.00001, 0.00003, 0.00007, 0.0001, 0.0003, 0.0007],
+            "learning_rate": [0.00001],
             # "gamma": Float(0.83, 0.87),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
@@ -86,10 +86,11 @@ config = {
             "max_grad_norm": 2.5,
             # "use_sde": False,  # n/a in MaskablePPO
         },
-        "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0.1}},
-        "net_arch": [],
+        "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0}},
+        "activation": "ReLU",  # XXX: convert to nn.ReLU
+        "net_arch": [64, 64],
         "features_extractor": {
-            "class_name": "VcmiNN",
+            "class_name": "VcmiFeaturesExtractor",
             "kwargs": {
                 "output_dim": 1024,
                 "activation": "ReLU",
@@ -115,8 +116,9 @@ config = {
         },
         "map_pool_offset_idx": 0,
         "map_pool": [
-            "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
-            "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
+            "_T0.vmap",
+            # "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
+            # "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
             # "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
             # "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
             # "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",

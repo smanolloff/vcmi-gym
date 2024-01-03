@@ -4,7 +4,7 @@ from ray.tune.search.sample import Integer, Float
 config = {
     "wandb_project": "vcmi",
     "results_dir": "data",
-    "population_size": 6,
+    "population_size": 2,
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
@@ -47,15 +47,15 @@ config = {
 
     "hyperparam_mutations": {
         "learner_kwargs": {
-            "learning_rate": [0.0001, 0.0006, 0.0012],
-            "gamma": Float(0.8, 0.9),
-            # "batch_size": Integer(32, 256),  # breaks loading from file
-            "n_epochs": Integer(4, 20),
-            "gae_lambda": Float(0.8, 1.0),
-            "clip_range": Float(0.1, 0.5),
-            "vf_coef": Float(0.1, 1.0),
-            "max_grad_norm": Float(0.5, 4),
-            "n_steps": [64, 256, 1024],
+            "learning_rate": [0.00001, 0.0001],
+            # "gamma": Float(0.8, 0.9),
+            # # "batch_size": Integer(32, 256),  # breaks loading from file
+            # "n_epochs": Integer(4, 20),
+            # "gae_lambda": Float(0.8, 1.0),
+            # "clip_range": Float(0.1, 0.5),
+            # "vf_coef": Float(0.1, 1.0),
+            # "max_grad_norm": Float(0.5, 4),
+            # "n_steps": [64, 256, 1024],
         },
         # "optimizer": {"kwargs": {"weight_decay": [0, 0.01, 0.1]}},
     },
@@ -88,7 +88,7 @@ config = {
         "activation": "ReLU",  # XXX: convert to nn.ReLU
         "lstm_hidden_size": 128,
         "enable_critic_lstm": False,
-        "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0.1}},
+        "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0}},
         "features_extractor": {
             "kwargs": {
                 "output_dim": 1024,
@@ -115,7 +115,8 @@ config = {
         },
         "map_pool_offset_idx": 0,
         "map_pool": [
-            "A01.vmap",
+            "_T0.vmap",
+            # "A01.vmap",
             # "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
             # "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
             # "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
