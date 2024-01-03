@@ -15,6 +15,7 @@ from stable_baselines3.common.utils import explained_variance, get_schedule_fn, 
 from stable_baselines3.common.vec_env import VecEnv
 
 from sb3_contrib.common.recurrent.type_aliases import RNNStates
+from sb3_contrib.common.maskable.utils import get_action_masks
 
 from .vcmi_policy import VcmiPolicy
 from .vcmi_rollout_buffer import VcmiRolloutBuffer
@@ -179,26 +180,24 @@ class VcmiPPO(OnPolicyAlgorithm):
         action_masks = None
         rollout_buffer.reset()
 
-        # XXX: SDE
-        # # Sample new weights for the state dependent exploration
-        # if self.use_sde:
-        #     self.policy.reset_noise(env.num_envs)
+        # Sample new weights for the state dependent exploration
+        if self.use_sde:
+            self.policy.reset_noise(env.num_envs)
 
         callback.on_rollout_start()
 
         lstm_states = deepcopy(self._last_lstm_states)
 
         while n_steps < n_rollout_steps:
-            # XXX: SDE
-            # if self.use_sde and self.sde_sample_freq > 0 and n_steps % self.sde_sample_freq == 0:
-            #     # Sample a new noise matrix
-            #     self.policy.reset_noise(env.num_envs)
+            if self.use_sde and self.sde_sample_freq > 0 and n_steps % self.sde_sample_freq == 0:
+                # Sample a new noise matrix
+                self.policy.reset_noise(env.num_envs)
 
             with th.no_grad():
                 # Convert to pytorch tensor or to TensorDict
                 obs_tensor = obs_as_tensor(self._last_obs, self.device)
                 episode_starts = th.tensor(self._last_episode_starts, dtype=th.float32, device=self.device)
-                action_masks = np.array(list(e.unwrapped.action_masks() for e in env.envs))
+                action_masks = get_action_masks(env)
                 actions, values, log_probs, lstm_states = self.policy.forward(
                     obs_tensor,
                     lstm_states,
@@ -323,10 +322,9 @@ class VcmiPPO(OnPolicyAlgorithm):
                 # Convert mask from float to bool
                 mask = rollout_data.mask > 1e-8
 
-                # XXX: SDE
-                # # Re-sample the noise matrix because the log_std has changed
-                # if self.use_sde:
-                #     self.policy.reset_noise(self.batch_size)
+                # Re-sample the noise matrix because the log_std has changed
+                if self.use_sde:
+                    self.policy.reset_noise(self.batch_size)
 
                 values, log_prob, entropy = self.policy.evaluate_actions(
                     rollout_data.observations,
@@ -367,6 +365,7 @@ class VcmiPPO(OnPolicyAlgorithm):
                 # Value loss using the TD(gae_lambda) target
                 # Mask padded sequences
                 value_loss = th.mean(((rollout_data.returns - values_pred) ** 2)[mask])
+
                 value_losses.append(value_loss.item())
 
                 # Entropy loss favor exploration

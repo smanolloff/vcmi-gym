@@ -299,7 +299,7 @@ class VcmiPolicy(ActorCriticPolicy):
         latent_pi = self.mlp_extractor.forward_actor(latent_pi)
         distribution = self._get_action_dist_from_latent(latent_pi)
         distribution.apply_masking(action_masks)
-        return self._get_action_dist_from_latent(latent_pi), lstm_states
+        return distribution, lstm_states
 
     def predict_values(
         self,

@@ -58,7 +58,9 @@ def run(action, cfg, rest=[]):
                     "progress_bar": cfg.get("progress_bar", True),
                     "reset_num_timesteps": cfg.get("reset_num_timesteps", False),
                     "learner_kwargs": cfg.get("learner_kwargs", {}),
-                    "vcmi_cnn_kwargs": cfg.get("vcmi_cnn_kwargs", None),
+                    "net_arch": cfg.get("net_arch", []),
+                    "features_extractor": cfg["features_extractor"],  # required
+                    "optimizer": cfg["optimizer"],
                     "rollouts_total": cfg.get("rollouts_total", 0),
                     "rollouts_per_map": cfg.get("rollouts_per_map", 100),
                     "rollouts_per_role": cfg.get("rollouts_per_role", 10),
