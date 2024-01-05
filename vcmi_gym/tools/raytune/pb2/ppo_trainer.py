@@ -82,6 +82,9 @@ class PPOTrainer(ray.tune.Trainable):
         self.experiment_name = initargs["experiment_name"]
         self.all_params = copy.deepcopy(initargs["config"]["all_params"])
 
+        if not self.rollouts_per_role:
+            self.rollouts_per_role = self.rollouts_per_iteration
+
         self._wandb_init(self.experiment_name, initargs["config"])
 
         self.sb3_callback = SB3Callback()
@@ -91,18 +94,20 @@ class PPOTrainer(ray.tune.Trainable):
         assert self.rollouts_per_iteration % self.logs_per_iteration == 0
         self.log_interval = self.rollouts_per_iteration // self.logs_per_iteration
 
-        # Ensure both roles get equal amount of rollouts
-        assert self.rollouts_per_iteration % self.rollouts_per_role == 0
-        assert (self.rollouts_per_iteration // self.rollouts_per_role) % 2 == 0
-
-        # Ensure there's equal amount of logs for each role
-        assert self.rollouts_per_role % self.log_interval == 0
-
         assert self.rollouts_per_iteration % self.maps_per_iteration == 0
         self.rollouts_per_map = self.rollouts_per_iteration // self.maps_per_iteration
 
-        assert self.rollouts_per_map % self.rollouts_per_role == 0
-        assert (self.rollouts_per_map // self.rollouts_per_role) % 2 == 0
+        if self.rollouts_per_role != self.rollouts_per_iteration:
+            # Ensure both roles get equal amount of rollouts
+            assert self.rollouts_per_iteration % self.rollouts_per_role == 0
+            assert (self.rollouts_per_iteration // self.rollouts_per_role) % 2 == 0
+
+            # Ensure there's equal amount of logs for each role
+            assert self.rollouts_per_role % self.log_interval == 0
+
+            if self.rollouts_per_map:
+                assert self.rollouts_per_map % self.rollouts_per_role == 0
+                assert (self.rollouts_per_map // self.rollouts_per_role) % 2 == 0
 
         assert self.n_envs % 2 == 0
 
@@ -121,7 +126,6 @@ class PPOTrainer(ray.tune.Trainable):
         # regardless of n_envs (=> n_steps != timesteps)
         n_steps_per_rollout = cfg["learner_kwargs"]["n_steps"]
         timesteps_per_rollout = n_steps_per_rollout * self.n_envs
-        assert math.log2(timesteps_per_rollout).is_integer()
 
         self.total_timesteps_per_role = timesteps_per_rollout * self.rollouts_per_role
         return True
@@ -155,6 +159,13 @@ class PPOTrainer(ray.tune.Trainable):
         rollouts_this_iteration = 0
         ep_rew_means = []
         while rollouts_this_iteration < self.rollouts_per_iteration:
+            self.log("CYCLE: rollouts_this_iteration=%d, rollouts_per_iteration=%d, rollouts_per_role=%d, total_timesteps_per_role=%d" % (  # noqa: E501
+                rollouts_this_iteration,
+                self.rollouts_per_iteration,
+                self.rollouts_per_role,
+                self.total_timesteps_per_role
+            ))
+
             if len(ep_rew_means) > 0:
                 self.model.env.close()
                 self.model.env = self._venv_init(rollouts_this_iteration)

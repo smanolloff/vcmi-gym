@@ -1,7 +1,7 @@
 from ray.tune.search.sample import Integer, Float
 
-N_WORKERS = 3
-N_ENVS = 8
+N_WORKERS = 1
+N_ENVS = 48
 
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
@@ -11,8 +11,8 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20231229_095917/2c08f_00000/checkpoint_000000/model.zip",  # noqa: E501
-    "initial_checkpoint": None,
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20240104_025052/50d8a_00001/checkpoint_000003/model.zip",  # noqa: E501
+    # "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -27,13 +27,13 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 2000,
+    "rollouts_per_iteration": 500,
 
     #
     # Number of logs per iteration
     # Requirement is: rollouts_per_iteration % logs_per_iteration == 0
     #
-    "logs_per_iteration": 200,
+    "logs_per_iteration": 50,
 
     #
     # Number of rollouts before swithing roles (attacker/defender)
@@ -45,8 +45,10 @@ config = {
     # 2. Equal number of logs per role:
     #       rollouts_per_role % (rollouts_per_iteration/logs_per_iteration) == 0
     #
-    "rollouts_per_role": 200,
+    # A value of 0 means no role switching
+    "rollouts_per_role": 0,
 
+    # A value of 1 means no map switching
     "maps_per_iteration": 1,
 
     "hyperparam_mutations": {
@@ -73,13 +75,16 @@ config = {
     # """
     "quantile_fraction": 0.25,
 
+    # Requirement:
+    #
+    # n_steps % N_ENVS == 0
     "n_envs": N_ENVS,
 
     "all_params": {
         "learner_kwargs": {
             "stats_window_size": 100,
             "learning_rate": 0.00126,
-            "n_steps": 1024 // N_ENVS,
+            "n_steps": 2048 // N_ENVS,
             "batch_size": 64,
             "n_epochs": 10,
             "gamma": 0.8425,
@@ -93,7 +98,7 @@ config = {
         },
         "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0}},
         "activation": "ReLU",  # XXX: convert to nn.ReLU
-        "net_arch": [256, 256],
+        "net_arch": [],
         # "net_arch": [64, 64],
         # "net_arch": [],
         "features_extractor": {
