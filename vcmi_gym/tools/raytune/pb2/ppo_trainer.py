@@ -1,6 +1,7 @@
 import os
 import copy
 import re
+import math
 import statistics
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
@@ -74,6 +75,7 @@ class PPOTrainer(ray.tune.Trainable):
         self.rollouts_per_iteration = initargs["config"]["rollouts_per_iteration"]
         self.rollouts_per_role = initargs["config"]["rollouts_per_role"]
         self.maps_per_iteration = initargs["config"]["maps_per_iteration"]
+        self.n_envs = initargs["config"]["n_envs"]
         self.logs_per_iteration = initargs["config"]["logs_per_iteration"]
         self.hyperparam_bounds = initargs["config"]["hyperparam_bounds"]
         self.initial_checkpoint = initargs["config"]["initial_checkpoint"]
@@ -102,6 +104,8 @@ class PPOTrainer(ray.tune.Trainable):
         assert self.rollouts_per_map % self.rollouts_per_role == 0
         assert (self.rollouts_per_map // self.rollouts_per_role) % 2 == 0
 
+        assert self.n_envs % 2 == 0
+
         # The model and env should be inited here
         # However, self.iteration is wrong (always 0) in setup()
         # => do lazy init in step()
@@ -112,9 +116,14 @@ class PPOTrainer(ray.tune.Trainable):
     def reset_config(self, cfg):
         cfg = deepmerge(copy.deepcopy(self.all_params), cfg)
         self.cfg = self._fix_floats(copy.deepcopy(cfg), self.hyperparam_bounds)
-        steps_per_rollout = cfg["learner_kwargs"]["n_steps"]
-        self.total_timesteps_per_iteration = steps_per_rollout * self.rollouts_per_iteration
-        self.total_timesteps_per_role = steps_per_rollout * self.rollouts_per_role
+
+        # SB3 increments its n_steps counter by 1 on call to venv.step(),
+        # regardless of n_envs (=> n_steps != timesteps)
+        n_steps_per_rollout = cfg["learner_kwargs"]["n_steps"]
+        timesteps_per_rollout = n_steps_per_rollout * self.n_envs
+        assert math.log2(timesteps_per_rollout).is_integer()
+
+        self.total_timesteps_per_role = timesteps_per_rollout * self.rollouts_per_role
         return True
 
     @debuglog
@@ -144,13 +153,11 @@ class PPOTrainer(ray.tune.Trainable):
 
         old_rollouts = self.sb3_callback.rollouts
         rollouts_this_iteration = 0
-        side = self.initial_side
         ep_rew_means = []
         while rollouts_this_iteration < self.rollouts_per_iteration:
             if len(ep_rew_means) > 0:
-                side = "attacker" if len(ep_rew_means) % 2 == 0 else "defender"
                 self.model.env.close()
-                self.model.env = self._venv_init(side, rollouts_this_iteration)
+                self.model.env = self._venv_init(rollouts_this_iteration)
                 self.model.env.reset()
 
             self.model.learn(
@@ -188,32 +195,39 @@ class PPOTrainer(ray.tune.Trainable):
     def _wandb_init(self, experiment_name, config):
         wandb_init(self.trial_id, self.trial_name, experiment_name, config)
 
-    def _venv_init(self, role, rollouts_this_iteration=0):
-        env_kwargs = dict(self.cfg["env_kwargs"], attacker="StupidAI", defender="StupidAI")
-        env_kwargs[role] = "MMAI_USER"
+    def _venv_init(self, rollouts_this_iteration=0):
         mpool = self.all_params["map_pool"]
-
         offset = self.all_params["map_pool_offset_idx"]
-        offset += self.maps_per_iteration * self.iteration
-
+        offset += self.maps_per_iteration * self.iteration * self.n_envs
         mid = (offset + rollouts_this_iteration // self.rollouts_per_map) % len(mpool)
-        env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
-        mapnum = int(re.match(r".+?([0-9]+)\.vmap", env_kwargs["mapname"]).group(1))
+        mapnum = int(re.match(r".+?([0-9]+)\.vmap", mpool[mid]).group(1))
+        wandb.log({"mapnum": mapnum}, commit=False)
+        state = {"n": 0}
 
-        env_kwargs["actions_log_file"] = f"/tmp/{self.trial_id}-actions.log"
+        def env_creator(**_env_kwargs):
+            assert state["n"] < self.n_envs
+            role = "attacker" if state["n"] % 2 == 0 else "defender"
+            mid2 = mid + (state["n"] // 2)
+            mapname2 = "ai/generated/%s" % (mpool[mid2])
+            logfile2 = f"/tmp/{self.trial_id}-env{state['n']}-actions.log"
 
-        wandb.log(
-            # 0=attacker, 1=defender
-            {"mapnum": mapnum, "role": ["attacker", "defender"].index(role)},
-            commit=False
-        )
+            env_kwargs = dict(
+                self.cfg["env_kwargs"],
+                mapname=mapname2,
+                actions_log_file=logfile2,
+                attacker="StupidAI",
+                defender="StupidAI",
+            )
 
-        self.log("Env kwargs: %s" % env_kwargs)
+            env_kwargs[role] = "MMAI_USER"
+            self.log("Env kwargs (env.%d): %s" % (state["n"], env_kwargs))
+            state["n"] += 1
+            # return gym.make("VCMI-v0", **env_kwargs)
+            return vcmi_gym.VcmiEnv(**env_kwargs)
 
         return make_vec_env(
-            "VCMI-v0",
-            n_envs=1,
-            env_kwargs=env_kwargs,
+            env_creator,
+            n_envs=self.n_envs,
             monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
         )
 
@@ -271,13 +285,13 @@ class PPOTrainer(ray.tune.Trainable):
             self.log("Load %s (initial)" % self.initial_checkpoint)
             model = self._model_load(self.initial_checkpoint)
         else:
-            venv = self._venv_init(self.initial_side)
+            venv = self._venv_init()
             model = self._model_internal_init(venv, **self._learner_kwargs_for_init())
 
         return model
 
     def _model_load(self, f):
-        venv = self._venv_init(self.initial_side)
+        venv = self._venv_init()
         model = self._model_internal_load(f, venv, **self._learner_kwargs_for_load())
 
         # Need to explicitly update optimizer settings after load
@@ -331,7 +345,9 @@ class PPOTrainer(ray.tune.Trainable):
         for name in self.leaf_keys:
             if name == "clip_range":
                 # clip_range is stored as a constant_fn callable
-                params[f"config/{name}"] = self.model.clip_range(1)
+                params["config/clip_range"] = self.model.clip_range(1)
+            elif name == "net_arch":
+                params["config/net_arch"] = repr(self.model.policy.net_arch)
             elif hasattr(self.model, name):
                 params[f"config/{name}"] = getattr(self.model, name)
             elif hasattr(env, name):
@@ -356,6 +372,8 @@ class PPOTrainer(ray.tune.Trainable):
             else:
                 if key in ["n_epochs", "n_steps", "reward_clip_mod"]:
                     cfg[key] = int(cfg[key])
+                elif key in ["net_arch"]:
+                    assert isinstance(cfg[key], list)
                 else:
                     cfg[key] = float(cfg[key])
 

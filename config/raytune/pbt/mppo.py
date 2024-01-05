@@ -1,11 +1,13 @@
 from ray.tune.search.sample import Integer, Float
 
+N_WORKERS = 3
+N_ENVS = 8
 
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
     "wandb_project": "vcmi",
     "results_dir": "data",
-    "population_size": 1,
+    "population_size": N_WORKERS,
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
@@ -25,7 +27,7 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 200,
+    "rollouts_per_iteration": 2000,
 
     #
     # Number of logs per iteration
@@ -43,13 +45,14 @@ config = {
     # 2. Equal number of logs per role:
     #       rollouts_per_role % (rollouts_per_iteration/logs_per_iteration) == 0
     #
-    "rollouts_per_role": 100,
+    "rollouts_per_role": 200,
 
     "maps_per_iteration": 1,
 
     "hyperparam_mutations": {
+        # "net_arch": [[], [64, 64], [256, 256]],
         "learner_kwargs": {
-            "learning_rate": [0.00001],
+            # "learning_rate": [0.00001],
             # "gamma": Float(0.83, 0.87),
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": Integer(4, 20),
@@ -70,11 +73,13 @@ config = {
     # """
     "quantile_fraction": 0.25,
 
+    "n_envs": N_ENVS,
+
     "all_params": {
         "learner_kwargs": {
             "stats_window_size": 100,
             "learning_rate": 0.00126,
-            "n_steps": 512,
+            "n_steps": 1024 // N_ENVS,
             "batch_size": 64,
             "n_epochs": 10,
             "gamma": 0.8425,
@@ -88,7 +93,9 @@ config = {
         },
         "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0}},
         "activation": "ReLU",  # XXX: convert to nn.ReLU
-        "net_arch": [64, 64],
+        "net_arch": [256, 256],
+        # "net_arch": [64, 64],
+        # "net_arch": [],
         "features_extractor": {
             "class_name": "VcmiFeaturesExtractor",
             "kwargs": {
@@ -116,27 +123,27 @@ config = {
         },
         "map_pool_offset_idx": 0,
         "map_pool": [
-            "_T0.vmap",
-            # "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
-            # "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
-            # "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
-            # "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
-            # "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",
-            # "A26.vmap", "A27.vmap", "A28.vmap", "A29.vmap", "A30.vmap",
-            # "A31.vmap", "A32.vmap", "A33.vmap", "A34.vmap", "A35.vmap",
-            # "A36.vmap", "A37.vmap", "A38.vmap", "A39.vmap", "A40.vmap",
-            # "A41.vmap", "A42.vmap", "A43.vmap", "A44.vmap", "A45.vmap",
-            # "A46.vmap", "A47.vmap", "A48.vmap", "A49.vmap", "A50.vmap",
-            # "A51.vmap", "A52.vmap", "A53.vmap", "A54.vmap", "A55.vmap",
-            # "A56.vmap", "A57.vmap", "A58.vmap", "A59.vmap", "A60.vmap",
-            # "A61.vmap", "A62.vmap", "A63.vmap", "A64.vmap", "A65.vmap",
-            # "A66.vmap", "A67.vmap", "A68.vmap", "A69.vmap", "A70.vmap",
-            # "A71.vmap", "A72.vmap", "A73.vmap", "A74.vmap", "A75.vmap",
-            # "A76.vmap", "A77.vmap", "A78.vmap", "A79.vmap", "A80.vmap",
-            # "A81.vmap", "A82.vmap", "A83.vmap", "A84.vmap", "A85.vmap",
-            # "A86.vmap", "A87.vmap", "A88.vmap", "A89.vmap", "A90.vmap",
-            # "A91.vmap", "A92.vmap", "A93.vmap", "A94.vmap", "A95.vmap",
-            # "A96.vmap", "A97.vmap", "A98.vmap", "A99.vmap"
+            # "_T0.vmap",
+            "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
+            "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
+            "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
+            "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
+            "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",
+            "A26.vmap", "A27.vmap", "A28.vmap", "A29.vmap", "A30.vmap",
+            "A31.vmap", "A32.vmap", "A33.vmap", "A34.vmap", "A35.vmap",
+            "A36.vmap", "A37.vmap", "A38.vmap", "A39.vmap", "A40.vmap",
+            "A41.vmap", "A42.vmap", "A43.vmap", "A44.vmap", "A45.vmap",
+            "A46.vmap", "A47.vmap", "A48.vmap", "A49.vmap", "A50.vmap",
+            "A51.vmap", "A52.vmap", "A53.vmap", "A54.vmap", "A55.vmap",
+            "A56.vmap", "A57.vmap", "A58.vmap", "A59.vmap", "A60.vmap",
+            "A61.vmap", "A62.vmap", "A63.vmap", "A64.vmap", "A65.vmap",
+            "A66.vmap", "A67.vmap", "A68.vmap", "A69.vmap", "A70.vmap",
+            "A71.vmap", "A72.vmap", "A73.vmap", "A74.vmap", "A75.vmap",
+            "A76.vmap", "A77.vmap", "A78.vmap", "A79.vmap", "A80.vmap",
+            "A81.vmap", "A82.vmap", "A83.vmap", "A84.vmap", "A85.vmap",
+            "A86.vmap", "A87.vmap", "A88.vmap", "A89.vmap", "A90.vmap",
+            "A91.vmap", "A92.vmap", "A93.vmap", "A94.vmap", "A95.vmap",
+            "A96.vmap", "A97.vmap", "A98.vmap", "A99.vmap"
         ]
     }
 }
