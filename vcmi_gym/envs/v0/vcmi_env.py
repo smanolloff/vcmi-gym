@@ -19,6 +19,23 @@ DTYPE = np.float32
 ZERO = DTYPE(0)
 ONE = DTYPE(1)
 
+TRACE = True
+MAXLEN = 80
+
+
+def tracelog(func, maxlen=MAXLEN):
+    if not TRACE:
+        return func
+
+    def wrapper(*args, **kwargs):
+        this = args[0]
+        this.logger.debug("Start: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], log.trunc(repr(kwargs), maxlen)))
+        result = func(*args, **kwargs)
+        this.logger.debug("End: %s (return %s)" % (func.__name__, log.trunc(repr(result), maxlen)))
+        return result
+
+    return wrapper
+
 
 class InfoDict(dict):
     SCALAR_VALUES = [
@@ -116,6 +133,7 @@ class VcmiEnv(gym.Env):
         # required to init vars
         self._reset_vars(result)
 
+    @tracelog
     def step(self, action):
         action += self.action_offset  # see note for action_space
 
@@ -149,6 +167,7 @@ class VcmiEnv(gym.Env):
 
         return obs, rew, term, trunc, info
 
+    @tracelog
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self._reset_vars(res=None)
@@ -164,6 +183,7 @@ class VcmiEnv(gym.Env):
 
         return self.result.state, {"side": self.result.side}
 
+    @tracelog
     def render(self):
         if self.render_mode == "ansi":
             return (
@@ -185,6 +205,7 @@ class VcmiEnv(gym.Env):
         elif self.render_mode is None:
             gym.logger.warn("Cannot render with no render mode set")
 
+    @tracelog
     def close(self):
         self.logger.info("Closing env...")
         if self.actfile:
@@ -196,6 +217,7 @@ class VcmiEnv(gym.Env):
             self.logger.removeHandler(handler)
             handler.close()
 
+    @tracelog
     def action_masks(self):
         return self.result.actmask[self.action_offset:]
 

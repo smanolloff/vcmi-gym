@@ -218,7 +218,7 @@ class PPOTrainer(ray.tune.Trainable):
         def env_creator(**_env_kwargs):
             assert state["n"] < self.n_envs
             role = "attacker" if state["n"] % 2 == 0 else "defender"
-            mid2 = mid + (state["n"] // 2)
+            mid2 = (mid + (state["n"] // 2)) % len(mpool)
             mapname2 = "ai/generated/%s" % (mpool[mid2])
             logfile2 = f"/tmp/{self.trial_id}-env{state['n']}-actions.log"
 

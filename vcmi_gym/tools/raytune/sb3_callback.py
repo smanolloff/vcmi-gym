@@ -13,7 +13,8 @@ class SB3Callback(BaseCallback):
         self.rollouts = 0
         self.ep_rew_mean = 0
 
-        # wdb tables are logged only once, at end of the iteration
+        # wdb tables are logged from OUTSIDE SB3Callback
+        # only once, at end of the iteration
         # (ie. once every config["rollouts_per_iteration"])
         self.wdb_tables = {}
         self.uncommitted_log = False

@@ -35,6 +35,23 @@ PyState = ctypes.c_float * _STATE_SIZE
 PyAction = ctypes.c_int16
 PyActmask = ctypes.c_bool * N_ACTIONS
 
+TRACE = True
+MAXLEN = 80
+
+
+def tracelog(func, maxlen=MAXLEN):
+    if not TRACE:
+        return func
+
+    def wrapper(*args, **kwargs):
+        this = args[0]
+        this.logger.debug("Start: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], log.trunc(repr(kwargs), maxlen)))
+        result = func(*args, **kwargs)
+        this.logger.debug("End: %s (return %s)" % (func.__name__, log.trunc(repr(result), maxlen)))
+        return result
+
+    return wrapper
+
 
 class PyRawResult(ctypes.Structure):
     _fields_ = [
@@ -83,11 +100,12 @@ class PyConnector():
         self.loglevel = loglevel
         self.shutdown_lock = multiprocessing.Lock()
         self.shutdown_complete = False
+        self.logger = log.get_logger("PyConnector", self.loglevel)
 
+    @tracelog
     def start(self, *args):
         assert not self.started, "Already started"
         self.started = True
-        self.logger = log.get_logger("PyConnector", self.loglevel)
 
         self.v_action = multiprocessing.Value(PyAction)
         self.v_result_act = multiprocessing.Value(PyRawResult)
@@ -98,7 +116,6 @@ class PyConnector():
         # cond.notify() will wake up the other proc (which immediately tries to acquire the lock)
         # cond.wait() will release the lock and wait (other proc now successfully acquires the lock)
         self.cond = multiprocessing.Condition()
-        self.cond.acquire()
         self.proc = multiprocessing.Process(
             target=self.start_connector,
             args=args,
@@ -161,28 +178,35 @@ class PyConnector():
             handler.close()
         del self.logger
 
+    @tracelog
     def reset(self):
-        self.v_command_type.value = PyConnector.COMMAND_TYPE_RESET
-        self.cond.notify()
-        self.cond.wait()
+        with self.cond:
+            self.v_command_type.value = PyConnector.COMMAND_TYPE_RESET
+            self.cond.notify()
+            self.cond.wait()
         return PyResult(self.v_result_act)
 
+    @tracelog
     def act(self, action):
-        self.v_command_type.value = PyConnector.COMMAND_TYPE_ACT
-        self.v_action.value = action
-        self.cond.notify()
-        self.cond.wait()
+        with self.cond:
+            self.v_command_type.value = PyConnector.COMMAND_TYPE_ACT
+            self.v_action.value = action
+            self.cond.notify()
+            self.cond.wait()
         return PyResult(self.v_result_act)
 
+    @tracelog
     def render_ansi(self):
-        self.v_command_type.value = PyConnector.COMMAND_TYPE_RENDER_ANSI
-        self.cond.notify()
-        self.cond.wait()
+        with self.cond:
+            self.v_command_type.value = PyConnector.COMMAND_TYPE_RENDER_ANSI
+            self.cond.notify()
+            self.cond.wait()
         return self.v_result_render_ansi.value.decode("utf-8")
 
     def _try_start(self, _retries, _retry_interval):
-        self.proc.start()
-        self.cond.wait()
+        with self.cond:
+            self.proc.start()
+            self.cond.wait()
         return True
 
     #
@@ -207,17 +231,17 @@ class PyConnector():
         # XXX: self.__connector is ONLY available in the sub-process!
         self.__connector = connector.Connector(*args)
 
-        self.cond.acquire()
-        self.set_v_result_act(self.__connector.start())
-        self.cond.notify()
-
-        while True:
-            # release the lock and wait (main proc now successfully acquires the lock)
-            self.cond.wait()
-            # perform action only after main proc calls cond.notify() and cond.wait()
-            self.process_command()
-            # wake up the subproc (which immediately tries to acquire the lock)
+        with self.cond:
+            self.set_v_result_act(self.__connector.start())
             self.cond.notify()
+
+            while True:
+                # release the lock and wait (main proc now successfully acquires the lock)
+                self.cond.wait()
+                # perform action only after main proc calls cond.notify() and cond.wait()
+                self.process_command()
+                # wake up the subproc (which immediately tries to acquire the lock)
+                self.cond.notify()
 
     def set_v_result_act(self, result):
         self.v_result_act.state = np.ctypeslib.as_ctypes(result.get_state())

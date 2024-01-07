@@ -11,7 +11,7 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20240104_025052/50d8a_00001/checkpoint_000003/model.zip",  # noqa: E501
+    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20240107_021740/2d08a_00000/checkpoint_000006/model.zip",  # noqa: E501
     # "initial_checkpoint": None,
 
     # Perturb every N iterations
