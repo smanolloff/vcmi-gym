@@ -10,7 +10,7 @@ progress_bar: false  # too annoying and noisy
 rollouts_total: 0
 rollouts_per_iteration: 20
 rollouts_per_log: 2
-save_every: 30  # seconds
+save_every: 600  # seconds
 max_saves: 3
 
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
@@ -61,7 +61,7 @@ learner_kwargs:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.00126"
+learner_lr_schedule: "const_0.0006"
 
 env_kwargs:
   max_steps: 500

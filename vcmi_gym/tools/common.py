@@ -12,6 +12,10 @@ import importlib
 import gymnasium as gym
 import wandb
 
+import concurrent.futures
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv
+
 from .. import VcmiEnv
 
 
@@ -246,3 +250,20 @@ def maybe_save(t, model, out_dir, save_every, max_saves):
         os.remove(file)
 
     return now
+
+
+def make_vec_env_parallel(j, env_creator, n_envs, monitor_kwargs):
+    def initenv():
+        env = env_creator()
+        env = Monitor(env, filename=None, **monitor_kwargs)
+        return env
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=j) as executor:
+        futures = [executor.submit(initenv) for _ in range(n_envs)]
+        results = [future.result() for future in concurrent.futures.as_completed(futures)]
+
+    funcs = [lambda x=x: x for x in results]
+
+    vec_env = DummyVecEnv(funcs)
+    vec_env.seed()
+    return vec_env

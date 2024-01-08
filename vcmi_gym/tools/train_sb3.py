@@ -1,4 +1,4 @@
-from stable_baselines3.common.env_util import make_vec_env
+# from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common import logger
 import random
 import glob
@@ -186,7 +186,8 @@ def create_venv(n_envs, env_kwargs, mapmask, randomize, iteration=0):
     # => there will be no info["episode"] in case of truncations
     # => metrics won't be correctly calculated
     # => implement truncation in the env itself
-    return make_vec_env(
+    return common.make_vec_env_parallel(
+        8,
         env_creator,
         n_envs=n_envs,
         monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},

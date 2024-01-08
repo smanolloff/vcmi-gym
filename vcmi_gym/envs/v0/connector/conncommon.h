@@ -35,6 +35,8 @@ struct P_Result {
         int units_killed_,
         int value_lost_,
         int value_killed_,
+        int side0_army_value_,
+        int side1_army_value_,
         bool is_battle_over_,
         bool is_victorious_,
         std::string ansiRender_
@@ -51,6 +53,8 @@ struct P_Result {
         units_killed(units_killed_),
         value_lost(value_lost_),
         value_killed(value_killed_),
+        side0_army_value(side0_army_value_),
+        side1_army_value(side1_army_value_),
         is_victorious(is_victorious_),
         ansiRender(ansiRender_) {}
 
@@ -65,6 +69,8 @@ struct P_Result {
     const int units_killed;
     const int value_lost;
     const int value_killed;
+    const int side0_army_value;
+    const int side1_army_value;
     const bool is_battle_over;
     const bool is_victorious;
     const std::string ansiRender;
@@ -79,6 +85,8 @@ struct P_Result {
     const int &get_units_killed() const { return units_killed; }
     const int &get_value_lost() const { return value_lost; }
     const int &get_value_killed() const { return value_killed; }
+    const int &get_side0_army_value() const { return side0_army_value; }
+    const int &get_side1_army_value() const { return side1_army_value; }
     const bool &get_is_battle_over() const { return is_battle_over; }
     const bool &get_is_victorious() const { return is_victorious; }
 };

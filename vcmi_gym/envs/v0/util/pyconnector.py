@@ -65,6 +65,8 @@ class PyRawResult(ctypes.Structure):
         ("units_killed", ctypes.c_int),
         ("value_lost", ctypes.c_int),
         ("value_killed", ctypes.c_int),
+        ("side0_army_value", ctypes.c_int),
+        ("side1_army_value", ctypes.c_int),
         ("is_battle_over", ctypes.c_bool),
         ("is_victorious", ctypes.c_bool),
     ]
@@ -83,6 +85,8 @@ class PyResult():
         self.units_killed = cres.units_killed
         self.value_lost = cres.value_lost
         self.value_killed = cres.value_killed
+        self.side0_army_value = cres.side0_army_value
+        self.side1_army_value = cres.side1_army_value
         self.is_battle_over = cres.is_battle_over
         self.is_victorious = cres.is_victorious
 
@@ -254,6 +258,8 @@ class PyConnector():
         self.v_result_act.units_killed = ctypes.c_int(result.get_units_killed())
         self.v_result_act.value_lost = ctypes.c_int(result.get_value_lost())
         self.v_result_act.value_killed = ctypes.c_int(result.get_value_killed())
+        self.v_result_act.side0_army_value = ctypes.c_int(result.get_side0_army_value())
+        self.v_result_act.side1_army_value = ctypes.c_int(result.get_side1_army_value())
         self.v_result_act.is_battle_over = ctypes.c_bool(result.get_is_battle_over())
         self.v_result_act.is_victorious = ctypes.c_bool(result.get_is_victorious())
 

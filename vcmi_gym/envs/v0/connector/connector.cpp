@@ -42,6 +42,7 @@ const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
          r->dmgDealt, r->dmgReceived,
          r->unitsLost, r->unitsKilled,
          r->valueLost, r->valueKilled,
+         r->side0ArmyValue, r->side1ArmyValue,
          r->ended, r->victory, r->ansiRender
     );
 }
@@ -283,6 +284,8 @@ PYBIND11_MODULE(connector, m) {
         .def("get_units_killed", &P_Result::get_units_killed)
         .def("get_value_lost", &P_Result::get_value_lost)
         .def("get_value_killed", &P_Result::get_value_killed)
+        .def("get_side0_army_value", &P_Result::get_side0_army_value)
+        .def("get_side1_army_value", &P_Result::get_side1_army_value)
         .def("get_is_battle_over", &P_Result::get_is_battle_over)
         .def("get_is_victorious", &P_Result::get_is_victorious);
 

@@ -22,6 +22,8 @@ ONE = DTYPE(1)
 TRACE = True
 MAXLEN = 80
 
+ARMY_VALUE_REF = 600_000
+
 
 def tracelog(func, maxlen=MAXLEN):
     if not TRACE:
@@ -147,7 +149,7 @@ class VcmiEnv(gym.Env):
         assert res.errmask == 0
 
         analysis = self.analyzer.analyze(action, res)
-        rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_clip_mod)
+        rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_scaling_factor, self.reward_clip_mod)
         obs = res.state
         term = res.is_battle_over
         trunc = self.analyzer.actions_count >= self.max_steps
@@ -170,8 +172,9 @@ class VcmiEnv(gym.Env):
     @tracelog
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self._reset_vars(res=None)
-        self.result = self.connector.reset()
+
+        result = self.connector.reset()
+        self._reset_vars(result)
 
         if self.render_each_step:
             print(self.render())
@@ -236,12 +239,13 @@ class VcmiEnv(gym.Env):
         self.terminated = term
         self.truncated = trunc
 
-    def _reset_vars(self, res=None):
+    def _reset_vars(self, res):
         self.result = res
         self.reward = 0
         self.reward_total = 0
         self.reward_clip_abs_total = 0
         self.reward_clip_abs_max = 0
+        self.reward_scaling_factor = ARMY_VALUE_REF / (res.side0_army_value + res.side1_army_value)
         self.net_value_last = 0
         self.terminated = False
         self.truncated = False
@@ -278,14 +282,14 @@ class VcmiEnv(gym.Env):
         info["net_value"] = analysis.net_value_ep
         info["is_success"] = res.is_victorious
         info["action_type_counters"] = analysis.action_type_counters_ep
-        info["reward_clip_abs_total"] = rewclip_total
-        info["reward_clip_abs_max"] = rewclip_max
+        # info["reward_clip_abs_total"] = rewclip_total
+        # info["reward_clip_abs_max"] = rewclip_max
 
         # Return regular dict (wrappers insert arbitary keys)
         return dict(info)
 
     @staticmethod
-    def calc_reward(analysis, clip_mod):
-        rew = analysis.net_value + 5 * analysis.net_dmg
+    def calc_reward(analysis, scaling_factor, clip_mod):
+        rew = int(scaling_factor * (analysis.net_value + 5 * analysis.net_dmg))
         clipped = max(min(rew, clip_mod), -clip_mod) if clip_mod else rew
         return clipped, rew
