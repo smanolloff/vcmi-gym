@@ -1,11 +1,11 @@
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common import logger
-import re
+import random
+import glob
 import gymnasium as gym
 import stable_baselines3
 import sb3_contrib
 import vcmi_gym
-import itertools
 import wandb
 import copy
 import torch.optim
@@ -23,7 +23,12 @@ def init_model(
     learner_cls,
     learner_kwargs,
     learning_rate,
-    vcmi_cnn_kwargs,
+    net_arch,
+    activation,
+    n_global_steps_max,
+    n_envs,
+    features_extractor,
+    optimizer,
     log_tensorboard,
     out_dir,
 ):
@@ -46,24 +51,33 @@ def init_model(
     alg_kwargs = copy.deepcopy(learner_kwargs)
     alg_kwargs["learning_rate"] = learning_rate
 
-    policy_kwargs = alg_kwargs.get("policy_kwargs", None)
-    if policy_kwargs:
-        fecn = policy_kwargs.get("features_extractor_class_name", None)
-        if fecn:
-            del policy_kwargs["features_extractor_class_name"]
-            policy_kwargs["features_extractor_class"] = getattr(vcmi_gym, fecn)
-
-        ocn = policy_kwargs.get("optimizer_class_name", None)
-        if ocn:
-            del policy_kwargs["optimizer_class_name"]
-            policy_kwargs["optimizer_class"] = getattr(torch.optim, ocn)
-
-    print("Learner kwargs: %s" % alg_kwargs)
+    if n_global_steps_max:
+        alg_kwargs["n_steps"] = n_global_steps_max // n_envs
 
     if model_load_file:
+        print("Learner kwargs: %s" % alg_kwargs)
         print("Loading %s model from %s" % (alg.__name__, model_load_file))
         model = alg.load(model_load_file, env=venv, **alg_kwargs)
     else:
+        policy_kwargs = {
+            "net_arch": net_arch,
+            "activation_fn": getattr(torch.nn, activation),
+        }
+
+        # Any custom features extractor is assumed to be a VcmiCNN-type policy
+        if features_extractor:
+            policy_kwargs["features_extractor_class"] = getattr(vcmi_gym, features_extractor["class_name"])
+            policy_kwargs["features_extractor_kwargs"] = features_extractor["kwargs"]
+
+        if optimizer:
+            policy_kwargs["optimizer_class"] = getattr(torch.optim, optimizer["class_name"])
+            policy_kwargs["optimizer_kwargs"] = optimizer["kwargs"]
+
+        alg_kwargs["policy"] = "MlpPolicy"
+        alg_kwargs["policy_kwargs"] = policy_kwargs
+
+        print("Learner kwargs: %s" % alg_kwargs)
+        print("Initializing %s model from scratch" % alg.__name__)
         model = alg(env=venv, **alg_kwargs)
 
     if log_tensorboard:
@@ -124,31 +138,57 @@ def init_model(
 #
 #         self.train()  # update NN
 
-def create_venv(role, mpool, offset, run_id, rollouts, rollouts_per_map):
-    env_id = "local/VCMI-v0"
-    env_kwargs = dict(attacker="StupidAI", defender="StupidAI")
-    env_kwargs[role] = "MMAI_USER"
+def create_venv(n_envs, env_kwargs, mapmask, randomize, iteration=0):
+    mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
+    all_maps = glob.glob("%s/%s" % (mappath, mapmask))
+    all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
 
-    mid = (offset + rollouts // rollouts_per_map) % len(mpool)
-    env_kwargs["mapname"] = "ai/generated/%s" % (mpool[mid])
-    mapnum = int(re.match(r".+?([0-9]+)\.vmap", env_kwargs["mapname"]).group(1))
+    assert n_envs % 2 == 0
+    assert n_envs <= len(all_maps) * 2
+    n_maps = n_envs // 2
 
-    env_kwargs["actions_log_file"] = f"/tmp/{run_id}-actions.log"
+    if randomize:
+        maps = random.sample(all_maps, n_maps)
+    else:
+        i = (n_envs * iteration) % len(all_maps)
+        new_i = (i + n_envs) % len(all_maps)
 
-    wandb.log(
-        # 0=attacker, 1=defender
-        {"mapnum": mapnum, "role": ["attacker", "defender"].index(role)},
-        commit=False
-    )
+        if new_i > i:
+            maps = all_maps[i:new_i]
+        else:
+            maps = all_maps[i:] + all_maps[:new_i]
 
-    # XXX: not wrapping in TimeLimit, as it gets applied AFTER Monitor
+        assert len(maps) == n_envs
+
+    pairs = [[("attacker", m), ("defender", m)] for m in maps]
+    pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
+    state = {"n": 0}
+
+    def env_creator(**_env_kwargs):
+        assert state["n"] < n_envs
+        role, mapname = pairs[state["n"]]
+        # logfile2 = f"/tmp/{self.trial_id}-env{state['n']}-actions.log"
+
+        env_kwargs2 = dict(
+            env_kwargs,
+            mapname=mapname,
+            attacker="StupidAI",
+            defender="StupidAI",
+        )
+
+        env_kwargs2[role] = "MMAI_USER"
+        print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs2))
+        state["n"] += 1
+
+        return vcmi_gym.VcmiEnv(**env_kwargs2)
+
+    # XXX: do not wrap in TimeLimit, as it gets applied AFTER Monitor
     # => there will be no info["episode"] in case of truncations
     # => metrics won't be correctly calculated
     # => implement truncation in the env itself
     return make_vec_env(
-        env_id,
-        n_envs=1,
-        env_kwargs=env_kwargs,
+        env_creator,
+        n_envs=n_envs,
         monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
     )
 
@@ -163,56 +203,58 @@ def train_sb3(
     learner_kwargs,
     learning_rate,
     learner_lr_schedule,
-    vcmi_cnn_kwargs,
+    net_arch,
+    activation,
+    features_extractor,
+    optimizer,
+    env_kwargs,
+    mapmask,
+    randomize_maps,
+    n_global_steps_max,
     rollouts_total,
-    rollouts_per_map,
-    rollouts_per_role,
+    rollouts_per_iteration,
     rollouts_per_log,
-    map_pool,
-    map_pool_offset_idx,
     n_envs,
+    save_every,
+    max_saves,
     out_dir,
     log_tensorboard,
     progress_bar,
     reset_num_timesteps,
     config_log,
 ):
-    # Ensure both roles get equal amount of rollouts
-    assert rollouts_total % rollouts_per_role == 0
-    assert (rollouts_total // rollouts_per_role) % 2 == 0
-
-    # Ensure there's equal amount of logs for each role and map
-    assert rollouts_per_role % rollouts_per_log == 0
-    assert rollouts_total % rollouts_per_map == 0
-    assert rollouts_per_map % rollouts_per_role == 0
-    assert rollouts_per_map // rollouts_per_role % 2 == 0
-
-    assert map_pool, "no map pool given"
 
     # prevent warnings for action_masks method
     gym.logger.set_level(gym.logger.ERROR)
 
     learning_rate = common.lr_from_schedule(learner_lr_schedule)
     sb3_cb = sb3_callback.SB3Callback()
-    roles = itertools.cycle(["attacker", "defender"])
     ep_rew_means = []
-    rollouts = 0
+    iteration = 0
 
-    if rollouts_total == 0:
-        rollouts_total = 10**9
+    if rollouts_total:
+        iterations = rollouts_total // rollouts_per_iteration
+    else:
+        iterations = 10**9
 
     model = None
+    t = None
 
     try:
         model = init_model(
-            venv=create_venv(next(roles), map_pool, map_pool_offset_idx, run_id, rollouts, rollouts_per_map),
+            venv=create_venv(n_envs, env_kwargs, mapmask, randomize_maps),
             seed=seed,
             model_load_file=model_load_file,
             model_load_update=model_load_update,
             learner_cls=learner_cls,
             learner_kwargs=learner_kwargs,
             learning_rate=learning_rate,
-            vcmi_cnn_kwargs=vcmi_cnn_kwargs,
+            net_arch=net_arch,
+            activation=activation,
+            n_global_steps_max=n_global_steps_max,
+            n_envs=n_envs,
+            features_extractor=features_extractor,
+            optimizer=optimizer,
             log_tensorboard=log_tensorboard,
             out_dir=out_dir,
         )
@@ -226,30 +268,30 @@ def train_sb3(
         model.logger.record("config", logger.HParam(config_log, metric_log))
 
         steps_per_rollout = model.train_freq if learner_cls == "MQRDQN" else model.n_steps
+        total_timesteps_per_iteration = rollouts_per_iteration * steps_per_rollout * n_envs
 
-        while rollouts < rollouts_total:
+        while iteration < iterations:
             print(".", end="", flush=True)
-            wandb.log({"iterations": rollouts // rollouts_per_role}, commit=False)
 
-            if rollouts > 0:
+            if iteration > 0:
                 common.save_model(out_dir, model)
                 model.env.close()
-                model.env = create_venv(next(roles), map_pool, map_pool_offset_idx, run_id, rollouts, rollouts_per_map)
+                model.env = create_venv(n_envs, env_kwargs, mapmask, randomize_maps, iteration)
                 model.env.reset()
 
             model.learn(
-                total_timesteps=rollouts_per_role * steps_per_rollout,
+                total_timesteps=total_timesteps_per_iteration,
                 log_interval=rollouts_per_log,
                 reset_num_timesteps=reset_num_timesteps,
                 progress_bar=progress_bar,
                 callback=[sb3_cb]
             )
 
-            diff_rollouts = sb3_cb.rollouts - rollouts
-            assert diff_rollouts == rollouts_per_role, f"expected {rollouts_per_role}, got: {diff_rollouts}"
-
-            rollouts += rollouts_per_role
+            diff_rollouts = sb3_cb.rollouts - (iteration * rollouts_per_iteration)
+            assert diff_rollouts == rollouts_per_iteration, f"expected {rollouts_per_iteration}, got: {diff_rollouts}"
+            iteration += 1
             ep_rew_means.append(sb3_cb.ep_rew_mean)
+            t = common.maybe_save(t, model, out_dir, save_every, max_saves)
 
         return {"out_dir": out_dir}
     finally:

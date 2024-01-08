@@ -2,78 +2,82 @@
 seed: ~
 run_id: ~
 group_id: ~
-model_load_file: ~
+model_load_file: "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20240107_171925/263fb_00000/checkpoint_000007/model.zip"
 out_dir_template: "data/MPPO-{group_id}/{run_id}"
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
 # total_timesteps: !!float 100000
 rollouts_total: 0
-rollouts_per_map: 200
-rollouts_per_role: 100
-rollouts_per_log: 10
-n_envs: 1
+rollouts_per_iteration: 20
+rollouts_per_log: 2
+save_every: 30  # seconds
+max_saves: 3
 
-logparams:
+# XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
+#      To increase (current shell session only):
+#           ulimit -n 1024
+n_envs: 32
+
+# overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
+# (eg. 2048/48 = 42.666... => n_steps=42)
+n_global_steps_max: 2048
+
+mapmask: "ai/generated/A*.vmap"
+
+logparams: {}
   # "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
-  "config/features_extractor": "learner_kwargs.policy_kwargs.features_extractor_class_name"
+  # "config/features_extractor": "learner_kwargs.policy_kwargs.features_extractor_class_name"
   # "config/optimizer": "learner_kwargs.policy_kwargs.optimizer_class_name"
-  "config/rew_clip": "env_kwargs.reward_clip_mod"
+  # "config/rew_clip": "env_kwargs.reward_clip_mod"
+
+activation: "ReLU"
+net_arch: []
+optimizer:
+  class_name: "AdamW"
+  kwargs: {eps: !!float 1e-5, weight_decay: 0}
+features_extractor:
+  class_name: "VcmiFeaturesExtractor"
+  kwargs:
+    output_dim: 1024
+    activation: "ReLU"
+    layers:
+        - {t: "Conv2d", out_channels: 32, kernel_size: [1, 15], stride: [1, 15], padding: 0}
+        # - {t: "Conv2d", in_channels: 32, out_channels: 64, kernel_size: 3, stride: 1, padding: 1}
+        # - {t: "Conv2d", in_channels: 64, out_channels: 64, kernel_size: 5, stride: 1, padding: 2}
 
 learner_kwargs:
-  n_steps: 512
+  # n_steps: 512  # calculated dynamically (see n_global_steps_max)
   batch_size: 64
   n_epochs: 10
-  gamma: 0.85
+  gamma: 0.8425
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
   ent_coef: 0.007
-  vf_coef: 0.2
-  max_grad_norm: 4
-  policy: "CnnPolicy"
-  policy_kwargs:
-    net_arch: []
-    features_extractor_class_name: "VcmiCNN"  # loaded from vcmi_gym
-    features_extractor_kwargs:
-      features_dim: 1024
-    # optimizer_class_name: "Adam"  # loaded from torch.optim
-    # optimizer_kwargs:
-    #   weight_decay: 0
+  vf_coef: 0.6
+  max_grad_norm: 2.5
 
 # Examples:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.001"
-
-map_pool_offset_idx: 0
-map_pool: [
-    "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
-    "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
-    "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
-    "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
-    "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",
-    "A26.vmap", "A27.vmap", "A28.vmap", "A29.vmap", "A30.vmap",
-    "A31.vmap", "A32.vmap", "A33.vmap", "A34.vmap", "A35.vmap",
-    "A36.vmap", "A37.vmap", "A38.vmap", "A39.vmap", "A40.vmap",
-    "A41.vmap", "A42.vmap", "A43.vmap", "A44.vmap", "A45.vmap",
-    "A46.vmap", "A47.vmap", "A48.vmap", "A49.vmap", "A50.vmap",
-    "A51.vmap", "A52.vmap", "A53.vmap", "A54.vmap", "A55.vmap",
-    "A56.vmap", "A57.vmap", "A58.vmap", "A59.vmap", "A60.vmap",
-    "A61.vmap", "A62.vmap", "A63.vmap", "A64.vmap", "A65.vmap",
-    "A66.vmap", "A67.vmap", "A68.vmap", "A69.vmap", "A70.vmap",
-    "A71.vmap", "A72.vmap", "A73.vmap", "A74.vmap", "A75.vmap",
-    "A76.vmap", "A77.vmap", "A78.vmap", "A79.vmap", "A80.vmap",
-    "A81.vmap", "A82.vmap", "A83.vmap", "A84.vmap", "A85.vmap",
-    "A86.vmap", "A87.vmap", "A88.vmap", "A89.vmap", "A90.vmap",
-    "A91.vmap", "A92.vmap", "A93.vmap", "A94.vmap", "A95.vmap",
-    "A96.vmap", "A97.vmap", "A98.vmap", "A99.vmap"]
+learner_lr_schedule: "const_0.00126"
 
 env_kwargs:
-  __include__: "config/env.yml"
-  mapname: "ai/generated/A01.vmap"
-  consecutive_error_reward_factor: -1
+  max_steps: 500
   reward_clip_mod: ~
+  vcmi_loglevel_global: "error"
+  vcmi_loglevel_ai: "error"
+  vcmienv_loglevel: "WARN"
+  consecutive_error_reward_factor: -1
+  sparse_info: true
+
+  # Set dynamically
+  # mapname: "ai/generated/A01.vmap"
+  # attacker: "MMAI_USER"  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
+  # defender: "StupidAI"   # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
+  # attacker_model: ~  # MPPO zip model (if attacker=MMAI_MODEL)
+  # defender_model: ~  # MPPO zip model (if defender=MMAI_MODEL)
 
 env_wrappers: []
 

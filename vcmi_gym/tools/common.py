@@ -1,6 +1,7 @@
 import math
 import traceback
 import re
+import glob
 import os
 import yaml
 import numpy as np
@@ -217,3 +218,31 @@ def extract_dict_value_by_path(data_dict, path):
         return current
     except (KeyError, TypeError):
         raise Exception("Value not found by path: %s (%s)" % (path, traceback.format_exc()))
+
+
+def maybe_save(t, model, out_dir, save_every, max_saves):
+    now = time.time()
+
+    if t is None:
+        return now
+
+    if t + save_every > now:
+        return t
+
+    os.makedirs(out_dir, exist_ok=True)
+    model_file = os.path.join(out_dir, "model-%d.zip" % now)
+    print("Saving %s" % model_file)
+    model.save(model_file)
+
+    # save file retention (keep latest N saves)
+    files = sorted(
+        glob.glob(os.path.join(out_dir, "model-[0-9]*.zip")),
+        key=lambda x: int(re.search(r'\d+', x).group()),
+        reverse=True
+    )
+
+    for file in files[max_saves:]:
+        print("Deleting %s" % file)
+        os.remove(file)
+
+    return now

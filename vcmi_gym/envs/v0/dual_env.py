@@ -63,12 +63,12 @@ ResetResult = collections.namedtuple("ResetResult", ["obs", "info"])
 
 
 class DualEnvController():
-    def __init__(self, env):
+    def __init__(self, env, loglevel="DEBUG"):
         self.env = env
         self.clients = Clients()
         self.state = State.RESET
         self.cond = threading.Condition()
-        self.logger = log.get_logger("Controller", "DEBUG")
+        self.logger = log.get_logger("Controller", loglevel)
 
     #
     # XXX:
@@ -209,10 +209,10 @@ class DualEnvController():
 
 
 class DualEnvClient(gym.Env):
-    def __init__(self, controller, name):
+    def __init__(self, controller, name, loglevel="DEBUG"):
         self.controller = controller
         self.side = None
-        self.logger = log.get_logger(name, "DEBUG")
+        self.logger = log.get_logger(name, loglevel)
 
     @tracelog
     def reset(self, *args, **kwargs):

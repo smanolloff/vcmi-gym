@@ -41,8 +41,8 @@ class InfoDict(dict):
     SCALAR_VALUES = [
         "net_value",
         "is_success",
-        "reward_clip_abs_total",
-        "reward_clip_abs_max",
+        # "reward_clip_abs_total",
+        # "reward_clip_abs_max",
     ]
 
     D1_ARRAY_VALUES = {

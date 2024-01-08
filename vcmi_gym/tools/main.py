@@ -2,7 +2,7 @@ import os
 import yaml
 import re
 import argparse
-import wandb
+# import wandb
 from copy import deepcopy
 
 from . import common
@@ -25,7 +25,7 @@ def run(action, cfg, rest=[]):
         case "train_ppo" | "train_qrdqn" | "train_mppo" | "train_mqrdqn":
             from .train_sb3 import train_sb3
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
-            common.register_env(expanded_env_kwargs, env_wrappers)
+            # common.register_env(expanded_env_kwargs, env_wrappers)
 
             learner_cls = action.split("_")[-1].upper()
             default_template = "data/%s-{group_id}/{run_id}" % learner_cls
@@ -59,15 +59,19 @@ def run(action, cfg, rest=[]):
                     "reset_num_timesteps": cfg.get("reset_num_timesteps", False),
                     "learner_kwargs": cfg.get("learner_kwargs", {}),
                     "net_arch": cfg.get("net_arch", []),
-                    "features_extractor": cfg["features_extractor"],  # required
-                    "optimizer": cfg["optimizer"],
+                    "activation": cfg.get("activation", "ReLU"),
+                    "features_extractor": cfg.get("features_extractor", {}),
+                    "optimizer": cfg.get("optimizer", {}),
+                    "env_kwargs": expanded_env_kwargs,
+                    "mapmask": cfg.get("mapmask", "ai/generated/A*.vmap"),
+                    "randomize_maps": cfg.get("randomize_maps", False),
+                    "n_global_steps_max": cfg.get("n_global_steps_max", None),
                     "rollouts_total": cfg.get("rollouts_total", 0),
-                    "rollouts_per_map": cfg.get("rollouts_per_map", 100),
-                    "rollouts_per_role": cfg.get("rollouts_per_role", 10),
+                    "rollouts_per_iteration": cfg.get("rollouts_per_iteration", 100),
                     "rollouts_per_log": cfg.get("rollouts_per_log", 5),
-                    "map_pool": cfg.get("map_pool", []),
-                    "map_pool_offset_idx": cfg.get("map_pool_offset_idx", 0),
                     "n_envs": cfg.get("n_envs", 1),
+                    "save_every": cfg.get("save_every", 3600),
+                    "max_saves": cfg.get("max_saves", 3),
                     "learning_rate": cfg.get("learning_rate", None),
                     "learner_lr_schedule": cfg.get(
                         "learner_lr_schedule", "const_0.003"

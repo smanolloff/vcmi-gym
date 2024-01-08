@@ -90,7 +90,7 @@ if __name__ == "__main__":
     header0, objects0, surface_terrain0 = get_templates()
     all_creatures = get_all_creatures()
 
-    for i in range(1, 100):
+    for i in range(100, 101):
         army_a = build_army(all_creatures)
         army_b = build_army(all_creatures)
 
