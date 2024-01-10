@@ -2,6 +2,8 @@ import os
 import yaml
 import re
 import argparse
+import signal
+import sys
 # import wandb
 from copy import deepcopy
 
@@ -10,6 +12,11 @@ from . import common
 # NOTE (MacOS ONLY):
 # To prevent annoying ApplePersistenceIgnoreState message:
 # $ defaults write org.python.python ApplePersistenceIgnoreState NO
+
+
+def handle_signal(signum, frame):
+    print("*** [main.py] received signal %s ***" % signum)
+    sys.exit(0)
 
 
 def run(action, cfg, rest=[]):
@@ -208,6 +215,8 @@ examples:
 """
 
     args = parser.parse_args()
+
+    signal.signal(signal.SIGTERM, handle_signal)
 
     if args.c is None:
         args.c = open(os.path.join("config", f"{args.action}.yml"), "r")
