@@ -32,11 +32,17 @@ def run(action, cfg, rest=[]):
             out_dir_template = cfg.get("out_dir_template", default_template)
             seed = cfg.get("seed", None) or common.gen_seed()
             run_id = cfg.get("run_id", None) or common.gen_id()
+            group_id = cfg.get("group_id", None) or run_id
+            model_load_file = cfg.get("model_load_file", None)
 
             if len(rest) > 0:
                 group_id = rest[0]
-            else:
-                group_id = cfg.get("group_id", None) or run_id
+
+            if len(rest) > 1:
+                run_id = rest[1]
+
+            if len(rest) > 2:
+                model_load_file = rest[2]
 
             assert re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]+[A-Za-z0-9]$", group_id), "invalid group_id: %s" % group_id
 
@@ -51,7 +57,7 @@ def run(action, cfg, rest=[]):
                     "seed": seed,
                     "run_id": run_id,
                     "group_id": group_id,
-                    "model_load_file": cfg.get("model_load_file", None),
+                    "model_load_file": model_load_file,
                     "model_load_update": cfg.get("model_load_update", False),
                     "out_dir": out_dir,
                     "log_tensorboard": cfg.get("log_tensorboard", False),
@@ -187,15 +193,15 @@ def main():
     parser.usage = "%(prog)s [options] <action> [<value>]"
     parser.epilog = """
 action:
-  train_ppo [group]     train using Proximal Policy Optimization (PPO)
-  train_mppo [group]    train using Maskable Proximal Policy Optimization (MPPO)
-  train_qrdqn [group]   train using Quantile Regression DQN (QRDQN)
-  train_mqrdqn [group]  train using Maskable Quantile Regression DQN (my impl)
-  spectate              watch a trained model play VCMI
-  benchmark [map]       evaluate the actions/s achievable with this env
-  test [map]            for testing purposes only
-  play [map]            play VCMI
-  help                  print this help message
+  train_ppo [group] [run] [loadfile]     train using Proximal Policy Optimization (PPO)
+  train_mppo [group] [run] [loadfile]    train using Maskable Proximal Policy Optimization (MPPO)
+  train_qrdqn [group] [run] [loadfile]   train using Quantile Regression DQN (QRDQN)
+  train_mqrdqn [group] [run] [loadfile]  train using Maskable Quantile Regression DQN (my impl)
+  spectate                               watch a trained model play VCMI
+  benchmark [map]                        evaluate the actions/s achievable with this env
+  test [map]                             for testing purposes only
+  play [map]                             play VCMI
+  help                                   print this help message
 
 examples:
   %(prog)s train_qrdqn

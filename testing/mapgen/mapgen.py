@@ -6,7 +6,8 @@ import io
 import zipfile
 
 
-ARMY_VALUE = 300_000
+ARMY_VALUE_MAX = 500_000
+ARMY_VALUE_MIN = 10_000
 
 
 def get_all_creatures():
@@ -37,12 +38,12 @@ def get_templates():
     return header, objects, surface_terrain
 
 
-def build_army(all_creatures):
-    per_stack = ARMY_VALUE / 7
+def build_army(all_creatures, value):
+    per_stack = value / 7
     army_creatures = random.sample(all_creatures, 7)
 
     army = [None] * 7
-    credit = ARMY_VALUE
+    credit = value
     for (i, (vcminame, name, aivalue)) in enumerate(army_creatures):
         number = int(per_stack / aivalue)
         credit -= number * aivalue
@@ -90,14 +91,17 @@ if __name__ == "__main__":
     header0, objects0, surface_terrain0 = get_templates()
     all_creatures = get_all_creatures()
 
-    for i in range(100, 1000):
-        army_a = build_army(all_creatures)
-        army_b = build_army(all_creatures)
+    for i in range(1, 1000):
+        mult = 10_000
+        value = mult * random.randint(ARMY_VALUE_MIN / mult, ARMY_VALUE_MAX / mult)
+        army_a = build_army(all_creatures, value)
+        army_b = build_army(all_creatures, value)
 
         header = copy.deepcopy(header0)
-        header["name"] = "A%02d" % i
-        header["description"] = "AI test map %s\n\nAttacker:\n%s\n\nDefender:\n%s" % (
+        header["name"] = "B%03d" % i
+        header["description"] = "AI test map %s\n\nTarget army values: %d\nAttacker:\n%s\n\nDefender:\n%s" % (
             header["name"],
+            value,
             describe(army_a),
             describe(army_b)
         )

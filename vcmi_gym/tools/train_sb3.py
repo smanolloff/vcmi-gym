@@ -9,6 +9,7 @@ import vcmi_gym
 import wandb
 import copy
 import torch.optim
+import threading
 
 from . import common
 from . import sb3_callback
@@ -163,22 +164,24 @@ def create_venv(n_envs, env_kwargs, mapmask, randomize, iteration=0):
     pairs = [[("attacker", m), ("defender", m)] for m in maps]
     pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
     state = {"n": 0}
+    lock = threading.RLock()
 
     def env_creator(**_env_kwargs):
-        assert state["n"] < n_envs
-        role, mapname = pairs[state["n"]]
-        # logfile2 = f"/tmp/{self.trial_id}-env{state['n']}-actions.log"
+        with lock:
+            assert state["n"] < n_envs
+            role, mapname = pairs[state["n"]]
+            # logfile2 = f"/tmp/{self.trial_id}-env{state['n']}-actions.log"
 
-        env_kwargs2 = dict(
-            env_kwargs,
-            mapname=mapname,
-            attacker="StupidAI",
-            defender="StupidAI",
-        )
+            env_kwargs2 = dict(
+                env_kwargs,
+                mapname=mapname,
+                attacker="StupidAI",
+                defender="StupidAI",
+            )
 
-        env_kwargs2[role] = "MMAI_USER"
-        print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs2))
-        state["n"] += 1
+            env_kwargs2[role] = "MMAI_USER"
+            print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs2))
+            state["n"] += 1
 
         return vcmi_gym.VcmiEnv(**env_kwargs2)
 

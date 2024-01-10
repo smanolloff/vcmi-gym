@@ -241,7 +241,7 @@ def maybe_save(t, model, out_dir, save_every, max_saves):
     # save file retention (keep latest N saves)
     files = sorted(
         glob.glob(os.path.join(out_dir, "model-[0-9]*.zip")),
-        key=lambda x: int(re.search(r'\d+', x).group()),
+        key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()),
         reverse=True
     )
 

@@ -2,7 +2,7 @@
 seed: ~
 run_id: ~
 group_id: ~
-model_load_file: "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20240107_171925/263fb_00000/checkpoint_000007/model.zip"
+model_load_file: "/Users/simo/Projects/vcmi-gym/data/MPPO-ahcgnv23/ahcgnv23/model.zip"
 out_dir_template: "data/MPPO-{group_id}/{run_id}"
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
@@ -22,7 +22,7 @@ n_envs: 32
 # (eg. 2048/48 = 42.666... => n_steps=42)
 n_global_steps_max: 2048
 
-mapmask: "ai/generated/A*.vmap"
+mapmask: "ai/generated/B*.vmap"
 
 logparams: {}
   # "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
