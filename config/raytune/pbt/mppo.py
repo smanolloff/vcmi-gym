@@ -1,7 +1,11 @@
 from ray.tune.search.sample import Integer, Float
 
-N_WORKERS = 1
-N_ENVS = 48
+N_WORKERS = 4
+N_ENVS = 8
+
+# overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
+# (eg. 2048/48 = 42.666... => n_steps=42)
+N_GLOBAL_STEPS_MAX = 2048
 
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
@@ -27,29 +31,15 @@ config = {
     # HOW TO CHOOSE:
     #   such that there at least 100 episodes between perturbations
     #
-    "rollouts_per_iteration": 500,
 
     #
-    # Number of logs per iteration
-    # Requirement is: rollouts_per_iteration % logs_per_iteration == 0
+    # XXX: changes to use rollouts_per_iteration_step and iteration_steps
+    #      are NOT tested! Changes in commit: 57a878c
     #
-    "logs_per_iteration": 50,
+    "rollouts_per_iteration_step": 20,
+    "rollouts_per_log": 2,
 
-    #
-    # Number of rollouts before swithing roles (attacker/defender)
-    # Requirements are:
-    #
-    # 1. Even number of roles per iteration:
-    #       (rollouts_per_iteration / rollouts_per_role) % 2 == 0
-    #
-    # 2. Equal number of logs per role:
-    #       rollouts_per_role % (rollouts_per_iteration/logs_per_iteration) == 0
-    #
-    # A value of 0 means no role switching
-    "rollouts_per_role": 0,
-
-    # A value of 1 means no map switching
-    "maps_per_iteration": 1,
+    "iteration_steps": 20,
 
     "hyperparam_mutations": {
         # "net_arch": [[], [64, 64], [256, 256]],
@@ -74,17 +64,13 @@ config = {
     # Setting it to 0 essentially implies doing no exploitation at all.
     # """
     "quantile_fraction": 0.25,
-
-    # Requirement:
-    #
-    # n_steps % N_ENVS == 0
     "n_envs": N_ENVS,
 
     "all_params": {
         "learner_kwargs": {
             "stats_window_size": 100,
             "learning_rate": 0.00126,
-            "n_steps": 2048 // N_ENVS,
+            "n_steps": N_GLOBAL_STEPS_MAX // N_ENVS,
             "batch_size": 64,
             "n_epochs": 10,
             "gamma": 0.8425,
@@ -126,29 +112,7 @@ config = {
             # "attacker": "MMAI_USER",
             # "defender": "StupidAI"
         },
-        "map_pool_offset_idx": 0,
-        "map_pool": [
-            # "_T0.vmap",
-            "A01.vmap", "A02.vmap", "A03.vmap", "A04.vmap", "A05.vmap",
-            "A06.vmap", "A07.vmap", "A08.vmap", "A09.vmap", "A10.vmap",
-            "A11.vmap", "A12.vmap", "A13.vmap", "A14.vmap", "A15.vmap",
-            "A16.vmap", "A17.vmap", "A18.vmap", "A19.vmap", "A20.vmap",
-            "A21.vmap", "A22.vmap", "A23.vmap", "A24.vmap", "A25.vmap",
-            "A26.vmap", "A27.vmap", "A28.vmap", "A29.vmap", "A30.vmap",
-            "A31.vmap", "A32.vmap", "A33.vmap", "A34.vmap", "A35.vmap",
-            "A36.vmap", "A37.vmap", "A38.vmap", "A39.vmap", "A40.vmap",
-            "A41.vmap", "A42.vmap", "A43.vmap", "A44.vmap", "A45.vmap",
-            "A46.vmap", "A47.vmap", "A48.vmap", "A49.vmap", "A50.vmap",
-            "A51.vmap", "A52.vmap", "A53.vmap", "A54.vmap", "A55.vmap",
-            "A56.vmap", "A57.vmap", "A58.vmap", "A59.vmap", "A60.vmap",
-            "A61.vmap", "A62.vmap", "A63.vmap", "A64.vmap", "A65.vmap",
-            "A66.vmap", "A67.vmap", "A68.vmap", "A69.vmap", "A70.vmap",
-            "A71.vmap", "A72.vmap", "A73.vmap", "A74.vmap", "A75.vmap",
-            "A76.vmap", "A77.vmap", "A78.vmap", "A79.vmap", "A80.vmap",
-            "A81.vmap", "A82.vmap", "A83.vmap", "A84.vmap", "A85.vmap",
-            "A86.vmap", "A87.vmap", "A88.vmap", "A89.vmap", "A90.vmap",
-            "A91.vmap", "A92.vmap", "A93.vmap", "A94.vmap", "A95.vmap",
-            "A96.vmap", "A97.vmap", "A98.vmap", "A99.vmap"
-        ]
+        "mapmask": "ai/generated/B*.vmap",
+        "randomize_maps": True,
     }
 }
