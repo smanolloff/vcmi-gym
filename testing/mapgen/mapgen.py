@@ -10,6 +10,10 @@ ARMY_VALUE_MAX = 500_000
 ARMY_VALUE_MIN = 10_000
 
 
+class StackTooBigError(Exception):
+    pass
+
+
 def get_all_creatures():
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -38,6 +42,21 @@ def get_templates():
     return header, objects, surface_terrain
 
 
+def build_army_with_retry(*args, **kwargs):
+    retry_limit = 10
+    retries = 0
+
+    while True:
+        try:
+            return build_army(*args, **kwargs)
+        except StackTooBigError as e:
+            if retries < retry_limit:
+                print("Rebuilding army due to: %s" % e.str())
+                retries += 1
+            else:
+                raise Exception("Retry limit (%d) hit" % retry_limit)
+
+
 def build_army(all_creatures, value):
     per_stack = value / 7
     army_creatures = random.sample(all_creatures, 7)
@@ -46,6 +65,8 @@ def build_army(all_creatures, value):
     credit = value
     for (i, (vcminame, name, aivalue)) in enumerate(army_creatures):
         number = int(per_stack / aivalue)
+        if number > 5000:
+            raise StackTooBigError("Stack too big: %s: %d" % (name, number))
         credit -= number * aivalue
         army[i] = (vcminame, name, number)
 
@@ -93,9 +114,10 @@ if __name__ == "__main__":
 
     for i in range(1, 1000):
         mult = 10_000
+
         value = mult * random.randint(ARMY_VALUE_MIN / mult, ARMY_VALUE_MAX / mult)
-        army_a = build_army(all_creatures, value)
-        army_b = build_army(all_creatures, value)
+        army_a = build_army_with_retry(all_creatures, value)
+        army_b = build_army_with_retry(all_creatures, value)
 
         header = copy.deepcopy(header0)
         header["name"] = "B%03d" % i
