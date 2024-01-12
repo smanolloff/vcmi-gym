@@ -2,8 +2,11 @@ import os
 import copy
 import re
 import statistics
+import glob
+import random
+import threading
 from stable_baselines3 import PPO
-from stable_baselines3.common.env_util import make_vec_env
+# from stable_baselines3.common.env_util import make_vec_env
 import ray.tune
 import ray.train
 import wandb
@@ -15,6 +18,7 @@ from ..wandb_init import wandb_init
 # from .... import InfoDict
 import vcmi_gym
 from vcmi_gym import InfoDict
+from vcmi_gym.tools.common import make_vec_env_parallel
 
 DEBUG = True
 
@@ -71,18 +75,14 @@ class PPOTrainer(ray.tune.Trainable):
 
     @debuglog
     def setup(self, cfg, initargs):
-        self.rollouts_per_iteration = initargs["config"]["rollouts_per_iteration"]
-        self.rollouts_per_role = initargs["config"]["rollouts_per_role"]
-        self.maps_per_iteration = initargs["config"]["maps_per_iteration"]
+        self.iteration_steps = initargs["config"]["iteration_steps"]
+        self.rollouts_per_iteration_step = initargs["config"]["rollouts_per_iteration_step"]
+        self.rollouts_per_log = initargs["config"]["rollouts_per_log"]
         self.n_envs = initargs["config"]["n_envs"]
-        self.logs_per_iteration = initargs["config"]["logs_per_iteration"]
         self.hyperparam_bounds = initargs["config"]["hyperparam_bounds"]
         self.initial_checkpoint = initargs["config"]["initial_checkpoint"]
         self.experiment_name = initargs["experiment_name"]
         self.all_params = copy.deepcopy(initargs["config"]["all_params"])
-
-        if not self.rollouts_per_role:
-            self.rollouts_per_role = self.rollouts_per_iteration
 
         self._wandb_init(self.experiment_name, initargs["config"])
 
@@ -90,23 +90,7 @@ class PPOTrainer(ray.tune.Trainable):
         self.leaf_keys = self._get_leaf_hyperparam_keys(self.hyperparam_bounds)
         self.reset_config(cfg)
 
-        assert self.rollouts_per_iteration % self.logs_per_iteration == 0
-        self.log_interval = self.rollouts_per_iteration // self.logs_per_iteration
-
-        assert self.rollouts_per_iteration % self.maps_per_iteration == 0
-        self.rollouts_per_map = self.rollouts_per_iteration // self.maps_per_iteration
-
-        if self.rollouts_per_role != self.rollouts_per_iteration:
-            # Ensure both roles get equal amount of rollouts
-            assert self.rollouts_per_iteration % self.rollouts_per_role == 0
-            assert (self.rollouts_per_iteration // self.rollouts_per_role) % 2 == 0
-
-            # Ensure there's equal amount of logs for each role
-            assert self.rollouts_per_role % self.log_interval == 0
-
-            if self.rollouts_per_map:
-                assert self.rollouts_per_map % self.rollouts_per_role == 0
-                assert (self.rollouts_per_map // self.rollouts_per_role) % 2 == 0
+        assert self.rollouts_per_log % self.rollouts_per_iteration_step == 0
 
         assert self.n_envs % 2 == 0
 
@@ -126,7 +110,7 @@ class PPOTrainer(ray.tune.Trainable):
         n_steps_per_rollout = cfg["learner_kwargs"]["n_steps"]
         timesteps_per_rollout = n_steps_per_rollout * self.n_envs
 
-        self.total_timesteps_per_role = timesteps_per_rollout * self.rollouts_per_role
+        self.total_timesteps_per_iteration_step = timesteps_per_rollout * self.rollouts_per_iteration_step
         return True
 
     @debuglog
@@ -155,34 +139,36 @@ class PPOTrainer(ray.tune.Trainable):
         wandb.log(wlog, commit=False)
 
         old_rollouts = self.sb3_callback.rollouts
-        rollouts_this_iteration = 0
+        iteration_step = 0
         ep_rew_means = []
-        while rollouts_this_iteration < self.rollouts_per_iteration:
-            self.log("CYCLE: rollouts_this_iteration=%d, rollouts_per_iteration=%d, rollouts_per_role=%d, total_timesteps_per_role=%d" % (  # noqa: E501
-                rollouts_this_iteration,
-                self.rollouts_per_iteration,
-                self.rollouts_per_role,
-                self.total_timesteps_per_role
+
+        while iteration_step < self.iteration_steps:
+            self.log("Iteration step: %d/%d (%d rollouts per step)" % (
+                iteration_step,
+                self.iteration_steps,
+                self.rollouts_per_iteration_step,
             ))
 
-            if len(ep_rew_means) > 0:
+            if iteration_step > 0:
                 self.model.env.close()
-                self.model.env = self._venv_init(rollouts_this_iteration)
+                self.model.env = self._venv_init(iteration_step)
                 self.model.env.reset()
 
             self.model.learn(
-                total_timesteps=self.total_timesteps_per_role,
-                log_interval=self.log_interval,
-                reset_num_timesteps=(self.iteration == 0 and rollouts_this_iteration == 0),
+                total_timesteps=self.total_timesteps_per_iteration_step,
+                log_interval=self.rollouts_per_log,
+                reset_num_timesteps=(self.iteration == 0 and iteration_step == 0),
                 progress_bar=False,
                 callback=self.sb3_callback
             )
 
-            rollouts_this_iteration += self.rollouts_per_role
+            diff_rollouts = self.sb3_callback.rollouts - (iteration_step * self.rollouts_per_iteration_step)
+            assert diff_rollouts == self.rollouts_per_iteration_step, f"expected {self.rollouts_per_iteration_step}, got: {diff_rollouts}"  # noqa: E501
+            iteration_step += 1
             ep_rew_means.append(self.sb3_callback.ep_rew_mean)
 
         diff_rollouts = self.sb3_callback.rollouts - old_rollouts
-        iter_rollouts = self.rollouts_per_iteration
+        iter_rollouts = self.rollouts_per_iteration_step * self.iteration_steps
 
         assert diff_rollouts == iter_rollouts, f"expected {iter_rollouts}, got: {diff_rollouts}"
 
@@ -205,37 +191,59 @@ class PPOTrainer(ray.tune.Trainable):
     def _wandb_init(self, experiment_name, config):
         wandb_init(self.trial_id, self.trial_name, experiment_name, config)
 
-    def _venv_init(self, rollouts_this_iteration=0):
-        mpool = self.all_params["map_pool"]
-        offset = self.all_params["map_pool_offset_idx"]
-        offset += self.maps_per_iteration * self.iteration * self.n_envs
-        mid = (offset + rollouts_this_iteration // self.rollouts_per_map) % len(mpool)
-        mapnum = int(re.match(r".+?([0-9]+)\.vmap", mpool[mid]).group(1))
-        wandb.log({"mapnum": mapnum}, commit=False)
+    def _venv_init(self, iteration_step=0):
+        mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
+        all_maps = glob.glob("%s/%s" % (mappath, self.all_params["mapmask"]))
+        all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
+
+        assert self.n_envs % 2 == 0
+        assert self.n_envs <= len(all_maps) * 2
+        n_maps = self.n_envs // 2
+
+        if self.all_params["randomize"]:
+            maps = random.sample(all_maps, n_maps)
+        else:
+            i = (n_maps * iteration_step) % len(all_maps)
+            new_i = (i + n_maps) % len(all_maps)
+
+            if new_i > i:
+                self.log("map range: [%d:%d]" % (i, new_i))
+                maps = all_maps[i:new_i]
+            else:
+                self.log("map range: [%d:] + [:%d]" % (i, new_i))
+                maps = all_maps[i:] + all_maps[:new_i]
+
+            assert len(maps) == n_maps
+
+        pairs = [[("attacker", m), ("defender", m)] for m in maps]
+        pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
         state = {"n": 0}
+        lock = threading.RLock()
 
         def env_creator(**_env_kwargs):
-            assert state["n"] < self.n_envs
-            role = "attacker" if state["n"] % 2 == 0 else "defender"
-            mid2 = (mid + (state["n"] // 2)) % len(mpool)
-            mapname2 = "ai/generated/%s" % (mpool[mid2])
-            logfile2 = f"/tmp/{self.trial_id}-env{state['n']}-actions.log"
+            with lock:
+                assert state["n"] < self.n_envs
+                role, mapname = pairs[state["n"]]
+                # logfile = f"/tmp/{run_id}-env{state['n']}-actions.log"
+                logfile = None
 
-            env_kwargs = dict(
-                self.cfg["env_kwargs"],
-                mapname=mapname2,
-                actions_log_file=logfile2,
-                attacker="StupidAI",
-                defender="StupidAI",
-            )
+                env_kwargs2 = dict(
+                    self.cfg["env_kwargs"],
+                    mapname=mapname,
+                    attacker="StupidAI",
+                    defender="StupidAI",
+                    actions_log_file=logfile
+                )
 
-            env_kwargs[role] = "MMAI_USER"
-            self.log("Env kwargs (env.%d): %s" % (state["n"], env_kwargs))
-            state["n"] += 1
-            # return gym.make("VCMI-v0", **env_kwargs)
-            return vcmi_gym.VcmiEnv(**env_kwargs)
+                env_kwargs2[role] = "MMAI_USER"
 
-        return make_vec_env(
+                print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs2))
+                state["n"] += 1
+
+            return vcmi_gym.VcmiEnv(**env_kwargs2)
+
+        return make_vec_env_parallel(
+            min(self.n_envs, 8),
             env_creator,
             n_envs=self.n_envs,
             monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},

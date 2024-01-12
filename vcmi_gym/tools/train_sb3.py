@@ -139,7 +139,7 @@ def init_model(
 #
 #         self.train()  # update NN
 
-def create_venv(n_envs, env_kwargs, mapmask, randomize, iteration=0):
+def create_venv(n_envs, env_kwargs, mapmask, randomize, run_id, iteration=0):
     mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
     all_maps = glob.glob("%s/%s" % (mappath, mapmask))
     all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
@@ -170,13 +170,14 @@ def create_venv(n_envs, env_kwargs, mapmask, randomize, iteration=0):
         with lock:
             assert state["n"] < n_envs
             role, mapname = pairs[state["n"]]
-            # logfile2 = f"/tmp/{self.trial_id}-env{state['n']}-actions.log"
+            logfile = f"/tmp/{run_id}-env{state['n']}-actions.log"
 
             env_kwargs2 = dict(
                 env_kwargs,
                 mapname=mapname,
                 attacker="StupidAI",
                 defender="StupidAI",
+                actions_log_file=logfile
             )
 
             env_kwargs2[role] = "MMAI_USER"
@@ -190,7 +191,7 @@ def create_venv(n_envs, env_kwargs, mapmask, randomize, iteration=0):
     # => metrics won't be correctly calculated
     # => implement truncation in the env itself
     return common.make_vec_env_parallel(
-        8,
+        min(n_envs, 8),
         env_creator,
         n_envs=n_envs,
         monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
@@ -246,7 +247,7 @@ def train_sb3(
 
     try:
         model = init_model(
-            venv=create_venv(n_envs, env_kwargs, mapmask, randomize_maps),
+            venv=create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id),
             seed=seed,
             model_load_file=model_load_file,
             model_load_update=model_load_update,
@@ -280,7 +281,7 @@ def train_sb3(
             if iteration > 0:
                 common.save_model(out_dir, model)
                 model.env.close()
-                model.env = create_venv(n_envs, env_kwargs, mapmask, randomize_maps, iteration)
+                model.env = create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id, iteration)
                 model.env.reset()
 
             model.learn(
