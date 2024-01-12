@@ -23,7 +23,7 @@ def tracelog(func):
 
     def wrapper(*args, **kwargs):
         this = args[0]
-        this._debug("Start: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], log.trunc(repr(kwargs), MAXLEN)))
+        this._debug("Begin: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], log.trunc(repr(kwargs), MAXLEN)))
         result = func(*args, **kwargs)
         this._debug("End: %s (return %s)" % (func.__name__, log.trunc(repr(result), MAXLEN)))
         return result

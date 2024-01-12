@@ -1,5 +1,6 @@
 ---
 env_kwargs:
+  user_timeout: 3600  # seconds
   __include__: "config/env.yml"
 
 env_wrappers: []

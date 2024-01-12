@@ -31,7 +31,7 @@ def tracelog(func, maxlen=MAXLEN):
 
     def wrapper(*args, **kwargs):
         this = args[0]
-        this.logger.debug("Start: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], log.trunc(repr(kwargs), maxlen)))
+        this.logger.debug("Begin: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], log.trunc(repr(kwargs), maxlen)))
         result = func(*args, **kwargs)
         this.logger.debug("End: %s (return %s)" % (func.__name__, log.trunc(repr(result), maxlen)))
         return result
@@ -81,6 +81,9 @@ class VcmiEnv(gym.Env):
         defender_model=None,  # MPPO zip model (if defender=MMAI_MODEL)
         sparse_info=False,
         actions_log_file=None,  # DEBUG
+        user_timeout=30,  # seconds (gradient updates may be slow)
+        vcmi_timeout=5,  # seconds (even resets should take no more than 1s)
+        boot_timeout=60,  # seconds
         reward_clip_mod=None,  # clip at +/- this value
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
@@ -91,7 +94,7 @@ class VcmiEnv(gym.Env):
         assert attacker == "MMAI_USER" or defender == "MMAI_USER", "an MMAI_USER role is required"
 
         self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
-        self.connector = PyConnector(vcmienv_loglevel)
+        self.connector = PyConnector(vcmienv_loglevel, user_timeout, vcmi_timeout, boot_timeout)
 
         result = self.connector.start(
             mapname,

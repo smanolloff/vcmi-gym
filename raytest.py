@@ -15,7 +15,7 @@ from ray.tune.schedulers.pb2 import PB2
 
 def debuglog(func):
     def wrapper(*args, **kwargs):
-        args[0].log("Start: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], kwargs))
+        args[0].log("Begin: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], kwargs))
         result = func(*args, **kwargs)
         args[0].log("End: %s (return %s)" % (func.__name__, result))
         return result

@@ -39,13 +39,25 @@ TRACE = True
 MAXLEN = 80
 
 
+class UserTimeout(Exception):
+    pass
+
+
+class VcmiTimeout(Exception):
+    pass
+
+
+class BootTimeout(Exception):
+    pass
+
+
 def tracelog(func, maxlen=MAXLEN):
     if not TRACE:
         return func
 
     def wrapper(*args, **kwargs):
         this = args[0]
-        this.logger.debug("Start: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], log.trunc(repr(kwargs), maxlen)))
+        this.logger.debug("Begin: %s (args=%s, kwargs=%s)" % (func.__name__, args[1:], log.trunc(repr(kwargs), maxlen)))
         result = func(*args, **kwargs)
         this.logger.debug("End: %s (return %s)" % (func.__name__, log.trunc(repr(result), maxlen)))
         return result
@@ -92,6 +104,7 @@ class PyResult():
 
 
 class PyConnector():
+    COMMAND_TYPE_UNSET = -1
     COMMAND_TYPE_RESET = 0
     COMMAND_TYPE_ACT = 1
     COMMAND_TYPE_RENDER_ANSI = 2
@@ -99,12 +112,15 @@ class PyConnector():
     #
     # MAIN PROCESS
     #
-    def __init__(self, loglevel):
+    def __init__(self, loglevel, user_timeout, vcmi_timeout, boot_timeout):
         self.started = False
         self.loglevel = loglevel
         self.shutdown_lock = multiprocessing.Lock()
         self.shutdown_complete = False
         self.logger = log.get_logger("PyConnector", self.loglevel)
+        self.user_timeout = user_timeout
+        self.vcmi_timeout = vcmi_timeout
+        self.boot_timeout = boot_timeout
 
     @tracelog
     def start(self, *args):
@@ -115,6 +131,8 @@ class PyConnector():
         self.v_result_act = multiprocessing.Value(PyRawResult)
         self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 8192)
         self.v_command_type = multiprocessing.Value(ctypes.c_int)
+
+        self.v_command_type.value = PyConnector.COMMAND_TYPE_UNSET
 
         # Process synchronization:
         # cond.notify() will wake up the other proc (which immediately tries to acquire the lock)
@@ -187,7 +205,7 @@ class PyConnector():
         with self.cond:
             self.v_command_type.value = PyConnector.COMMAND_TYPE_RESET
             self.cond.notify()
-            self.cond.wait()
+            self._wait_vcmi()
         return PyResult(self.v_result_act)
 
     @tracelog
@@ -196,7 +214,7 @@ class PyConnector():
             self.v_command_type.value = PyConnector.COMMAND_TYPE_ACT
             self.v_action.value = action
             self.cond.notify()
-            self.cond.wait()
+            self._wait_vcmi()
         return PyResult(self.v_result_act)
 
     @tracelog
@@ -204,14 +222,32 @@ class PyConnector():
         with self.cond:
             self.v_command_type.value = PyConnector.COMMAND_TYPE_RENDER_ANSI
             self.cond.notify()
-            self.cond.wait()
+            self._wait_vcmi()
         return self.v_result_render_ansi.value.decode("utf-8")
 
     def _try_start(self, _retries, _retry_interval):
         with self.cond:
             self.proc.start()
-            self.cond.wait()
+            # boot time may be long, add extra 10s
+            self._wait_boot()
         return True
+
+    def _wait_vcmi(self):
+        self._wait("vcmi", self.vcmi_timeout, VcmiTimeout)
+
+    def _wait_boot(self):
+        self._wait("boot", self.boot_timeout, BootTimeout)
+
+    def _wait(self, actor, timeout, err_cls):
+        if not self.cond.wait(timeout):
+            msg = "No response from %s for %s seconds (last command_type was: %d)" % (
+                actor,
+                timeout,
+                self.v_command_type.value
+            )
+
+            self.logger.error(msg)
+            raise err_cls(msg)
 
     #
     # This method is the SUB-PROCESS
@@ -239,9 +275,15 @@ class PyConnector():
             self.set_v_result_act(self.__connector.start())
             self.cond.notify()
 
+            # use boot_timeout for 1st user action
+            # (as it may take longer, eg. until all vec envs are UP)
+            self._wait("user (boot)", self.boot_timeout, UserTimeout)
+            self.process_command()
+            self.cond.notify()
+
             while True:
                 # release the lock and wait (main proc now successfully acquires the lock)
-                self.cond.wait()
+                self._wait("user", self.user_timeout, UserTimeout)
                 # perform action only after main proc calls cond.notify() and cond.wait()
                 self.process_command()
                 # wake up the subproc (which immediately tries to acquire the lock)
