@@ -151,15 +151,15 @@ def create_venv(n_envs, env_kwargs, mapmask, randomize, run_id, iteration=0):
     if randomize:
         maps = random.sample(all_maps, n_maps)
     else:
-        i = (n_envs * iteration) % len(all_maps)
-        new_i = (i + n_envs) % len(all_maps)
+        i = (n_maps * iteration) % len(all_maps)
+        new_i = (i + n_maps) % len(all_maps)
 
         if new_i > i:
             maps = all_maps[i:new_i]
         else:
             maps = all_maps[i:] + all_maps[:new_i]
 
-        assert len(maps) == n_envs
+        assert len(maps) == n_maps
 
     pairs = [[("attacker", m), ("defender", m)] for m in maps]
     pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
@@ -170,7 +170,8 @@ def create_venv(n_envs, env_kwargs, mapmask, randomize, run_id, iteration=0):
         with lock:
             assert state["n"] < n_envs
             role, mapname = pairs[state["n"]]
-            logfile = f"/tmp/{run_id}-env{state['n']}-actions.log"
+            # logfile = f"/tmp/{run_id}-env{state['n']}-actions.log"
+            logfile = None
 
             env_kwargs2 = dict(
                 env_kwargs,

@@ -260,7 +260,7 @@ def make_vec_env_parallel(j, env_creator, n_envs, monitor_kwargs):
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=j) as executor:
         futures = [executor.submit(initenv) for _ in range(n_envs)]
-        results = [future.result() for future in concurrent.futures.as_completed(futures)]
+        results = [future.result() for future in futures]
 
     funcs = [lambda x=x: x for x in results]
 

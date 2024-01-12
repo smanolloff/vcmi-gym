@@ -212,6 +212,7 @@ action:
 
 examples:
   %(prog)s train_qrdqn
+  %(prog)s -c path/to/config.yml train_qrdqn
 """
 
     args = parser.parse_args()
@@ -219,6 +220,8 @@ examples:
     signal.signal(signal.SIGTERM, handle_signal)
 
     if args.c is None:
+        print("AAAAAA")
+        breakpoint()
         args.c = open(os.path.join("config", f"{args.action}.yml"), "r")
 
     print("Loading configuration from %s" % args.c.name)
