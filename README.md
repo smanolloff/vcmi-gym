@@ -6,4 +6,6 @@ A Gym environment for VCMI (open-source recreation of Heroes of Might & Magic II
 
 <p align="center"><img src="doc/Under-Construction.png" alt="UNDER CONSTRUCTION" width="300" height="200"></p>
 
-This project is a work-in-progress. Stay tuned.
+SB3 project (messy, not annotated, WIP): https://wandb.ai/s-manolloff/vcmi
+
+VCMI-gym is a work-in-progress. Stay tuned.
