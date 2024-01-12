@@ -156,7 +156,15 @@ fi
 orig_run=$run
 
 # run_id must be globally unique
-run=${orig_run}-$(date +%s)
+while true; do
+  run=${orig_run}-$(date +%s)
+  # Multiple runs started in the same second might end up with the same name
+  [ -d "data/MPPO-$group/$run" ] || break
+  sleep $((RANDOM%5 + 1))
+fi
+
+mkdir -p data/MPPO-$group/$run
+
 
 while true; do
   echo -e "$IDENT group: $group\n$IDENT run: $run\n$IDENT loadfile: $loadfile"
