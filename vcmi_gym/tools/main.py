@@ -35,7 +35,7 @@ def handle_signal(signum, frame):
     sys.exit(0)
 
 
-def run(action, cfg, rest=[]):
+def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
     # print("**** ENV WANDB_RUN_ID: %s" % os.environ["WANDB_RUN_ID"])
     # import wandb
     # print("**** wandb.run.id: %s" % wandb.run.id)
@@ -54,18 +54,18 @@ def run(action, cfg, rest=[]):
             default_template = "data/%s-{group_id}/{run_id}" % learner_cls
             out_dir_template = cfg.get("out_dir_template", default_template)
             seed = cfg.get("seed", None) or common.gen_seed()
-            run_id = cfg.get("run_id", None) or common.gen_id()
-            group_id = cfg.get("group_id", None) or run_id
-            model_load_file = cfg.get("model_load_file", None)
 
-            if len(rest) > 0:
-                group_id = rest[0]
+            if group_id is None:
+                group_id = cfg.get("group_id", None) or common.gen_id()
 
-            if len(rest) > 1:
-                run_id = rest[1]
+            if run_id is None:
+                run_id = cfg.get("run_id", None) or group_id
 
-            if len(rest) > 2:
-                model_load_file = rest[2]
+            if model_load_file is None:
+                model_load_file = cfg.get("model_load_file", None)
+
+            if iteration is None:
+                iteration = cfg.get("iteration", None) or 0
 
             assert re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]+[A-Za-z0-9]$", group_id), "invalid group_id: %s" % group_id
 
@@ -81,6 +81,7 @@ def run(action, cfg, rest=[]):
                     "run_id": run_id,
                     "group_id": group_id,
                     "model_load_file": model_load_file,
+                    "iteration": iteration,
                     "model_load_update": cfg.get("model_load_update", False),
                     "out_dir": out_dir,
                     "log_tensorboard": cfg.get("log_tensorboard", False),
@@ -205,6 +206,10 @@ def run(action, cfg, rest=[]):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", help=argparse.SUPPRESS)
+    parser.add_argument("-g", metavar="GROUP_ID", help="group_id")
+    parser.add_argument("-r", metavar="RUN_ID", help="run_id")
+    parser.add_argument("-l", metavar="LOADFILE", help="zip file to load model from")
+    parser.add_argument("-i", metavar="ITERATION", help="iteration")
     parser.add_argument(
         "-c",
         metavar="FILE",
@@ -216,15 +221,15 @@ def main():
     parser.usage = "%(prog)s [options] <action> [<value>]"
     parser.epilog = """
 action:
-  train_ppo [group] [run] [loadfile]     train using Proximal Policy Optimization (PPO)
-  train_mppo [group] [run] [loadfile]    train using Maskable Proximal Policy Optimization (MPPO)
-  train_qrdqn [group] [run] [loadfile]   train using Quantile Regression DQN (QRDQN)
-  train_mqrdqn [group] [run] [loadfile]  train using Maskable Quantile Regression DQN (my impl)
-  spectate                               watch a trained model play VCMI
-  benchmark [map]                        evaluate the actions/s achievable with this env
-  test [map]                             for testing purposes only
-  play [map]                             play VCMI
-  help                                   print this help message
+  train_ppo         train using Proximal Policy Optimization (PPO)
+  train_mppo        train using Maskable Proximal Policy Optimization (MPPO)
+  train_qrdqn       train using Quantile Regression DQN (QRDQN)
+  train_mqrdqn      train using Maskable Quantile Regression DQN (my impl)
+  spectate          watch a trained model play VCMI
+  benchmark [map]   evaluate the actions/s achievable with this env
+  test [map]        for testing purposes only
+  play [map]        play VCMI
+  help              print this help message
 
 examples:
   %(prog)s train_qrdqn
@@ -236,15 +241,13 @@ examples:
     signal.signal(signal.SIGTERM, handle_signal)
 
     if args.c is None:
-        print("AAAAAA")
-        breakpoint()
         args.c = open(os.path.join("config", f"{args.action}.yml"), "r")
 
     print("Loading configuration from %s" % args.c.name)
     cfg = yaml.safe_load(args.c)
     args.c.close()
 
-    run(args.action, cfg, rest=args.rest)
+    run(args.action, cfg, args.g, args.r, args.l, args.i, rest=args.rest)
 
 
 if __name__ == "__main__":

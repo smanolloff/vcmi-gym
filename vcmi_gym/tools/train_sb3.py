@@ -222,6 +222,7 @@ def train_sb3(
     group_id,
     model_load_file,
     model_load_update,
+    iteration,
     learner_kwargs,
     learning_rate,
     learner_lr_schedule,
@@ -252,7 +253,6 @@ def train_sb3(
     learning_rate = common.lr_from_schedule(learner_lr_schedule)
     sb3_cb = sb3_callback.SB3Callback()
     ep_rew_means = []
-    iteration = 0
 
     if rollouts_total:
         iterations = rollouts_total // rollouts_per_iteration
@@ -261,10 +261,11 @@ def train_sb3(
 
     model = None
     t = None
+    start_iteration = iteration
 
     try:
         model = init_model(
-            venv=create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id),
+            venv=create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id, iteration),
             seed=seed,
             model_load_file=model_load_file,
             model_load_update=model_load_update,
@@ -295,8 +296,10 @@ def train_sb3(
         while iteration < iterations:
             print(".", end="", flush=True)
 
-            if iteration > 0:
+            if (iteration - start_iteration) > 0:
                 common.save_model(out_dir, model)
+                with open(f"{out_dir}/iteration", "w") as f:
+                    f.write(iteration)
                 model.env.close()
                 model.env = create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id, iteration)
                 model.env.reset()
@@ -309,7 +312,7 @@ def train_sb3(
                 callback=[sb3_cb]
             )
 
-            diff_rollouts = sb3_cb.rollouts - (iteration * rollouts_per_iteration)
+            diff_rollouts = sb3_cb.rollouts - (iteration - start_iteration)*rollouts_per_iteration
             assert diff_rollouts == rollouts_per_iteration, f"expected {rollouts_per_iteration}, got: {diff_rollouts}"
             iteration += 1
             ep_rew_means.append(sb3_cb.ep_rew_mean)

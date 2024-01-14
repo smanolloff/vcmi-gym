@@ -121,6 +121,7 @@ cfg=
 group=
 run=
 loadfile=
+iteration=
 
 #
 #
@@ -172,10 +173,11 @@ while true; do
   args=()
 
   [ -z "$cfg" ] || args+=("-c" "$cfg")
+  [ -z "$iteration" ] || args+=(-i "$iteration")
+  [ -z "$loadfile" ] || args+=("-l" "$loadfile")
+  args+=(-g "$group")
+  args+=(-r "$run")
   args+=(train_mppo)
-  args+=("$group")
-  args+=("$run")
-  [ -z "$loadfile" ] || args+=("$loadfile")
 
   python vcmi-gym.py "${args[@]}" &
 
@@ -187,7 +189,10 @@ while true; do
 
       # Overwrite loadfile with the latest model snapshot, if any
       latest_loadfile=$(find_latest_loadfile)
-      [ -z "$latest_loadfile" ] || loadfile=$latest_loadfile
+      if [ -n "$latest_loadfile" ]; then
+        loadfile=$latest_loadfile
+        iteration=$(<${file%/*}/iteration)
+      fi
 
       run=${orig_run}_$(date +%s)
       # re-use the same run ID (ie. just continue training from last save)
