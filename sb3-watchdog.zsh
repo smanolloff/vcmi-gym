@@ -191,7 +191,7 @@ while true; do
       latest_loadfile=$(find_latest_loadfile)
       if [ -n "$latest_loadfile" ]; then
         loadfile=$latest_loadfile
-        iteration=$(<${file%/*}/iteration)
+        iteration=$(<${loadfile%/*}/iteration)
       fi
 
       run=${orig_run}_$(date +%s)

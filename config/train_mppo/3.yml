@@ -1,8 +1,9 @@
 ---
 seed: ~
-run_id: lr_0.0009
-group_id: lr-gvh5hhb7
-model_load_file: "data/MPPO-32q24d2n/32q24d2n_1705008488/model-1705048846.zip"
+run_id: trained_lr_0.0012
+group_id: fc64-u47ql1mo
+model_load_file: ~
+features_extractor_load_file: "data/MPPO-32q24d2n/32q24d2n_1705008488/model-1705048846.zip"
 out_dir_template: "data/MPPO-{group_id}/{run_id}"
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
@@ -12,6 +13,7 @@ rollouts_per_iteration: 20
 rollouts_per_log: 2
 save_every: 7200  # seconds
 max_saves: 3
+iteration: 0  # start iteration (to skip first n_envs/2 maps)
 
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
@@ -32,7 +34,7 @@ logparams: {}
   # "config/rew_clip": "env_kwargs.reward_clip_mod"
 
 activation: "ReLU"
-net_arch: []
+net_arch: [64, 64]
 optimizer:
   class_name: "AdamW"
   kwargs: {eps: !!float 1e-5, weight_decay: 0}
@@ -54,7 +56,7 @@ learner_kwargs:
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0.001
+  ent_coef: 0.01
   vf_coef: 0.6
   max_grad_norm: 1.5
 
@@ -62,7 +64,7 @@ learner_kwargs:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.0009"
+learner_lr_schedule: "const_0.0012"
 
 env_kwargs:
   max_steps: 500

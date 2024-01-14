@@ -15,7 +15,6 @@
 # =============================================================================
 
 # from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common import logger
 import random
 import glob
 import gymnasium as gym
@@ -27,6 +26,9 @@ import copy
 import torch.optim
 import threading
 
+from stable_baselines3.common import logger
+from stable_baselines3.common.save_util import load_from_zip_file
+
 from . import common
 from . import sb3_callback
 from .. import InfoDict
@@ -35,6 +37,7 @@ from .. import InfoDict
 def init_model(
     venv,
     seed,
+    features_extractor_load_file,
     model_load_file,
     model_load_update,
     learner_cls,
@@ -96,6 +99,15 @@ def init_model(
         print("Learner kwargs: %s" % alg_kwargs)
         print("Initializing %s model from scratch" % alg.__name__)
         model = alg(env=venv, **alg_kwargs)
+
+    if features_extractor_load_file:
+        print("Loading features extractor from %s" % features_extractor_load_file)
+        _data, params, _pytorch_variables = load_from_zip_file(features_extractor_load_file)
+        prefix = "features_extractor."
+        features_extractor_params = dict(
+            (k.removeprefix(prefix), v) for (k, v) in params["policy"].items() if k.startswith(prefix)
+        )
+        model.policy.features_extractor.load_state_dict(features_extractor_params, strict=True)
 
     if log_tensorboard:
         log = logger.configure(folder=out_dir, format_strings=["tensorboard"])
@@ -220,6 +232,7 @@ def train_sb3(
     seed,
     run_id,
     group_id,
+    features_extractor_load_file,
     model_load_file,
     model_load_update,
     iteration,
@@ -267,6 +280,7 @@ def train_sb3(
         model = init_model(
             venv=create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id, iteration),
             seed=seed,
+            features_extractor_load_file=features_extractor_load_file,
             model_load_file=model_load_file,
             model_load_update=model_load_update,
             learner_cls=learner_cls,
@@ -299,7 +313,7 @@ def train_sb3(
             if (iteration - start_iteration) > 0:
                 common.save_model(out_dir, model)
                 with open(f"{out_dir}/iteration", "w") as f:
-                    f.write(iteration)
+                    f.write(str(iteration))
                 model.env.close()
                 model.env = create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id, iteration)
                 model.env.reset()

@@ -1,8 +1,9 @@
 ---
 seed: ~
 run_id: lr_0.0012
-group_id: fc64-u47ql1mo
+group_id: fc64-dre0uhjk
 model_load_file: ~
+features_extractor_load_file: "data/MPPO-32q24d2n/32q24d2n_1705008488/model-1705048846.zip"
 out_dir_template: "data/MPPO-{group_id}/{run_id}"
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
