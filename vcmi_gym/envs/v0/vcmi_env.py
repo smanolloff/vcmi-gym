@@ -97,9 +97,9 @@ class VcmiEnv(gym.Env):
         defender_model=None,  # MPPO zip model (if defender=MMAI_MODEL)
         sparse_info=False,
         actions_log_file=None,  # DEBUG
-        user_timeout=30,  # seconds (gradient updates may be slow)
-        vcmi_timeout=5,  # seconds (even resets should take no more than 1s)
-        boot_timeout=60,  # seconds
+        user_timeout=0,  # seconds
+        vcmi_timeout=5,  # seconds
+        boot_timeout=0,  # seconds
         reward_clip_mod=None,  # clip at +/- this value
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS

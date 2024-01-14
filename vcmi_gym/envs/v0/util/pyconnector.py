@@ -134,9 +134,10 @@ class PyConnector():
         self.shutdown_lock = multiprocessing.Lock()
         self.shutdown_complete = False
         self.logger = log.get_logger("PyConnector", self.loglevel)
-        self.user_timeout = user_timeout
-        self.vcmi_timeout = vcmi_timeout
-        self.boot_timeout = boot_timeout
+        # use "or" to catch zeros
+        self.user_timeout = user_timeout or 999999
+        self.vcmi_timeout = vcmi_timeout or 999999
+        self.boot_timeout = boot_timeout or 999999
 
     @tracelog
     def start(self, *args):
@@ -293,7 +294,7 @@ class PyConnector():
 
             # use boot_timeout for 1st user action
             # (as it may take longer, eg. until all vec envs are UP)
-            self._wait("user (boot)", self.boot_timeout, UserTimeout)
+            self._wait("user (boot)", self.boot_timeout, BootTimeout)
             self.process_command()
             self.cond.notify()
 

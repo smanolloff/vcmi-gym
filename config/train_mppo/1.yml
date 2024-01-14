@@ -1,13 +1,13 @@
 ---
 seed: ~
-run_id: lr_0.0008
-group_id: mv73wroh
+run_id: lr_0.0003
+group_id: lr-gvh5hhb7
 model_load_file: "data/MPPO-32q24d2n/32q24d2n_1705008488/model-1705048846.zip"
 out_dir_template: "data/MPPO-{group_id}/{run_id}"
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
 # total_timesteps: !!float 100000
-rollouts_total: 500
+rollouts_total: 0
 rollouts_per_iteration: 20
 rollouts_per_log: 2
 save_every: 7200  # seconds
@@ -16,7 +16,7 @@ max_saves: 3
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-n_envs: 8
+n_envs: 12
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
 # (eg. 2048/48 = 42.666... => n_steps=42)
@@ -50,19 +50,19 @@ learner_kwargs:
   # n_steps: 512  # calculated dynamically (see n_global_steps_max)
   batch_size: 64
   n_epochs: 10
-  gamma: 0.8425
+  gamma: 0.8
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0.007
+  ent_coef: 0.001
   vf_coef: 0.6
-  max_grad_norm: 2.5
+  max_grad_norm: 1.5
 
 # Examples:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.0008"
+learner_lr_schedule: "const_0.0003"
 
 env_kwargs:
   max_steps: 500

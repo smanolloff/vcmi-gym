@@ -161,7 +161,7 @@ while true; do
   # Multiple runs started in the same second might end up with the same name
   [ -d "data/MPPO-$group/$run" ] || break
   sleep $((RANDOM%5 + 1))
-fi
+done
 
 mkdir -p data/MPPO-$group/$run
 
