@@ -123,4 +123,5 @@ def main():
 
 if __name__ == "__main__":
     os.environ["WANDB_SILENT"] = "true"
+    print("PID: %d" % os.getpid())
     main()

@@ -202,6 +202,7 @@ def create_venv(n_envs, framestack, env_kwargs, mapmask, randomize, run_id, iter
     mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
     all_maps = glob.glob("%s/%s" % (mappath, mapmask))
     all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
+    all_maps.sort()
 
     if n_envs == 1:
         n_maps = 1
