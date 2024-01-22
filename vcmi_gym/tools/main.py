@@ -45,7 +45,7 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
     env_kwargs = cfg.pop("env_kwargs", {})
 
     match action:
-        case "train_ppo" | "train_qrdqn" | "train_mppo" | "train_mqrdqn":
+        case "train_ppo" | "train_qrdqn" | "train_mppo" | "train_mqrdqn" | "train_vppo":
             from .train_sb3 import train_sb3
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
             # common.register_env(expanded_env_kwargs, env_wrappers)
@@ -67,6 +67,18 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
             if iteration is None:
                 iteration = cfg.get("iteration", None) or 0
 
+            features_extractor_load_file = cfg.get("features_extractor_load_file", False)
+            features_extractor_load_file_type = cfg.get("features_extractor_load_file_type", "sb3")
+            features_extractor_freeze = cfg.get("features_extractor_freeze", False)
+
+            if model_load_file is not None:
+                # Possibly a mistake (or watchdog-continued run)
+                # assert features_extractor_load_file, "loading features_extractor supported for new models only"
+                if features_extractor_load_file:
+                    print("\n\n\n****** WARNING ******")
+                    print("ignoring `features_extractor_load_file` because model_load_file is given")
+                    features_extractor_load_file = None
+
             assert re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]+[A-Za-z0-9]$", group_id), "invalid group_id: %s" % group_id
 
             out_dir = out_dir_template.format(seed=seed, group_id=group_id, run_id=run_id)
@@ -74,17 +86,24 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
             out_dir = common.make_absolute(cwd, out_dir)
             os.makedirs(out_dir, exist_ok=True)
 
+            observations_dir = cfg.get("observations_dir", None)
+            if observations_dir:
+                os.makedirs(observations_dir, exist_ok=True)
+
             # learner_cls is not part of the config
             run_config = deepcopy(
                 {
                     "seed": seed,
                     "run_id": run_id,
                     "group_id": group_id,
-                    "features_extractor_load_file": cfg.get("features_extractor_load_file", False),
+                    "features_extractor_load_file": features_extractor_load_file,
+                    "features_extractor_load_file_type": features_extractor_load_file_type,
+                    "features_extractor_freeze": features_extractor_freeze,
                     "model_load_file": model_load_file,
                     "model_load_update": cfg.get("model_load_update", False),
                     "iteration": iteration,
                     "out_dir": out_dir,
+                    "observations_dir": observations_dir,
                     "log_tensorboard": cfg.get("log_tensorboard", False),
                     "progress_bar": cfg.get("progress_bar", True),
                     "reset_num_timesteps": cfg.get("reset_num_timesteps", False),
@@ -92,6 +111,7 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
                     "net_arch": cfg.get("net_arch", []),
                     "activation": cfg.get("activation", "ReLU"),
                     "features_extractor": cfg.get("features_extractor", {}),
+                    "lstm": cfg.get("lstm", {}),
                     "optimizer": cfg.get("optimizer", {}),
                     "env_kwargs": expanded_env_kwargs,
                     "mapmask": cfg.get("mapmask", "ai/generated/A*.vmap"),
@@ -101,6 +121,7 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
                     "rollouts_per_iteration": cfg.get("rollouts_per_iteration", 100),
                     "rollouts_per_log": cfg.get("rollouts_per_log", 5),
                     "n_envs": cfg.get("n_envs", 1),
+                    "framestack": cfg.get("framestack", 1),
                     "save_every": cfg.get("save_every", 3600),
                     "max_saves": cfg.get("max_saves", 3),
                     "learning_rate": cfg.get("learning_rate", None),
@@ -115,12 +136,13 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
 
             run_config["config_log"] = {}
             for (k, v) in cfg.get("logparams", {}).items():
-                run_config["config_log"][k] = common.extract_dict_value_by_path(all_cfg, v)
+                run_config["config_log"][k] = common.extract_dict_value_by_path(all_cfg, v) or "NULL"
 
             print("Starting run %s with seed %s" % (run_id, seed))
 
             os.environ["WANDB_SILENT"] = "true"
-            common.wandb_init(run_id, group_id, all_cfg)
+            notes = cfg.get("notes", None)
+            common.wandb_init(run_id, group_id, notes, all_cfg)
 
             run_duration, run_values = common.measure(
                 train_sb3, dict(run_config, learner_cls=learner_cls)
@@ -210,7 +232,7 @@ def main():
     parser.add_argument("-g", metavar="GROUP_ID", help="group_id")
     parser.add_argument("-r", metavar="RUN_ID", help="run_id")
     parser.add_argument("-l", metavar="LOADFILE", help="zip file to load model from")
-    parser.add_argument("-i", metavar="ITERATION", help="iteration")
+    parser.add_argument("-i", metavar="ITERATION", type=int, help="iteration")
     parser.add_argument(
         "-c",
         metavar="FILE",

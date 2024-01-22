@@ -8,4 +8,4 @@ data/
 CMakeUserPresets.json
 conan-generated/
 test.out
-
+*.pth

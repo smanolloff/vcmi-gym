@@ -1,16 +1,11 @@
 ---
 seed: ~
-run_id: scratch
-group_id: autoencoder-sanity
+run_id: stack_4-lr_0.0012
+group_id: fc64-dre0uhjk
 model_load_file: ~
-# model_load_file: ~
-features_extractor_load_file: ~
-features_extractor_load_file_type: "params"  # model / params / sb3
-features_extractor_freeze: false
-notes: |
-  Using the encoder part of pre-trained autoencoders as the features extractor
+features_extractor_load_file: "data/MPPO-32q24d2n/32q24d2n_1705008488/model-1705048846.zip"
+notes: ~
 out_dir_template: "data/{group_id}/{run_id}"
-observations_dir: ~
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
 # total_timesteps: !!float 100000
@@ -24,15 +19,15 @@ iteration: 0  # start iteration (to skip first n_envs/2 maps)
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-n_envs: 8
-framestack: 1
+n_envs: 12
+framestack: 4
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
 # (eg. 2048/48 = 42.666... => n_steps=42)
 n_global_steps_max: 2048
 
 mapmask: "ai/generated/B*.vmap"
-randomize_maps: false
+randomize_maps: False
 
 logparams: {}
   # "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
@@ -41,14 +36,14 @@ logparams: {}
   # "config/rew_clip": "env_kwargs.reward_clip_mod"
 
 activation: "ReLU"
-net_arch: [64, 64]
+net_arch: []
 optimizer:
   class_name: "AdamW"
   kwargs: {eps: !!float 1e-5, weight_decay: 0}
 features_extractor:
   class_name: "VcmiFeaturesExtractor"
   kwargs:
-    output_dim: 512
+    output_dim: 1024
     activation: "ReLU"
     layers:
         - {t: "Conv2d", out_channels: 32, kernel_size: [1, 15], stride: [1, 15], padding: 0}

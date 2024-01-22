@@ -38,7 +38,7 @@ NV_MAX = connexport.get_nv_max()
 
 STATE_SIZE_X = 15 * N_HEX_ATTRS
 STATE_SIZE_Y = 11
-STATE_SIZE_Z = 1
+STATE_SIZE_Z = 1  # used sb3's VecFrameStack (Z stacked observations)
 
 assert STATE_SIZE_X * STATE_SIZE_Y == _STATE_SIZE
 

@@ -1,10 +1,16 @@
 ---
 seed: ~
-run_id: lr_0.0012
-group_id: fc64-dre0uhjk
+run_id: pretrained-unfrozen
+group_id: autoencoder-sanity
 model_load_file: ~
-features_extractor_load_file: "data/MPPO-32q24d2n/32q24d2n_1705008488/model-1705048846.zip"
-out_dir_template: "data/MPPO-{group_id}/{run_id}"
+# model_load_file: ~
+features_extractor_load_file: "autoencoder-pretrained-encoder-params.pth"
+features_extractor_load_file_type: "params"  # model / params / sb3
+features_extractor_freeze: false
+notes: |
+  Using the encoder part of pre-trained autoencoders as the features extractor
+out_dir_template: "data/{group_id}/{run_id}"
+observations_dir: ~
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
 # total_timesteps: !!float 100000
@@ -18,14 +24,15 @@ iteration: 0  # start iteration (to skip first n_envs/2 maps)
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-n_envs: 12
+n_envs: 8
+framestack: 1
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
 # (eg. 2048/48 = 42.666... => n_steps=42)
 n_global_steps_max: 2048
 
 mapmask: "ai/generated/B*.vmap"
-randomize_maps: False
+randomize_maps: false
 
 logparams: {}
   # "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
@@ -41,7 +48,7 @@ optimizer:
 features_extractor:
   class_name: "VcmiFeaturesExtractor"
   kwargs:
-    output_dim: 1024
+    output_dim: 512
     activation: "ReLU"
     layers:
         - {t: "Conv2d", out_channels: 32, kernel_size: [1, 15], stride: [1, 15], padding: 0}

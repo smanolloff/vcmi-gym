@@ -1,11 +1,12 @@
-from ray.tune.search.sample import Integer, Float
+# from ray.tune.search.sample import Integer, Float
 
-N_WORKERS = 4
-N_ENVS = 8
+N_WORKERS = 6
+N_ENVS = 4
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
 # (eg. 2048/48 = 42.666... => n_steps=42)
-N_GLOBAL_STEPS_MAX = 2048
+# N_GLOBAL_STEPS_MAX = 2048
+N_GLOBAL_STEPS_MAX = 2000
 
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
@@ -15,8 +16,8 @@ config = {
     "target_ep_rew_mean": 300000,  # impossible target - 300k is the army value
 
     # Initial checkpoint to start from
-    "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20240107_021740/2d08a_00000/checkpoint_000006/model.zip",  # noqa: E501
-    # "initial_checkpoint": None,
+    # "initial_checkpoint": "/Users/simo/Projects/vcmi-gym/data/GEN-PBT-MPPO-20240107_021740/2d08a_00000/checkpoint_000006/model.zip",  # noqa: E501
+    "initial_checkpoint": None,
 
     # Perturb every N iterations
     "perturbation_interval": 1,
@@ -32,10 +33,6 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #
 
-    #
-    # XXX: changes to use rollouts_per_iteration_step and iteration_steps
-    #      are NOT tested! Changes in commit: 57a878c
-    #
     "rollouts_per_iteration_step": 20,
     "rollouts_per_log": 2,
 
@@ -44,14 +41,15 @@ config = {
     "hyperparam_mutations": {
         # "net_arch": [[], [64, 64], [256, 256]],
         "learner_kwargs": {
-            # "learning_rate": [0.00001],
-            # "gamma": Float(0.83, 0.87),
+            "learning_rate": [0.00001, 0.0001, 0.001],
+            "gamma": [0.8, 0.86, 0.98],
             # "batch_size": Integer(32, 256),  # breaks loading from file
-            # "n_epochs": Integer(4, 20),
-            # "gae_lambda": Float(0.8, 1.0),
-            # "clip_range": Float(0.1, 0.5),
-            # "vf_coef": Float(0.1, 1.0),
-            # "max_grad_norm": Float(0.5, 4),
+            "n_epochs": [5, 10, 20],
+            "gae_lambda": [0.8, 0.86, 0.98],
+            "clip_range": [0.2, 0.5],
+            "vf_coef": [0.2, 0.5],
+            "max_grad_norm": [0.5, 1.5, 3],
+            "ent_coef": [0.001, 0.01, 0.1],
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
         # "optimizer": {"kwargs": {"weight_decay": [0, 0.01, 0.1]}},
@@ -71,7 +69,7 @@ config = {
             "stats_window_size": 100,
             "learning_rate": 0.00126,
             "n_steps": N_GLOBAL_STEPS_MAX // N_ENVS,
-            "batch_size": 64,
+            "batch_size": 50,
             "n_epochs": 10,
             "gamma": 0.8425,
             "gae_lambda": 0.8,
@@ -82,15 +80,18 @@ config = {
             "max_grad_norm": 2.5,
             # "use_sde": False,  # n/a in MaskablePPO
         },
+        "features_extractor_load_file": "/Users/simo/Projects/vcmi-gym/autoencoder-pretrained-encoder-params.pth",
+        "features_extractor_load_file_type": "params",  # model / params / sb3
+        "features_extractor_freeze": True,
         "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0}},
         "activation": "ReLU",  # XXX: convert to nn.ReLU
-        "net_arch": [],
-        # "net_arch": [64, 64],
+        # "net_arch": [],
+        "net_arch": [64, 64],
         # "net_arch": [],
         "features_extractor": {
             "class_name": "VcmiFeaturesExtractor",
             "kwargs": {
-                "output_dim": 1024,
+                "output_dim": 512,
                 "activation": "ReLU",
                 "layers": [
                     {"t": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},

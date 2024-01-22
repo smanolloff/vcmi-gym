@@ -1,22 +1,16 @@
 ---
-seed: ~
-run_id: scratch
-group_id: autoencoder-sanity
+run_id: vppo-pt-bs_16-lstm_1024-n_steps_16-grad_0.5
+group_id: bench-M01
 model_load_file: ~
-# model_load_file: ~
-features_extractor_load_file: ~
-features_extractor_load_file_type: "params"  # model / params / sb3
-features_extractor_freeze: false
-notes: |
-  Using the encoder part of pre-trained autoencoders as the features extractor
+features_extractor_load_file: data/MPPO-fc64-dre0uhjk/lr_0.0006-1705216247/model.zip
+notes:
 out_dir_template: "data/{group_id}/{run_id}"
-observations_dir: ~
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
 # total_timesteps: !!float 100000
 rollouts_total: 0
-rollouts_per_iteration: 20
-rollouts_per_log: 2
+rollouts_per_iteration: 100
+rollouts_per_log: 10
 save_every: 7200  # seconds
 max_saves: 3
 iteration: 0  # start iteration (to skip first n_envs/2 maps)
@@ -24,48 +18,58 @@ iteration: 0  # start iteration (to skip first n_envs/2 maps)
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-n_envs: 8
-framestack: 1
+n_envs: 1
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
 # (eg. 2048/48 = 42.666... => n_steps=42)
-n_global_steps_max: 2048
+n_global_steps_max: 16
 
-mapmask: "ai/generated/B*.vmap"
-randomize_maps: false
+mapmask: "ai/M01.vmap"
+randomize_maps: False
 
-logparams: {}
-  # "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
-  # "config/features_extractor": "learner_kwargs.policy_kwargs.features_extractor_class_name"
-  # "config/optimizer": "learner_kwargs.policy_kwargs.optimizer_class_name"
-  # "config/rew_clip": "env_kwargs.reward_clip_mod"
+logparams:
+  "config/lstm/hidden_size": "lstm.lstm_hidden_size"
+  "config/lstm/n_layers": "lstm.n_lstm_layers"
+  "config/ppo/batch_size": "learner_kwargs.batch_size"
+  "config/ppo/ent_coef": "learner_kwargs.ent_coef"
+  "config/ppo/lr_schedule": "learner_lr_schedule"
+  "config/ppo/net_arch": "net_arch"
+  "config/model_load_file": "model_load_file"
+  "config/features_extractor_load_file": "features_extractor_load_file"
 
 activation: "ReLU"
-net_arch: [64, 64]
+net_arch: []
 optimizer:
   class_name: "AdamW"
   kwargs: {eps: !!float 1e-5, weight_decay: 0}
 features_extractor:
   class_name: "VcmiFeaturesExtractor"
   kwargs:
-    output_dim: 512
+    output_dim: 1024
     activation: "ReLU"
     layers:
         - {t: "Conv2d", out_channels: 32, kernel_size: [1, 15], stride: [1, 15], padding: 0}
         # - {t: "Conv2d", in_channels: 32, out_channels: 64, kernel_size: 3, stride: 1, padding: 1}
         # - {t: "Conv2d", in_channels: 64, out_channels: 64, kernel_size: 5, stride: 1, padding: 2}
 
+lstm:
+  lstm_hidden_size: 1024
+  n_lstm_layers: 1
+  shared_lstm: false
+  enable_critic_lstm: true
+  lstm_kwargs: ~
+
 learner_kwargs:
   # n_steps: 512  # calculated dynamically (see n_global_steps_max)
-  batch_size: 64
+  batch_size: 16
   n_epochs: 10
   gamma: 0.8
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0.01
+  ent_coef: 0.05
   vf_coef: 0.6
-  max_grad_norm: 1.5
+  max_grad_norm: 0.5
 
 # Examples:
 #   * "const_0.001"

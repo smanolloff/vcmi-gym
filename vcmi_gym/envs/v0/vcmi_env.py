@@ -96,6 +96,7 @@ class VcmiEnv(gym.Env):
         attacker_model=None,  # MPPO zip model (if attacker=MMAI_MODEL)
         defender_model=None,  # MPPO zip model (if defender=MMAI_MODEL)
         sparse_info=False,
+        allow_invalid_actions=False,
         actions_log_file=None,  # DEBUG
         user_timeout=0,  # seconds
         vcmi_timeout=5,  # seconds
@@ -140,6 +141,7 @@ class VcmiEnv(gym.Env):
         # <params>
         self.render_mode = render_mode
         self.sparse_info = sparse_info
+        self.allow_invalid_actions = allow_invalid_actions
         self.max_steps = max_steps
         self.render_each_step = render_each_step
         self.mapname = mapname
@@ -165,7 +167,7 @@ class VcmiEnv(gym.Env):
             self.actfile.write(f"{action}\n")
 
         res = self.connector.act(action)
-        assert res.errmask == 0
+        assert res.errmask == 0 or self.allow_invalid_actions
 
         analysis = self.analyzer.analyze(action, res)
         rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_scaling_factor, self.reward_clip_mod)

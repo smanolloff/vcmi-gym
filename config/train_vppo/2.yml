@@ -1,21 +1,16 @@
 ---
 seed: ~
-run_id: scratch
-group_id: autoencoder-sanity
+run_id: vppo-scratch-e0.1-lr_lin-2
+group_id: vppo-x3xbd4h4
 model_load_file: ~
-# model_load_file: ~
 features_extractor_load_file: ~
-features_extractor_load_file_type: "params"  # model / params / sb3
-features_extractor_freeze: false
-notes: |
-  Using the encoder part of pre-trained autoencoders as the features extractor
+notes: ~
 out_dir_template: "data/{group_id}/{run_id}"
-observations_dir: ~
 log_tensorboard: true
 progress_bar: false  # too annoying and noisy
 # total_timesteps: !!float 100000
 rollouts_total: 0
-rollouts_per_iteration: 20
+rollouts_per_iteration: 200
 rollouts_per_log: 2
 save_every: 7200  # seconds
 max_saves: 3
@@ -24,15 +19,14 @@ iteration: 0  # start iteration (to skip first n_envs/2 maps)
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-n_envs: 8
-framestack: 1
+n_envs: 1
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
 # (eg. 2048/48 = 42.666... => n_steps=42)
-n_global_steps_max: 2048
+n_global_steps_max: 512
 
-mapmask: "ai/generated/B*.vmap"
-randomize_maps: false
+mapmask: "ai/M01.vmap"
+randomize_maps: False
 
 logparams: {}
   # "config/weight_decay": "learner_kwargs.policy_kwargs.optimizer_kwargs.weight_decay"
@@ -41,14 +35,14 @@ logparams: {}
   # "config/rew_clip": "env_kwargs.reward_clip_mod"
 
 activation: "ReLU"
-net_arch: [64, 64]
+net_arch: []
 optimizer:
   class_name: "AdamW"
   kwargs: {eps: !!float 1e-5, weight_decay: 0}
 features_extractor:
   class_name: "VcmiFeaturesExtractor"
   kwargs:
-    output_dim: 512
+    output_dim: 1024
     activation: "ReLU"
     layers:
         - {t: "Conv2d", out_channels: 32, kernel_size: [1, 15], stride: [1, 15], padding: 0}
@@ -63,15 +57,16 @@ learner_kwargs:
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0.01
+  ent_coef: 0.1
   vf_coef: 0.6
-  max_grad_norm: 1.5
+  max_grad_norm: 2.5
 
 # Examples:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.0012"
+# learner_lr_schedule: "const_0.0012"
+learner_lr_schedule: "lin_decay_0.03_0.001_0.75"
 
 env_kwargs:
   max_steps: 500

@@ -18,13 +18,21 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import safe_mean
 import wandb
 import numpy as np
+import time
+import os
 
 from .. import InfoDict
 
 
 class SB3Callback(BaseCallback):
-    def __init__(self):
+    def __init__(self, observations_dir=None):
         super().__init__()
+
+        if observations_dir:
+            print("Will store observations in %s" % observations_dir)
+            os.makedirs(observations_dir, exist_ok=True)
+
+        self.observations_dir = observations_dir
         self.rollout_episodes = 0
         self.rollouts = 0
         self.ep_rew_mean = 0
@@ -39,6 +47,12 @@ class SB3Callback(BaseCallback):
         return True
 
     def _on_rollout_end(self):
+        if self.observations_dir:
+            np.save(
+                "%s/observations-%d" % (self.observations_dir, time.time() * 1000),
+                self.model.rollout_buffer.observations
+            )
+
         self.rollouts += 1
         wdb_log = {
             "num_timesteps": self.num_timesteps,

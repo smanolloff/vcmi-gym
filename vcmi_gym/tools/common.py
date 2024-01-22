@@ -184,6 +184,7 @@ def save_model(out_dir, model):
     os.makedirs(out_dir, exist_ok=True)
     model_file = os.path.join(out_dir, "model.zip")
     model.save(model_file)
+    print("Saved model to %s" % model_file)
 
 
 def register_env(env_kwargs={}, env_wrappers=[]):
@@ -208,7 +209,7 @@ def make_absolute(cwd, p):
     return f"{cwd}/{p}"
 
 
-def wandb_init(id, group, config):
+def wandb_init(id, group, notes, config):
     # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/air/integrations/wandb.py#L601-L607
     wandb.init(
         id=id,
@@ -220,6 +221,7 @@ def wandb_init(id, group, config):
         settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
         group=group,
         project="vcmi",
+        notes=notes,
         config=config,
         # NOTE: this takes a lot of time, better to have detailed graphs
         #       tb-only (local) and log only most important info to wandb

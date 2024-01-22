@@ -31,6 +31,7 @@ from datetime import datetime
 
 from ..sb3_callback import SB3Callback
 from ..wandb_init import wandb_init
+from stable_baselines3.common.save_util import load_from_zip_file
 # from .... import InfoDict
 import vcmi_gym
 from vcmi_gym import InfoDict
@@ -106,9 +107,9 @@ class PPOTrainer(ray.tune.Trainable):
         self.leaf_keys = self._get_leaf_hyperparam_keys(self.hyperparam_bounds)
         self.reset_config(cfg)
 
-        assert self.rollouts_per_log % self.rollouts_per_iteration_step == 0
+        assert self.rollouts_per_iteration_step % self.rollouts_per_log == 0
 
-        assert self.n_envs % 2 == 0
+        assert self.n_envs % 2 == 0 or self.n_envs == 1
 
         # The model and env should be inited here
         # However, self.iteration is wrong (always 0) in setup()
@@ -211,16 +212,22 @@ class PPOTrainer(ray.tune.Trainable):
         mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
         all_maps = glob.glob("%s/%s" % (mappath, self.all_params["mapmask"]))
         all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
+        all_maps.sort()
 
-        assert self.n_envs % 2 == 0
-        assert self.n_envs <= len(all_maps) * 2
-        n_maps = self.n_envs // 2
+        if self.n_envs == 1:
+            n_maps = 1
+        else:
+            assert self.n_envs % 2 == 0
+            assert self.n_envs <= len(all_maps) * 2
+            n_maps = self.n_envs // 2
 
-        if self.all_params["randomize"]:
+        if self.all_params["randomize_maps"]:
             maps = random.sample(all_maps, n_maps)
         else:
-            i = (n_maps * iteration_step) % len(all_maps)
+            iteration = self.iteration_steps * self.iteration + iteration_step
+            i = (n_maps * iteration) % len(all_maps)
             new_i = (i + n_maps) % len(all_maps)
+            wandb.log({"map_offset": i}, commit=False)
 
             if new_i > i:
                 self.log("map range: [%d:%d]" % (i, new_i))
@@ -252,7 +259,6 @@ class PPOTrainer(ray.tune.Trainable):
                 )
 
                 env_kwargs2[role] = "MMAI_USER"
-
                 print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs2))
                 state["n"] += 1
 
@@ -307,6 +313,43 @@ class PPOTrainer(ray.tune.Trainable):
     def _model_internal_init(self, venv, **learner_kwargs):
         return PPO(env=venv, **learner_kwargs)
 
+    def _features_extractor_init(self, model):
+        features_extractor_load_file = self.all_params["features_extractor_load_file"]
+        if not features_extractor_load_file:
+            return model
+
+        self.log("Loading features extractor from %s" % features_extractor_load_file)
+        features_extractor_load_file_type = self.all_params["features_extractor_load_file_type"]
+
+        if features_extractor_load_file_type == "sb3":
+            _data, params, _pytorch_variables = load_from_zip_file(features_extractor_load_file)
+            prefix = "features_extractor."
+            features_extractor_params = dict(
+                (k.removeprefix(prefix), v) for (k, v) in params["policy"].items() if k.startswith(prefix)
+            )
+        elif features_extractor_load_file_type == "params":
+            autoencoder_encoder_params = torch.load(features_extractor_load_file)
+            features_extractor_params = dict(
+                (f"network.{k}", v) for (k, v) in autoencoder_encoder_params.items()
+            )
+        elif features_extractor_load_file_type == "model":
+            model = torch.load(features_extractor_load_file)
+            features_extractor_params = model.state_dict()
+        else:
+            raise Exception("Unexpected features_extractor_load_file_type: %s" % features_extractor_load_file_type)
+
+        model.policy.features_extractor.load_state_dict(features_extractor_params, strict=True)
+
+        return model
+
+    def _maybe_freeze_features_extractor(self, model):
+        if not self.all_params["features_extractor_freeze"]:
+            return
+
+        self.log("Freezing features extractor params")
+        for param in model.policy.features_extractor.parameters():
+            param.requires_grad = False
+
     def _model_init(self):
         # at init, we are the origin
         origin = int(self.trial_id.split("_")[1])
@@ -321,6 +364,8 @@ class PPOTrainer(ray.tune.Trainable):
         else:
             venv = self._venv_init()
             model = self._model_internal_init(venv, **self._learner_kwargs_for_init())
+            model = self._features_extractor_init(model)
+            self._maybe_freeze_features_extractor(model)
 
         return model
 
@@ -339,6 +384,8 @@ class PPOTrainer(ray.tune.Trainable):
 
             for (k, v) in optimizer.get("kwargs", {}).items():
                 model.policy.optimizer.param_groups[0][k] = v
+
+        self._maybe_freeze_features_extractor(model)
 
         return model
 

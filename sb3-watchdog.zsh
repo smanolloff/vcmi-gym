@@ -20,7 +20,7 @@
 #       and sed -i '' -r "s/^group_id:.+/group_id: $group/" config/train_mppo/{1,2,3}.yml
 #
 
-CHECK_EVERY=300  # seconds
+CHECK_EVERY=600  # seconds
 
 IDENT="*** [🐕]"
 
@@ -103,9 +103,9 @@ function read_cfg() {
 }
 
 function find_latest_loadfile() {
-  [ -d "data/MPPO-$group" ] || return 0
+  [ -d "data/$group" ] || return 0
 
-  find data/MPPO-$group -type f -name 'model.zip' -exec stat -f "%Sm %N" -t "%s" {} \; \
+  find data/$group/$orig_run-* -type f -name 'model.zip' -exec stat -f "%Sm %N" -t "%s" {} \; \
     | sort -r \
     | head -1 \
     | awk '{print $2}'
@@ -147,24 +147,24 @@ if [ -z "$run" ]; then
   run=$(head /dev/urandom | LC_ALL=C tr -dc 'a-z0-8' | head -c 8)
 fi
 
-if [ -z "$loadfile" ]; then
-  loadfile=$(find_latest_loadfile)
-fi
-
 # run_id must not contain these chars as per https://docs.wandb.ai/ref/python/init
 [[ "$run" =~ '^[^/\#?%: ]+$' ]]
 
 orig_run=$run
 
+if [ "$loadfile" = "__latest__" ]; then
+  loadfile=$(find_latest_loadfile)
+fi
+
 # run_id must be globally unique
 while true; do
   run=${orig_run}-$(date +%s)
   # Multiple runs started in the same second might end up with the same name
-  [ -d "data/MPPO-$group/$run" ] || break
+  [ -d "data/$group/$run" ] || break
   sleep $((RANDOM%5 + 1))
 done
 
-mkdir -p data/MPPO-$group/$run
+mkdir -p data/$group/$run
 
 
 while true; do
@@ -183,7 +183,7 @@ while true; do
 
   while sleep $CHECK_EVERY; do
     # no tfevents => no training
-    if ! find data/MPPO-$group/$run -name 'events.out.tfevents.*' -mtime -${CHECK_EVERY}s | grep -q . ; then
+    if ! find data/$group/$run -name 'events.out.tfevents.*' -mtime -${CHECK_EVERY}s | grep -q . ; then
       echo "$IDENT No new tfevents in the last ${CHECK_EVERY}s"
       terminate_vcmi_gym
 
@@ -192,9 +192,10 @@ while true; do
       if [ -n "$latest_loadfile" ]; then
         loadfile=$latest_loadfile
         iteration=$(<${loadfile%/*}/iteration)
+        let iteration++
       fi
 
-      run=${orig_run}_$(date +%s)
+      run=${orig_run}-$(date +%s)
       # re-use the same run ID (ie. just continue training from last save)
       # set -g run (head /dev/urandom | LC_ALL=C tr -dc 'a-z0-8' | head -c 8)
       break

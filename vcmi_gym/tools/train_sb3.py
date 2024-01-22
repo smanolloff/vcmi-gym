@@ -28,6 +28,7 @@ import threading
 
 from stable_baselines3.common import logger
 from stable_baselines3.common.save_util import load_from_zip_file
+from stable_baselines3.common.vec_env import VecFrameStack
 
 from . import common
 from . import sb3_callback
@@ -38,6 +39,8 @@ def init_model(
     venv,
     seed,
     features_extractor_load_file,
+    features_extractor_load_file_type,
+    features_extractor_freeze,
     model_load_file,
     model_load_update,
     learner_cls,
@@ -48,6 +51,7 @@ def init_model(
     n_global_steps_max,
     n_envs,
     features_extractor,
+    lstm,
     optimizer,
     log_tensorboard,
     out_dir,
@@ -63,6 +67,8 @@ def init_model(
             alg = sb3_contrib.QRDQN
         case "MQRDQN":
             alg = vcmi_gym.MaskableQRDQN
+        case "VPPO":
+            alg = vcmi_gym.VcmiPPO
         case _:
             raise Exception("Unexpected learner_cls: %s" % learner_cls)
 
@@ -93,7 +99,12 @@ def init_model(
             policy_kwargs["optimizer_class"] = getattr(torch.optim, optimizer["class_name"])
             policy_kwargs["optimizer_kwargs"] = optimizer["kwargs"]
 
-        alg_kwargs["policy"] = "MlpPolicy"
+        if learner_cls == "VPPO":
+            alg_kwargs["policy"] = "VcmiPolicy"
+            policy_kwargs = dict(policy_kwargs, **lstm)
+        else:
+            alg_kwargs["policy"] = "MlpPolicy"
+
         alg_kwargs["policy_kwargs"] = policy_kwargs
 
         print("Learner kwargs: %s" % alg_kwargs)
@@ -101,13 +112,33 @@ def init_model(
         model = alg(env=venv, **alg_kwargs)
 
     if features_extractor_load_file:
-        print("Loading features extractor from %s" % features_extractor_load_file)
-        _data, params, _pytorch_variables = load_from_zip_file(features_extractor_load_file)
-        prefix = "features_extractor."
-        features_extractor_params = dict(
-            (k.removeprefix(prefix), v) for (k, v) in params["policy"].items() if k.startswith(prefix)
-        )
+        if features_extractor_load_file_type == "sb3":
+            print("Loading features extractor (sb3 model) from %s" % features_extractor_load_file)
+            _data, params, _pytorch_variables = load_from_zip_file(features_extractor_load_file)
+            prefix = "features_extractor."
+            features_extractor_params = dict(
+                (k.removeprefix(prefix), v) for (k, v) in params["policy"].items() if k.startswith(prefix)
+            )
+        elif features_extractor_load_file_type == "params":
+            print("Loading features extractor (torch params) from %s" % features_extractor_load_file)
+            autoencoder_encoder_params = torch.load(features_extractor_load_file)
+            features_extractor_params = dict(
+                (f"network.{k}", v) for (k, v) in autoencoder_encoder_params.items()
+            )
+        elif features_extractor_load_file_type == "model":
+            print("Loading features extractor (torch model) from %s" % features_extractor_load_file)
+            model = torch.load(features_extractor_load_file)
+            features_extractor_params = model.state_dict()
+        else:
+            raise Exception("Unexpected features_extractor_load_file_type: %s" % features_extractor_load_file_type)
+
         model.policy.features_extractor.load_state_dict(features_extractor_params, strict=True)
+
+        if features_extractor_freeze:
+            print("Freezing features extractor...")
+            # Freeze the parameters of the features extractor
+            for param in model.policy.features_extractor.parameters():
+                param.requires_grad = False
 
     if log_tensorboard:
         log = logger.configure(folder=out_dir, format_strings=["tensorboard"])
@@ -167,20 +198,24 @@ def init_model(
 #
 #         self.train()  # update NN
 
-def create_venv(n_envs, env_kwargs, mapmask, randomize, run_id, iteration=0):
+def create_venv(n_envs, framestack, env_kwargs, mapmask, randomize, run_id, iteration=0):
     mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
     all_maps = glob.glob("%s/%s" % (mappath, mapmask))
     all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
 
-    assert n_envs % 2 == 0
-    assert n_envs <= len(all_maps) * 2
-    n_maps = n_envs // 2
+    if n_envs == 1:
+        n_maps = 1
+    else:
+        assert n_envs % 2 == 0
+        assert n_envs <= len(all_maps) * 2
+        n_maps = n_envs // 2
 
     if randomize:
         maps = random.sample(all_maps, n_maps)
     else:
         i = (n_maps * iteration) % len(all_maps)
         new_i = (i + n_maps) % len(all_maps)
+        wandb.log({"map_offset": i}, commit=False)
 
         if new_i > i:
             maps = all_maps[i:new_i]
@@ -219,12 +254,17 @@ def create_venv(n_envs, env_kwargs, mapmask, randomize, run_id, iteration=0):
     # => there will be no info["episode"] in case of truncations
     # => metrics won't be correctly calculated
     # => implement truncation in the env itself
-    return common.make_vec_env_parallel(
+    venv = common.make_vec_env_parallel(
         min(n_envs, 8),
         env_creator,
         n_envs=n_envs,
         monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
     )
+
+    if framestack > 1:
+        venv = VecFrameStack(venv, n_stack=framestack, channels_order="first")
+
+    return venv
 
 
 def train_sb3(
@@ -233,6 +273,8 @@ def train_sb3(
     run_id,
     group_id,
     features_extractor_load_file,
+    features_extractor_load_file_type,
+    features_extractor_freeze,
     model_load_file,
     model_load_update,
     iteration,
@@ -242,6 +284,7 @@ def train_sb3(
     net_arch,
     activation,
     features_extractor,
+    lstm,
     optimizer,
     env_kwargs,
     mapmask,
@@ -251,9 +294,11 @@ def train_sb3(
     rollouts_per_iteration,
     rollouts_per_log,
     n_envs,
+    framestack,
     save_every,
     max_saves,
     out_dir,
+    observations_dir,
     log_tensorboard,
     progress_bar,
     reset_num_timesteps,
@@ -264,7 +309,7 @@ def train_sb3(
     gym.logger.set_level(gym.logger.ERROR)
 
     learning_rate = common.lr_from_schedule(learner_lr_schedule)
-    sb3_cb = sb3_callback.SB3Callback()
+    sb3_cb = sb3_callback.SB3Callback(observations_dir)
     ep_rew_means = []
 
     if rollouts_total:
@@ -278,9 +323,11 @@ def train_sb3(
 
     try:
         model = init_model(
-            venv=create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id, iteration),
+            venv=create_venv(n_envs, framestack, env_kwargs, mapmask, randomize_maps, run_id, iteration),
             seed=seed,
             features_extractor_load_file=features_extractor_load_file,
+            features_extractor_load_file_type=features_extractor_load_file_type,
+            features_extractor_freeze=features_extractor_freeze,
             model_load_file=model_load_file,
             model_load_update=model_load_update,
             learner_cls=learner_cls,
@@ -291,6 +338,7 @@ def train_sb3(
             n_global_steps_max=n_global_steps_max,
             n_envs=n_envs,
             features_extractor=features_extractor,
+            lstm=lstm,
             optimizer=optimizer,
             log_tensorboard=log_tensorboard,
             out_dir=out_dir,
@@ -315,7 +363,7 @@ def train_sb3(
                 with open(f"{out_dir}/iteration", "w") as f:
                     f.write(str(iteration))
                 model.env.close()
-                model.env = create_venv(n_envs, env_kwargs, mapmask, randomize_maps, run_id, iteration)
+                model.env = create_venv(n_envs, framestack, env_kwargs, mapmask, randomize_maps, run_id, iteration)
                 model.env.reset()
 
             model.learn(
@@ -334,6 +382,13 @@ def train_sb3(
 
         return {"out_dir": out_dir}
     finally:
-        if model and model.env:
-            model.env.close()
+        if model:
+            try:
+                common.save_model(out_dir, model)
+            except Exception as e:
+                print("Failed to save model: %s" % e.str())
+                pass
+
+            if model.env:
+                model.env.close()
         wandb.finish(quiet=True)

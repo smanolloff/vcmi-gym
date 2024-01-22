@@ -22,7 +22,7 @@ from torch import nn
 from ..pyconnector import (
     STATE_SIZE_X,
     STATE_SIZE_Y,
-    STATE_SIZE_Z,
+    # STATE_SIZE_Z,
     N_HEX_ATTRS
 )
 
@@ -75,19 +75,25 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
         # It does not work if we don't have an explicit "channel" dim in obs
         assert len(observation_space.shape) == 3, "unexpected shape"
 
-        # The "Z" is apparently required, as SB3 uses it for passing multiple
-        # observations at once:
-        #   Z=batch_size during train()
-        #   Z=n_envs during collect_rollouts()
-        # I may be wrong here, but without it, everything got messed up
-        assert observation_space.shape[0] == STATE_SIZE_Z, "expected channels=%d" % STATE_SIZE_Z
+        # The "Z" (ie. "channel") dim is always required:
+        # conv2d is designed to process 2D images with Z channels, ie. 3D inputs
+        # => Input to conv2d cannot be (11, 225), must be 3D: (1, 11, 225)
+        #    When using VecFrameStack, Z=n_stack, eg. for 4: (4, 11, 225)
+        #
+        # HOWEVER, conv2d expects "3D (unbatched) or 4D (batched) input",
+        # which means three is special handling for batches of images:
+        # ie. (B, 1, 11, 225). In SB3, B is:
+        #   * batch_size during train(), eg. 32
+        #   * n_envs during collect_rollouts(), eg. 4
+        #
 
         # Y=11 (battlefield height)
-        assert observation_space.shape[1] == STATE_SIZE_Y, "expected height=%d" % STATE_SIZE_Y
-        # X=15*15 (battlefield width is 15 hexes, each with 15 attrs)
-        # ideally, X=15 and Z=15, but handling Z is was too difficult in pybind
+        assert observation_space.shape[1] == STATE_SIZE_Y, "expected height=%d for shape: %s" % (STATE_SIZE_Y, observation_space.shape)  # noqa: E501
+        # X=15*15=225 (battlefield width is 15 hexes, each with 15 attrs)
+        # ideally, Y=11, X=15, Z=15, but handling Z is too difficult in pybind
         # so we use X=15*15 and Z=1
-        assert observation_space.shape[2] == STATE_SIZE_X, "expected width=%d" % STATE_SIZE_X
+        # XXX: using Z != 1 would also cause issues (see above notes for Z & B)
+        assert observation_space.shape[2] == STATE_SIZE_X, "expected width=%d for shape: %s" % (STATE_SIZE_X, observation_space.shape)  # noqa: E501
         assert observation_space.shape[2] % N_HEX_ATTRS == 0, "width to be divisible by %d" % N_HEX_ATTRS
 
         activation_cls = getattr(nn, activation)
@@ -100,7 +106,8 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
 
             if i == 0:
                 assert "in_channels" not in layer_kwargs, "in_channels must be omitted for 1st layer"
-                layer_kwargs["in_channels"] = STATE_SIZE_Z
+                # layer_kwargs["in_channels"] = STATE_SIZE_Z
+                layer_kwargs["in_channels"] = observation_space.shape[0]
 
             self.network.append(layer_cls(**layer_kwargs))
             self.network.append(activation_cls())

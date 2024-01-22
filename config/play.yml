@@ -2,6 +2,7 @@
 env_kwargs:
   user_timeout: 600
   boot_timeout: 600
+  allow_invalid_actions: true
   __include__: "config/env.yml"
 
 env_wrappers: []

@@ -8,7 +8,6 @@ from vcmi_gym.envs.v0.dual_env import DualEnvController, DualEnvClient
 class DummyEnv():
     def step(self, *args, **kwargs):
         print("*** DUMMY ENV: step(%s, %s)" % (args, kwargs))
-
     def reset(self, *args, **kwargs):
         print("*** DUMMY ENV: reset(%s, %s)" % (args, kwargs))
 
