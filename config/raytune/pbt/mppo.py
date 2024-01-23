@@ -1,6 +1,6 @@
 # from ray.tune.search.sample import Integer, Float
 
-N_WORKERS = 4
+N_WORKERS = 3
 N_ENVS = 8
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
