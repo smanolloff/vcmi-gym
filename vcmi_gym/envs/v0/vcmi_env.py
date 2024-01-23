@@ -310,8 +310,7 @@ class VcmiEnv(gym.Env):
         return dict(info)
 
     @staticmethod
-    def calc_reward(analysis, _scaling_factor, clip_mod):
-        # rew = int(scaling_factor * (analysis.net_value + 5 * analysis.net_dmg))
-        rew = analysis.net_value + 5 * analysis.net_dmg
+    def calc_reward(analysis, scaling_factor, clip_mod):
+        rew = int(scaling_factor * (analysis.net_value + 5 * analysis.net_dmg))
         clipped = max(min(rew, clip_mod), -clip_mod) if clip_mod else rew
         return clipped, rew
