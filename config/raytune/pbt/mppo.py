@@ -33,10 +33,10 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #
 
-    "rollouts_per_iteration_step": 2000,
+    "rollouts_per_iteration_step": 200,
     "rollouts_per_log": 2,
 
-    "iteration_steps": 20,
+    "iteration_steps": 100,
 
     "hyperparam_mutations": {
         # "net_arch": [[], [64, 64], [256, 256]],
@@ -114,7 +114,7 @@ config = {
             # "attacker": "MMAI_USER",
             # "defender": "StupidAI"
         },
-        "mapmask": "ai/generated/A*.vmap",
+        "mapmask": "ai/generated/A0[0-4].vmap",
         "randomize_maps": False,
     }
 }
