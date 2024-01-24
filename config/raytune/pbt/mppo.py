@@ -88,11 +88,11 @@ config = {
         "activation": "ReLU",  # XXX: convert to nn.ReLU
         # "net_arch": [],
         # "net_arch": [64, 64],
-        "net_arch": [256, 256],
+        "net_arch": [64, 64],
         "features_extractor": {
             "class_name": "VcmiFeaturesExtractor",
             "kwargs": {
-                "output_dim": 1024,
+                "output_dim": 512,
                 "activation": "ReLU",
                 "layers": [
                     {"t": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},
