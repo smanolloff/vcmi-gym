@@ -9,3 +9,4 @@ CMakeUserPresets.json
 conan-generated/
 test.out
 *.pth
+*.pt

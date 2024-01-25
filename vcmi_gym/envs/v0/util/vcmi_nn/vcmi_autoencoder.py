@@ -8,10 +8,10 @@ from collections import deque
 from statistics import mean
 
 
-DETERMINISTIC = True
+DETERMINISTIC = False
 TRAIN_DECODER_ONLY = True
-ENCODER_PARAMETERS_LOAD_FILE = None
-# ENCODER_PARAMETERS_LOAD_FILE = "autoencoder-pretrained-encoder-params.pth"
+# ENCODER_PARAMETERS_LOAD_FILE = None
+ENCODER_PARAMETERS_LOAD_FILE = "autoencoder-1706148587-encoder-params.pth"
 
 
 def moving_average(data, window_size):
@@ -35,14 +35,14 @@ class VcmiAutoencoder(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Flatten(),  # by default this flattens dims 1..-1 (ie. keeps B)
             # => (B, 5280)
-            torch.nn.Linear(5280, 512),  # 5280 = 32*15*11
-            # => (B, 512)
+            torch.nn.Linear(5280, 1024),  # 5280 = 32*15*11
+            # => (B, 1024)
             torch.nn.ReLU()
         )
 
         self.decoder = torch.nn.Sequential(
-            # => (B, 512)
-            torch.nn.Linear(512, 5280),
+            # => (B, 1024)
+            torch.nn.Linear(1024, 5280),
             # => (B, 5280)
             torch.nn.ReLU(),
             torch.nn.Unflatten(1, (32, 11, 15)),
@@ -75,11 +75,19 @@ class DataProvider:
         assert train_test_ratio > 0 and train_test_ratio < 1
 
         files = glob.glob("data/observations/*.npy")
-        if not DETERMINISTIC:
-            random.shuffle(files)
+        files.sort()
         n_train_files = int(train_test_ratio * len(files))
-        self.train_files = files[:n_train_files]
-        self.test_files = files[n_train_files:]
+        n_test_files = len(files) - n_train_files
+        self.test_files = files[:n_test_files]
+        train_files = files[:n_train_files]
+
+        assert len(self.test_files) + len(train_files) == len(files)
+
+        if DETERMINISTIC:
+            self.train_files = train_files
+        if not DETERMINISTIC:
+            # use a random 50% of the train files
+            self.train_files = random.sample(train_files, int(len(train_files)/2))
 
     def train_data(self):
         return Dataset(self.train_files)
@@ -95,12 +103,14 @@ model = VcmiAutoencoder()
 #     model.load_state_dict(torch.load("autoencoder-untrained.pth"))
 
 mse = torch.nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-dp = DataProvider(0.95)
+optimizer = optim.Adam(model.parameters(), lr=0.0005)
+
+# use the same dataset for testing
+test_dp = DataProvider(0.95)
 
 # Load pretrained features extractor as the encoder and updates for it
 if ENCODER_PARAMETERS_LOAD_FILE:
-    print("loading from...")
+    print("loading from %s..." % ENCODER_PARAMETERS_LOAD_FILE)
     model.encoder.load_state_dict(torch.load(ENCODER_PARAMETERS_LOAD_FILE))
 
 if TRAIN_DECODER_ONLY:
@@ -113,7 +123,7 @@ def test():
     loss_sum = 0
 
     with torch.no_grad():
-        for batch in dp.test_data():
+        for batch in test_dp.test_data():
             # d = batch.flatten(0, 1)
             for data in batch:
                 d = data
@@ -132,6 +142,7 @@ def test():
 def train():
     losses = deque(maxlen=100)
     step = 0
+    dp = DataProvider(0.95)
 
     for batch in dp.train_data():
         # d = batch.flatten(0, 1)
@@ -200,17 +211,18 @@ def train():
 # ie. [Train] [26200] Loss: 0.0008  (was below 1e-4 at ~10k)
 
 
-train_epochs = 10
+train_epochs = 30
 step = 0
+save = True
 test()
-for epoch in range(train_epochs):
-    print("Steps: %d" % step)
-    print("Epoch %d/%d:" % (epoch + 1, train_epochs))
-    step += train()
-    test()
 
-
-if input("\nSave model? [y/n]: ") == "y":
+try:
+    for epoch in range(train_epochs):
+        print("Steps: %d" % step)
+        print("Epoch %d/%d:" % (epoch + 1, train_epochs))
+        step += train()
+        test()
+finally:
     t = time.time()
     dest = "autoencoder-%d-model.pt" % t
     torch.save(model, dest)
@@ -220,4 +232,4 @@ if input("\nSave model? [y/n]: ") == "y":
     torch.save(model.encoder.state_dict(), dest)
     print("Saved %s" % dest)
 
-print("\nFinished.")
+    print("\nFinished.")
