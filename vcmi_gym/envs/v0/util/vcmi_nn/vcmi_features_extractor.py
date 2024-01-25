@@ -56,21 +56,18 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
     #       VcmiNN(
     #           layers=[
     #               {"t": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},
+    #               {"t": "LeakyReLU"},
     #               {"t": "Conv2d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
+    #               {"t": "LeakyReLU"},
     #               {"t": "Conv2d", "in_channels": 64, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
-    #           ],
-    #           activation="ReLU",
-    #           output_dim=1024,
+    #               {"t": "LeakyReLU"},
+    #               {"t": "Flatten"},
+    #               {"t": "Linear", "in_features": 384, "out_features": 1024},
+    #               {"t": "LeakyReLU"}
+    #           ]
     #       )
-    def __init__(
-        self,
-        observation_space: gym.Space,
-        layers,
-        activation,
-        output_dim
-    ) -> None:
+    def __init__(self, observation_space: gym.Space, layers) -> None:
         assert isinstance(observation_space, gym.spaces.Box)
-        super().__init__(observation_space, output_dim)
 
         # It does not work if we don't have an explicit "channel" dim in obs
         assert len(observation_space.shape) == 3, "unexpected shape"
@@ -96,31 +93,29 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
         assert observation_space.shape[2] == STATE_SIZE_X, "expected width=%d for shape: %s" % (STATE_SIZE_X, observation_space.shape)  # noqa: E501
         assert observation_space.shape[2] % N_HEX_ATTRS == 0, "width to be divisible by %d" % N_HEX_ATTRS
 
-        activation_cls = getattr(nn, activation)
+        network = nn.Sequential()
 
-        self.network = nn.Sequential()
         for (i, layer) in enumerate(layers):
             # fallback to Conv2d for old .zip models ("_" key not stored)
-            layer_cls = getattr(nn, layer.pop("t", "Conv2d"))
+            layer_cls = getattr(nn, layer.pop("t"))
             layer_kwargs = dict(layer)  # copy
 
             if i == 0:
                 assert "in_channels" not in layer_kwargs, "in_channels must be omitted for 1st layer"
                 # layer_kwargs["in_channels"] = STATE_SIZE_Z
+                # When using VecFrameStack, Z=n_stack
                 layer_kwargs["in_channels"] = observation_space.shape[0]
 
-            self.network.append(layer_cls(**layer_kwargs))
-            self.network.append(activation_cls())
+            network.append(layer_cls(**layer_kwargs))
 
-        # Always flatten to "out_dim"
-        self.network.append(nn.Flatten())
-
-        # Compute shape by doing one forward pass
+        # Compute output dim by doing one forward pass
         with th.no_grad():
-            n_flatten = self.network(th.as_tensor(observation_space.sample()[None]).float()).shape[1]
+            # ignore the batch dim
+            out_dim = network(th.as_tensor(observation_space.sample()[None]).float()).shape[1:]
 
-        self.network.append(nn.Linear(n_flatten, output_dim))
-        self.network.append(activation_cls())
+        assert len(out_dim) == 1, "expected a flattened 1-dim output shape, got: %s" % out_dim.shape
+        super().__init__(observation_space, out_dim[0])
+        self.network = network
 
     def forward(self, observations: th.Tensor) -> th.Tensor:
         return self.network(observations)

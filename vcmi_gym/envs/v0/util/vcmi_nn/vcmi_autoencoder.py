@@ -11,7 +11,10 @@ from statistics import mean
 DETERMINISTIC = False
 TRAIN_DECODER_ONLY = True
 # ENCODER_PARAMETERS_LOAD_FILE = None
-ENCODER_PARAMETERS_LOAD_FILE = "autoencoder-1706148587-encoder-params.pth"
+# ENCODER_PARAMETERS_LOAD_FILE = "autoencoder-1706148587-encoder-params.pth"
+ENCODER_PARAMETERS_LOAD_FILE = "autoencoder-pretrained-encoder-params.pth"
+# DATASET_FILEMASK = "data/observations/*.npy"
+DATASET_FILEMASK = "data/observations/1706*.npy"
 
 
 def moving_average(data, window_size):
@@ -74,7 +77,7 @@ class DataProvider:
         assert isinstance(train_test_ratio, float)
         assert train_test_ratio > 0 and train_test_ratio < 1
 
-        files = glob.glob("data/observations/*.npy")
+        files = glob.glob(DATASET_FILEMASK)
         files.sort()
         n_train_files = int(train_test_ratio * len(files))
         n_test_files = len(files) - n_train_files

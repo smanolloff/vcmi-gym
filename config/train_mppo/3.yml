@@ -1,12 +1,12 @@
 ---
 seed: ~
-run_id: net256-fdim512-frozen
-group_id: autoencoder-fe
+run_id: l3-fdim1024
+group_id: fe-arch
 model_load_file: ~
-features_extractor_load_file: "autoencoder-pretrained-encoder-params.pth"
-# features_extractor_load_file: ~
+# features_extractor_load_file: "autoencoder-pretrained-encoder-params.pth"
+features_extractor_load_file: ~
 features_extractor_load_file_type: "params"  # model / params / sb3
-features_extractor_freeze: true
+features_extractor_freeze: false
 notes: ""
 out_dir_template: "data/{group_id}/{run_id}"
 observations_dir: ~
@@ -39,20 +39,31 @@ logparams: {}
   # "config/optimizer": "learner_kwargs.policy_kwargs.optimizer_class_name"
   # "config/rew_clip": "env_kwargs.reward_clip_mod"
 
-activation: "ReLU"
-net_arch: [256, 256]
+activation: "LeakyReLU"
+net_arch: []
 optimizer:
   class_name: "AdamW"
   kwargs: {eps: !!float 1e-5, weight_decay: 0}
 features_extractor:
   class_name: "VcmiFeaturesExtractor"
   kwargs:
-    output_dim: 512
-    activation: "ReLU"
     layers:
+        # => (11, 225)
         - {t: "Conv2d", out_channels: 32, kernel_size: [1, 15], stride: [1, 15], padding: 0}
-        # - {t: "Conv2d", in_channels: 32, out_channels: 64, kernel_size: 3, stride: 1, padding: 1}
-        # - {t: "Conv2d", in_channels: 64, out_channels: 64, kernel_size: 5, stride: 1, padding: 2}
+        - {t: "LeakyReLU"}
+        # => (11, 15)
+        - {t: "Conv2d", in_channels: 32, out_channels: 64, kernel_size: 3, stride: 2, padding: 0}
+        - {t: "LeakyReLU"}
+        # => (7, 5)
+        - {t: "Conv2d", in_channels: 64, out_channels: 64, kernel_size: 3, stride: 2, padding: 0}
+        - {t: "LeakyReLU"}
+        # => (3, 2)
+        - {t: "Flatten"}
+        # => 384
+        # TODO: remove
+        - {t: "Linear", in_features: 384, out_features: 1024}
+        - {t: "LeakyReLU"}
+        # => 1024
 
 learner_kwargs:
   # n_steps: 512  # calculated dynamically (see n_global_steps_max)
