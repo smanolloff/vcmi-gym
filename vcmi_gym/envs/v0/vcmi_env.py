@@ -101,6 +101,7 @@ class VcmiEnv(gym.Env):
         user_timeout=0,  # seconds
         vcmi_timeout=5,  # seconds
         boot_timeout=0,  # seconds
+        reward_dmg_factor=5,
         reward_clip_mod=None,  # clip at +/- this value
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
@@ -151,6 +152,7 @@ class VcmiEnv(gym.Env):
         self.defender_model = defender_model
         self.actions_log_file = actions_log_file
         self.reward_clip_mod = reward_clip_mod
+        self.reward_dmg_factor = reward_dmg_factor
         # </params>
 
         # required to init vars
@@ -170,7 +172,7 @@ class VcmiEnv(gym.Env):
         assert res.errmask == 0 or self.allow_invalid_actions
 
         analysis = self.analyzer.analyze(action, res)
-        rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_scaling_factor, self.reward_clip_mod)
+        rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_dmg_factor, self.reward_scaling_factor, self.reward_clip_mod)  # noqa:E501
         obs = res.state
         term = res.is_battle_over
         trunc = self.analyzer.actions_count >= self.max_steps
@@ -310,7 +312,7 @@ class VcmiEnv(gym.Env):
         return dict(info)
 
     @staticmethod
-    def calc_reward(analysis, scaling_factor, clip_mod):
-        rew = int(scaling_factor * (analysis.net_value + 5 * analysis.net_dmg))
+    def calc_reward(analysis, dmg_factor, scaling_factor, clip_mod):
+        rew = int(scaling_factor * (analysis.net_value + dmg_factor * analysis.net_dmg))
         clipped = max(min(rew, clip_mod), -clip_mod) if clip_mod else rew
         return clipped, rew

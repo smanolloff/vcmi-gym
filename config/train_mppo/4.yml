@@ -1,8 +1,9 @@
 ---
 seed: ~
-run_id: l3-do-bn-fdim1024
+run_id: l3-do-bn-fdim1024-rollouts100-lr0.00126-e0
 group_id: fe-arch
-model_load_file: ~
+# model_load_file: __latest__
+model_load_file: "data/fe-arch/l3-do-bn-fdim1024-rollouts100-lr0.0001-e0-1706598388/model.zip"
 # features_extractor_load_file: "autoencoder-pretrained-encoder-params.pth"
 features_extractor_load_file: ~
 features_extractor_load_file_type: "params"  # model / params / sb3
@@ -14,11 +15,11 @@ log_tensorboard: true
 progress_bar: false  # too annoying and noisy
 # total_timesteps: !!float 100000
 rollouts_total: 0
-rollouts_per_iteration: 200
+rollouts_per_iteration: 100
 rollouts_per_log: 2
 save_every: 7200  # seconds
 max_saves: 3
-iteration: 0  # start iteration (to skip first n_envs/2 maps)
+iteration: 140  # start iteration (to skip first n_envs/2 maps)
 
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
@@ -30,7 +31,7 @@ framestack: 1
 # (eg. 2048/48 = 42.666... => n_steps=42)
 n_global_steps_max: 1024
 
-mapmask: "ai/generated/A0[0-4].vmap"
+mapmask: "ai/generated/B*.vmap"
 randomize_maps: false
 
 logparams: {}
@@ -79,7 +80,7 @@ learner_kwargs:
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0.007
+  ent_coef: 0
   vf_coef: 0.6
   max_grad_norm: 2.5
 
@@ -92,6 +93,7 @@ learner_lr_schedule: "const_0.00126"
 env_kwargs:
   max_steps: 500
   reward_clip_mod: ~
+  reward_dmg_factor: 0
   vcmi_loglevel_global: "error"
   vcmi_loglevel_ai: "error"
   vcmienv_loglevel: "WARN"

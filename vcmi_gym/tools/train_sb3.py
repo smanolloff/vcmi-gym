@@ -358,6 +358,7 @@ def train_sb3(
 
         while iteration < iterations:
             print(".", end="", flush=True)
+            wandb.log({"iteration": iteration}, commit=False)
 
             if (iteration - start_iteration) > 0:
                 common.save_model(out_dir, model)

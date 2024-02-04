@@ -1,24 +1,29 @@
 import torch
 import torch.optim as optim
-import random
-import time
 import glob
+import sys
 import numpy as np
+from datetime import datetime
 from collections import deque
 from statistics import mean
 
+TRAIN_DECODER_ONLY = False
 
-DETERMINISTIC = False
-TRAIN_DECODER_ONLY = True
-# ENCODER_PARAMETERS_LOAD_FILE = None
-# ENCODER_PARAMETERS_LOAD_FILE = "autoencoder-1706148587-encoder-params.pth"
-ENCODER_PARAMETERS_LOAD_FILE = "autoencoder-pretrained-encoder-params.pth"
-# DATASET_FILEMASK = "data/observations/*.npy"
-DATASET_FILEMASK = "data/observations/1706*.npy"
+BATCH_SIZE = 32
 
+# *** non-deterministic ***
+MODEL_LOAD_FILE = None
+# RNG = np.random.default_rng()
 
-def moving_average(data, window_size):
-    return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
+# *** deterministic ***
+# MODEL_LOAD_FILE = "data/autoencoder/untrained-l3-bn-a-do-f384-model.pt"
+RNG = np.random.default_rng(seed=42)  # make deterministic
+
+ENCODER_PARAMETERS_LOAD_FILE = None
+# ENCODER_PARAMETERS_LOAD_FILE = "autoencoder-pretrained-encoder-params.pth"
+
+DATASET_FILEMASK = "data/observations/*.npy"
+# DATASET_FILEMASK = "data/observations/1706*.npy"
 
 
 # Define the autoencoder architecture
@@ -32,26 +37,74 @@ class VcmiAutoencoder(torch.nn.Module):
         # Z=n_channels
 
         self.encoder = torch.nn.Sequential(
+
+            # <3>
             # => (B, 1, 11, 225)
             torch.nn.Conv2d(1, 32, kernel_size=(1, 15), stride=(1, 15)),
+            torch.nn.BatchNorm2d(num_features=32),
+            torch.nn.LeakyReLU(),
+            torch.nn.Dropout2d(p=0.25, inplace=True),
             # => (B, 32, 11, 15)
-            torch.nn.ReLU(),
             torch.nn.Flatten(),  # by default this flattens dims 1..-1 (ie. keeps B)
             # => (B, 5280)
-            torch.nn.Linear(5280, 1024),  # 5280 = 32*15*11
-            # => (B, 1024)
-            torch.nn.ReLU()
+            # </3>
+
+            # # <1>
+            # # => (B, 1, 11, 225)
+            # torch.nn.Conv2d(1, 32, kernel_size=(1, 15), stride=(1, 15)),
+            # torch.nn.BatchNorm2d(num_features=32),
+            # torch.nn.LeakyReLU(),
+            # # torch.nn.Dropout2d(p=0.25, inplace=True),
+            # # # => (B, 32, 11, 15)
+            # torch.nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=0),
+            # torch.nn.BatchNorm2d(num_features=64),
+            # torch.nn.LeakyReLU(),
+            # # torch.nn.Dropout2d(p=0.25, inplace=True),
+            # # => (B, 64, 5, 7)
+            # torch.nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=0),
+            # torch.nn.BatchNorm2d(num_features=64),
+            # torch.nn.LeakyReLU(),
+            # # torch.nn.Dropout2d(p=0.25, inplace=True),
+            # # => (B, 64, 2, 3)
+            # torch.nn.Flatten(),  # by default this flattens dims 1..-1 (ie. keeps B)
+            # # => (B, 384)
+            # # torch.nn.Linear(384, 1024),  # 5280 = 32*15*11
+            # # torch.nn.LeakyReLU()
+            # # # => (B, 1024)
+            # # </1>
         )
 
+        self.id = "l1-bn-a-do-f5280"
+
         self.decoder = torch.nn.Sequential(
-            # => (B, 1024)
-            torch.nn.Linear(1024, 5280),
+            # <3>
             # => (B, 5280)
-            torch.nn.ReLU(),
             torch.nn.Unflatten(1, (32, 11, 15)),
             # => (B, 32, 11, 15)
             torch.nn.ConvTranspose2d(32, 1, kernel_size=(1, 15), stride=(1, 15)),
             # => (B, 1, 11, 225)
+            # </3>
+
+            # # <1>
+            # # => (B, 384)
+            # torch.nn.Unflatten(1, (64, 2, 3)),
+            # # => (B, 64, 3, 2)
+            # torch.nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2, padding=0),
+            # torch.nn.BatchNorm2d(num_features=64),
+            # torch.nn.LeakyReLU(),
+            # # torch.nn.Dropout2d(p=0.25, inplace=True),
+            # # => (B, 64, 5, 7)
+            # torch.nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=0),
+            # torch.nn.BatchNorm2d(num_features=32),
+            # torch.nn.LeakyReLU(),
+            # # torch.nn.Dropout2d(p=0.25, inplace=True),
+            # # => (B, 64, 11, 15)
+            # torch.nn.ConvTranspose2d(32, 1, kernel_size=(1, 15), stride=(1, 15)),
+            # # torch.nn.BatchNorm2d(num_features=1),
+            # # torch.nn.LeakyReLU(),
+            # # => (B, 1, 11, 225)
+            # # </1>
+
             torch.nn.Sigmoid()
         )
 
@@ -62,14 +115,42 @@ class VcmiAutoencoder(torch.nn.Module):
 
 
 class Dataset:
-    def __init__(self, files):
+    def __init__(self, files, batch_size):
         self.it_files = iter(files)
+        self.it_curfile = iter([])
+        self.batch_size = int(batch_size)
+        self.stopped = False
+        self.returned = False
+        self.batch = []
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        return torch.as_tensor(np.load(next(self.it_files)))
+        try:
+            while len(self.batch) < self.batch_size:
+                # print(".", end="", flush=True)
+                self.batch.append(next(self.it_curfile))
+                self.stopped = False
+            res = torch.as_tensor(np.array(self.batch))
+            self.batch = []
+            # print("returning batch: %s" % str(res.shape))
+            return res
+        except StopIteration:
+            if self.stopped:
+                raise
+
+            try:
+                f = next(self.it_files)
+                self.it_curfile = iter(np.vstack(np.load(f)))
+                # print("New it_curfile: %s" % f)
+                return self.__next__()
+            except StopIteration:
+                self.stopped = True
+                res = torch.as_tensor(np.array(self.batch))
+                self.batch = []
+                # print("Last return: %s" % str(res.shape))
+                return res
 
 
 class DataProvider:
@@ -80,40 +161,37 @@ class DataProvider:
         files = glob.glob(DATASET_FILEMASK)
         files.sort()
         n_train_files = int(train_test_ratio * len(files))
-        n_test_files = len(files) - n_train_files
-        self.test_files = files[:n_test_files]
-        train_files = files[:n_train_files]
 
-        assert len(self.test_files) + len(train_files) == len(files)
+        indexes = RNG.choice(np.arange(0, len(files)), size=len(files), replace=False)
 
-        if DETERMINISTIC:
-            self.train_files = train_files
-        if not DETERMINISTIC:
-            # use a random 50% of the train files
-            self.train_files = random.sample(train_files, int(len(train_files)/2))
+        self.train_files = [files[i] for i in indexes[:n_train_files]]
+        self.test_files = [files[i] for i in indexes[n_train_files:]]
 
-    def train_data(self):
-        return Dataset(self.train_files)
+        assert len(self.train_files) + len(self.test_files) == len(files)
 
-    def test_data(self):
-        return Dataset(self.test_files)
+    def train_data(self, batch_size):
+        return Dataset(self.train_files, batch_size=batch_size)
+
+    def test_data(self, batch_size):
+        return Dataset(self.test_files, batch_size=batch_size)
 
 
 # Initialize the VcmiAutoencoder
-model = VcmiAutoencoder()
 
-# if DETERMINISTIC:
-#     model.load_state_dict(torch.load("autoencoder-untrained.pth"))
+if MODEL_LOAD_FILE:
+    assert not ENCODER_PARAMETERS_LOAD_FILE
+    model = torch.load(MODEL_LOAD_FILE)
+    print("loading model from %s..." % MODEL_LOAD_FILE)
+else:
+    model = VcmiAutoencoder()
 
 mse = torch.nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.0005)
-
-# use the same dataset for testing
-test_dp = DataProvider(0.95)
+dp = DataProvider(0.99)
 
 # Load pretrained features extractor as the encoder and updates for it
 if ENCODER_PARAMETERS_LOAD_FILE:
-    print("loading from %s..." % ENCODER_PARAMETERS_LOAD_FILE)
+    print("loading encoder params from %s..." % ENCODER_PARAMETERS_LOAD_FILE)
     model.encoder.load_state_dict(torch.load(ENCODER_PARAMETERS_LOAD_FILE))
 
 if TRAIN_DECODER_ONLY:
@@ -126,17 +204,12 @@ def test():
     loss_sum = 0
 
     with torch.no_grad():
-        for batch in test_dp.test_data():
-            # d = batch.flatten(0, 1)
-            for data in batch:
-                d = data
-                # for data0 in data:
-                #     d = data0.unsqueeze(0)
-                recon = model(d)
-                loss_sum += mse(recon, d).item()
-                step += 1
-                # if step % 100 == 0:
-                print("\r[Test] [%d] Loss: %.4f %5s" % (step, loss_sum / step, ""), end="", flush=True)
+        for test_batch in dp.test_data(1000):
+            recon = model(test_batch)
+            loss_sum += mse(recon, test_batch).item()
+            step += 1
+            # if step % 100 == 0:
+            print("\r[Test] [%d] Loss: %.4f %5s" % (step, loss_sum / step, ""), end="", flush=True)
 
     print("")  # newline
     return step
@@ -145,23 +218,17 @@ def test():
 def train():
     losses = deque(maxlen=100)
     step = 0
-    dp = DataProvider(0.95)
 
-    for batch in dp.train_data():
-        # d = batch.flatten(0, 1)
-        for data in batch:
-            d = data
-            # for data0 in data:
-            #     d = data0.unsqueeze(0)
-            optimizer.zero_grad()
-            recon = model(d)
-            loss = mse(recon, d)
-            loss.backward()
-            optimizer.step()
-            losses.append(loss.item())
-            step += 1
-            if step % 100 == 0:
-                print("\r[Train] [%d] Loss: %.4f %5s" % (step, mean(losses), ""), end="", flush=True)
+    for train_batch in dp.train_data(batch_size=BATCH_SIZE):
+        recon = model(train_batch)
+        loss = mse(recon, train_batch)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+        step += 1
+        if step % 100 == 0:
+            print("\r[Train] [%d] Loss: %.4f %5s" % (step, mean(losses), ""), end="", flush=True)
 
     print("")  # newline
     return step
@@ -214,24 +281,30 @@ def train():
 # ie. [Train] [26200] Loss: 0.0008  (was below 1e-4 at ~10k)
 
 
-train_epochs = 30
+ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+base = "data/autoencoder/%s-%s" % (ts, model.id)
+
+with open("%s.txt" % base, "w") as dest:
+    print("Run: %s" % dest.name)
+    dest.write("Batch size: %d\n\n%s\n\n%s\n" % (BATCH_SIZE, model.encoder, model.decoder))
+
+train_epochs = 1
 step = 0
 save = True
 test()
 
 try:
     for epoch in range(train_epochs):
-        print("Steps: %d" % step)
-        print("Epoch %d/%d:" % (epoch + 1, train_epochs))
+        print("[Train] Step: %d" % step)
+        print("[Train] Epoch %d/%d:" % (epoch + 1, train_epochs))
         step += train()
         test()
 finally:
-    t = time.time()
-    dest = "autoencoder-%d-model.pt" % t
+    dest = "%s-model.pt" % base
     torch.save(model, dest)
     print("Saved %s" % dest)
 
-    dest = "autoencoder-%d-encoder-params.pth" % t
+    dest = "%s-params-encoder.pth" % base
     torch.save(model.encoder.state_dict(), dest)
     print("Saved %s" % dest)
 

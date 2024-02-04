@@ -96,9 +96,8 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
         network = nn.Sequential()
 
         for (i, layer) in enumerate(layers):
-            # fallback to Conv2d for old .zip models ("_" key not stored)
-            layer_cls = getattr(nn, layer.pop("t"))
             layer_kwargs = dict(layer)  # copy
+            layer_cls = getattr(nn, layer_kwargs.pop("t"))
 
             if i == 0:
                 assert "in_channels" not in layer_kwargs, "in_channels must be omitted for 1st layer"
