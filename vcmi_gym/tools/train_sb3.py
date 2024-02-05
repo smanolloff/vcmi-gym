@@ -198,7 +198,7 @@ def init_model(
 #
 #         self.train()  # update NN
 
-def create_venv(n_envs, framestack, env_kwargs, mapmask, randomize, run_id, iteration=0):
+def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run_id, iteration=0):
     mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
     all_maps = glob.glob("%s/%s" % (mappath, mapmask))
     all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
@@ -207,9 +207,10 @@ def create_venv(n_envs, framestack, env_kwargs, mapmask, randomize, run_id, iter
     if n_envs == 1:
         n_maps = 1
     else:
-        assert n_envs % 2 == 0
-        assert n_envs <= len(all_maps) * 2
-        n_maps = n_envs // 2
+        # assert n_envs % 2 == 0
+        # assert n_envs <= len(all_maps) * 2
+        # n_maps = n_envs // 2
+        n_maps = n_envs
 
     if randomize:
         maps = random.sample(all_maps, n_maps)
@@ -225,8 +226,9 @@ def create_venv(n_envs, framestack, env_kwargs, mapmask, randomize, run_id, iter
 
         assert len(maps) == n_maps
 
-    pairs = [[("attacker", m), ("defender", m)] for m in maps]
-    pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
+    # pairs = [[("attacker", m), ("defender", m)] for m in maps]
+    # pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
+    pairs = [("attacker", m) for m in maps]
     state = {"n": 0}
     lock = threading.RLock()
 
@@ -249,7 +251,7 @@ def create_venv(n_envs, framestack, env_kwargs, mapmask, randomize, run_id, iter
             print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs2))
             state["n"] += 1
 
-        return vcmi_gym.VcmiEnv(**env_kwargs2)
+        return env_cls(**env_kwargs2)
 
     # XXX: do not wrap in TimeLimit, as it gets applied AFTER Monitor
     # => there will be no info["episode"] in case of truncations
@@ -287,6 +289,7 @@ def train_sb3(
     features_extractor,
     lstm,
     optimizer,
+    env_cls_name,
     env_kwargs,
     mapmask,
     randomize_maps,
@@ -312,6 +315,7 @@ def train_sb3(
     learning_rate = common.lr_from_schedule(learner_lr_schedule)
     sb3_cb = sb3_callback.SB3Callback(observations_dir)
     ep_rew_means = []
+    env_cls = getattr(vcmi_gym, env_cls_name)
 
     if rollouts_total:
         iterations = rollouts_total // rollouts_per_iteration
@@ -324,7 +328,7 @@ def train_sb3(
 
     try:
         model = init_model(
-            venv=create_venv(n_envs, framestack, env_kwargs, mapmask, randomize_maps, run_id, iteration),
+            venv=create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, iteration),
             seed=seed,
             features_extractor_load_file=features_extractor_load_file,
             features_extractor_load_file_type=features_extractor_load_file_type,
@@ -365,7 +369,7 @@ def train_sb3(
                 with open(f"{out_dir}/iteration", "w") as f:
                     f.write(str(iteration))
                 model.env.close()
-                model.env = create_venv(n_envs, framestack, env_kwargs, mapmask, randomize_maps, run_id, iteration)
+                model.env = create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, iteration)  # noqa: E501
                 model.env.reset()
 
             model.learn(

@@ -113,6 +113,7 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
                     "features_extractor": cfg.get("features_extractor", {}),
                     "lstm": cfg.get("lstm", {}),
                     "optimizer": cfg.get("optimizer", {}),
+                    "env_cls_name": cfg.get("env_cls_name", "VcmiEnv"),
                     "env_kwargs": expanded_env_kwargs,
                     "mapmask": cfg.get("mapmask", "ai/generated/A*.vmap"),
                     "randomize_maps": cfg.get("randomize_maps", False),

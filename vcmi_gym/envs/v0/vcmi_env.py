@@ -160,7 +160,7 @@ class VcmiEnv(gym.Env):
 
     @tracelog
     def step(self, action):
-        action += self.action_offset  # see note for action_space
+        action = self._transform_action(action)
 
         if self.terminated or self.truncated:
             raise Exception("Reset needed")
@@ -274,11 +274,15 @@ class VcmiEnv(gym.Env):
         self.truncated = False
 
         # Vars updated after other events
-        self.analyzer = Analyzer(self.action_space.n)
+        self.analyzer = Analyzer(N_ACTIONS - self.action_offset)
 
     def _maybe_render(self, analysis):
         if self.render_each_step:
             print(self.render())
+
+    def _transform_action(self, action):
+        # see note for action_space
+        return action + self.action_offset
 
     #
     # A note on the static methods

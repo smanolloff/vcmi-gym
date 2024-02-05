@@ -4,15 +4,15 @@
 #
 # Usage:
 #
-#     zsh sb3_watchdog.zsh [group_id [run_id [loadfile]]]
+#     zsh sb3_watchdog.zsh ACTION [group_id [run_id [loadfile]]]
 #   <OR>
-#     zsh sb3_watchdog.zsh [-c CONFIG]
+#     zsh sb3_watchdog.zsh ACTION [-c CONFIG]
 #
 # Examples:
 #
-#     zsh sb3_watchdog.zsh ahcgnv23
-#     zsh sb3_watchdog.zsh ahcgnv23 fisughdk path/to/model.zip
-#     zsh sb3_watchdog.zsh -c path/to/config.yml
+#     zsh sb3_watchdog.zsh train_mppo ahcgnv23
+#     zsh sb3_watchdog.zsh train_mppo ahcgnv23 fisughdk path/to/model.zip
+#     zsh sb3_watchdog.zsh train_vppo -c path/to/config.yml
 #
 # To generate a new group for all configs (config/train_mppo/{1,2,3}.yml):
 #
@@ -122,6 +122,10 @@ group=
 run=
 loadfile=
 iteration=
+action=$1
+
+[ "$action" = "train_mppo" -o "$action" = "train_vppo" ]
+shift
 
 #
 #
@@ -177,7 +181,7 @@ while true; do
   [ -z "$loadfile" ] || args+=("-l" "$loadfile")
   args+=(-g "$group")
   args+=(-r "$run")
-  args+=(train_mppo)
+  args+=("$action")
 
   python vcmi-gym.py "${args[@]}" &
 
