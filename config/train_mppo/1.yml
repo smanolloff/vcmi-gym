@@ -1,6 +1,6 @@
 ---
 seed: ~
-run_id: MD-dmg0-l3-bn-f1024-rollouts20-lr0.0004-e0.05-g0.88-mgn0.5
+run_id: l64
 group_id: attackers-only
 model_load_file: ~
 features_extractor_load_file: ~
@@ -39,7 +39,7 @@ logparams: {}
   # "config/rew_clip": "env_kwargs.reward_clip_mod"
 
 activation: "LeakyReLU"
-net_arch: []
+net_arch: [64, 64]
 optimizer:
   class_name: "AdamW"
   kwargs: {eps: !!float 1e-5, weight_decay: 0}
@@ -47,27 +47,19 @@ features_extractor:
   class_name: "VcmiFeaturesExtractor"
   kwargs:
     layers:
-        # => (11, 225)
-        - {t: "Conv2d", out_channels: 32, kernel_size: [1, 15], stride: [1, 15], padding: 0}
-        - {t: "BatchNorm2d", num_features: 32}
-        - {t: "LeakyReLU"}
-        # - {t: "Dropout2d", p: 0.25, inplace: true}
-        # => (11, 15)
-        - {t: "Conv2d", in_channels: 32, out_channels: 64, kernel_size: 3, stride: 2, padding: 0}
-        - {t: "BatchNorm2d", num_features: 64}
-        - {t: "LeakyReLU"}
-        # - {t: "Dropout2d", p: 0.25, inplace: true}
-        # => (5, 7)
-        - {t: "Conv2d", in_channels: 64, out_channels: 64, kernel_size: 3, stride: 2, padding: 0}
-        - {t: "BatchNorm2d", num_features: 64}
-        - {t: "LeakyReLU"}
-        # - {t: "Dropout2d", p: 0.25, inplace: true}
-        # => (2, 3)
+        # => (B, 11, 225)
         - {t: "Flatten"}
-        # => 384
-        - {t: "Linear", in_features: 384, out_features: 1024}
+        # => (B, 2475)
+        - {t: "Unflatten", dim: 1, unflattened_size: [165, 15]}
+        # => (B, 165, 15)
+        - {t: "VcmiAttention", embed_dim: 15, num_heads: 3, batch_first: true}
+        # => (B, 165, 15)
+        - {t: "Flatten"}
+        # => (B, 2475)
+        - {t: "Linear", in_features: 2475, out_features: 64}
         - {t: "LeakyReLU"}
-        # => 1024
+        # => (B, 64)
+
 
 learner_kwargs:
   # n_steps: 512  # calculated dynamically (see n_global_steps_max)
@@ -87,7 +79,7 @@ learner_kwargs:
 #   * "exp_decay_0.03_0.0001_0.5_5"
 learner_lr_schedule: "const_0.0004"
 
-env_cls_name: VcmiMDEnv
+env_cls_name: VcmiEnv
 env_kwargs:
   max_steps: 500
   reward_clip_mod: ~

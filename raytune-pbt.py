@@ -1,6 +1,6 @@
 import sys
 import os
-from pathlib import Path
+import re
 from datetime import datetime
 import copy
 import importlib
@@ -37,13 +37,18 @@ def validate_hyperparams(params):
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise Exception("Expected alg name as the only argument, eg. PPO")
-
     alg = sys.argv[1]
 
     if alg not in ["PPO", "RPPO", "MPPO", "VPPO"]:
         raise Exception("Only PPO, RPPO, MPPO, VPPO are supported for raytune currently")
+
+    if len(sys.argv) > 2:
+        desc = sys.argv[2]
+        assert len(sys.argv) <= 3, "trailing arguments"
+        assert re.match(r"^[0-9A-Za-z_-].+$", desc)
+        experiment_name = "PBT-%s-%s" % (desc, datetime.now().strftime("%Y%m%d_%H%M%S"))
+    else:
+        experiment_name = "PBT-%s" % (datetime.now().strftime("%Y%m%d_%H%M%S"))
 
     config_mod = importlib.import_module("config.raytune.pbt.%s" % alg.lower())
     trainer_mod = importlib.import_module("vcmi_gym.tools.raytune.pbt.%s_trainer" % alg.lower())
@@ -52,11 +57,6 @@ def main():
     trainer_cls = getattr(trainer_mod, "%sTrainer" % alg)
 
     orig_config = copy.deepcopy(config)
-
-    experiment_name = "GEN-PBT-%s-%s" % (
-        alg,
-        datetime.now().strftime("%Y%m%d_%H%M%S")
-    )
 
     results_dir = config["results_dir"]
     if not os.path.isabs(results_dir):

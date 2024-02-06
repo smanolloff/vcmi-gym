@@ -33,23 +33,17 @@ class SB3Callback(BaseCallback):
         # only once, at end of the iteration
         # (ie. once every config["rollouts_per_iteration"])
         self.wdb_tables = {}
-        self.uncommitted_log = False
 
     def _on_step(self):
         self.rollout_episodes += self.locals["dones"].sum()
         return True
 
-    def _on_rollout_start(self):
-        if self.uncommitted_log:
-            # Must log *something* to commit the rest
-            # Since timesteps are preserved between checkpoint loads,
-            # mark this as a trial-related metric
-            wandb.log({"trial/num_timesteps": self.num_timesteps})
-            self.uncommitted_log = False
-
     def _on_rollout_end(self):
         self.rollouts += 1
-        wdb_log = {"rollout/n_episodes": self.rollout_episodes}
+        wdb_log = {
+            "num_timesteps": self.num_timesteps,
+            "rollout/n_episodes": self.rollout_episodes,
+        }
         self.rollout_episodes = 0
 
         if self.rollouts % self.locals["log_interval"] != 0:
@@ -61,7 +55,7 @@ class SB3Callback(BaseCallback):
             wdb_log[k] = v
 
         # From here on it's W&B stuff only
-        wdb_log["rollout/count"] = self.rollouts
+        wdb_log["n_rollouts"] = self.rollouts
 
         # Also add sb3's Monitor info keys: "r" (reward) and "l" (length)
         # (these are already recorded to TB by sb3, but not in W&B)
@@ -92,8 +86,4 @@ class SB3Callback(BaseCallback):
             for row in rotated:
                 wb_table.add_data(*row)
 
-        # Commit will be done either:
-        #   a) on_rollout_start()
-        #   b) by the trainer (if this is the last rollout)
-        wandb.log(wdb_log, commit=False)
-        self.uncommitted_log = True
+        wandb.log(wdb_log, commit=True)

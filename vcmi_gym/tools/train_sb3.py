@@ -207,10 +207,9 @@ def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run
     if n_envs == 1:
         n_maps = 1
     else:
-        # assert n_envs % 2 == 0
-        # assert n_envs <= len(all_maps) * 2
-        # n_maps = n_envs // 2
-        n_maps = n_envs
+        assert n_envs % 2 == 0
+        assert n_envs <= len(all_maps) * 2
+        n_maps = n_envs // 2
 
     if randomize:
         maps = random.sample(all_maps, n_maps)
@@ -226,9 +225,8 @@ def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run
 
         assert len(maps) == n_maps
 
-    # pairs = [[("attacker", m), ("defender", m)] for m in maps]
-    # pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
-    pairs = [("attacker", m) for m in maps]
+    pairs = [[("attacker", m), ("defender", m)] for m in maps]
+    pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
     state = {"n": 0}
     lock = threading.RLock()
 
@@ -253,10 +251,6 @@ def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run
 
         return env_cls(**env_kwargs2)
 
-    # XXX: do not wrap in TimeLimit, as it gets applied AFTER Monitor
-    # => there will be no info["episode"] in case of truncations
-    # => metrics won't be correctly calculated
-    # => implement truncation in the env itself
     venv = common.make_vec_env_parallel(
         min(n_envs, 8),
         env_creator,

@@ -16,7 +16,6 @@
 
 import gymnasium
 from .envs.v0.vcmi_env import VcmiEnv, InfoDict
-from .envs.v0.vcmimd_env import VcmiMDEnv
 from .envs.v0.util.test_helper import TestHelper
 from .envs.v0.util.maskable_qrdqn.maskable_qrdqn import MaskableQRDQN
 from .envs.v0.util.vcmi_nn import (
@@ -27,7 +26,6 @@ from .envs.v0.util.vcmi_nn import (
 
 all = [
     VcmiEnv,
-    VcmiMDEnv,
     InfoDict,
     TestHelper,
     MaskableQRDQN,

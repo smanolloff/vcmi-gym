@@ -1,12 +1,12 @@
 # from ray.tune.search.sample import Integer, Float
 
-N_WORKERS = 3
-N_ENVS = 8
+N_WORKERS = 6
+N_ENVS = 6
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
 # (eg. 2048/48 = 42.666... => n_steps=42)
 # N_GLOBAL_STEPS_MAX = 2048
-# N_GLOBAL_STEPS_MAX = 2000
+N_GLOBAL_STEPS_MAX = 2000
 
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
@@ -41,15 +41,15 @@ config = {
     "hyperparam_mutations": {
         # "net_arch": [[], [64, 64], [256, 256]],
         "learner_kwargs": {
-            # "learning_rate": [0.00001, 0.0001, 0.001],
-            # "gamma": [0.8, 0.86, 0.98],
+            "learning_rate": [0.00001, 0.0001, 0.001],
+            "gamma": [0.85, 0.95],
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": [5, 10, 20],
-            # "gae_lambda": [0.8, 0.95],
+            "gae_lambda": [0.8, 0.95],
             # "clip_range": [0.2, 0.5],
             # "vf_coef": [0.2, 0.5],
             # "max_grad_norm": [0.5, 1.5, 3],
-            # "ent_coef": [0.001, 0.01],
+            "ent_coef": [0.1, 0.01],
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
         # "optimizer": {"kwargs": {"weight_decay": [0, 0.01, 0.1]}},
@@ -68,8 +68,8 @@ config = {
         "learner_kwargs": {
             "stats_window_size": 100,
             "learning_rate": 0.00126,
-            # "n_steps": N_GLOBAL_STEPS_MAX // N_ENVS,
-            "n_steps": 128,
+            "n_steps": N_GLOBAL_STEPS_MAX // N_ENVS,
+            # "n_steps": 128,
             "batch_size": 64,
             "n_epochs": 10,
             "gamma": 0.8425,
@@ -78,31 +78,32 @@ config = {
             "normalize_advantage": True,
             "ent_coef": 0.007,
             "vf_coef": 0.6,
-            "max_grad_norm": 2.5,
+            "max_grad_norm": 0.5,
             # "use_sde": False,  # n/a in MaskablePPO
         },
         "features_extractor_load_file": None,
         "features_extractor_load_file_type": None,  # model / params / sb3
         "features_extractor_freeze": False,
         "optimizer": {"class_name": "AdamW", "kwargs": {"eps": 1e-5, "weight_decay": 0}},
-        "activation": "ReLU",  # XXX: convert to nn.ReLU
-        # "net_arch": [],
+        "activation": "LeakyReLU",
+        "net_arch": [],
         # "net_arch": [64, 64],
-        "net_arch": [64, 64],
         "features_extractor": {
             "class_name": "VcmiFeaturesExtractor",
             "kwargs": {
-                "output_dim": 512,
-                "activation": "ReLU",
                 "layers": [
-                    {"t": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},
-                    # {"t": "Conv2d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
-                    # {"t": "Conv2d", "in_channels": 64, "out_channels": 64, "kernel_size": 5, "stride": 1, "padding": 2},
+                    {"t": "Flatten"},
+                    {"t": "Unflatten", "dim": 1, "unflattened_size": [165, 15]},
+                    {"t": "VcmiAttention", "embed_dim": 15, "num_heads": 3, "batch_first": True},
+                    {"t": "Flatten"},
+                    {"t": "Linear", "in_features": 2475, "out_features": 64},
+                    {"t": "LeakyReLU"}
                 ]
             }
         },
         "env_kwargs": {
             "max_steps": 1000,  # not used with MPPO
+            "reward_dmg_factor": 5,
             "vcmi_loglevel_global": "error",
             "vcmi_loglevel_ai": "error",
             "vcmienv_loglevel": "WARN",
@@ -114,7 +115,7 @@ config = {
             # "attacker": "MMAI_USER",
             # "defender": "StupidAI"
         },
-        "mapmask": "ai/generated/A0[0-4].vmap",
+        "mapmask": "ai/generated/B*.vmap",
         "randomize_maps": False,
     }
 }

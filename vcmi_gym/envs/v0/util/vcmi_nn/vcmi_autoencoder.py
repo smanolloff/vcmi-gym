@@ -9,14 +9,14 @@ from statistics import mean
 TRAIN_DECODER_ONLY = False
 
 BATCH_SIZE = 32
-LR = 0.0005
+LR = 0.0009
 
 # *** non-deterministic ***
 # MODEL_LOAD_FILE = None
 # RNG = np.random.default_rng()
 
 # *** deterministic ***
-MODEL_LOAD_FILE = "data/autoencoder/20240205_174759-l2-bn-f1_11_15-model.pt"
+MODEL_LOAD_FILE = "data/autoencoder/20240205_182200-l2-bn-f1_11_15-model.pt"
 RNG = np.random.default_rng(seed=42)  # make deterministic
 
 ENCODER_PARAMETERS_LOAD_FILE = None
@@ -340,8 +340,9 @@ base = "data/autoencoder/%s-%s" % (ts, model.id)
 
 if train_epochs:
     with open("%s.txt" % base, "w") as dest:
-        print("Run: %s" % dest.name)
-        dest.write("Batch size: %d\nLearning rate: %s\n\n%s\n\n%s\n" % (BATCH_SIZE, LR, model.encoder, model.decoder))
+        info = "Run: %s\nBatch size: %d\nLearning rate: %s" % (dest.name, BATCH_SIZE, LR)
+        print(info)
+        dest.write("%s\n\n%s\n\n%s\n" % (info, model.encoder, model.decoder))
 
     try:
         for epoch in range(train_epochs):

@@ -195,11 +195,12 @@ class PPOTrainer(ray.tune.Trainable):
 
     @debuglog
     def log_result(self, result):
-        assert self.sb3_callback.uncommitted_log
-        assert self.sb3_callback.wdb_tables
-        wdb_log = dict(self.sb3_callback.wdb_tables)
-        wdb_log["trial/time_this_iter_s"] = result["time_this_iter_s"]
-        wandb.log(wdb_log)
+        # assert self.sb3_callback.uncommitted_log
+        # assert self.sb3_callback.wdb_tables
+        # wdb_log = dict(self.sb3_callback.wdb_tables)
+        # wdb_log["trial/time_this_iter_s"] = result["time_this_iter_s"]
+        # wandb.log(wdb_log)
+        pass
 
     #
     # private
@@ -230,10 +231,8 @@ class PPOTrainer(ray.tune.Trainable):
             wandb.log({"map_offset": i}, commit=False)
 
             if new_i > i:
-                self.log("map range: [%d:%d]" % (i, new_i))
                 maps = all_maps[i:new_i]
             else:
-                self.log("map range: [%d:] + [:%d]" % (i, new_i))
                 maps = all_maps[i:] + all_maps[:new_i]
 
             assert len(maps) == n_maps

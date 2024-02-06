@@ -27,10 +27,14 @@ from ..pyconnector import (
 )
 
 
-class VcmiFeaturesExtractor(BaseFeaturesExtractor):
-    # x1 = hex 1
-    # n = hexstate + n-1 stack attributes
+class VcmiAttention(nn.MultiheadAttention):
+    def forward(self, obs):
+        # TODO: attn_mask
+        res, _weights = super().forward(obs, obs, obs, need_weights=False, attn_mask=None)
+        return res
 
+
+class VcmiFeaturesExtractor(BaseFeaturesExtractor):
     # Observation is a 2D array of shape (11, 15*n):
     # [
     #   [x1_1,   ...   x1_n, | x2_1,   ...   x2_n, | ... | x15_1,  ...  x15_n],
@@ -55,7 +59,7 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
     # Example config
     #       VcmiNN(
     #           layers=[
-    #               {"t": "Conv2d", "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15), "padding": 0},
+    #               {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": (1, 15), "stride": (1, 15)},
     #               {"t": "LeakyReLU"},
     #               {"t": "Conv2d", "in_channels": 32, "out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
     #               {"t": "LeakyReLU"},
@@ -64,12 +68,15 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
     #               {"t": "Flatten"},
     #               {"t": "Linear", "in_features": 384, "out_features": 1024},
     #               {"t": "LeakyReLU"}
+    #           ],
+    #           attention_kwargs=[
+    #               layers=[...]
     #           ]
     #       )
-    def __init__(self, observation_space: gym.Space, layers) -> None:
+    def __init__(self, observation_space: gym.Space, layers, attention_kwargs=None) -> None:
         assert isinstance(observation_space, gym.spaces.Box)
 
-        # It does not work if we don't have an explicit "channel" dim in obs
+        # Conv2d does not work if we don't have an explicit "channel" dim in obs
         assert len(observation_space.shape) == 3, "unexpected shape"
 
         # The "Z" (ie. "channel") dim is always required:
@@ -97,12 +104,10 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
 
         for (i, layer) in enumerate(layers):
             layer_kwargs = dict(layer)  # copy
-            layer_cls = getattr(nn, layer_kwargs.pop("t"))
+            t = layer_kwargs.pop("t")
+            layer_cls = getattr(nn, t, None) or globals()[t]
 
-            if i == 0:
-                assert "in_channels" not in layer_kwargs, "in_channels must be omitted for 1st layer"
-                # layer_kwargs["in_channels"] = STATE_SIZE_Z
-                # When using VecFrameStack, Z=n_stack
+            if i == 0 and t == "Conv2d" and "in_channels" not in layer_kwargs:
                 layer_kwargs["in_channels"] = observation_space.shape[0]
 
             network.append(layer_cls(**layer_kwargs))
