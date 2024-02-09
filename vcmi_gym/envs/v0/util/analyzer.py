@@ -46,16 +46,21 @@ class ActionType(enum.IntEnum):
     assert N_NONHEX_ACTIONS == 2
 
     MOVE = enum.auto()
+    AMOVE_TL = enum.auto()
+    AMOVE_TR = enum.auto()
+    AMOVE_R = enum.auto()
+    AMOVE_BR = enum.auto()
+    AMOVE_BL = enum.auto()
+    AMOVE_L = enum.auto()
+    AMOVE_2BL = enum.auto()
+    AMOVE_2L = enum.auto()
+    AMOVE_2TL = enum.auto()
+    AMOVE_2TR = enum.auto()
+    AMOVE_2R = enum.auto()
+    AMOVE_2BR = enum.auto()
     SHOOT = enum.auto()
-    MELEE_TL = enum.auto()
-    MELEE_TR = enum.auto()
-    MELEE_R = enum.auto()
-    MELEE_BR = enum.auto()
-    MELEE_BL = enum.auto()
-    MELEE_L = enum.auto()
-    MELEE_T = enum.auto()
-    MELEE_B = enum.auto()
-    assert N_HEX_ACTIONS == 10
+
+    assert N_HEX_ACTIONS == 14
 
 
 class Analyzer():

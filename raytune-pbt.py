@@ -42,13 +42,11 @@ def main():
     if alg not in ["PPO", "RPPO", "MPPO", "VPPO"]:
         raise Exception("Only PPO, RPPO, MPPO, VPPO are supported for raytune currently")
 
-    if len(sys.argv) > 2:
-        desc = sys.argv[2]
-        assert len(sys.argv) <= 3, "trailing arguments"
-        assert re.match(r"^[0-9A-Za-z_-].+$", desc)
-        experiment_name = "PBT-%s-%s" % (desc, datetime.now().strftime("%Y%m%d_%H%M%S"))
-    else:
-        experiment_name = "PBT-%s" % (datetime.now().strftime("%Y%m%d_%H%M%S"))
+    assert len(sys.argv) == 3, "experiment name is required"
+
+    desc = sys.argv[2]
+    assert re.match(r"^[0-9A-Za-z_-].+$", desc)
+    experiment_name = "PBT-%s-%s" % (desc, datetime.now().strftime("%Y%m%d_%H%M%S"))
 
     config_mod = importlib.import_module("config.raytune.pbt.%s" % alg.lower())
     trainer_mod = importlib.import_module("vcmi_gym.tools.raytune.pbt.%s_trainer" % alg.lower())
@@ -89,7 +87,7 @@ def main():
     run_config = train.RunConfig(
         name=experiment_name,
         verbose=False,
-        failure_config=train.FailureConfig(fail_fast=True),
+        failure_config=train.FailureConfig(max_failures=-1),
         checkpoint_config=checkpoint_config,
         stop={"rew_mean": config["target_ep_rew_mean"]},
         callbacks=[TBXDummyCallback()],

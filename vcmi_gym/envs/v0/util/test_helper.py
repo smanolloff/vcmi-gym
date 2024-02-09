@@ -48,10 +48,10 @@ class TestHelper:
         return N_NONHEX_ACTIONS + ((y-1)*15 + x-1)*N_HEX_ACTIONS - 1
 
     def _shoot_action(self, x, y):
-        return self._move_action(x, y) + 1  # SHOOT is 1 after MOVE
+        return self._move_action(x, y) + N_HEX_ACTIONS-1  # SHOOT is last
 
     def _melee_action(self, x, y, direction):
-        return self._shoot_action(x, y) + direction
+        return self._move_action(x, y) + direction + 1
 
     # x: 1..15
     # y: 1..11

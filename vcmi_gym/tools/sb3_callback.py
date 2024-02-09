@@ -79,25 +79,25 @@ class SB3Callback(BaseCallback):
         v = safe_mean([ep_info["l"] for ep_info in self.model.ep_info_buffer])
         wdb_log["rollout/ep_len_mean"] = v
 
-        for (k, columns) in InfoDict.D1_ARRAY_VALUES.items():
-            action_types_vec_2d = [ep_info[k] for ep_info in self.model.ep_info_buffer]
-            ary = np.mean(action_types_vec_2d, axis=0)
+        # for (k, columns) in InfoDict.D1_ARRAY_VALUES.items():
+        #     action_types_vec_2d = [ep_info[k] for ep_info in self.model.ep_info_buffer]
+        #     ary = np.mean(action_types_vec_2d, axis=0)
 
-            # In SB3's logger, Tensor objects are logged as a Histogram
-            # https://github.com/DLR-RM/stable-baselines3/blob/v1.8.0/stable_baselines3/common/logger.py#L412
-            # NOT logging this to TB, it's not visualized well there
-            # tb_data = torch.as_tensor(ary)
-            # self.model.logger.record(f"user/{k}", tb_data)
+        #     # In SB3's logger, Tensor objects are logged as a Histogram
+        #     # https://github.com/DLR-RM/stable-baselines3/blob/v1.8.0/stable_baselines3/common/logger.py#L412
+        #     # NOT logging this to TB, it's not visualized well there
+        #     # tb_data = torch.as_tensor(ary)
+        #     # self.model.logger.record(f"user/{k}", tb_data)
 
-            # In W&B, we need to unpivot into a name/count table
-            # NOTE: reserved column names: "id", "name", "_step" and "color"
-            wk = f"table/{k}"
-            rotated = [list(row) for row in zip(columns, ary)]
-            if wk not in self.wdb_tables:
-                self.wdb_tables[wk] = wandb.Table(columns=["key", "value"])
+        #     # In W&B, we need to unpivot into a name/count table
+        #     # NOTE: reserved column names: "id", "name", "_step" and "color"
+        #     wk = f"table/{k}"
+        #     rotated = [list(row) for row in zip(columns, ary)]
+        #     if wk not in self.wdb_tables:
+        #         self.wdb_tables[wk] = wandb.Table(columns=["key", "value"])
 
-            wb_table = self.wdb_tables[wk]
-            for row in rotated:
-                wb_table.add_data(*row)
+        #     wb_table = self.wdb_tables[wk]
+        #     for row in rotated:
+        #         wb_table.add_data(*row)
 
         wandb.log(wdb_log, commit=True)

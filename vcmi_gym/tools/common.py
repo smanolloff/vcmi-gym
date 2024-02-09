@@ -276,12 +276,15 @@ def make_vec_env_parallel(j, env_creator, n_envs, monitor_kwargs):
         env = Monitor(env, filename=None, **monitor_kwargs)
         return env
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=j) as executor:
-        futures = [executor.submit(initenv) for _ in range(n_envs)]
-        results = [future.result() for future in futures]
+    if n_envs > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=j) as executor:
+            futures = [executor.submit(initenv) for _ in range(n_envs)]
+            results = [future.result() for future in futures]
 
-    funcs = [lambda x=x: x for x in results]
+        funcs = [lambda x=x: x for x in results]
+        vec_env = DummyVecEnv(funcs)
+    else:
+        vec_env = DummyVecEnv([initenv])
 
-    vec_env = DummyVecEnv(funcs)
     vec_env.seed()
     return vec_env

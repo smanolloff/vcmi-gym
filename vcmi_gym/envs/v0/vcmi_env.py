@@ -24,9 +24,10 @@ from .util.pyconnector import (
     STATE_SIZE_X,
     STATE_SIZE_Y,
     STATE_SIZE_Z,
+    N_HEX_ATTRS,
     N_ACTIONS,
     NV_MAX,
-    NV_MIN,
+    NV_MIN
 )
 
 
@@ -101,6 +102,7 @@ class VcmiEnv(gym.Env):
         user_timeout=0,  # seconds
         vcmi_timeout=5,  # seconds
         boot_timeout=0,  # seconds
+        hexattr_filter=None,
         reward_dmg_factor=5,
         reward_clip_mod=None,  # clip at +/- this value
     ):
@@ -131,12 +133,27 @@ class VcmiEnv(gym.Env):
         #       => just start from 0, reduce max by 1, and manually add +1
         self.action_offset = 1
         self.action_space = gym.spaces.Discrete(N_ACTIONS - self.action_offset)
-        self.observation_space = gym.spaces.Box(
-            shape=(STATE_SIZE_Z, STATE_SIZE_Y, STATE_SIZE_X),
-            low=NV_MIN,
-            high=NV_MAX,
-            dtype=DTYPE
-        )
+
+        if hexattr_filter:
+            assert isinstance(hexattr_filter, list)
+            assert len(hexattr_filter) == len(list(set(hexattr_filter)))
+            assert len(hexattr_filter) <= STATE_SIZE_X
+            assert all(isinstance(x, int) and x < N_HEX_ATTRS for x in hexattr_filter)
+            self.observation_space = gym.spaces.Box(
+                # id, state, stack qty, side, type
+                shape=(STATE_SIZE_Z, STATE_SIZE_Y, 15 * len(hexattr_filter)),
+                low=NV_MIN,
+                high=NV_MAX,
+                dtype=DTYPE
+            )
+        else:
+            self.observation_space = gym.spaces.Box(
+                shape=(STATE_SIZE_Z, STATE_SIZE_Y, STATE_SIZE_X),
+                low=NV_MIN,
+                high=NV_MAX,
+                dtype=DTYPE
+            )
+
         self.actfile = None
 
         # <params>
@@ -151,6 +168,7 @@ class VcmiEnv(gym.Env):
         self.attacker_model = attacker_model
         self.defender_model = defender_model
         self.actions_log_file = actions_log_file
+        self.hexattr_filter = hexattr_filter
         self.reward_clip_mod = reward_clip_mod
         self.reward_dmg_factor = reward_dmg_factor
         # </params>
@@ -169,11 +187,15 @@ class VcmiEnv(gym.Env):
             self.actfile.write(f"{action}\n")
 
         res = self.connector.act(action)
-        assert res.errmask == 0 or self.allow_invalid_actions
+        # assert res.errmask == 0 or self.allow_invalid_actions, "Errmask != 0: %d" % res.errmask
+        if res.errmask != 0 and not self.allow_invalid_actions:
+            # MQRDQN sometimes (very rarely) hits an invalid action
+            # Could be a corner case for just after learning starts
+            self.logger.warn("errmask=%d" % res.errmask)
 
         analysis = self.analyzer.analyze(action, res)
-        rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_dmg_factor, self.reward_scaling_factor, self.reward_clip_mod)  # noqa:E501
-        obs = res.state
+        rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_dmg_factor, self.reward_scaling_factor, self.reward_clip_mod, res.errmask)  # noqa:E501
+        obs = VcmiEnv.maybe_filter_hexattrs(res.state, self.hexattr_filter)
         term = res.is_battle_over
         trunc = self.analyzer.actions_count >= self.max_steps
 
@@ -207,7 +229,8 @@ class VcmiEnv(gym.Env):
                 self.actfile.close()
             self.actfile = open(self.actions_log_file, "w")
 
-        return self.result.state, {"side": self.result.side}
+        obs = VcmiEnv.maybe_filter_hexattrs(self.result.state, self.hexattr_filter)
+        return obs, {"side": self.result.side}
 
     @tracelog
     def render(self):
@@ -246,6 +269,81 @@ class VcmiEnv(gym.Env):
     @tracelog
     def action_masks(self):
         return self.result.actmask[self.action_offset:]
+
+    # Print all info about a hex
+    # To test:
+    # import vcmi_gym
+    # env = vcmi_gym.VcmiEnv("ai/generated/A03.vmap")
+    # obs = env.step(589)[0]
+    # env.hexreport(obs, 14, 3)
+    def hexreport(self, obs, x, y):
+        iy = y-1
+        ix0 = (x-1) * N_HEX_ATTRS
+        ix1 = (x) * N_HEX_ATTRS
+
+        print("Obs range: [%d][%d:%d]" % (iy, ix0, ix1))
+        part = obs[0][iy][ix0:ix1]
+
+        def round_and_strip(number, decimals=2):
+            rounded_number = round(number, decimals)
+            return str(rounded_number).rstrip('0').rstrip('.') if '.' in str(rounded_number) else str(rounded_number)
+
+        def vreport(i, name, vmin, vmax, voffset=0):
+            norm = part[i]
+            unnorm = round_and_strip(norm * (vmax - vmin) + vmin, 3)
+            print("[%d] %s: %s" % (i, name, unnorm))
+
+        def vstackreport(i, name, vmin, vmax, voffset=0):
+            vreport(i, f"{name} #1", 0, 1)
+            vreport(i+1, f"{name} #2", 0, 1)
+            vreport(i+2, f"{name} #3", 0, 1)
+            vreport(i+3, f"{name} #4", 0, 1)
+            vreport(i+4, f"{name} #5", 0, 1)
+            vreport(i+5, f"{name} #6", 0, 1)
+            vreport(i+6, f"{name} #7", 0, 1)
+
+        vreport(0, "y (0-based)", 0, 10)
+        vreport(1, "x (0-based)", 0, 14)
+        vreport(2, "state", 1, 4)
+        vreport(3, "StackAttr::Quantity", -1, 5000, 1)
+        vreport(4, "StackAttr::Attack", -1, 100, 1)
+        vreport(5, "StackAttr::Defense", -1, 100, 1)
+        vreport(6, "StackAttr::Shots", -1, 32, 1)
+        vreport(7, "StackAttr::DmgMin", -1, 100, 1)
+        vreport(8, "StackAttr::DmgMax", -1, 100, 1)
+        vreport(9, "StackAttr::HP", -1, 1500, 1)
+        vreport(10, "StackAttr::HPLeft", -1, 1500, 1)
+        vreport(11, "StackAttr::Speed", -1, 30, 1)
+        vreport(12, "StackAttr::Waited", -1, 1, 1)
+        vreport(13, "StackAttr::QueuePos", -1, 14, 1)
+        vreport(14, "StackAttr::RetaliationsLeft", -1, 3, 1)
+        vreport(15, "StackAttr::Side", -1, 1, 1)
+        vreport(16, "StackAttr::Slot", -1, 6, 1)
+        vreport(17, "StackAttr::CreatureType", -1, 150, 1)
+        vreport(18, "StackAttr::AIValue", -1, 40000, 1)
+        vreport(19, "StackAttr::IsActive", -1, 1, 1)
+        vreport(20, "rangedDmgModifier", 0, 1)
+        vstackreport(21, "Reachability by friendly stack", 0, 1)
+        vstackreport(28, "Reachability by enemy stack", 0, 1)
+        vstackreport(35, "Neighbouring friendly stack", 0, 1)
+        vstackreport(42, "Neighbouring enemy stack", 0, 1)
+        vstackreport(49, "Potential enemy attacking stack", 0, 1)
+        assert N_HEX_ATTRS == 56
+
+    # just play a pre-recorded actions from vcmi actions.txt
+    # useful when "resuming" battle after reproducing & fixing a bug
+    def replay_actions_txt(self, actions_txt="vcmi_gym/envs/v0/vcmi/actions.txt"):
+        with open(actions_txt, "r") as f:
+            actions_str = f.read()
+
+        for a in actions_str.split():
+            print("Replaying %s" % a)
+            obs, rew, term, trunc, info = self.step(int(a) - 1)
+            if rew < 0:
+                print(self.render())
+                raise Exception("error replaying: %s" % a)
+
+        print(self.render())
 
     #
     # private
@@ -292,6 +390,14 @@ class VcmiEnv(gym.Env):
     # This approach is justified for training-critical methods only
     # (ie. no need to abstract out `render`, for example)
 
+    @staticmethod
+    def maybe_filter_hexattrs(state, hexattr_filter):
+        if not hexattr_filter:
+            return state
+
+        # original obs is (1, 11, 15*N_HEX_ATTRS)
+        return state.reshape(11, 15, N_HEX_ATTRS)[..., hexattr_filter].reshape(1, 11, 15 * len(hexattr_filter))
+
     #
     # NOTE:
     # info is read only after env termination
@@ -316,7 +422,10 @@ class VcmiEnv(gym.Env):
         return dict(info)
 
     @staticmethod
-    def calc_reward(analysis, dmg_factor, scaling_factor, clip_mod):
+    def calc_reward(analysis, dmg_factor, scaling_factor, clip_mod, errmask):
+        if errmask > 0:
+            return -100, -100
+
         rew = int(scaling_factor * (analysis.net_value + dmg_factor * analysis.net_dmg))
         clipped = max(min(rew, clip_mod), -clip_mod) if clip_mod else rew
         return clipped, rew

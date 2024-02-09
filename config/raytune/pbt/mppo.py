@@ -1,6 +1,6 @@
 # from ray.tune.search.sample import Integer, Float
 
-N_WORKERS = 6
+N_WORKERS = 3
 N_ENVS = 6
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
@@ -33,23 +33,23 @@ config = {
     #   such that there at least 100 episodes between perturbations
     #
 
-    "rollouts_per_iteration_step": 200,
+    "rollouts_per_iteration_step": 20,
     "rollouts_per_log": 2,
 
-    "iteration_steps": 100,
+    "iteration_steps": 5,
 
     "hyperparam_mutations": {
         # "net_arch": [[], [64, 64], [256, 256]],
         "learner_kwargs": {
-            "learning_rate": [0.00001, 0.0001, 0.001],
-            "gamma": [0.85, 0.95],
+            "learning_rate": [0.00001, 0.0001, 0.0005],
+            "gamma": [0.8, 0.9],
             # "batch_size": Integer(32, 256),  # breaks loading from file
             # "n_epochs": [5, 10, 20],
-            "gae_lambda": [0.8, 0.95],
+            # "gae_lambda": [0.95, 0.98],
             # "clip_range": [0.2, 0.5],
             # "vf_coef": [0.2, 0.5],
             # "max_grad_norm": [0.5, 1.5, 3],
-            "ent_coef": [0.1, 0.01],
+            # "ent_coef": [0.01, 0.01],
             # "n_steps": [128, 256, 512, 1024, 2048, 4096, 8192],
         },
         # "optimizer": {"kwargs": {"weight_decay": [0, 0.01, 0.1]}},
@@ -73,11 +73,11 @@ config = {
             "batch_size": 64,
             "n_epochs": 10,
             "gamma": 0.8425,
-            "gae_lambda": 0.8,
-            "clip_range": 0.4,
+            "gae_lambda": 0.95,
+            "clip_range": 0.2,
             "normalize_advantage": True,
             "ent_coef": 0.007,
-            "vf_coef": 0.6,
+            "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             # "use_sde": False,  # n/a in MaskablePPO
         },
@@ -94,9 +94,11 @@ config = {
                 "layers": [
                     {"t": "Flatten"},
                     {"t": "Unflatten", "dim": 1, "unflattened_size": [165, 15]},
-                    {"t": "VcmiAttention", "embed_dim": 15, "num_heads": 3, "batch_first": True},
+                    {"t": "VcmiAttention", "embed_dim": 15, "num_heads": 5, "batch_first": True},
                     {"t": "Flatten"},
-                    {"t": "Linear", "in_features": 2475, "out_features": 64},
+                    {"t": "Linear", "in_features": 2475, "out_features": 256},
+                    {"t": "LeakyReLU"},
+                    {"t": "Linear", "in_features": 256, "out_features": 256},
                     {"t": "LeakyReLU"}
                 ]
             }

@@ -25,8 +25,10 @@ Actions:
     r           render
     w           wait
     x y         move to x,y (x=1..15, y=1..11)
+    x y 1..6    move to x,y + ATTACK at direction (TL/TR/R/BR/BL/L)
+    x y 7..9    move to x,y + BACK-ATTACK at direction (BL/L/TL) (RED only)
+    x y 10..12  move to x,y + BACK-ATTACK at direction (TR/R/BR) (BLUE only)
     x y 0       shoot at x,y
-    x y 1..6    attack x,y from a direction (TL/TR/R/BR/BL/L)
     h           show this help
 """
 

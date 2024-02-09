@@ -20,10 +20,10 @@ import torch as th
 from torch import nn
 
 from ..pyconnector import (
-    STATE_SIZE_X,
+    # STATE_SIZE_X,
     STATE_SIZE_Y,
     # STATE_SIZE_Z,
-    N_HEX_ATTRS
+    # N_HEX_ATTRS
 )
 
 
@@ -32,6 +32,18 @@ class VcmiAttention(nn.MultiheadAttention):
         # TODO: attn_mask
         res, _weights = super().forward(obs, obs, obs, need_weights=False, attn_mask=None)
         return res
+
+
+class BatchReshape(nn.Module):
+    def __init__(self, shape):
+        self.shape = shape
+        super().__init__()
+
+    def forward(self, x):
+        # XXX: view won't work sometimes, for some reason
+        # return x.view(x.shape[0], *self.shape)
+
+        return x.reshape(x.shape[0], *self.shape)
 
 
 class VcmiFeaturesExtractor(BaseFeaturesExtractor):
@@ -97,8 +109,8 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
         # ideally, Y=11, X=15, Z=15, but handling Z is too difficult in pybind
         # so we use X=15*15 and Z=1
         # XXX: using Z != 1 would also cause issues (see above notes for Z & B)
-        assert observation_space.shape[2] == STATE_SIZE_X, "expected width=%d for shape: %s" % (STATE_SIZE_X, observation_space.shape)  # noqa: E501
-        assert observation_space.shape[2] % N_HEX_ATTRS == 0, "width to be divisible by %d" % N_HEX_ATTRS
+        # assert observation_space.shape[2] == STATE_SIZE_X, "expected width=%d for shape: %s" % (STATE_SIZE_X, observation_space.shape)  # noqa: E501
+        # assert observation_space.shape[2] % N_HEX_ATTRS == 0, "width to be divisible by %d" % N_HEX_ATTRS
 
         network = nn.Sequential()
 
@@ -117,7 +129,7 @@ class VcmiFeaturesExtractor(BaseFeaturesExtractor):
             # ignore the batch dim
             out_dim = network(th.as_tensor(observation_space.sample()[None]).float()).shape[1:]
 
-        assert len(out_dim) == 1, "expected a flattened 1-dim output shape, got: %s" % out_dim.shape
+        assert len(out_dim) == 1, "expected a flattened 1-dim output shape, got: %s" % out_dim
         super().__init__(observation_space, out_dim[0])
         self.network = network
 
