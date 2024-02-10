@@ -105,6 +105,8 @@ class VcmiEnv(gym.Env):
         hexattr_filter=None,
         reward_dmg_factor=5,
         reward_clip_mod=None,  # clip at +/- this value
+        step_reward_mult=1,
+        term_reward_mult=1,  # at term step, reward = diff in total army values
     ):
         assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
@@ -171,6 +173,8 @@ class VcmiEnv(gym.Env):
         self.hexattr_filter = hexattr_filter
         self.reward_clip_mod = reward_clip_mod
         self.reward_dmg_factor = reward_dmg_factor
+        self.step_reward_mult = step_reward_mult
+        self.term_reward_mult = term_reward_mult
         # </params>
 
         # required to init vars
@@ -194,9 +198,10 @@ class VcmiEnv(gym.Env):
             self.logger.warn("errmask=%d" % res.errmask)
 
         analysis = self.analyzer.analyze(action, res)
-        rew, rew_unclipped = VcmiEnv.calc_reward(analysis, self.reward_dmg_factor, self.reward_scaling_factor, self.reward_clip_mod, res.errmask)  # noqa:E501
-        obs = VcmiEnv.maybe_filter_hexattrs(res.state, self.hexattr_filter)
         term = res.is_battle_over
+        rew, rew_unclipped = self.calc_reward(analysis, res)
+
+        obs = VcmiEnv.maybe_filter_hexattrs(res.state, self.hexattr_filter)
         trunc = self.analyzer.actions_count >= self.max_steps
 
         self._update_vars_after_step(res, rew, rew_unclipped, term, trunc, analysis)
@@ -421,11 +426,23 @@ class VcmiEnv(gym.Env):
         # Return regular dict (wrappers insert arbitary keys)
         return dict(info)
 
-    @staticmethod
-    def calc_reward(analysis, dmg_factor, scaling_factor, clip_mod, errmask):
-        if errmask > 0:
+    def calc_reward(self, analysis, res):
+        if res.errmask > 0:
             return -100, -100
 
-        rew = int(scaling_factor * (analysis.net_value + dmg_factor * analysis.net_dmg))
-        clipped = max(min(rew, clip_mod), -clip_mod) if clip_mod else rew
+        rew = analysis.net_value + self.reward_dmg_factor * analysis.net_dmg
+        rew *= self.step_reward_mult
+
+        if res.is_battle_over:
+            vdiff = res.side0_army_value - res.side1_army_value
+            vdiff = -vdiff if res.side == 1 else vdiff
+            rew += (self.term_reward_mult * vdiff)
+
+        rew = int(self.reward_scaling_factor * rew)
+
+        if self.reward_clip_mod:
+            clipped = max(min(rew, self.reward_clip_mod), -self.reward_clip_mod)
+        else:
+            clipped = rew
+
         return clipped, rew

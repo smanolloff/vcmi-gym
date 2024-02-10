@@ -46,6 +46,16 @@ class BatchReshape(nn.Module):
         return x.reshape(x.shape[0], *self.shape)
 
 
+class Transpose(nn.Module):
+    def __init__(self, dim0, dim1):
+        self.dim0 = dim0
+        self.dim1 = dim1
+        super().__init__()
+
+    def forward(self, x):
+        return x.transpose(self.dim0, self.dim1)
+
+
 class VcmiFeaturesExtractor(BaseFeaturesExtractor):
     # Observation is a 2D array of shape (11, 15*n):
     # [

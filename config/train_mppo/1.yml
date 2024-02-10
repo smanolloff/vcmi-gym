@@ -1,8 +1,8 @@
 ---
 seed: ~
-run_id: A4-C2d32-L1652-lr0.00005-mgn0.8-rollouts6-env32
-group_id: attention
-model_load_file: "data/attention/A4-C1d32-L1652-lr0.0003-mgn2.5-1707345972/backup-1707381277.zip"
+run_id: A4-C1d32-L2312-lr0.0003-mgn2.5
+group_id: big-obs
+model_load_file: ~
 features_extractor_load_file: ~
 features_extractor_load_file_type: "params"  # model / params / sb3
 features_extractor_freeze: false
@@ -13,7 +13,7 @@ log_tensorboard: true
 progress_bar: false  # too annoying and noisy
 # total_timesteps: !!float 100000
 rollouts_total: 0
-rollouts_per_iteration: 6
+rollouts_per_iteration: 20
 rollouts_per_log: 2
 save_every: 7200  # seconds
 max_saves: 3
@@ -22,12 +22,12 @@ iteration: 0  # start iteration (to skip first n_envs/2 maps)
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-n_envs: 32
+n_envs: 8
 framestack: 1
 
 # overwrites learner_kwargs.n_steps to n_global_steps_max // n_envs
 # (eg. 2048/48 = 42.666... => n_steps=42)
-n_global_steps_max: 4096
+n_global_steps_max: 1024
 
 mapmask: "ai/generated/B*.vmap"
 randomize_maps: false
@@ -47,39 +47,39 @@ features_extractor:
   class_name: "VcmiFeaturesExtractor"
   kwargs:
     layers:
-        # => (B, 11, 240)
-        - {t: "BatchReshape", shape: [165, 16]}
-        # => (B, 165, 16)
-        - {t: "VcmiAttention", embed_dim: 16, num_heads: 4, batch_first: true}
-        # => (B, 165, 16)
-        - {t: "BatchReshape", shape: [1, 2640]}  # 165*16
+        # => (B, 11, 840)
+        - {t: "BatchReshape", shape: [165, 56]}
+        # => (B, 165, 56)
+        - {t: "VcmiAttention", embed_dim: 56, num_heads: 4, batch_first: true}
+        # => (B, 165, 56)
+        - {t: "BatchReshape", shape: [1, 9240]}  # 165*56
         # => (B, 1, 2640)
-        - {t: "Conv1d", in_channels: 1, out_channels: 32, kernel_size: 16, stride: 16}
+        - {t: "Conv1d", in_channels: 1, out_channels: 32, kernel_size: 56, stride: 56}
         - {t: "BatchNorm1d", num_features: 32}
         - {t: "LeakyReLU"}
         # => (B, 32, 165)
         - {t: "Flatten"}
         # => (B, 5280)
-        - {t: "Linear", in_features: 5280, out_features: 1652}  # = N_ACTIONS
+        - {t: "Linear", in_features: 5280, out_features: 2312}  # = N_ACTIONS
         - {t: "LeakyReLU"}
 
 learner_kwargs:
   # n_steps: 512  # calculated dynamically (see n_global_steps_max)
   batch_size: 64
   n_epochs: 10
-  gamma: 0.9
+  gamma: 0.85
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
   ent_coef: 0
   vf_coef: 0.6
-  max_grad_norm: 0.8
+  max_grad_norm: 2.5
 
 # Examples:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.00005"
+learner_lr_schedule: "const_0.0003"
 
 env_cls_name: VcmiEnv
 env_kwargs:

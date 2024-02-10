@@ -41,7 +41,9 @@ def play_model(env, fps, model, obs):
         obs, reward, terminated, truncated, info = env.step(action)
 
         if terminated or truncated:
+            print("**** FINAL REWARD: %s\n\n**** FINAL INFO: %s" % (reward, info))
             break
+        print(env.render())
 
         if info.get("errors", 0) == last_errors:
             clock.tick()
@@ -64,9 +66,13 @@ def spectate(
     print(f"""
 *** NOTE ***
 
-Consider using the *REAL* spectator experience by running
+Consider using the *REAL* spectator experience by using the AI for auto-combat:
 
-    vcmi_gym/envs/v0/vcmi/rel/bin/mytest {mapname} MMAI {model_file}
+    vcmi_gym/envs/v0/vcmi/rel/bin/myclient-gui \\
+        --loglevel-ai error \\
+        --map {mapname} \\
+        --attacker-ai MMAI_MODEL \\
+        --attacker-model {model_file}
 
 """)
     time.sleep(2)
