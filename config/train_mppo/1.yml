@@ -1,8 +1,10 @@
 ---
 seed: ~
-run_id: A4-C1d32-L2312-lr0.0003-mgn2.5
-group_id: big-obs
-model_load_file: ~
+run_id: mult-sanity2-lr0.0001
+group_id: sparse-rewards
+model_load_file: "data/sparse-rewards/mult-sanity2-1708070849/backup.zip"
+# model_load_file: "data/fe-arch/l3-do-bn-fdim1024-rollouts10-lr0.0004-e0-g0.98-mgn0.5-1706740821/model.zip"
+# features_extractor_load_file: "autoencoder-pretrained-encoder-params.pth"
 features_extractor_load_file: ~
 features_extractor_load_file_type: "params"  # model / params / sb3
 features_extractor_freeze: false
@@ -47,31 +49,28 @@ features_extractor:
   class_name: "VcmiFeaturesExtractor"
   kwargs:
     layers:
-        # => (B, 11, 840)
-        - {t: "BatchReshape", shape: [165, 56]}
-        # => (B, 165, 56)
-        - {t: "VcmiAttention", embed_dim: 56, num_heads: 4, batch_first: true}
-        # => (B, 165, 56)
-        - {t: "BatchReshape", shape: [1, 9240]}  # 165*56
-        # => (B, 1, 2640)
-        - {t: "Conv1d", in_channels: 1, out_channels: 32, kernel_size: 56, stride: 56}
-        - {t: "BatchNorm1d", num_features: 32}
+        # => (11, 840)
+        # XXX: kernel_size DEPENDS on hexattr_filter
+        - {t: "Conv2d", out_channels: 32, kernel_size: [1, 56], stride: [1, 56], padding: 0}
+        - {t: "BatchNorm2d", num_features: 32}
         - {t: "LeakyReLU"}
-        # => (B, 32, 165)
+        # - {t: "Dropout2d", p: 0.25, inplace: true}
+        # => (11, 15)
         - {t: "Flatten"}
-        # => (B, 5280)
-        - {t: "Linear", in_features: 5280, out_features: 2312}  # = N_ACTIONS
+        # => (5280)
+        - {t: "Linear", in_features: 5280, out_features: 1024}
         - {t: "LeakyReLU"}
+        # => 1024
 
 learner_kwargs:
   # n_steps: 512  # calculated dynamically (see n_global_steps_max)
   batch_size: 64
   n_epochs: 10
-  gamma: 0.85
+  gamma: 0.8425
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0
+  ent_coef: 0.007
   vf_coef: 0.6
   max_grad_norm: 2.5
 
@@ -79,18 +78,24 @@ learner_kwargs:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.0003"
+learner_lr_schedule: "const_0.0001"
 
-env_cls_name: VcmiEnv
 env_kwargs:
   max_steps: 500
   reward_clip_mod: ~
-  reward_dmg_factor: 0
+  reward_dmg_factor: 5
   vcmi_loglevel_global: "error"
   vcmi_loglevel_ai: "error"
   vcmienv_loglevel: "WARN"
   consecutive_error_reward_factor: -1
   sparse_info: true
+  step_reward_mult: 1
+  term_reward_mult: 0
+  # 0=hex.id, 1=hex.state, 2=qty, 12=qpos, 13=side, 15=creature type
+  #   Visualize with:
+  #   o = obs.reshape(11, 15, 6)[0][0] * [164, 4, 5001, 15, 2, 151])
+  #   o.astype(int)
+  # hexattr_filter: [0, 1, 2, 12, 13, 15]
 
   # Set dynamically
   # mapname: "ai/generated/A01.vmap"

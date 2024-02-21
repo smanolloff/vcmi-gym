@@ -27,6 +27,50 @@ from ..pyconnector import (
 )
 
 
+def reshape_fortran(x, shape):
+    if len(x.shape) > 0:
+        x = x.permute(*reversed(range(len(x.shape))))
+    return x.reshape(*reversed(shape)).permute(*reversed(range(len(shape))))
+
+
+#
+# Reshape a batched VCMI observation so that
+# each attribute type is in a separate feature plane (channel)
+#
+# i.e. (B, 1, 11, 15*N) => (B, N, 11, 15)
+#
+# Example:
+#   input = (B, 1, 11, 15*N)
+#   output = (B, N, 11, 15)
+#
+# To test:
+#   B = 2  # batch dim
+#   N = 3  # 3 attributes per hex
+#   obs = torch.as_tensor(np.ndarray((B,1,11,15*N), dtype="int"))
+#   for b in range(B):
+#       for y in range(11):
+#           for x in range(15):
+#               for a in range(N):
+#                   if b == 0:
+#                       obs[b][0][y][x*N+a] = 100 * (y*15 + x) + a
+#                   else:
+#                       obs[b][0][y][x*N+a] = -100 * (y*15 + x) - a
+#
+#   v = VcmiHexAttrsAsChannels(3,11,15)
+#   v(obs)
+class VcmiHexAttrsAsChannels(nn.Module):
+    def __init__(self, n, y, x):
+        self.n = n
+        self.y = y
+        self.x = x
+        self.xy = self.x * self.y
+        super().__init__()
+    def forward(self, x):
+        b = x.shape[0]
+        tmp = reshape_fortran(x.flatten(), [self.n, b * self.xy]).reshape(b * self.n, self.xy)
+        return reshape_fortran(tmp, [b, self.n, self.xy]).reshape(b, self.n, self.y, self.x)
+
+
 class VcmiAttention(nn.MultiheadAttention):
     def forward(self, obs):
         # TODO: attn_mask

@@ -1,8 +1,8 @@
 ---
 seed: ~
-run_id: mult-0.5-g0.85-lr0.001-e0.05
+run_id: mult-sanity2-lr0.00001
 group_id: sparse-rewards
-model_load_file: ~
+model_load_file: "data/sparse-rewards/mult-sanity2-lr0.0001-1708333861/model.zip"
 # model_load_file: "data/fe-arch/l3-do-bn-fdim1024-rollouts10-lr0.0004-e0-g0.98-mgn0.5-1706740821/model.zip"
 # features_extractor_load_file: "autoencoder-pretrained-encoder-params.pth"
 features_extractor_load_file: ~
@@ -56,19 +56,9 @@ features_extractor:
         - {t: "LeakyReLU"}
         # - {t: "Dropout2d", p: 0.25, inplace: true}
         # => (11, 15)
-        - {t: "Conv2d", in_channels: 32, out_channels: 64, kernel_size: 3, stride: 2, padding: 0}
-        - {t: "BatchNorm2d", num_features: 64}
-        - {t: "LeakyReLU"}
-        # - {t: "Dropout2d", p: 0.25, inplace: true}
-        # => (5, 7)
-        - {t: "Conv2d", in_channels: 64, out_channels: 64, kernel_size: 3, stride: 2, padding: 0}
-        - {t: "BatchNorm2d", num_features: 64}
-        - {t: "LeakyReLU"}
-        # - {t: "Dropout2d", p: 0.25, inplace: true}
-        # => (2, 3)
         - {t: "Flatten"}
-        # => 384
-        - {t: "Linear", in_features: 384, out_features: 1024}
+        # => (5280)
+        - {t: "Linear", in_features: 5280, out_features: 1024}
         - {t: "LeakyReLU"}
         # => 1024
 
@@ -76,11 +66,11 @@ learner_kwargs:
   # n_steps: 512  # calculated dynamically (see n_global_steps_max)
   batch_size: 64
   n_epochs: 10
-  gamma: 0.85
+  gamma: 0.8425
   gae_lambda: 0.8
   clip_range: 0.4
   normalize_advantage: true
-  ent_coef: 0.05
+  ent_coef: 0.007
   vf_coef: 0.6
   max_grad_norm: 2.5
 
@@ -88,7 +78,7 @@ learner_kwargs:
 #   * "const_0.001"
 #   * "lin_decay_0.03_0.0001_0.75"
 #   * "exp_decay_0.03_0.0001_0.5_5"
-learner_lr_schedule: "const_0.001"
+learner_lr_schedule: "const_0.00001"
 
 env_kwargs:
   max_steps: 500
@@ -99,8 +89,8 @@ env_kwargs:
   vcmienv_loglevel: "WARN"
   consecutive_error_reward_factor: -1
   sparse_info: true
-  step_reward_mult: 0.5
-  term_reward_mult: 1
+  step_reward_mult: 1
+  term_reward_mult: 0
   # 0=hex.id, 1=hex.state, 2=qty, 12=qpos, 13=side, 15=creature type
   #   Visualize with:
   #   o = obs.reshape(11, 15, 6)[0][0] * [164, 4, 5001, 15, 2, 151])

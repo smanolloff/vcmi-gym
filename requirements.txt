@@ -13,3 +13,4 @@ scikit-learn
 json5
 wandb == 0.16.1
 gymnasium
+tyro

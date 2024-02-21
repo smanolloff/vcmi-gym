@@ -25,6 +25,8 @@ import wandb
 import copy
 import torch.optim
 import threading
+import os
+import shutil
 
 from stable_baselines3.common import logger
 from stable_baselines3.common.save_util import load_from_zip_file
@@ -198,7 +200,7 @@ def init_model(
 #
 #         self.train()  # update NN
 
-def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run_id, iteration=0):
+def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run_id, model_file, iteration=0):
     mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
     all_maps = glob.glob("%s/%s" % (mappath, mapmask))
     all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
@@ -244,6 +246,9 @@ def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run
                 defender="StupidAI",
                 actions_log_file=logfile
             )
+
+            if model_file:
+                env_kwargs2.update({"attacker": "MMAI_MODEL", "attacker_model": model_file, "defender": "MMAI_MODEL", "defender_model": model_file})
 
             env_kwargs2[role] = "MMAI_USER"
             print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs2))
@@ -301,6 +306,7 @@ def train_sb3(
     progress_bar,
     reset_num_timesteps,
     config_log,
+    self_play,
 ):
 
     # prevent warnings for action_masks method
@@ -321,8 +327,16 @@ def train_sb3(
     start_iteration = iteration
 
     try:
+        # XXX: model_load_file is required for self-play
+        model_file = None
+        if self_play:
+            model_file = os.path.join(out_dir, "model.zip")
+            os.makedirs(out_dir, exist_ok=True)
+            shutil.copyfile(model_load_file, model_file)
+
+
         model = init_model(
-            venv=create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, iteration),
+            venv=create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, model_file, iteration),
             seed=seed,
             features_extractor_load_file=features_extractor_load_file,
             features_extractor_load_file_type=features_extractor_load_file_type,
@@ -363,7 +377,7 @@ def train_sb3(
                 with open(f"{out_dir}/iteration", "w") as f:
                     f.write(str(iteration))
                 model.env.close()
-                model.env = create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, iteration)  # noqa: E501
+                model.env = create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, model_file, iteration)  # noqa: E501
                 model.env.reset()
 
             model.learn(
