@@ -128,7 +128,7 @@ if __name__ == "__main__":
     header0, objects0, surface_terrain0 = get_templates()
     all_creatures = get_all_creatures()
 
-    for i in range(1, 1000):
+    for i in range(1, 100):
         mult = 10_000
 
         value = mult * random.randint(ARMY_VALUE_MIN / mult, ARMY_VALUE_MAX / mult)
@@ -136,7 +136,7 @@ if __name__ == "__main__":
         army_b = build_army_with_retry(all_creatures, value)
 
         header = copy.deepcopy(header0)
-        header["name"] = "B%03d" % i
+        header["name"] = "B%02d" % i
         header["description"] = "AI test map %s\n\nTarget army values: %d\nAttacker:\n%s\n\nDefender:\n%s" % (
             header["name"],
             value,
