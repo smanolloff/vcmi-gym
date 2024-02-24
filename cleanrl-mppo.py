@@ -87,8 +87,8 @@ class Args:
     mapmask: str = "ai/generated/B*.vmap"
     randomize_maps: bool = False
 
-    model_load_file: Optional[str] = None
-    opponent_model_file: Optional[str] = None
+    agent_load_file: Optional[str] = None
+    opponent_load_file: Optional[str] = None
     iteration: int = 0
 
     learning_rate: float = 2.5e-4
@@ -171,10 +171,10 @@ def create_venv(n_envs, env_cls, env_kwargs, mapmask, randomize, run_id, writer,
             env_kwargs2 = dict(
                 env_kwargs,
                 mapname=mapname,
-                attacker="MMAI_MODEL" if args.opponent_model_file else "StupidAI",
-                defender="MMAI_MODEL" if args.opponent_model_file else "StupidAI",
-                attacker_model=args.opponent_model_file,
-                defender_model=args.opponent_model_file,
+                attacker="MMAI_MODEL" if args.opponent_load_file else "StupidAI",
+                defender="MMAI_MODEL" if args.opponent_load_file else "StupidAI",
+                attacker_model=args.opponent_load_file,
+                defender_model=args.opponent_load_file,
                 actions_log_file=logfile
             )
 
@@ -205,8 +205,8 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-def safe_mean(dq: deque) -> float:
-    return np.nan if len(dq) == 0 else float(np.mean(dq))
+def safe_mean(array_like) -> float:
+    return np.nan if len(array_like) == 0 else float(np.mean(array_like))
 
 
 class Agent(nn.Module):
@@ -249,48 +249,51 @@ class Agent(nn.Module):
 
 
 def main(**kwargs):
-    try:
-        args = Args(**kwargs)  # will blow up if any invalid kwargs are given
-        batch_size = int(args.num_envs * args.num_steps)
-        minibatch_size = int(batch_size // args.num_minibatches)
+    args = Args(**kwargs)  # will blow up if any invalid kwargs are given
+    batch_size = int(args.num_envs * args.num_steps)
+    minibatch_size = int(batch_size // args.num_minibatches)
 
-        if args.wandb:
-            import wandb
+    if args.wandb:
+        import wandb
 
-            wandb.init(
-                project="vcmi-gym",
-                group=args.run_group,
-                name=args.run_id,
-                id=args.run_id,
-                resume="never",
-                config=vars(args),
-                sync_tensorboard=True,
-                save_code=True,
-                allow_val_change=False,
-                settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
-            )
-
-        writer = SummaryWriter(args.out_dir)
-        writer.add_text(
-            "hyperparameters",
-            "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        wandb.init(
+            project="vcmi-gym",
+            group=args.run_group,
+            name=args.run_id,
+            id=args.run_id,
+            resume="never",
+            config=vars(args),
+            sync_tensorboard=True,
+            save_code=True,
+            allow_val_change=False,
+            settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
         )
 
-        # TRY NOT TO MODIFY: seeding
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        torch.backends.cudnn.deterministic = True  # args.torch_deterministic
+    writer = SummaryWriter(args.out_dir)
+    writer.add_text(
+        "hyperparameters",
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    )
 
-        device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-        envs = create_venv(args.num_envs, VcmiEnv, vars(args.env), args.mapmask, args.randomize_maps, args.run_id, writer, args.iteration)
+    # TRY NOT TO MODIFY: seeding
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = True  # args.torch_deterministic
+
+    device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    iteration = args.iteration
+
+    try:
+        envs = create_venv(args.num_envs, VcmiEnv, vars(args.env), args.mapmask, args.randomize_maps, args.run_id, writer, iteration)
+        net_value_queue = deque(maxlen=envs.return_queue.maxlen)
 
         assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
         agent = Agent(envs.single_observation_space, envs.single_action_space).to(device)
-        if args.model_load_file:
-            print("Loading model from %s" % args.model_load_file)
-            agent.load_state_dict(torch.load(args.model_load_file), strict=True)
+        if args.agent_load_file:
+            print("Loading model from %s" % args.agent_load_file)
+            agent.load_state_dict(torch.load(args.agent_load_file), strict=True)
 
         optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
@@ -336,6 +339,13 @@ def main(**kwargs):
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
                 next_mask = torch.as_tensor(np.array(envs.call("action_masks"))).to(device)
+
+            if "final_info" in infos:
+                for info in infos["final_info"]:
+                    if info and "episode" in info:
+                        print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
+                        writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
+                        writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -420,8 +430,10 @@ def main(**kwargs):
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
+            iteration += rollout // args.rollouts_per_mapchange
+
             # TRY NOT TO MODIFY: record rewards for plotting purposes
-            writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]["lr"], global_step)
+            writer.add_scalar("params/learning_rate", optimizer.param_groups[0]["lr"], global_step)
             writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
             writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
             writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
@@ -434,13 +446,10 @@ def main(**kwargs):
             writer.add_scalar("rollout/ep_rew_mean", safe_mean(envs.return_queue))
             writer.add_scalar("rollout/ep_len_mean", safe_mean(envs.length_queue))
             writer.add_scalar("rollout/ep_count", envs.episode_count)
-
-            print(f"global_step={global_step}, rollout/ep_rew_mean={safe_mean(envs.return_queue)}")
-
-            iteration = rollout // args.rollouts_per_mapchange
             writer.add_scalar("global/num_timesteps", global_step)
             writer.add_scalar("global/num_rollouts", rollout)
             writer.add_scalar("global/progress", rollout / args.rollouts_total)
+            print(f"global_step={global_step}, rollout/ep_rew_mean={safe_mean(envs.return_queue)}")
 
             if rollout > 0 and rollout % args.rollouts_per_mapchange == 0:
                 envs.close()
@@ -456,11 +465,14 @@ def main(**kwargs):
                 envs.return_queue.clear()
                 envs.length_queue.clear()
                 # envs.time_queue.clear()  # irrelevant
+                net_value_queue.clear()
                 envs.episode_count = 0
     finally:
         envs.close()
         writer.close()
-
+        agent_file = os.path.join(out_dir, "agent.pt")
+        torch.save(agent, agent_file)
+        print("Saved agent to %s" % agent_file)
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
