@@ -20,12 +20,13 @@ import wandb
 import numpy as np
 import time
 import os
+from collections import deque
 
 from .. import InfoDict
 
 
 class SB3Callback(BaseCallback):
-    def __init__(self, observations_dir=None):
+    def __init__(self, observations_dir=None, success_rate_target=None):
         super().__init__()
 
         if observations_dir:
@@ -33,9 +34,12 @@ class SB3Callback(BaseCallback):
             os.makedirs(observations_dir, exist_ok=True)
 
         self.observations_dir = observations_dir
+        self.success_rate_target = success_rate_target
         self.rollout_episodes = 0
         self.rollouts = 0
         self.ep_rew_mean = 0
+        self.success_rates = deque(maxlen=20)
+        self.this_env_rollouts = 0
 
         # wdb tables are logged from OUTSIDE SB3Callback
         # only once, at end of the iteration
@@ -43,7 +47,29 @@ class SB3Callback(BaseCallback):
         self.wdb_tables = {}
 
     def _on_step(self):
-        self.rollout_episodes += self.locals["dones"].sum()
+        new_episodes = self.locals["dones"].sum()
+        self.rollout_episodes += new_episodes
+
+        for idx, info in enumerate(self.locals["infos"]):
+            if not self.locals["dones"][idx]:
+                continue
+
+            self.success_rates.append(info.get("is_success"))
+
+        # at least 5 episodes
+        if self.success_rate_target and len(self.success_rates) > 10:
+            success_rate = safe_mean(self.success_rates)
+            if success_rate > self.success_rate_target:
+                self.model.logger.record("is_success", success_rate)
+                wandb.log({"success_rate": success_rate})
+                print("Early stopping after %d rollouts due to: success rate > %.2f (%.2f)" % (
+                    self.this_env_rollouts,
+                    self.success_rate_target,
+                    success_rate
+                ))
+                self.logger.dump(step=self.num_timesteps)  # log dump required for watchdog
+                return False  # early stop training
+
         return True
 
     def _on_rollout_end(self):
@@ -54,10 +80,12 @@ class SB3Callback(BaseCallback):
             )
 
         self.rollouts += 1
+        self.this_env_rollouts += 1
         wdb_log = {
             "num_timesteps": self.num_timesteps,
             "rollout/n_episodes": self.rollout_episodes,
         }
+
         self.rollout_episodes = 0
 
         if self.rollouts % self.locals["log_interval"] != 0:

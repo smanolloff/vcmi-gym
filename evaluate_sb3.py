@@ -152,8 +152,11 @@ if __name__ == "__main__":
             # Discard "evaluated" models which are no longer candidates
             evaluated = [x for x in evaluated if x in models.values()]
 
+            print("Models: %s\nEvaluated: %s" % (models, evaluated))
+
             for run_id, model_load_file in models.items():
                 if model_load_file in evaluated:
+                    print("Skip model: %s (already evaluated)" % (model_load_file))
                     continue
 
                 print("*** Evaluating model %s" % model_load_file)

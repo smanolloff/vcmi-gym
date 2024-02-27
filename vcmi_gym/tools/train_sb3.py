@@ -307,13 +307,14 @@ def train_sb3(
     reset_num_timesteps,
     config_log,
     self_play,
+    success_rate_target,
 ):
 
     # prevent warnings for action_masks method
     gym.logger.set_level(gym.logger.ERROR)
 
     learning_rate = common.lr_from_schedule(learner_lr_schedule)
-    sb3_cb = sb3_callback.SB3Callback(observations_dir)
+    sb3_cb = sb3_callback.SB3Callback(observations_dir, success_rate_target=success_rate_target)
     ep_rew_means = []
     env_cls = getattr(vcmi_gym, env_cls_name)
 
@@ -379,6 +380,8 @@ def train_sb3(
                 model.env.close()
                 model.env = create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, model_file, iteration)  # noqa: E501
                 model.env.reset()
+                sb3_cb.success_rates.clear()
+                sb3_cb.this_env_rollouts = 0
 
             model.learn(
                 total_timesteps=total_timesteps_per_iteration,
@@ -389,7 +392,8 @@ def train_sb3(
             )
 
             diff_rollouts = sb3_cb.rollouts - (iteration - start_iteration)*rollouts_per_iteration
-            assert diff_rollouts == rollouts_per_iteration, f"expected {rollouts_per_iteration}, got: {diff_rollouts}"
+            if not success_rate_target:
+                assert diff_rollouts == rollouts_per_iteration, f"expected {rollouts_per_iteration}, got: {diff_rollouts}"  # noqa: E501
             iteration += 1
             ep_rew_means.append(sb3_cb.ep_rew_mean)
             t = common.maybe_save(t, model, out_dir, save_every, max_saves)
