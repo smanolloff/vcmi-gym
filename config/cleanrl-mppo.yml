@@ -1,0 +1,69 @@
+---
+run_id: mult-sanity2-lr0.00001
+group_id: sparse-rewards
+
+agent_load_file: ~
+map_cycle: 0
+rollouts_total: 10000
+rollouts_per_mapchange: 20
+rollouts_per_log: 1
+opponent_load_file: ~
+mapmask: "ai/generated/B*.vmap"
+randomize_maps: false
+save_every: 7200  # seconds
+max_saves: 3
+out_dir_template: "data/{group_id}/{run_id}"
+
+# XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
+#      To increase (current shell session only):
+#           ulimit -n 1024
+num_envs: 8
+
+optimizer:
+  class_name: "AdamW"
+  kwargs: {eps: !!float 1e-5, weight_decay: 0}
+
+#
+# PPO Hyperparams
+#
+learning_rate: 0.00001
+num_steps: 128
+gamma: 0.8425
+gae_lambda: 0.8
+num_minibatches: 16
+update_epochs: 5
+norm_adv: true
+clip_coef: 0.4
+clip_vloss: bool = True
+ent_coef: 0.007
+vf_coef: 0.6
+max_grad_norm: 2.5
+target_kl: ~
+
+env:
+  max_steps: 500
+  reward_dmg_factor: 5
+  vcmi_loglevel_global: "error"
+  vcmi_loglevel_ai: "error"
+  vcmienv_loglevel: "WARN"
+  consecutive_error_reward_factor: -1
+  sparse_info: true
+  step_reward_mult: 1
+  term_reward_mult: 0
+  reward_clip_mod: ~
+
+  # 0=hex.id, 1=hex.state, 2=qty, 12=qpos, 13=side, 15=creature type
+  #   Visualize with:
+  #   o = obs.reshape(11, 15, 6)[0][0] * [164, 4, 5001, 15, 2, 151])
+  #   o.astype(int)
+  # hexattr_filter: [0, 1, 2, 12, 13, 15]
+
+  # Set dynamically
+  # mapname: "ai/generated/A01.vmap"
+  # attacker: "MMAI_USER"  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
+  # defender: "StupidAI"   # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
+  # attacker_model: ~  # MPPO zip model (if attacker=MMAI_MODEL)
+  # defender_model: ~  # MPPO zip model (if defender=MMAI_MODEL)
+
+env_wrappers: []
+

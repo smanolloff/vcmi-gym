@@ -24,7 +24,9 @@ import numpy as np
 import string
 import random
 import time
+import datetime
 import importlib
+import itertools
 import gymnasium as gym
 import wandb
 
@@ -288,3 +290,16 @@ def make_vec_env_parallel(j, env_creator, n_envs, monitor_kwargs):
 
     vec_env.seed()
     return vec_env
+
+
+def find_models(dir_pattern="data/*/*"):
+    # XXX: model.zip is no good as it may get overwritten every ~7 minutes during load
+    # model-%d.zip is static, but is being created every 2 hours
+    threshold = datetime.datetime.now() - datetime.timedelta(hours=3)
+    files = glob.glob(f"{dir_pattern}/model-[0-9]*.zip")
+    assert len(files) > 0, "No files found"
+    filtered = [f for f in files if datetime.datetime.fromtimestamp(os.path.getmtime(f)) > threshold]
+    grouped = itertools.groupby(filtered, key=lambda x: x.split("/")[-2])
+
+    # {'attrchan-test-2-1708258565': 'data/sparse-rewards/attrchan-test-2-1708258565/model.zip', ...etc}
+    return {k: max(v, key=os.path.getmtime) for k, v in grouped}

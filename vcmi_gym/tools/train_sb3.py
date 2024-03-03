@@ -306,7 +306,7 @@ def train_sb3(
     progress_bar,
     reset_num_timesteps,
     config_log,
-    self_play,
+    opponent_model_dir_pattern,
     success_rate_target,
 ):
 
@@ -326,18 +326,21 @@ def train_sb3(
     model = None
     t = None
     start_iteration = iteration
+    opponent_model = None
+
+    if opponent_model_dir_pattern:
+        # find_models("data/sparse-rewards/mult-sanity2-lr0.00001-target0.7-*")
+        models = list(common.find_models(opponent_model_dir_pattern).values())
+        # https://stackoverflow.com/a/74033260
+        opponent_model, = models[0:] or [model_load_file]
+
+        # XXX: If opponent_model=None, it is most likely a human error
+        # Without this assert, training will be done vs. StupidAI
+        assert opponent_model is not None, f"bad opponent_model_dir_pattern: {opponent_model_dir_pattern}"
 
     try:
-        # XXX: model_load_file is required for self-play
-        model_file = None
-        if self_play:
-            model_file = os.path.join(out_dir, "model.zip")
-            os.makedirs(out_dir, exist_ok=True)
-            shutil.copyfile(model_load_file, model_file)
-
-
         model = init_model(
-            venv=create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, model_file, iteration),
+            venv=create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, opponent_model, iteration),
             seed=seed,
             features_extractor_load_file=features_extractor_load_file,
             features_extractor_load_file_type=features_extractor_load_file_type,
@@ -378,7 +381,12 @@ def train_sb3(
                 with open(f"{out_dir}/iteration", "w") as f:
                     f.write(str(iteration))
                 model.env.close()
-                model.env = create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, model_file, iteration)  # noqa: E501
+
+                if opponent_model_dir_pattern:
+                    models = list(common.find_models(opponent_model_dir_pattern).values())
+                    opponent_model, = models[0:] or [model.env.opponent_model]
+
+                model.env = create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, opponent_model, iteration)  # noqa: E501
                 model.env.reset()
                 sb3_cb.success_rates.clear()
                 sb3_cb.this_env_rollouts = 0

@@ -27,12 +27,6 @@ from ..pyconnector import (
 )
 
 
-def reshape_fortran(x, shape):
-    if len(x.shape) > 0:
-        x = x.permute(*reversed(range(len(x.shape))))
-    return x.reshape(*reversed(shape)).permute(*reversed(range(len(shape))))
-
-
 #
 # Reshape a batched VCMI observation so that
 # each attribute type is in a separate feature plane (channel)
@@ -65,10 +59,11 @@ class VcmiHexAttrsAsChannels(nn.Module):
         self.x = x
         self.xy = self.x * self.y
         super().__init__()
+
     def forward(self, x):
         b = x.shape[0]
-        tmp = reshape_fortran(x.flatten(), [self.n, b * self.xy]).reshape(b * self.n, self.xy)
-        return reshape_fortran(tmp, [b, self.n, self.xy]).reshape(b, self.n, self.y, self.x)
+        # (B, 1, 11, 15*N) -> (B, N, 11, 15)
+        return x.reshape([b, 1, self.y, self.x, self.n]).permute(0, 4, 2, 3, 1).flatten(start_dim=-2)
 
 
 class VcmiAttention(nn.MultiheadAttention):

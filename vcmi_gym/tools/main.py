@@ -129,7 +129,7 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
                     "learner_lr_schedule": cfg.get(
                         "learner_lr_schedule", "const_0.003"
                     ),
-                    "self_play": cfg.get("self_play", False),
+                    "opponent_model_dir_pattern": cfg.get("opponent_model_dir_pattern", None),
                     "success_rate_target": cfg.get("success_rate_target", None),
                 }
             )
