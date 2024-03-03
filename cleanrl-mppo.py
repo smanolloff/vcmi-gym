@@ -2,7 +2,7 @@
 import os
 import random
 import time
-import random
+import re
 import glob
 import threading
 from dataclasses import dataclass
@@ -59,18 +59,19 @@ class CategoricalMasked(Categorical):
 #     --gamma 0.8425 \
 #     --gae-lambda 0.8
 
+
 @dataclass
 class EnvArgs:
-  max_steps: int = 500
-  reward_dmg_factor: int = 5
-  vcmi_loglevel_global: str = "error"
-  vcmi_loglevel_ai: str = "error"
-  vcmienv_loglevel: str = "WARN"
-  consecutive_error_reward_factor: int = -1
-  sparse_info: bool = True
-  step_reward_mult: int = 1
-  term_reward_mult: int = 0
-  reward_clip_mod: Optional[int] = None
+    max_steps: int = 500
+    reward_dmg_factor: int = 5
+    vcmi_loglevel_global: str = "error"
+    vcmi_loglevel_ai: str = "error"
+    vcmienv_loglevel: str = "WARN"
+    consecutive_error_reward_factor: int = -1
+    sparse_info: bool = True
+    step_reward_mult: int = 1
+    term_reward_mult: int = 0
+    reward_clip_mod: Optional[int] = None
 
 
 @dataclass
@@ -109,25 +110,6 @@ class Args:
     seed: int = 42
 
     env: EnvArgs = EnvArgs()
-
-
-def make_vec_env_parallel(j, env_creator, n_envs):
-    def initenv():
-        env = env_creator()
-        return env
-
-    if n_envs > 1:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=j) as executor:
-            futures = [executor.submit(initenv) for _ in range(n_envs)]
-            results = [future.result() for future in futures]
-
-        funcs = [lambda x=x: x for x in results]
-        vec_env = DummyVecEnv(funcs)
-    else:
-        vec_env = DummyVecEnv([initenv])
-
-    vec_env.seed()
-    return vec_env
 
 
 def create_venv(n_envs, env_cls, env_kwargs, mapmask, randomize, run_id, writer, map_cycle):
@@ -316,8 +298,9 @@ def main(**kwargs):
     t = None
 
     try:
-        envs = create_venv(args.num_envs, VcmiEnv, vars(args.env), args.mapmask, args.randomize_maps, args.run_id, writer, iteration)
-        net_value_queue = deque(maxlen=envs.return_queue.maxlen)
+        envs = create_venv(args.num_envs, VcmiEnv, vars(args.env), args.mapmask, args.randomize_maps, args.run_id, writer, iteration)  # noqa: E501
+        ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
+        ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
 
         assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
@@ -387,15 +370,17 @@ def main(**kwargs):
                 #     ...     },
                 #     ...     "_episode": "<boolean array of length num-envs>"
                 #     ... }
-                # 
+                #
                 # My notes:
                 #   "episode" and "_episode" is added by RecordEpisodeStatistics wrapper
-                #   gym's vec env *automatically* collects episode returns and lengths in envs.return_queue and envs.length_queue
+                #   gym's vec env *automatically* collects episode returns and lengths
+                #   in envs.return_queue and envs.length_queue
                 #   (eg. [-1024.2, 333.6, ...] and [34, 36, 41, ...]) - each element is a full episode
                 #
-                # See https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/vector/sync_vector_env.py#L142-L157
-                #     https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/vector/vector_env.py#L275-L300
-                #     https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/wrappers/record_episode_statistics.py#L102-L124
+                # See
+                #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/vector/sync_vector_env.py#L142-L157
+                #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/vector/vector_env.py#L275-L300
+                #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/wrappers/record_episode_statistics.py#L102-L124
                 #
                 for final_info, has_final_info in infos.get("final_info", []).zip(infos.get("_final_info", [])):
                     if has_final_info:
@@ -436,7 +421,11 @@ def main(**kwargs):
                     end = start + minibatch_size
                     mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_masks[mb_inds], b_actions.long()[mb_inds])
+                    _, newlogprob, entropy, newvalue = agent.get_action_and_value(
+                        b_obs[mb_inds],
+                        b_masks[mb_inds],
+                        b_actions.long()[mb_inds]
+                    )
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 
@@ -498,7 +487,7 @@ def main(**kwargs):
             writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
             writer.add_scalar("losses/explained_variance", explained_var, global_step)
             writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time)
-            writer.add_scalar("time/steps_per_second", (global_step - rollout_start_step) / (time.time() - rollout_start_time))
+            writer.add_scalar("time/steps_per_second", (global_step - rollout_start_step) / (time.time() - rollout_start_time))  # noqa: E501
             writer.add_scalar("rollout/ep_rew_mean", safe_mean(envs.return_queue))
             writer.add_scalar("rollout/ep_len_mean", safe_mean(envs.length_queue))
             writer.add_scalar("rollout/ep_value_mean", safe_mean(ep_net_value_queue))
@@ -513,7 +502,11 @@ def main(**kwargs):
 
             if args.success_rate_target and safe_mean(ep_is_success_queue) >= args.success_rate_target:
                 writer.flush()
-                print("Early stopping after %d rollouts due to: success rate > %.2f (%.2f)" % (self.this_env_rollouts, self.success_rate_target, success_rate))
+                print("Early stopping after %d rollouts due to: success rate > %.2f (%.2f)" % (
+                    rollout % args.rollouts_per_mapchange,
+                    args.success_rate_target,
+                    safe_mean(ep_is_success_queue)
+                ))
 
             if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
                 writer.flush()
@@ -527,24 +520,22 @@ def main(**kwargs):
 
             if rollout > start_rollout and rollout % args.rollouts_per_mapchange == 0:
                 envs.close()
-                envs = create_venv(args.num_envs, VcmiEnv, vars(args.env), args.mapmask, args.randomize_maps, args.run_id, writer, iteration)
+                envs = create_venv(args.num_envs, VcmiEnv, vars(args.env), args.mapmask, args.randomize_maps, args.run_id, writer, iteration)  # noqa: E501
                 next_obs, _ = envs.reset(seed=args.seed)
                 next_obs = torch.Tensor(next_obs).to(device)
                 next_done = torch.zeros(args.num_envs).to(device)
                 next_mask = torch.as_tensor(np.array(envs.call("action_masks"))).to(device)
 
-        t = maybe_save(t, agent, out_dir, save_every=3600, max_saves=3)
+        t = maybe_save(t, agent, args.out_dir, save_every=3600, max_saves=3)
 
     finally:
         envs.close()
         writer.close()
-        agent_file = os.path.join(out_dir, "agent.pt")
+        agent_file = os.path.join(args.out_dir, "agent.pt")
         torch.save(agent, agent_file)
         print("Saved agent to %s" % agent_file)
+
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
     main(**vars(args))
-
-# C:\simo> pscp.exe -P 2222 -i id_rsa-alextmp clean-rl/mppo.py simo@151.251.227.203:/Users/simo/Projects/vcmi-gym/cleanrl-mppo.py
- 

@@ -8,6 +8,7 @@ rollouts_total: 10000
 rollouts_per_mapchange: 20
 rollouts_per_log: 1
 opponent_load_file: ~
+success_rate_target: ~
 mapmask: "ai/generated/B*.vmap"
 randomize_maps: false
 save_every: 7200  # seconds
@@ -18,10 +19,6 @@ out_dir_template: "data/{group_id}/{run_id}"
 #      To increase (current shell session only):
 #           ulimit -n 1024
 num_envs: 8
-
-optimizer:
-  class_name: "AdamW"
-  kwargs: {eps: !!float 1e-5, weight_decay: 0}
 
 #
 # PPO Hyperparams
