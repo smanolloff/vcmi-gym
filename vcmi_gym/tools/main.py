@@ -35,7 +35,7 @@ def handle_signal(signum, frame):
     sys.exit(0)
 
 
-def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
+def run(action, cfg, group_id, run_id, model_load_file, iteration, resume, rest=[]):
     # print("**** ENV WANDB_RUN_ID: %s" % os.environ["WANDB_RUN_ID"])
     # import wandb
     # print("**** wandb.run.id: %s" % wandb.run.id)
@@ -158,6 +158,39 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, rest=[]):
                 values=dict(run_values, env=expanded_env_kwargs),
             )
 
+        case "crl_train_mppo":
+            from .crl.mppo import main as crl_train_mppo
+            from .crl.mppo import Args
+
+            os.environ["WANDB_SILENT"] = "true"
+            cfg["wandb"] = True
+
+            if group_id is not None:
+                cfg["group_id"] = group_id
+
+            if run_id is not None:
+                cfg["run_id"] = run_id
+
+            if model_load_file is not None:
+                cfg["agent_load_file"] = model_load_file
+
+            if resume is not None:
+                cfg["resume"] = resume
+
+            assert re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]+[A-Za-z0-9]$", cfg["group_id"]), \
+                "invalid group_id: %s" % cfg["group_id"]
+
+            args = Args(**cfg)
+            print("Starting run %s with seed %s" % (args.run_id, args.seed))
+
+            run_duration, run_values = common.measure(crl_train_mppo, dict(args=args))
+            common.save_run_metadata(
+                action=action,
+                cfg=vars(args),
+                duration=run_duration,
+                values=dict(run_values),
+            )
+
         case "spectate":
             from .spectate import spectate
             expanded_env_kwargs = common.expand_env_kwargs(env_kwargs)
@@ -234,6 +267,7 @@ def main():
     parser.add_argument("action", help=argparse.SUPPRESS)
     parser.add_argument("-g", metavar="GROUP_ID", help="group_id")
     parser.add_argument("-r", metavar="RUN_ID", help="run_id")
+    parser.add_argument("-R", help="resume training (crl only)", action=argparse.BooleanOptionalAction)
     parser.add_argument("-l", metavar="LOADFILE", help="zip file to load model from")
     parser.add_argument("-i", metavar="ITERATION", type=int, help="iteration")
     parser.add_argument(
@@ -251,6 +285,7 @@ action:
   train_mppo        train using Maskable Proximal Policy Optimization (MPPO)
   train_qrdqn       train using Quantile Regression DQN (QRDQN)
   train_mqrdqn      train using Maskable Quantile Regression DQN (my impl)
+  crl_train_mppo    same as train_mppo, but use cleanrl implementation
   spectate          watch a trained model play VCMI
   benchmark [map]   evaluate the actions/s achievable with this env
   test [map]        for testing purposes only
@@ -273,7 +308,7 @@ examples:
     cfg = yaml.safe_load(args.c)
     args.c.close()
 
-    run(args.action, cfg, args.g, args.r, args.l, args.i, rest=args.rest)
+    run(args.action, cfg, args.g, args.r, args.l, args.i, args.R, rest=args.rest)
 
 
 if __name__ == "__main__":

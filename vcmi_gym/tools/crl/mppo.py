@@ -1,14 +1,14 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/ppo/#ppopy
 import os
 import random
 import time
 import re
 import glob
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional
 from collections import deque
 import concurrent.futures
+import datetime
 
 import gymnasium as gym
 import numpy as np
@@ -20,6 +20,74 @@ from torch.distributions.categorical import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
 from vcmi_gym import VcmiEnv
+
+
+@dataclass
+class EnvArgs:
+    max_steps: int = 500
+    reward_dmg_factor: int = 5
+    vcmi_loglevel_global: str = "error"
+    vcmi_loglevel_ai: str = "error"
+    vcmienv_loglevel: str = "WARN"
+    sparse_info: bool = True
+    step_reward_mult: int = 1
+    term_reward_mult: int = 0
+    reward_clip_mod: Optional[int] = None
+    consecutive_error_reward_factor: Optional[int] = None
+
+
+@dataclass
+class State:
+    map_swaps: int = 0
+    global_step: int = 0
+    global_rollout: int = 0
+    optimizer_state_dict: Optional[dict] = None
+
+
+@dataclass
+class Args:
+    run_id: str
+    group_id: str
+    resume: bool = False
+
+    agent_load_file: Optional[str] = None
+    rollouts_total: int = 10000
+    rollouts_per_mapchange: int = 20
+    rollouts_per_log: int = 1
+    opponent_load_file: Optional[str] = None
+    success_rate_target: Optional[float] = None
+    mapmask: str = "ai/generated/B*.vmap"
+    randomize_maps: bool = False
+    save_every: int = 7200  # seconds
+    max_saves: int = 3
+    out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
+
+    learning_rate: float = 2.5e-4
+    num_envs: int = 4
+    num_steps: int = 128
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    num_minibatches: int = 4
+    update_epochs: int = 4
+    norm_adv: bool = True
+    clip_coef: float = 0.2
+    clip_vloss: bool = True
+    ent_coef: float = 0.01
+    vf_coef: float = 0.5
+    max_grad_norm: float = 0.5
+    target_kl: float = None
+
+    wandb: bool = True
+    seed: int = 42
+
+    env: EnvArgs = EnvArgs()
+    state: State = State()
+
+    def __post_init__(self):
+        if not isinstance(self.env, EnvArgs):
+            self.env = EnvArgs(**self.env)
+        if not isinstance(self.state, State):
+            self.state = State(**self.state)
 
 
 # https://boring-guy.sh/posts/masking-rl/
@@ -41,94 +109,24 @@ class CategoricalMasked(Categorical):
         p_log_p = torch.where(self.mask, p_log_p, torch.tensor(0, dtype=p_log_p.dtype, device=p_log_p.device))
         return -p_log_p.sum(-1)
 
-# python clean-rl/mppo.py \
-#     --exp-name cleanrl-test \
-#     --track \
-#     --wandb-id test-(date +%s) \
-#     --wandb-group cleanrl \
-#     --learning-rate 0.00126  \
-#     --num-envs 1 \
-#     --num-steps 128 \
-#     --num-minibatches 4 \
-#     --update-epochs 4 \
-#     --clip-coef 0.4 \
-#     --clip-vloss \
-#     --ent-coef 0.007 \
-#     --vf-coef 0.6 \
-#     --max-grad-norm 2.5 \
-#     --gamma 0.8425 \
-#     --gae-lambda 0.8
 
-
-@dataclass
-class EnvArgs:
-    max_steps: int = 500
-    reward_dmg_factor: int = 5
-    vcmi_loglevel_global: str = "error"
-    vcmi_loglevel_ai: str = "error"
-    vcmienv_loglevel: str = "WARN"
-    consecutive_error_reward_factor: int = -1
-    sparse_info: bool = True
-    step_reward_mult: int = 1
-    term_reward_mult: int = 0
-    reward_clip_mod: Optional[int] = None
-
-
-@dataclass
-class Args:
-    run_id: str
-    group_id: str
-    agent_load_file: Optional[str] = None
-    map_cycle: int = 0
-    rollouts_total: int = 10000
-    rollouts_per_mapchange: int = 20
-    rollouts_per_log: int = 1
-    opponent_load_file: Optional[str] = None
-    success_rate_target: Optional[float] = None
-    mapmask: str = "ai/generated/B*.vmap"
-    randomize_maps: bool = False
-    save_every: 7200  # seconds
-    max_saves: 3
-    out_dir: str = "data/default"
-
-    learning_rate: float = 2.5e-4
-    num_envs: int = 4
-    num_steps: int = 128
-    gamma: float = 0.99
-    gae_lambda: float = 0.95
-    num_minibatches: int = 4
-    update_epochs: int = 4
-    norm_adv: bool = True
-    clip_coef: float = 0.2
-    clip_vloss: bool = True
-    ent_coef: float = 0.01
-    vf_coef: float = 0.5
-    max_grad_norm: float = 0.5
-    target_kl: float = None
-
-    wandb: bool = True
-    seed: int = 42
-
-    env: EnvArgs = EnvArgs()
-
-
-def create_venv(n_envs, env_cls, env_kwargs, mapmask, randomize, run_id, writer, map_cycle):
+def create_venv(env_cls, args, writer, map_swaps):
     mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
-    all_maps = glob.glob("%s/%s" % (mappath, mapmask))
+    all_maps = glob.glob("%s/%s" % (mappath, args.mapmask))
     all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
     all_maps.sort()
 
-    if n_envs == 1:
+    if args.num_envs == 1:
         n_maps = 1
     else:
-        assert n_envs % 2 == 0
-        assert n_envs <= len(all_maps) * 2
-        n_maps = n_envs // 2
+        assert args.num_envs % 2 == 0
+        assert args.num_envs <= len(all_maps) * 2
+        n_maps = args.num_envs // 2
 
-    if randomize:
+    if args.randomize_maps:
         maps = random.sample(all_maps, n_maps)
     else:
-        i = (n_maps * map_cycle) % len(all_maps)
+        i = (n_maps * map_swaps) % len(all_maps)
         new_i = (i + n_maps) % len(all_maps)
         # wandb.log({"map_offset": i}, commit=False)
         writer.add_scalar("global/map_offset", i)
@@ -147,13 +145,13 @@ def create_venv(n_envs, env_cls, env_kwargs, mapmask, randomize, run_id, writer,
 
     def env_creator():
         with lock:
-            assert state["n"] < n_envs
+            assert state["n"] < args.num_envs
             role, mapname = pairs[state["n"]]
             # logfile = f"/tmp/{run_id}-env{state['n']}-actions.log"
             logfile = None
 
-            env_kwargs2 = dict(
-                env_kwargs,
+            env_kwargs = dict(
+                asdict(args.env),
                 mapname=mapname,
                 attacker="MMAI_MODEL" if args.opponent_load_file else "StupidAI",
                 defender="MMAI_MODEL" if args.opponent_load_file else "StupidAI",
@@ -162,16 +160,16 @@ def create_venv(n_envs, env_cls, env_kwargs, mapmask, randomize, run_id, writer,
                 actions_log_file=logfile
             )
 
-            env_kwargs2[role] = "MMAI_USER"
-            print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs2))
+            env_kwargs[role] = "MMAI_USER"
+            print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs))
             state["n"] += 1
 
-        return env_cls(**env_kwargs2)
+        return env_cls(**env_kwargs)
 
     # I don't remember anymore, but there were some issues with more envs
-    if n_envs > 1:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(n_envs, 8)) as executor:
-            futures = [executor.submit(env_creator) for _ in range(n_envs)]
+    if args.num_envs > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.num_envs, 8)) as executor:
+            futures = [executor.submit(env_creator) for _ in range(args.num_envs)]
             results = [future.result() for future in futures]
 
         funcs = [lambda x=x: x for x in results]
@@ -183,7 +181,7 @@ def create_venv(n_envs, env_cls, env_kwargs, mapmask, randomize, run_id, writer,
     return vec_env
 
 
-def maybe_save(t, agent, out_dir, save_every, max_saves):
+def maybe_save(t, args, agent, optimizer, out_dir, save_every, max_saves):
     now = time.time()
 
     if t is None:
@@ -194,12 +192,17 @@ def maybe_save(t, agent, out_dir, save_every, max_saves):
 
     os.makedirs(out_dir, exist_ok=True)
     agent_file = os.path.join(out_dir, "agent-%d.pt" % now)
+    agent.state.optimizer_state_dict = optimizer.state_dict()
     torch.save(agent, agent_file)
     print("Saved agent to %s" % agent_file)
 
+    args_file = os.path.join(out_dir, "args-%d.pt" % now)
+    torch.save(args, args_file)
+    print("Saved args to %s" % args_file)
+
     # save file retention (keep latest N saves)
     files = sorted(
-        glob.glob(os.path.join(out_dir, "agent-[0-9]*.zip")),
+        glob.glob(os.path.join(out_dir, "agent-[0-9]*.pt")),
         key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()),
         reverse=True
     )
@@ -207,8 +210,26 @@ def maybe_save(t, agent, out_dir, save_every, max_saves):
     for file in files[max_saves:]:
         print("Deleting %s" % file)
         os.remove(file)
+        argfile = "%s/args-%s" % (os.path.dirname(file), os.path.basename(file).removeprefix("agent-"))
+        if os.path.isfile(argfile):
+            print("Deleting %s" % argfile)
+            os.remove(argfile)
 
     return now
+
+
+def find_latest_save(group_id, run_id):
+    threshold = datetime.datetime.now() - datetime.timedelta(hours=3)
+    pattern = f"data/{group_id}/{run_id}/agent-[0-9]*.pt"
+    files = glob.glob(pattern)
+    assert len(files) > 0, f"No files found for: {pattern}"
+    filtered = [f for f in files if datetime.datetime.fromtimestamp(os.path.getmtime(f)) > threshold]
+    agent_file = max(filtered, key=os.path.getmtime)
+
+    args_file = "%s/args-%s" % (os.path.dirname(agent_file), os.path.basename(agent_file).removeprefix("agent-"))
+    assert os.path.isfile(args_file)
+
+    return args_file, agent_file
 
 
 def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
@@ -222,8 +243,10 @@ def safe_mean(array_like) -> float:
 
 
 class Agent(nn.Module):
-    def __init__(self, observation_space, action_space):
+    def __init__(self, observation_space, action_space, state):
         super().__init__()
+
+        self.state = state
 
         assert observation_space.shape[0] == 1
         assert observation_space.shape[1] == 11
@@ -260,8 +283,25 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.get_value(x)
 
 
-def main(**kwargs):
-    args = Args(**kwargs)  # will blow up if any invalid kwargs are given
+def main(args):
+    assert isinstance(args, Args)
+
+    # XXX: resume will overwrite all input args except run_id & group_id
+    if args.resume:
+        args_load_file, agent_load_file = find_latest_save(args.group_id, args.run_id)
+        loaded_args = torch.load(args_load_file)
+        assert loaded_args.group_id == args.group_id
+        assert loaded_args.run_id == args.run_id
+        args = loaded_args
+        args.resume = True
+        args.agent_load_file = agent_load_file
+        print("Resuming run %s/%s" % (args.group_id, args.run_id))
+        print("Loaded args from %s" % args_load_file)
+    else:
+        print("Starting new run %s/%s" % (args.group_id, args.run_id))
+
+    print("Args: %s" % (asdict(args)))
+
     batch_size = int(args.num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
 
@@ -273,18 +313,29 @@ def main(**kwargs):
             group=args.group_id,
             name=args.run_id,
             id=args.run_id,
-            resume="never",
-            config=vars(args),
+            resume="must" if args.resume else "never",
+            config=asdict(args),
             sync_tensorboard=True,
-            save_code=True,
-            allow_val_change=False,
+            save_code=False,  # code saved manually below
+            allow_val_change=args.resume,
             settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
         )
 
-    writer = SummaryWriter(args.out_dir)
+        # https://docs.wandb.ai/ref/python/run#log_code
+        wandb.run.log_code(root=os.path.dirname(__file__))
+
+    out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
+    print("Out dir: %s" % out_dir)
+
+    # XXX: this check is redundant: wandb's "resume" handling is enough
+    if not args.resume:
+        assert not os.path.exists(out_dir), "out_dir already exists: %s" % out_dir
+        os.makedirs(out_dir, exist_ok=True)
+
+    writer = SummaryWriter(out_dir)
     writer.add_text(
         "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in asdict(args).items()])),
     )
 
     # TRY NOT TO MODIFY: seeding
@@ -294,51 +345,64 @@ def main(**kwargs):
     torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
     device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    iteration = args.iteration
     t = None
+    agent = None
+    optimizer = None
+    start_map_swaps = args.state.map_swaps
+
+    if args.agent_load_file:
+        print("Loading agent from %s" % args.agent_load_file)
+        agent = torch.load(args.agent_load_file)
+        start_map_swaps = agent.state.map_swaps
 
     try:
-        envs = create_venv(args.num_envs, VcmiEnv, vars(args.env), args.mapmask, args.randomize_maps, args.run_id, writer, iteration)  # noqa: E501
-        ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
-        ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
+        envs = create_venv(VcmiEnv, args, writer, start_map_swaps)  # noqa: E501
+        obs_space = envs.unwrapped.single_observation_space
+        act_space = envs.unwrapped.single_action_space
 
-        assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
+        assert isinstance(act_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-        agent = Agent(envs.single_observation_space, envs.single_action_space).to(device)
-        if args.agent_load_file:
-            print("Loading agent from %s" % args.agent_load_file)
-            agent.load_state_dict(torch.load(args.agent_load_file), strict=True)
+        if agent is None:
+            agent = Agent(obs_space, act_space, args.state).to(device)
+
+        print("Agent state: %s" % asdict(agent.state))
 
         optimizer = optim.AdamW(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
+        if agent.state.optimizer_state_dict:
+            optimizer.load_state_dict(agent.state.optimizer_state_dict)
+
+        ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
+        ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
+
         # ALGO Logic: Storage setup
-        obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-        actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
+        obs = torch.zeros((args.num_steps, args.num_envs) + obs_space.shape).to(device)
+        actions = torch.zeros((args.num_steps, args.num_envs) + act_space.shape).to(device)
         logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
         rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
         dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
         values = torch.zeros((args.num_steps, args.num_envs)).to(device)
 
         # XXX: the start=0 requirement is needed for SB3 compat
-        assert envs.single_action_space.start == 0
-        masks = torch.zeros((args.num_steps, args.num_envs, envs.single_action_space.n), dtype=torch.bool).to(device)
+        assert act_space.start == 0
+        masks = torch.zeros((args.num_steps, args.num_envs, act_space.n), dtype=torch.bool).to(device)
 
         # TRY NOT TO MODIFY: start the game
-        global_step = 0
         next_obs, _ = envs.reset(seed=args.seed)
         next_obs = torch.Tensor(next_obs).to(device)
         next_done = torch.zeros(args.num_envs).to(device)
-        next_mask = torch.as_tensor(np.array(envs.call("action_masks"))).to(device)
+        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
-        start_rollout = args.iteration * args.rollouts_per_mapchange
+        start_rollout = agent.state.global_rollout + 1
         assert start_rollout < args.rollouts_total
 
-        for rollout in range(start_rollout, args.rollouts_total):
+        for rollout in range(start_rollout, args.rollouts_total + 1):
+            agent.state.global_rollout = rollout
             rollout_start_time = time.time()
-            rollout_start_step = global_step
+            rollout_start_step = agent.state.global_step
 
             for step in range(0, args.num_steps):
-                global_step += args.num_envs
+                agent.state.global_step += args.num_envs
                 obs[step] = next_obs
                 dones[step] = next_done
                 masks[step] = next_mask
@@ -355,7 +419,7 @@ def main(**kwargs):
                 next_done = np.logical_or(terminations, truncations)
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
-                next_mask = torch.as_tensor(np.array(envs.call("action_masks"))).to(device)
+                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
                 # For a vectorized environments the output will be in the form of::
                 #     >>> infos = {
@@ -382,10 +446,12 @@ def main(**kwargs):
                 #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/vector/vector_env.py#L275-L300
                 #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/wrappers/record_episode_statistics.py#L102-L124
                 #
-                for final_info, has_final_info in infos.get("final_info", []).zip(infos.get("_final_info", [])):
+                for final_info, has_final_info in zip(infos.get("final_info", []), infos.get("_final_info", [])):
+                    # "final_info" must be None if "has_final_info" is False
                     if has_final_info:
-                        ep_net_value_queue.append(safe_mean(final_info["net_value"]))
-                        ep_is_success_queue.append(safe_mean(final_info["is_success"]))
+                        assert final_info is not None, "has_final_info=True, but final_info=None"
+                        ep_net_value_queue.append(final_info["net_value"])
+                        ep_is_success_queue.append(final_info["is_success"])
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -404,10 +470,10 @@ def main(**kwargs):
                 returns = advantages + values
 
             # flatten the batch
-            b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
+            b_obs = obs.reshape((-1,) + obs_space.shape)
             b_logprobs = logprobs.reshape(-1)
-            b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
-            b_masks = masks.reshape((-1,) + (envs.single_action_space.n,))
+            b_actions = actions.reshape((-1,) + act_space.shape)
+            b_masks = masks.reshape((-1,) + (act_space.n,))
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
@@ -474,31 +540,27 @@ def main(**kwargs):
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-            iteration += 1
-            assert iteration == rollout // args.rollouts_per_mapchange
-
             # TRY NOT TO MODIFY: record rewards for plotting purposes
-            writer.add_scalar("params/learning_rate", optimizer.param_groups[0]["lr"], global_step)
-            writer.add_scalar("losses/value_loss", v_loss.item(), global_step)
-            writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
-            writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
-            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), global_step)
-            writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
-            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
-            writer.add_scalar("losses/explained_variance", explained_var, global_step)
+            # writer.add_scalar("params/learning_rate", optimizer.param_groups[0]["lr"], agent.state.global_step)
+            writer.add_scalar("losses/value_loss", v_loss.item(), agent.state.global_step)
+            writer.add_scalar("losses/policy_loss", pg_loss.item(), agent.state.global_step)
+            writer.add_scalar("losses/entropy", entropy_loss.item(), agent.state.global_step)
+            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), agent.state.global_step)
+            writer.add_scalar("losses/approx_kl", approx_kl.item(), agent.state.global_step)
+            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), agent.state.global_step)
+            writer.add_scalar("losses/explained_variance", explained_var, agent.state.global_step)
             writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time)
-            writer.add_scalar("time/steps_per_second", (global_step - rollout_start_step) / (time.time() - rollout_start_time))  # noqa: E501
+            writer.add_scalar("time/steps_per_second", (agent.state.global_step - rollout_start_step) / (time.time() - rollout_start_time))  # noqa: E501
             writer.add_scalar("rollout/ep_rew_mean", safe_mean(envs.return_queue))
             writer.add_scalar("rollout/ep_len_mean", safe_mean(envs.length_queue))
             writer.add_scalar("rollout/ep_value_mean", safe_mean(ep_net_value_queue))
             writer.add_scalar("rollout/ep_success_rate", safe_mean(ep_is_success_queue))
             writer.add_scalar("rollout/ep_count", envs.episode_count)
-            writer.add_scalar("global/num_timesteps", global_step)
-            writer.add_scalar("global/num_rollouts", rollout)
-            writer.add_scalar("global/iterations", iteration)
-            writer.add_scalar("global/progress", rollout / args.rollouts_total)
+            writer.add_scalar("global/num_timesteps", agent.state.global_step)
+            writer.add_scalar("global/num_rollouts", agent.state.global_rollout)
+            writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total)
 
-            print(f"global_step={global_step}, rollout/ep_rew_mean={safe_mean(envs.return_queue)}")
+            print(f"global_step={agent.state.global_step}, rollout/ep_rew_mean={safe_mean(envs.return_queue)}")
 
             if args.success_rate_target and safe_mean(ep_is_success_queue) >= args.success_rate_target:
                 writer.flush()
@@ -519,23 +581,23 @@ def main(**kwargs):
                 envs.episode_count = 0
 
             if rollout > start_rollout and rollout % args.rollouts_per_mapchange == 0:
+                agent.state.map_swaps += 1
+                writer.add_scalar("global/map_swaps", agent.state.map_swaps)
                 envs.close()
-                envs = create_venv(args.num_envs, VcmiEnv, vars(args.env), args.mapmask, args.randomize_maps, args.run_id, writer, iteration)  # noqa: E501
+                envs = create_venv(VcmiEnv, args, writer, agent.state.map_swaps)  # noqa: E501
                 next_obs, _ = envs.reset(seed=args.seed)
                 next_obs = torch.Tensor(next_obs).to(device)
                 next_done = torch.zeros(args.num_envs).to(device)
-                next_mask = torch.as_tensor(np.array(envs.call("action_masks"))).to(device)
+                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
-        t = maybe_save(t, agent, args.out_dir, save_every=3600, max_saves=3)
+        t = maybe_save(t, args, agent, optimizer, out_dir, save_every=3600, max_saves=3)
 
     finally:
+        maybe_save(0, args, agent, optimizer, out_dir, save_every=3600, max_saves=3)
         envs.close()
         writer.close()
-        agent_file = os.path.join(args.out_dir, "agent.pt")
-        torch.save(agent, agent_file)
-        print("Saved agent to %s" % agent_file)
 
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
-    main(**vars(args))
+    main(args)
