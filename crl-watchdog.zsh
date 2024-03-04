@@ -4,8 +4,7 @@
 #
 # Usage:
 #
-#     zsh crl_watchdog.zsh path/to/config.yml
-#
+USAGE="zsh crl_watchdog.zsh path/to/config.yml"
 
 CHECK_FIRST=30
 CHECK_EVERY=600  # seconds
@@ -76,10 +75,6 @@ function handle_sigint() {
   exit 0
 }
 
-function gen_id() {
-  head /dev/urandom | LC_ALL=C tr -dc 'a-z0-8' | head -c 8
-}
-
 function read_cfg() {
   local res=$(yq "$1" "$2")
 
@@ -107,11 +102,19 @@ trap "handle_sigint" INT
 
 source .venv/bin/activate
 
+# add timestamps to xtrace output
+export PS4="+[%D{%Y-%m-%d %H:%M:%S}] "
+
 set -eux
 
 #
 #
 #
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: $USAGE"
+  exit 1
+fi
 
 cfg=$1
 group=$(read_cfg ".group_id" "$cfg")

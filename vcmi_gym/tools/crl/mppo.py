@@ -1,3 +1,19 @@
+# =============================================================================
+# Copyright 2024 Simeon Manolov <s.manolloff@gmail.com>.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# =============================================================================
+
 import os
 import random
 import time
@@ -50,6 +66,7 @@ class Args:
     run_id: str
     group_id: str
     resume: bool = False
+    notes: Optional[str] = None
 
     agent_load_file: Optional[str] = None
     rollouts_total: int = 10000
@@ -167,8 +184,8 @@ def create_venv(env_cls, args, writer, map_swaps):
 
         return env_cls(**env_kwargs)
 
-    # I don't remember anymore, but there were some issues with more envs
     if args.num_envs > 1:
+        # I don't remember anymore, but there were issues if max_workers>8
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.num_envs, 8)) as executor:
             futures = [executor.submit(env_creator) for _ in range(args.num_envs)]
             results = [future.result() for future in futures]
@@ -283,6 +300,13 @@ class Agent(nn.Module):
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), self.get_value(x)
 
+    # Inference (deterministic)
+    def predict(self, x, mask):
+        with torch.no_grad():
+            logits = self.actor(self.features_extractor(x))
+            probs = CategoricalMasked(logits=logits, mask=mask)
+            return probs.mode().cpu().numpy()
+
 
 def main(args):
     assert isinstance(args, Args)
@@ -314,7 +338,9 @@ def main(args):
             group=args.group_id,
             name=args.run_id,
             id=args.run_id,
+            notes=args.notes,
             resume="must" if args.resume else "never",
+            # resume="allow",  # XXX: reuse id for insta-failed runs
             config=asdict(args),
             sync_tensorboard=True,
             save_code=False,  # code saved manually below
@@ -327,11 +353,7 @@ def main(args):
 
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     print("Out dir: %s" % out_dir)
-
-    # XXX: this check is redundant: wandb's "resume" handling is enough
-    if not args.resume:
-        assert not os.path.exists(out_dir), "out_dir already exists: %s" % out_dir
-        os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
     writer = SummaryWriter(out_dir)
     writer.add_text(
@@ -445,6 +467,10 @@ def main(args):
                 #   gym's vec env *automatically* collects episode returns and lengths
                 #   in envs.return_queue and envs.length_queue
                 #   (eg. [-1024.2, 333.6, ...] and [34, 36, 41, ...]) - each element is a full episode
+                #
+                #  "final_info" and "_final_info" are NOT present at all if no env was done
+                #   If at least 1 env was done, both are present, with info about all envs
+                #   (this applies for all info keys)
                 #
                 # See
                 #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/vector/sync_vector_env.py#L142-L157

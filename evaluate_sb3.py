@@ -164,7 +164,7 @@ if __name__ == "__main__":
                 wandb_init(id=f"eval-{run_id}", group="evaluation")
                 timestamp = int(model_load_file.split("-")[-1][:-4])
                 wandb.log({"model/timestamp": timestamp}, commit=False)
-                wandb.log({"evaluator/idle": 0}, commit=False)
+                wandb.log({"evaluator/busy": 1})  # commit here as well
 
                 # List of (rew, len) tuples, where rew and len are lists of mean(ep_reward) and ep_len
                 rewards = {"StupidAI": [], "BattleAI": []}
@@ -193,7 +193,7 @@ if __name__ == "__main__":
                 wandb.log({"opponent/BattleAI/reward": np.mean(rewards["BattleAI"])}, commit=False)
                 wandb.log({"opponent/BattleAI/length": np.mean(lengths["BattleAI"])}, commit=False)
                 wandb.log({"all/reward": np.mean(rewards["StupidAI"] + rewards["BattleAI"])}, commit=False)
-                wandb.log({"all/length": np.mean(lengths["StupidAI"] + lengths["BattleAI"])})  # commit here
+                wandb.log({"all/length": np.mean(lengths["StupidAI"] + lengths["BattleAI"])}, commit=False)
 
                 print("Evaluated %s: reward=%d length=%d" % (
                     run_id,
@@ -203,11 +203,13 @@ if __name__ == "__main__":
 
                 evaluated.append(model_load_file)
 
+                # XXX: evaluator/busy is only for THIS model
+                wandb.log({"evaluator/busy": 0})  # commit here as well
+
             if once:
                 break
 
             print("Sleeping 300s...")
-            wandb.log({"evaluator/idle": 1})  # commit here as well
             time.sleep(30)
     finally:
         if venv:
