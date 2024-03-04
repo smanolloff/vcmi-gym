@@ -5,7 +5,7 @@ resume: False
 
 agent_load_file: ~
 rollouts_total: 10000
-rollouts_per_mapchange: 5
+rollouts_per_mapchange: 20
 rollouts_per_log: 1
 opponent_load_file: ~
 success_rate_target: ~
@@ -24,11 +24,11 @@ num_envs: 2
 # PPO Hyperparams
 #
 learning_rate: 0.00001
-num_steps: 32
+num_steps: 128
 gamma: 0.8425
 gae_lambda: 0.8
 num_minibatches: 16
-update_epochs: 5
+update_epochs: 10
 norm_adv: true
 clip_coef: 0.4
 clip_vloss: True

@@ -38,6 +38,7 @@ class EnvArgs:
 
 @dataclass
 class State:
+    resumes: int = 0
     map_swaps: int = 0
     global_step: int = 0
     global_rollout: int = 0
@@ -364,6 +365,10 @@ def main(args):
 
         if agent is None:
             agent = Agent(obs_space, act_space, args.state).to(device)
+
+        if args.resume:
+            agent.state.resumes += 1
+            wandb.log("global/resumes")
 
         print("Agent state: %s" % asdict(agent.state))
 

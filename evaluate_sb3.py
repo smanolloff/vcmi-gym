@@ -163,7 +163,8 @@ if __name__ == "__main__":
                 model = load_model(model_load_file=model_load_file)
                 wandb_init(id=f"eval-{run_id}", group="evaluation")
                 timestamp = int(model_load_file.split("-")[-1][:-4])
-                wandb.log({f"model/timestamp": timestamp}, commit=False)
+                wandb.log({"model/timestamp": timestamp}, commit=False)
+                wandb.log({"evaluator/idle": 0}, commit=False)
 
                 # List of (rew, len) tuples, where rew and len are lists of mean(ep_reward) and ep_len
                 rewards = {"StupidAI": [], "BattleAI": []}
@@ -175,7 +176,7 @@ if __name__ == "__main__":
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
                         venv = create_venv(2, env_cls, run_id, f"ai/generated/{vmap}", opponent)
-                        ep_rewards, ep_lengths = evaluate_policy(model=model, env=venv, n_eval_episodes=100, return_episode_rewards=True)
+                        ep_rewards, ep_lengths = evaluate_policy(model=model, env=venv, n_eval_episodes=100, return_episode_rewards=True)  # noqa: E501
                         rewards[opponent].append(np.mean(ep_rewards))
                         lengths[opponent].append(np.mean(ep_lengths))
                         rewards[vmap].append(np.mean(ep_rewards))
@@ -187,12 +188,12 @@ if __name__ == "__main__":
                     print("%s: reward=%d length=%d" % (vmap, np.mean(rewards[vmap]), np.mean(lengths[vmap])))
 
                 # no need to flatten lists, they are all the same lengths so np.mean just works
-                wandb.log({f"opponent/StupidAI/reward": np.mean(rewards["StupidAI"])}, commit=False)
-                wandb.log({f"opponent/StupidAI/length": np.mean(lengths["StupidAI"])}, commit=False)
-                wandb.log({f"opponent/BattleAI/reward": np.mean(rewards["BattleAI"])}, commit=False)
-                wandb.log({f"opponent/BattleAI/length": np.mean(lengths["BattleAI"])}, commit=False)
-                wandb.log({f"all/reward": np.mean(rewards["StupidAI"] + rewards["BattleAI"])}, commit=False)
-                wandb.log({f"all/length": np.mean(lengths["StupidAI"] + lengths["BattleAI"])}) # commit here
+                wandb.log({"opponent/StupidAI/reward": np.mean(rewards["StupidAI"])}, commit=False)
+                wandb.log({"opponent/StupidAI/length": np.mean(lengths["StupidAI"])}, commit=False)
+                wandb.log({"opponent/BattleAI/reward": np.mean(rewards["BattleAI"])}, commit=False)
+                wandb.log({"opponent/BattleAI/length": np.mean(lengths["BattleAI"])}, commit=False)
+                wandb.log({"all/reward": np.mean(rewards["StupidAI"] + rewards["BattleAI"])}, commit=False)
+                wandb.log({"all/length": np.mean(lengths["StupidAI"] + lengths["BattleAI"])})  # commit here
 
                 print("Evaluated %s: reward=%d length=%d" % (
                     run_id,
@@ -200,13 +201,15 @@ if __name__ == "__main__":
                     np.mean(lengths["StupidAI"] + lengths["BattleAI"]),
                 ))
 
+                evaluated.append(model_load_file)
+
             if once:
                 break
 
             print("Sleeping 300s...")
+            wandb.log({"evaluator/idle": 1})  # commit here as well
             time.sleep(30)
     finally:
         if venv:
             venv.close()
         wandb.finish(quiet=True)
-
