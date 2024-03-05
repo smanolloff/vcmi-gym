@@ -20,7 +20,7 @@ import time
 import re
 import glob
 import threading
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
 import concurrent.futures
@@ -66,6 +66,7 @@ class Args:
     run_id: str
     group_id: str
     resume: bool = False
+    overwrite: list = field(default_factory=list)
     notes: Optional[str] = None
 
     agent_load_file: Optional[str] = None
@@ -76,7 +77,7 @@ class Args:
     success_rate_target: Optional[float] = None
     mapmask: str = "ai/generated/B*.vmap"
     randomize_maps: bool = False
-    save_every: int = 7200  # seconds
+    save_every: int = 3600  # seconds
     max_saves: int = 3
     out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
 
@@ -95,6 +96,7 @@ class Args:
     max_grad_norm: float = 0.5
     target_kl: float = None
 
+    cfg_file: str = 'path/to/cfg.yml'
     wandb: bool = True
     seed: int = 42
 
@@ -199,13 +201,13 @@ def create_venv(env_cls, args, writer, map_swaps):
     return vec_env
 
 
-def maybe_save(t, args, agent, optimizer, out_dir, save_every, max_saves):
+def maybe_save(t, args, agent, optimizer, out_dir):
     now = time.time()
 
     if t is None:
         return now
 
-    if t + save_every > now:
+    if t + args.save_every > now:
         return t
 
     os.makedirs(out_dir, exist_ok=True)
@@ -225,7 +227,7 @@ def maybe_save(t, args, agent, optimizer, out_dir, save_every, max_saves):
         reverse=True
     )
 
-    for file in files[max_saves:]:
+    for file in files[args.max_saves:]:
         print("Deleting %s" % file)
         os.remove(file)
         argfile = "%s/args-%s" % (os.path.dirname(file), os.path.basename(file).removeprefix("agent-"))
@@ -295,17 +297,17 @@ class Agent(nn.Module):
 
     def get_action_and_value(self, x, mask, action=None):
         logits = self.actor(self.features_extractor(x))
-        probs = CategoricalMasked(logits=logits, mask=mask)
+        dist = CategoricalMasked(logits=logits, mask=mask)
         if action is None:
-            action = probs.sample()
-        return action, probs.log_prob(action), probs.entropy(), self.get_value(x)
+            action = dist.sample()
+        return action, dist.log_prob(action), dist.entropy(), self.get_value(x)
 
     # Inference (deterministic)
     def predict(self, x, mask):
         with torch.no_grad():
             logits = self.actor(self.features_extractor(x))
-            probs = CategoricalMasked(logits=logits, mask=mask)
-            return probs.mode().cpu().numpy()
+            dist = CategoricalMasked(logits=logits, mask=mask)
+            return torch.argmax(dist.probs, dim=1).cpu().numpy()
 
 
 def main(args):
@@ -317,11 +319,31 @@ def main(args):
         loaded_args = torch.load(args_load_file)
         assert loaded_args.group_id == args.group_id
         assert loaded_args.run_id == args.run_id
+
+        # List of arg names to overwrite after loading
+        # (some args (incl. overwrite itself) must always be overwritten)
+        loaded_args.overwrite = args.overwrite
+        loaded_args.cfg_file = args.cfg_file
+
+        for argname in args.overwrite:
+            parts = argname.split(".")
+            if len(parts) == 1:
+                print("Overwrite %s: %s -> %s" % (argname, getattr(loaded_args, argname), getattr(args, argname)))
+                setattr(loaded_args, argname, getattr(args, argname))
+            else:
+                assert len(parts) == 2
+                sub_loaded = getattr(args, parts[0])
+                sub_arg = getattr(args, parts[0])
+                print("Overwrite %s: %s -> %s" % (argname, getattr(sub_loaded, parts[1]), getattr(sub_arg, args[1])))
+                setattr(sub_loaded, parts[1], getattr(sub_arg, parts[1]))
+
         args = loaded_args
         args.resume = True
         args.agent_load_file = agent_load_file
+
         print("Resuming run %s/%s" % (args.group_id, args.run_id))
         print("Loaded args from %s" % args_load_file)
+
     else:
         print("Starting new run %s/%s" % (args.group_id, args.run_id))
 
@@ -349,17 +371,26 @@ def main(args):
         )
 
         # https://docs.wandb.ai/ref/python/run#log_code
-        wandb.run.log_code(root=os.path.dirname(__file__))
+        # XXX: "path" is relative to THIS dir
+        #      but args.cfg_file is relative to vcmi-gym ROOT dir
+        def code_include_fn(path):
+            res = (
+                path.endswith(os.path.basename(__file__)) or
+                path.endswith(os.path.basename(args.cfg_file)) or
+                path.endswith("requirements.txt") or
+                path.endswith("requirements.lock")
+            )
+
+            print("Should include %s: %s" % (path, res))
+            return res
+
+        wandb.run.log_code(root=os.path.dirname(__file__), include_fn=code_include_fn)
 
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     print("Out dir: %s" % out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
     writer = SummaryWriter(out_dir)
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in asdict(args).items()])),
-    )
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -368,7 +399,7 @@ def main(args):
     torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
     device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
-    t = None
+    save_ts = None
     agent = None
     optimizer = None
     start_map_swaps = args.state.map_swaps
@@ -390,7 +421,7 @@ def main(args):
 
         if args.resume:
             agent.state.resumes += 1
-            wandb.log("global/resumes")
+            writer.add_scalar("global/resumes", agent.state.resumes)
 
         print("Agent state: %s" % asdict(agent.state))
 
@@ -398,6 +429,8 @@ def main(args):
 
         if agent.state.optimizer_state_dict:
             optimizer.load_state_dict(agent.state.optimizer_state_dict)
+            # Need to explicitly set lr after loading state
+            optimizer.param_groups[0]["lr"] = args.learning_rate
 
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
@@ -450,14 +483,14 @@ def main(args):
 
                 # For a vectorized environments the output will be in the form of::
                 #     >>> infos = {
-                #     ...     "final_observation": "<array of length num-envs>",
-                #     ...     "_final_observation": "<boolean array of length num-envs>",
-                #     ...     "final_info": "<array of length num-envs>",
-                #     ...     "_final_info": "<boolean array of length num-envs>",
+                #     ...     "final_observation": "<array<obs> of length num-envs>",
+                #     ...     "_final_observation": "<array<bool> of length num-envs>",
+                #     ...     "final_info": "<array<hash> of length num-envs>",
+                #     ...     "_final_info": "<array<bool> of length num-envs>",
                 #     ...     "episode": {
-                #     ...         "r": "<array of cumulative reward>",
-                #     ...         "l": "<array of episode length>",
-                #     ...         "t": "<array of elapsed time since beginning of episode>"
+                #     ...         "r": "<array<float> of cumulative reward>",
+                #     ...         "l": "<array<int> of episode length>",
+                #     ...         "t": "<array<float> of elapsed time since beginning of episode>"
                 #     ...     },
                 #     ...     "_episode": "<boolean array of length num-envs>"
                 #     ... }
@@ -471,6 +504,9 @@ def main(args):
                 #  "final_info" and "_final_info" are NOT present at all if no env was done
                 #   If at least 1 env was done, both are present, with info about all envs
                 #   (this applies for all info keys)
+                #
+                #   Note that rewards are accessed as infos["episode"]["r"][i]
+                #   ... but env's info is accessed as infos["final_info"][i][key]
                 #
                 # See
                 #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/vector/sync_vector_env.py#L142-L157
@@ -621,10 +657,10 @@ def main(args):
                 next_done = torch.zeros(args.num_envs).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
-        t = maybe_save(t, args, agent, optimizer, out_dir, save_every=3600, max_saves=3)
+            save_ts = maybe_save(save_ts, args, agent, optimizer, out_dir)
 
     finally:
-        maybe_save(0, args, agent, optimizer, out_dir, save_every=3600, max_saves=3)
+        maybe_save(0, args, agent, optimizer, out_dir)
         envs.close()
         writer.close()
 

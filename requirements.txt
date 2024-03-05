@@ -1,3 +1,8 @@
+#
+# XXX: ALWAYS save a lock file when modifying requirements:
+#
+#     pip3 freeze -r requirements.txt > requirements.lock
+#
 numpy==1.26.3
 stable_baselines3 ~= 2.1.0
 sb3-contrib ~= 2.1.0
@@ -7,7 +12,6 @@ tqdm
 rich
 pyyaml
 ray == 2.9.0
-ray[train]
 GPy
 scikit-learn
 json5

@@ -35,7 +35,7 @@ def handle_signal(signum, frame):
     sys.exit(0)
 
 
-def run(action, cfg, group_id, run_id, model_load_file, iteration, resume, rest=[]):
+def run(action, cfg, group_id, run_id, model_load_file, iteration, resume, cfgpath, rest=[]):
     # print("**** ENV WANDB_RUN_ID: %s" % os.environ["WANDB_RUN_ID"])
     # import wandb
     # print("**** wandb.run.id: %s" % wandb.run.id)
@@ -161,6 +161,8 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, resume, rest=
         case "crl_train_mppo":
             from .crl.mppo import main as crl_train_mppo
             from .crl.mppo import Args
+
+            cfg["cfg_file"] = cfgpath
 
             os.environ["WANDB_SILENT"] = "true"
             cfg["wandb"] = True
@@ -307,8 +309,7 @@ examples:
     print("Loading configuration from %s" % args.c.name)
     cfg = yaml.safe_load(args.c)
     args.c.close()
-
-    run(args.action, cfg, args.g, args.r, args.l, args.i, args.R, rest=args.rest)
+    run(args.action, cfg, args.g, args.r, args.l, args.i, args.R, cfgpath=args.c.name, rest=args.rest)
 
 
 if __name__ == "__main__":
