@@ -24,7 +24,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
 import concurrent.futures
-import datetime
+import shutil
 
 import gymnasium as gym
 import numpy as np
@@ -239,13 +239,11 @@ def maybe_save(t, args, agent, optimizer, out_dir):
 
 
 def find_latest_save(group_id, run_id):
-    threshold = datetime.datetime.now() - datetime.timedelta(hours=3)
     pattern = f"data/{group_id}/{run_id}/agent-[0-9]*.pt"
     files = glob.glob(pattern)
     assert len(files) > 0, f"No files found for: {pattern}"
-    filtered = [f for f in files if datetime.datetime.fromtimestamp(os.path.getmtime(f)) > threshold]
-    agent_file = max(filtered, key=os.path.getmtime)
 
+    agent_file = max(files, key=os.path.getmtime)
     args_file = "%s/args-%s" % (os.path.dirname(agent_file), os.path.basename(agent_file).removeprefix("agent-"))
     assert os.path.isfile(args_file)
 
@@ -320,10 +318,18 @@ def main(args):
         assert loaded_args.group_id == args.group_id
         assert loaded_args.run_id == args.run_id
 
+        for f in [args_load_file, agent_load_file]:
+            backup = "%s/resumed-%s" % (os.path.dirname(f), os.path.basename(f))
+            with open(f, 'rb') as fsrc:
+                with open(backup, 'wb') as fdst:
+                    shutil.copyfileobj(fsrc, fdst)
+                    print("Wrote backup %s" % backup)
+
         # List of arg names to overwrite after loading
         # (some args (incl. overwrite itself) must always be overwritten)
         loaded_args.overwrite = args.overwrite
         loaded_args.cfg_file = args.cfg_file
+        loaded_args.wandb = args.wandb
 
         for argname in args.overwrite:
             parts = argname.split(".")
@@ -429,8 +435,15 @@ def main(args):
 
         if agent.state.optimizer_state_dict:
             optimizer.load_state_dict(agent.state.optimizer_state_dict)
+
             # Need to explicitly set lr after loading state
-            optimizer.param_groups[0]["lr"] = args.learning_rate
+            # When resuming runs, explicitly check lr (it's easy to mess it up)
+            if args.resume and "learning_rate" not in args.overwrite:
+                assert optimizer.param_groups[0]["lr"] == args.learning_rate
+            else:
+                optimizer.param_groups[0]["lr"] = args.learning_rate
+
+        print("Learning rate: %s" % optimizer.param_groups[0]["lr"])
 
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)

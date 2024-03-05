@@ -1,0 +1,8 @@
+---
+group_id: crl
+run_id: crl-mult-sanity2-lr0.0001-fixed
+resume: True
+overwrite: []
+# overwrite: ["learning_rate", "env.term_reward_mult"]
+notes: ~
+out_dir_template: "data/{group_id}/{run_id}"

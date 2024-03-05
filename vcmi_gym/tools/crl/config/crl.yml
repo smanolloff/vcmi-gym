@@ -1,13 +1,13 @@
 ---
 group_id: crl
-run_id: crl-mult-sanity2-lr0.001
+run_id: crl-mult-sanity2-lr0.0001-fixed
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "env.term_reward_mult"]
 
-notes: ~
+notes: "Fixes the original run's wrong LR which was was 1e-5 instead of 1e-4"
 
-agent_load_file: "data/crl/crl-mult-sanity2-lr0.0001/agent-1709634350.pt"
+agent_load_file: "data/crl/crl-mult-sanity2-lr0.0001/agent-1709647911.pt"
 rollouts_total: 10000
 rollouts_per_mapchange: 20
 rollouts_per_log: 1
@@ -27,7 +27,7 @@ num_envs: 8
 #
 # PPO Hyperparams
 #
-learning_rate: 0.001
+learning_rate: 0.0001
 num_steps: 128       # rollout_buffer = num_steps*num_envs
 num_minibatches: 16  # minibatch_size = rollout_buffer/num_minibatches
 update_epochs: 10    # full passes of rollout_buffer

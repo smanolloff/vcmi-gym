@@ -166,6 +166,7 @@ def run(action, cfg, group_id, run_id, model_load_file, iteration, resume, cfgpa
 
             os.environ["WANDB_SILENT"] = "true"
             cfg["wandb"] = True
+            # cfg["wandb"] = False
 
             if group_id is not None:
                 cfg["group_id"] = group_id

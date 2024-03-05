@@ -117,6 +117,10 @@ if [ "$#" -ne 1 ]; then
 fi
 
 cfg=$1
+resume_cfg="vcmi_gym/tools/crl/config/resume.yml"
+
+[ -r "$resume_cfg" ]
+
 group=$(read_cfg ".group_id" "$cfg")
 run=$(read_cfg ".run_id" "$cfg")
 
