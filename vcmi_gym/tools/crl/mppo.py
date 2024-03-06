@@ -81,6 +81,7 @@ class Args:
     max_saves: int = 3
     out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
 
+    weight_decay: float = 0.0
     learning_rate: float = 2.5e-4
     num_envs: int = 4
     num_steps: int = 128
@@ -294,11 +295,13 @@ class Agent(nn.Module):
         return self.critic(self.features_extractor(x))
 
     def get_action_and_value(self, x, mask, action=None):
-        logits = self.actor(self.features_extractor(x))
-        dist = CategoricalMasked(logits=logits, mask=mask)
+        features = self.features_extractor(x)
+        value = self.critic(features)
+        action_logits = self.actor(features)
+        dist = CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), self.get_value(x)
+        return action, dist.log_prob(action), dist.entropy(), value
 
     # Inference (deterministic)
     def predict(self, x, mask):
@@ -438,12 +441,22 @@ def main(args):
 
             # Need to explicitly set lr after loading state
             # When resuming runs, explicitly check lr (it's easy to mess it up)
-            if args.resume and "learning_rate" not in args.overwrite:
-                assert optimizer.param_groups[0]["lr"] == args.learning_rate
+            if args.resume:
+                if "learning_rate" not in args.overwrite:
+                    assert optimizer.param_groups[0]["lr"] == args.learning_rate
+                else:
+                    optimizer.param_groups[0]["lr"] = args.learning_rate
+
+                if "weight_decay" not in args.overwrite:
+                    assert optimizer.param_groups[0]["weight_decay"] == args.weight_decay
+                else:
+                    optimizer.param_groups[0]["weight_decay"] = args.weight_decay
             else:
                 optimizer.param_groups[0]["lr"] = args.learning_rate
+                optimizer.param_groups[0]["weight_decay"] = args.weight_decay
 
         print("Learning rate: %s" % optimizer.param_groups[0]["lr"])
+        print("Weight decay: %s" % optimizer.param_groups[0]["weight_decay"])
 
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
