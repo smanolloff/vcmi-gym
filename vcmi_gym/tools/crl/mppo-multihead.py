@@ -78,7 +78,6 @@ class Args:
     max_saves: int = 3
     out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
 
-    weight_decay: float = 0.0
     learning_rate: float = 2.5e-4
     num_envs: int = 4
     num_steps: int = 128
@@ -94,7 +93,6 @@ class Args:
     max_grad_norm: float = 0.5
     target_kl: float = None
 
-    logparams: dict = field(default_factory=dict)
     cfg_file: str = 'path/to/cfg.yml'
     wandb: bool = True
     seed: int = 42
@@ -109,47 +107,304 @@ class Args:
             self.state = State(**self.state)
 
 
+class Bx1x11x15N_to_Bx165xN(nn.Module):
+    def __init__(self, n):
+        self.n = n
+        super().__init__()
+
+    def forward(self, x):
+        # (B, 1, 11, 15*N) -> (B, N, 11, 15, 1) -> (B, 165, N)
+        return x.unflatten(-1, (15, self.n)) \
+                .permute(0, 4, 2, 3, 1) \
+                .flatten(start_dim=-3) \
+                .permute(0, 2, 1)
+
+
+# See notes/reshape_Bx165xE_to_BxEx11x15.py
+class Bx165xE_to_Ex11x15(nn.Module):
+    def __init__(self, e):
+        self.e = e
+        super().__init__()
+
+    def forward(self, x):
+        # (B, 165, E) -> (B, E, 11, 15)
+        return x.unflatten(1, (11, 15)).permute(0, 3, 1, 2)
+
+
 class Agent(nn.Module):
     def __init__(self, observation_space, action_space, state):
         super().__init__()
 
         self.state = state
 
+        # 1 nonhex action (RETREAT) + 165 hexex*14 actions each
+        assert action_space.n == 1 + (165*14)
+
         assert observation_space.shape[0] == 1
         assert observation_space.shape[1] == 11
         assert observation_space.shape[2] / 56 == 15
 
-        self.features_extractor = nn.Sequential(
+        # Produces hex embeddings
+        self.hex_embedder = nn.Sequential(
             # => (B, 1, 11, 840)
-            common.layer_init(nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56))),
+            Bx1x11x15N_to_Bx165xN(n=56),
+            # => (B, 165, 56)
+            common.layer_init(nn.Linear(56, 128)),
+            nn.LeakyReLU(),
+            # => (B, 165, 128)
+            Bx165xE_to_Ex11x15(e=128),
+            # => (B, 128, 11, 15)
+            common.layer_init(nn.Conv2d(128, 32, kernel_size=5, stride=1, padding=2)),
             nn.BatchNorm2d(32),
             nn.LeakyReLU(),
             # => (B, 32, 11, 15)
-            nn.Flatten(),
-            # => (B, 5280)
-            common.layer_init(nn.Linear(5280, 1024)),
+            common.layer_init(nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            # => (B, 1024)
+            # => (B, 64, 11, 15)
         )
 
-        self.critic = nn.Sequential(
-            common.layer_init(nn.Linear(1024, 1), std=1.0),
+        # Produces a summary embedding
+        self.summary_embedder = nn.Sequential(
+            # => (B, 64, 11, 15)
+            nn.Flatten(),
+            # => (B, 10560)
+            common.layer_init(nn.Linear(10560, 256)),
+            nn.LeakyReLU(),
+            # => (B, 256)
         )
-        self.actor = nn.Sequential(
-            common.layer_init(nn.Linear(1024, action_space.n), std=0.01),
+
+        #
+        # Value head:
+        #
+        # => (B, 256)
+        self.value_net = common.layer_init(nn.Linear(256, 1), std=1.0)
+        # => (B, 1)
+
+        #
+        # Action Head #1: one of 5 actions: WAIT, DEFEND, SHOOT, MOVE, AMOVE
+        #
+        # => (B, 256)
+        self.action1_net = common.layer_init(nn.Linear(256, 5), std=0.01)
+        # => (B, 5)
+
+        #
+        # Action Head #2: one of 165 hexes given hex_embeddings + action
+        #
+        self.action2_net = nn.Sequential(
+            # => (B, 65, 11, 15)
+            common.layer_init(nn.Conv2d(65, 1, kernel_size=1, stride=1, padding=0)),
+            nn.BatchNorm2d(1),
+            nn.LeakyReLU(),
+            # => (B, 1, 11, 15)
+            nn.Flatten(),
+            # => (B, 1, 165)
+            common.layer_init(nn.Linear(165, 1), std=0.01)
         )
+
+        #
+        # Action Head #3: one of 165 hexes given hex_embeddings + action + hex1
+        #
+        self.action3_net = nn.Sequential(
+            # => (B, 66, 11, 15)
+            common.layer_init(nn.Conv2d(66, 1, kernel_size=1, stride=1, padding=0)),
+            nn.BatchNorm2d(1),
+            nn.LeakyReLU(),
+            # => (B, 1, 11, 15)
+            nn.Flatten(),
+            # => (B, 1, 165)
+            common.layer_init(nn.Linear(165, 1), std=0.01)
+        )
+
+    # see notes/concat_B_and_BxNx11x15.py
+    def concat_B_and_BxNx11x15(self, b_action, b_hex_embeddings):
+        assert len(b_action.shape) == 1
+        broadcasted = b_action. \
+            unsqueeze(-1). \
+            unsqueeze(-1). \
+            unsqueeze(-1). \
+            broadcast_to(b_action.shape[0], 1, 11, 15)
+
+        return torch.cat(broadcasted, b_hex_embeddings)
 
     def get_value(self, x):
-        return self.critic(self.features_extractor(x))
+        return self.value_net(self.summary_embedder(self.hex_embedder(x)))
 
-    def get_action_and_value(self, x, mask, action=None):
-        features = self.features_extractor(x)
-        value = self.critic(features)
-        action_logits = self.actor(features)
-        dist = common.CategoricalMasked(logits=action_logits, mask=mask)
-        if action is None:
-            action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), value
+    # XXX: b_mask and b_action are batched, e.g. for 2 batches:
+    #   b_mask = [[<2311 bools>], [<2311 bools]]
+    #   b_action = [<int>, <int>]
+    def get_action_and_value(self, b_obs: np.ndarray, b_mask: np.ndarray, b_action=Optional[torch.Tensor]):
+        b_size = len(b_obs)
+
+        # Per-hex action mask (see notes/mask.txt)
+        def amove_mask(m):
+            # Split the 2311-element mask into 165 chunks (1 chunk per hex)
+            return [any(hexmask[1:]) for hexmask in np.split(m[1:], 165)]
+
+        # must go through np.array first
+        b_mask_shoot = [m[14::14] for m in b_mask]
+        b_mask_move = [m[1::14] for m in b_mask]
+        b_mask_amove = [amove_mask(m) for m in b_mask]
+
+        # When collecting experiences, b_action is None
+        # When updating the policy, b_action is provided
+        need_action = b_action is None
+
+        #
+        # Head 1
+        #
+
+        b_hex_embeddings = self.hex_embedder(torch.as_tensor(b_obs))
+        b_summary_embedding = self.summary_embedder(b_hex_embeddings)
+        b_value = self.value_net(b_summary_embedding)
+
+        def mask_for_action1(i):
+            return [
+                b_mask[i][0],            # WAIT
+                True,                    # DEFEND
+                any(b_mask_shoot[i]),    # SHOOT
+                any(b_mask_move[i]),     # MOVE
+                any(b_mask_amove[i]),    # AMOVE
+            ]
+
+        b_action1_masks = torch.as_tensor([mask_for_action1(i) for i in range(b_size)])
+        b_action1_logits = self.action1_net(b_summary_embedding)
+        b_action1_dist = common.CategoricalMasked(logits=b_action1_logits, mask=b_action1_masks)
+
+        if need_action:
+            b_action1 = b_action1_dist.sample()
+
+        b_action1_log_prob = b_action1_dist.log_prob(b_action1)
+        b_action1_entropy = b_action1_dist.entropy()
+
+        #
+        # Head 2
+        #
+
+        b_hex_embeddings2 = self.concat_B_and_BxNx11x15(b_action1, b_hex_embeddings)
+
+        # action2 is the target hex
+        def mask_for_action2(i):
+            action1 = b_action1[i]
+            return b_mask_shoot[i] if action1 == 0 \
+                else b_mask_move[i] if action1 == 1 \
+                else b_mask_amove[i] if action1 == 2 \
+                else Exception("not supposed to be here")
+
+        b_action2_masks = torch.as_tensor(np.array([mask_for_action2(i) for i in range(b_size)]))
+        b_action2_logits = self.action2_net(b_hex_embeddings2)
+        b_action2_dist = common.CategoricalMasked(logits=b_action2_logits, mask=b_action2_masks)
+
+        if need_action:
+            b_action2 = b_action2_dist.sample()
+
+        b_action2_log_prob = b_action2_dist.log_prob(b_action2)
+        b_action2_entropy = b_action2_dist.entropy()
+
+        #
+        # Head 3
+        #
+
+        b_hex_embeddings3 = self.concat_B_and_BxNx11x15(b_action2, b_hex_embeddings2)
+
+        # Hex offsets for attacking at direction 0..12
+        # Depends if the row is even (offset0) or odd (offset1)
+        # see notes/masks.txt
+        # XXX: indexes MUST correspond to the directions in hexaction.h
+        offsets0 = [-15, -14, 1, 16, 15, -1, 14, -2, -16, -13, 2, 17]
+        offsets1 = [-16, -15, 1, 15, 14, -1, 13, -2, -17, -14, 2, 16]
+
+        # calculate the offsets for each action2 (hex) in the batch:
+        # e.g. b_offsets = [offsets1, offsets0]  (if batch=2)
+        b_offsets = [[
+            offsets0 if (b_action2[i]//15) % 2 == 0 else offsets1
+        ] for i in range(b_size)]
+
+        # action3 is the target hex
+        def mask_for_action3(i: int, action2: int):
+            mask = np.zeros(165, dtype=bool)
+            for offset in b_offsets[i]:
+                hex_target = action2 + offset
+                if hex_target >= 0 and hex_target < len(mask):
+                    mask[hex_target] = True
+
+            return mask
+
+        b_action3_masks = torch.as_tensor(np.array([mask_for_action3(i) for i in range(b_size)]))
+        b_action3_logits = self.action3_net(b_hex_embeddings3)
+        b_action3_dist = common.CategoricalMasked(logits=b_action3_logits, mask=b_action3_masks)
+
+        if need_action:
+            b_action3 = b_action3_dist.sample()
+
+        b_action3_log_prob = b_action3_dist.log_prob(b_action3)
+        b_action3_entropy = b_action3_dist.entropy()
+
+        #
+        # Result
+        #
+
+        def calc_action(i):
+            a1, a2, a3 = b_actions[i]
+
+            if a1 == 0:
+                # WAIT
+                return 0
+            elif a1 == 1:
+                # DEFEND
+                # The 19th HexAttribute is IsActive
+                # (see Battlefield::exportState() in battlefield.cpp)
+                hex = np.where(b_obs[i].flatten()[19::56] == 1)
+                # Defend is just a no-op MOVE (move to the active hex)
+                return 1 + hex*14
+            elif a1 == 2:
+                # SHOOT
+                return 1 + a2*14 + 13
+            elif a1 == 3:
+                # MOVE
+                return 1 + a2*14
+            elif a1 == 4:
+                # AMOVE
+                # find the index of a3 (the target hex) amongst a2's neughbours
+                # this is the "direction" of attack from a2 (the source hex)
+                a2_neighbours = b_offsets[i] + a2
+                direction = np.where(a2_neighbours == a3)[0][0]
+
+                # 0 is MOVE, 1 corresponds direction=0 (see hexaction.h)
+                return 1 + a2*14 + direction + 1
+
+            raise Exception("Should not be here: a1 = %s" % a1)
+
+        if need_action:
+            # b_actions is a List<List<int, 3>, B>
+            # b_action is a List<int, B> (1 int represents a gym discrete action)
+            # Need to reconstruct the integer from the 3 elements
+
+            # 1. Reshape
+            #    [[1, 10], [2, 20], [3, 30]] => [[1, 2, 3], [10, 20, 30]]
+            b_actions = np.transpose([b_action1, b_action2])
+            # 2. Combine the 3-head actions into a single integer
+            #    [[1,2,3], [10,20,30]] => [124, 1631]
+            b_action = torch.as_tensor([calc_action(i) for i in range(b_size)])
+
+        # b_log_probs and b_entropies contain values for each action head
+        # Example:
+        # [
+        #   [b1_a1_logprob, b1_a2_logprob, b1_a3_logprob],  # batch 1
+        #   [b2_a1_logprob, b2_a2_logprob, b2_a3_logprob],  # batch 2
+        # ]
+        # Same applies for b_entropies
+        b_log_probs = np.transpose([b_action1_log_prob, b_action2_log_prob, b_action3_log_prob])
+        b_entropies = np.transpose([b_action1_entropy, b_action2_entropy, b_action3_entropy])
+
+        #
+        # Example return (for batch=2):
+        # b_action = [214, 1631]
+        # b_log_probs = [[-0.41, -0.23, -0.058], [-0.64, -0.01, -0.093]]
+        # b_entropies = [[0.081, 0.31, 0.11], [0.123, 0.714, 0.4]]
+        # b_value = [5.125, 67.11]
+
+        return b_action, b_log_probs, b_entropies, b_value
 
     # Inference (deterministic)
     def predict(self, x, mask):

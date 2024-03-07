@@ -235,6 +235,7 @@ if __name__ == "__main__":
                 print("*** Evaluating agent %s" % agent_load_file)
                 agent = load_agent(agent_file=agent_load_file, run_id=run_id)
                 wandb_init(id=f"eval-{run_id}", group="evaluation")
+                wandb.log({"evaluator/busy": 0})  # commit here as well
                 wandb.log({"agent/num_timesteps": agent.state.global_step}, commit=False)
                 wandb.log({"agent/num_rollouts": agent.state.global_rollout}, commit=False)
                 wandb.log({"evaluator/busy": 1})  # commit here as well
@@ -318,6 +319,8 @@ if __name__ == "__main__":
                 evaluated.append(agent_load_file)
 
                 # XXX: evaluator/busy is only for THIS model
+                # XXX: force "square" angles in wandb with Wall Clock axis
+                wandb.log({"evaluator/busy": 1})  # commit here as well
                 wandb.log({"evaluator/busy": 0})  # commit here as well
 
             if once:

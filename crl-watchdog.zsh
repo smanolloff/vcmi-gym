@@ -103,7 +103,7 @@ trap "handle_sigint" INT
 source .venv/bin/activate
 
 # add timestamps to xtrace output
-export PS4="+[%D{%Y-%m-%d %H:%M:%S}] "
+export PS4="+[%D{%Y-%m-%d %H:%M:%S}]<$$> "
 
 set -eux
 

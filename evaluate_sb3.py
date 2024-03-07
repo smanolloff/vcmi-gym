@@ -163,6 +163,7 @@ if __name__ == "__main__":
                 model = load_model(model_load_file=model_load_file)
                 wandb_init(id=f"eval-{run_id}", group="evaluation")
                 timestamp = int(model_load_file.split("-")[-1][:-4])
+                wandb.log({"evaluator/busy": 0})  # commit here as well
                 wandb.log({"model/timestamp": timestamp}, commit=False)
                 wandb.log({"evaluator/busy": 1})  # commit here as well
 
@@ -204,6 +205,8 @@ if __name__ == "__main__":
                 evaluated.append(model_load_file)
 
                 # XXX: evaluator/busy is only for THIS model
+                # XXX: force "square" angles in wandb with Wall Clock axis
+                wandb.log({"evaluator/busy": 1})  # commit here as well
                 wandb.log({"evaluator/busy": 0})  # commit here as well
 
             if once:
