@@ -26,8 +26,9 @@ from .. import InfoDict
 
 
 class SB3Callback(BaseCallback):
-    def __init__(self, observations_dir=None, success_rate_target=None):
+    def __init__(self, observations_dir=None, success_rate_target=None, wandb_enabled=True):
         super().__init__()
+        self.wandb_enabled = wandb_enabled
 
         if observations_dir:
             print("Will store observations in %s" % observations_dir)
@@ -61,7 +62,8 @@ class SB3Callback(BaseCallback):
             success_rate = safe_mean(self.success_rates)
             if success_rate > self.success_rate_target:
                 self.model.logger.record("is_success", success_rate)
-                wandb.log({"success_rate": success_rate})
+                if self.wandb_enabled:
+                    wandb.log({"success_rate": success_rate})
                 print("Early stopping after %d rollouts due to: success rate > %.2f (%.2f)" % (
                     self.this_env_rollouts,
                     self.success_rate_target,
@@ -128,4 +130,5 @@ class SB3Callback(BaseCallback):
         #     for row in rotated:
         #         wb_table.add_data(*row)
 
-        wandb.log(wdb_log, commit=True)
+        if self.wandb_enabled:
+            wandb.log(wdb_log, commit=True)

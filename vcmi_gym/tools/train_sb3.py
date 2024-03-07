@@ -25,8 +25,6 @@ import wandb
 import copy
 import torch.optim
 import threading
-import os
-import shutil
 
 from stable_baselines3.common import logger
 from stable_baselines3.common.save_util import load_from_zip_file
@@ -36,6 +34,7 @@ from . import common
 from . import sb3_callback
 from .. import InfoDict
 
+WANDB_ENABLED = True
 
 def init_model(
     venv,
@@ -146,6 +145,7 @@ def init_model(
         log = logger.configure(folder=out_dir, format_strings=["tensorboard"])
         model.set_logger(log)
 
+    breakpoint()
     return model
 
 
@@ -200,7 +200,7 @@ def init_model(
 #
 #         self.train()  # update NN
 
-def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run_id, model_file, iteration=0):
+def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run_id, model_file, iteration=0, wrappers=[]):
     mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
     all_maps = glob.glob("%s/%s" % (mappath, mapmask))
     all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
@@ -218,7 +218,8 @@ def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run
     else:
         i = (n_maps * iteration) % len(all_maps)
         new_i = (i + n_maps) % len(all_maps)
-        wandb.log({"map_offset": i}, commit=False)
+        if WANDB_ENABLED:
+            wandb.log({"map_offset": i}, commit=False)
 
         if new_i > i:
             maps = all_maps[i:new_i]
@@ -261,6 +262,7 @@ def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run
         env_creator,
         n_envs=n_envs,
         monitor_kwargs={"info_keywords": InfoDict.ALL_KEYS},
+        wrappers=wrappers,
     )
 
     if framestack > 1:
@@ -308,13 +310,19 @@ def train_sb3(
     config_log,
     opponent_model_dir_pattern,
     success_rate_target,
+    wrappers=[],
 ):
 
     # prevent warnings for action_masks method
     gym.logger.set_level(gym.logger.ERROR)
 
     learning_rate = common.lr_from_schedule(learner_lr_schedule)
-    sb3_cb = sb3_callback.SB3Callback(observations_dir, success_rate_target=success_rate_target)
+    sb3_cb = sb3_callback.SB3Callback(
+        observations_dir,
+        success_rate_target=success_rate_target,
+        wandb_enabled=WANDB_ENABLED
+    )
+
     ep_rew_means = []
     env_cls = getattr(vcmi_gym, env_cls_name)
 
@@ -340,7 +348,7 @@ def train_sb3(
 
     try:
         model = init_model(
-            venv=create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, opponent_model, iteration),
+            venv=create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, opponent_model, iteration, wrappers),  # noqa: E501
             seed=seed,
             features_extractor_load_file=features_extractor_load_file,
             features_extractor_load_file_type=features_extractor_load_file_type,
@@ -361,8 +369,9 @@ def train_sb3(
             out_dir=out_dir,
         )
 
-        wandb.log(config_log, commit=False)
-        wandb.watch(model.policy, log="all")
+        if WANDB_ENABLED:
+            wandb.log(config_log, commit=False)
+            wandb.watch(model.policy, log="all")
 
         metric_log = dict((v, 0) for v in InfoDict.SCALAR_VALUES)
         metric_log["rollout/ep_rew_mean"] = 0
@@ -374,7 +383,9 @@ def train_sb3(
 
         while iteration < iterations:
             print(".", end="", flush=True)
-            wandb.log({"iteration": iteration}, commit=False)
+
+            if WANDB_ENABLED:
+                wandb.log({"iteration": iteration}, commit=False)
 
             if (iteration - start_iteration) > 0:
                 common.save_model(out_dir, model)
@@ -386,7 +397,7 @@ def train_sb3(
                     models = list(common.find_models(opponent_model_dir_pattern).values())
                     opponent_model, = models[0:] or [model.env.opponent_model]
 
-                model.env = create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, opponent_model, iteration)  # noqa: E501
+                model.env = create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize_maps, run_id, opponent_model, iteration, wrappers)  # noqa: E501
                 model.env.reset()
                 sb3_cb.success_rates.clear()
                 sb3_cb.this_env_rollouts = 0
@@ -417,4 +428,83 @@ def train_sb3(
 
             if model.env:
                 model.env.close()
-        wandb.finish(quiet=True)
+
+
+if __name__ == "__main__":
+    WANDB_ENABLED = False
+
+    train_sb3(
+        learner_cls="MPPO",
+        seed=42,
+        run_id="debug-sb3",
+        group_id="debug-sb3",
+        features_extractor_load_file=None,
+        # features_extractor_load_file="TODO",
+        features_extractor_load_file_type="params",
+        features_extractor_freeze=False,
+        model_load_file=None,
+        model_load_update=False,
+        iteration=0,
+        learner_kwargs=dict(
+            batch_size=64,
+            n_epochs=10,
+            gamma=0.8425,
+            gae_lambda=0.8,
+            clip_range=0.4,
+            normalize_advantage=True,
+            ent_coef=0.007,
+            vf_coef=0.6,
+            max_grad_norm=2.5,
+        ),
+        learning_rate=None,
+        learner_lr_schedule="const_0.001",
+        net_arch=[],
+        activation="LeakyReLU",
+        features_extractor=dict(
+            class_name="VcmiFeaturesExtractor",
+            kwargs=dict(
+                layers=[
+                    dict(t="Conv2d", out_channels=32, kernel_size=[1, 56], stride=[1, 56], padding=0),
+                    dict(t="BatchNorm2d", num_features=32),
+                    dict(t="LeakyReLU"),
+                    dict(t="Flatten"),
+                    dict(t="Linear", in_features=5280, out_features=1024),
+                    dict(t="LeakyReLU"),
+                ]
+            )
+        ),
+        lstm={},
+        optimizer=dict(class_name="AdamW", kwargs=dict(eps=1e-5, weight_decay=0)),
+        env_cls_name="VcmiEnv",
+        env_kwargs=dict(
+            max_steps=500,
+            reward_clip_mod=None,
+            reward_dmg_factor=5,
+            vcmi_loglevel_global="error",
+            vcmi_loglevel_ai="error",
+            vcmienv_loglevel="WARN",
+            consecutive_error_reward_factor=-1,
+            sparse_info=True,
+            step_reward_mult=1,
+            term_reward_mult=0,
+        ),
+        mapmask="ai/P1.vmap",
+        randomize_maps=False,
+        n_global_steps_max=4,
+        rollouts_total=1000000,
+        rollouts_per_iteration=1000,
+        rollouts_per_log=1000,
+        n_envs=1,
+        framestack=1,
+        save_every=2000000000,  # greater than time.time()
+        max_saves=3,
+        out_dir="data/debug-sb3/debug-sb3",
+        observations_dir=None,
+        log_tensorboard=False,
+        progress_bar=False,
+        reset_num_timesteps=True,
+        config_log={},
+        opponent_model_dir_pattern=None,
+        success_rate_target=None,
+        wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
+    )

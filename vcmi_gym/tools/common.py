@@ -272,9 +272,14 @@ def maybe_save(t, model, out_dir, save_every, max_saves):
     return now
 
 
-def make_vec_env_parallel(j, env_creator, n_envs, monitor_kwargs):
+def make_vec_env_parallel(j, env_creator, n_envs, monitor_kwargs, wrappers=[]):
     def initenv():
         env = env_creator()
+        for wrapper in wrappers:
+            wrapper_mod = importlib.import_module(wrapper["module"])
+            wrapper_cls = getattr(wrapper_mod, wrapper["cls"])
+            env = wrapper_cls(env, **wrapper.get("kwargs", {}))
+
         env = Monitor(env, filename=None, **monitor_kwargs)
         return env
 

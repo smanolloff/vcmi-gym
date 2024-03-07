@@ -8,6 +8,7 @@ import os
 import time
 import re
 import shutil
+import importlib
 import numpy as np
 
 from dataclasses import asdict
@@ -88,7 +89,14 @@ def create_venv(env_cls, args, writer, map_swaps):
             print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs))
             state["n"] += 1
 
-        return env_cls(**env_kwargs)
+        res = env_cls(**env_kwargs)
+
+        for wrapper in args.env_wrappers:
+            wrapper_mod = importlib.import_module(wrapper["module"])
+            wrapper_cls = getattr(wrapper_mod, wrapper["cls"])
+            res = wrapper_cls(res, **wrapper.get("kwargs", {}))
+
+        return res
 
     if args.num_envs > 1:
         # I don't remember anymore, but there were issues if max_workers>8
@@ -269,12 +277,18 @@ def init_optimizer(args, agent, optimizer):
     if agent.state.optimizer_state_dict:
         optimizer.load_state_dict(agent.state.optimizer_state_dict)
 
-        # Need to explicitly set lr after loading state
-        # When resuming runs, explicitly check lr (it's easy to mess it up)
-        if args.resume and "learning_rate" not in args.overwrite:
-            assert optimizer.param_groups[0]["lr"] == args.learning_rate
-        else:
-            optimizer.param_groups[0]["lr"] = args.learning_rate
+    # Need to explicitly set lr after loading state
+    # When resuming runs, explicitly check lr (it's easy to mess it up)
+    if args.resume and "learning_rate" not in args.overwrite:
+        assert optimizer.param_groups[0]["lr"] == args.learning_rate
+    else:
+        optimizer.param_groups[0]["lr"] = args.learning_rate
+
+    if args.resume and "weight_decay" not in args.overwrite:
+        assert optimizer.param_groups[0]["weight_decay"] == args.weight_decay
+    else:
+        optimizer.param_groups[0]["weight_decay"] = args.weight_decay
 
     print("Learning rate: %s" % optimizer.param_groups[0]["lr"])
+    print("Weight decay: %s" % optimizer.param_groups[0]["weight_decay"])
     return optimizer

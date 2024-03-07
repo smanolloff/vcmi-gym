@@ -27,7 +27,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
-import tyro
+# import tyro
 from torch.utils.tensorboard import SummaryWriter
 
 from vcmi_gym import VcmiEnv
@@ -88,7 +88,7 @@ class Args:
     update_epochs: int = 4
     norm_adv: bool = True
     clip_coef: float = 0.2
-    clip_vloss: bool = True
+    clip_vloss: bool = False
     ent_coef: float = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
@@ -100,6 +100,7 @@ class Args:
     seed: int = 42
 
     env: EnvArgs = EnvArgs()
+    env_wrappers: list = field(default_factory=list)
     state: State = State()
 
     def __post_init__(self):
@@ -209,6 +210,7 @@ def main(args):
         # print("Agent state: %s" % asdict(agent.state))
 
         optimizer = common.init_optimizer(args, agent, optimizer)
+        breakpoint()
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
 
@@ -411,6 +413,61 @@ def main(args):
         writer.close()
 
 
+# if __name__ == "__main__":
+#     args = tyro.cli(Args)
+#     main(args)
+
+
 if __name__ == "__main__":
-    args = tyro.cli(Args)
+    args = Args(
+        "debug-crl",
+        "debug-crl",
+        resume=False,
+        overwrite=[],
+        notes=None,
+        # agent_load_file="TODO",
+        rollouts_total=1000000,
+        rollouts_per_mapchange=1000,
+        rollouts_per_log=1000,
+        opponent_load_file=None,
+        success_rate_target=None,
+        mapmask="ai/P1.vmap",
+        randomize_maps=False,
+        save_every=2000000000,  # greater than time.time()
+        max_saves=0,
+        out_dir_template="data/debug-crl/debug-crl",
+        weight_decay=0.0,
+        learning_rate=0.001,
+        num_envs=1,
+        num_steps=4,
+        gamma=0.8,
+        gae_lambda=0.8,
+        num_minibatches=2,
+        update_epochs=2,
+        norm_adv=True,
+        clip_coef=0.4,
+        clip_vloss=False,
+        ent_coef=0.01,
+        vf_coef=0.5,
+        max_grad_norm=0.5,
+        target_kl=None,
+        logparams={},
+        cfg_file="/path/to/cfg",
+        wandb=False,
+        seed=42,
+        env=EnvArgs(
+            max_steps=500,
+            reward_clip_mod=None,
+            reward_dmg_factor=5,
+            vcmi_loglevel_global="error",
+            vcmi_loglevel_ai="error",
+            vcmienv_loglevel="WARN",
+            consecutive_error_reward_factor=-1,
+            sparse_info=True,
+            step_reward_mult=1,
+            term_reward_mult=0,
+        ),
+        env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
+    )
+
     main(args)
