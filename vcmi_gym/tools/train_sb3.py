@@ -34,7 +34,8 @@ from . import common
 from . import sb3_callback
 from .. import InfoDict
 
-WANDB_ENABLED = True
+DEBUGGING = False
+
 
 def init_model(
     venv,
@@ -85,6 +86,8 @@ def init_model(
         print("Learner kwargs: %s" % alg_kwargs)
         print("Loading %s model from %s" % (alg.__name__, model_load_file))
         model = alg.load(model_load_file, env=venv, **alg_kwargs)
+        if seed:
+            model.set_random_seed(seed)
     else:
         policy_kwargs = {
             "net_arch": net_arch,
@@ -145,7 +148,6 @@ def init_model(
         log = logger.configure(folder=out_dir, format_strings=["tensorboard"])
         model.set_logger(log)
 
-    breakpoint()
     return model
 
 
@@ -218,7 +220,7 @@ def create_venv(n_envs, env_cls, framestack, env_kwargs, mapmask, randomize, run
     else:
         i = (n_maps * iteration) % len(all_maps)
         new_i = (i + n_maps) % len(all_maps)
-        if WANDB_ENABLED:
+        if not DEBUGGING:
             wandb.log({"map_offset": i}, commit=False)
 
         if new_i > i:
@@ -320,7 +322,7 @@ def train_sb3(
     sb3_cb = sb3_callback.SB3Callback(
         observations_dir,
         success_rate_target=success_rate_target,
-        wandb_enabled=WANDB_ENABLED
+        debugging=DEBUGGING
     )
 
     ep_rew_means = []
@@ -369,14 +371,14 @@ def train_sb3(
             out_dir=out_dir,
         )
 
-        if WANDB_ENABLED:
+        if not DEBUGGING:
             wandb.log(config_log, commit=False)
             wandb.watch(model.policy, log="all")
 
-        metric_log = dict((v, 0) for v in InfoDict.SCALAR_VALUES)
-        metric_log["rollout/ep_rew_mean"] = 0
-        metric_log["rollout/ep_len_mean"] = 0
-        model.logger.record("config", logger.HParam(config_log, metric_log))
+        # metric_log = dict((v, 0) for v in InfoDict.SCALAR_VALUES)
+        # metric_log["rollout/ep_rew_mean"] = 0
+        # metric_log["rollout/ep_len_mean"] = 0
+        # model.logger.record("config", logger.HParam(config_log, metric_log))
 
         steps_per_rollout = model.train_freq.frequency if learner_cls in ["QRDQN", "MQRDQN"] else model.n_steps
         total_timesteps_per_iteration = rollouts_per_iteration * steps_per_rollout * n_envs
@@ -384,7 +386,7 @@ def train_sb3(
         while iteration < iterations:
             print(".", end="", flush=True)
 
-            if WANDB_ENABLED:
+            if not DEBUGGING:
                 wandb.log({"iteration": iteration}, commit=False)
 
             if (iteration - start_iteration) > 0:
@@ -431,7 +433,7 @@ def train_sb3(
 
 
 if __name__ == "__main__":
-    WANDB_ENABLED = False
+    DEBUGGING = True
 
     train_sb3(
         learner_cls="MPPO",
@@ -439,22 +441,22 @@ if __name__ == "__main__":
         run_id="debug-sb3",
         group_id="debug-sb3",
         features_extractor_load_file=None,
-        # features_extractor_load_file="TODO",
         features_extractor_load_file_type="params",
         features_extractor_freeze=False,
-        model_load_file=None,
+        model_load_file="debugging/session2/model-sb3.pt",
+        # model_load_file=None,
         model_load_update=False,
         iteration=0,
         learner_kwargs=dict(
-            batch_size=64,
-            n_epochs=10,
-            gamma=0.8425,
+            batch_size=2,
+            n_epochs=2,
+            gamma=0.8,
             gae_lambda=0.8,
             clip_range=0.4,
             normalize_advantage=True,
-            ent_coef=0.007,
-            vf_coef=0.6,
-            max_grad_norm=2.5,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
         ),
         learning_rate=None,
         learner_lr_schedule="const_0.001",

@@ -1,11 +1,11 @@
 ---
 group_id: crl
-run_id: crl-mult-sanity2-3
-resume: True
-overwrite: ["learning_rate"]
+run_id: crl-mult-sanity2-sb3fix
+resume: False
+overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
 
-notes: "first 'clone' bricked at -50K net value, attempt #2..."
+notes: "this contains sets the network in 'eval' mode during experience collection"
 
 agent_load_file: ~
 # agent_load_file: "data/crl/crl-mult-sanity2-lr0.0001-wd0/agent-1709801900.pt"
@@ -29,7 +29,7 @@ num_envs: 8
 # PPO Hyperparams
 #
 weight_decay: 0
-learning_rate: 0.0001
+learning_rate: 0.00126
 num_steps: 128       # rollout_buffer = num_steps*num_envs
 num_minibatches: 16  # minibatch_size = rollout_buffer/num_minibatches
 update_epochs: 10    # full passes of rollout_buffer
@@ -40,7 +40,7 @@ clip_coef: 0.4
 clip_vloss: false
 ent_coef: 0.007
 vf_coef: 0.6
-max_grad_norm: 0.5
+max_grad_norm: 2.5
 target_kl: ~
 
 env:

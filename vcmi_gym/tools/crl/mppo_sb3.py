@@ -35,6 +35,38 @@ from vcmi_gym import VcmiEnv
 from . import common
 
 
+class CategoricalMasked(torch.distributions.categorical.Categorical):
+    def __init__(self, logits: torch.Tensor, mask: torch.Tensor):
+        assert mask is not None
+        self.mask = mask
+        self.batch, self.nb_action = logits.size()
+        # self.mask_value = torch.tensor(torch.finfo(logits.dtype).min, dtype=logits.dtype)
+        self.mask_value = torch.tensor(-1e8, dtype=logits.dtype)
+        logits = torch.where(self.mask, logits, self.mask_value)
+        super().__init__(logits=logits)
+
+    def entropy(self):
+        # Highly negative logits don't result in 0 probs, so we must replace
+        # with 0s to ensure 0 contribution to the distribution's entropy
+        p_log_p = self.logits * self.probs
+        p_log_p = torch.where(self.mask, p_log_p, torch.tensor(0, dtype=p_log_p.dtype, device=p_log_p.device))
+        return -p_log_p.sum(-1)
+
+
+def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+    torch.nn.init.orthogonal_(layer.weight, std)
+    torch.nn.init.constant_(layer.bias, bias_const)
+    return layer
+
+nn.init.orthogonal_(self.features_extractor, gain=np.sqrt(2))
+nn.init.orthogonal_(self.mlp_extractor, gain=np.sqrt(2))
+nn.init.orthogonal_(self.action_net, gain=0.01)
+nn.init.orthogonal_(self.value_net, gain=1)
+
+if module.bias is not None:
+    module.bias.data.fill_(0.0)
+
+
 @dataclass
 class EnvArgs:
     max_steps: int = 500
@@ -120,25 +152,29 @@ class Agent(nn.Module):
         assert observation_space.shape[1] == 11
         assert observation_space.shape[2] / 56 == 15
 
+        def layer_init(mod, gain):
+            nn.init.orthogonal_(mod, gain=gain)
+            nn.init.constant_(mod.bias, 0.0)
+
         self.features_extractor = nn.Sequential(
             # => (B, 1, 11, 840)
-            common.layer_init(nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56))),
+            nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56)),
             nn.BatchNorm2d(32),
             nn.LeakyReLU(),
             # => (B, 32, 11, 15)
             nn.Flatten(),
             # => (B, 5280)
-            common.layer_init(nn.Linear(5280, 1024)),
+            nn.Linear(5280, 1024),
             nn.LeakyReLU(),
             # => (B, 1024)
         )
 
-        self.critic = nn.Sequential(
-            common.layer_init(nn.Linear(1024, 1), std=1.0),
-        )
-        self.actor = nn.Sequential(
-            common.layer_init(nn.Linear(1024, action_space.n), std=0.01),
-        )
+        self.critic = nn.Linear(1024, 1)
+        self.actor = nn.Linear(1024, action_space.n)
+
+        layer_init(self.features_extractor, gain=np.sqrt(2))
+        layer_init(self.critic, gain=1.0)
+        layer_init(self.actor, gain=0.01)
 
     def get_value(self, x):
         return self.critic(self.features_extractor(x))
@@ -147,7 +183,8 @@ class Agent(nn.Module):
         features = self.features_extractor(x)
         value = self.critic(features)
         action_logits = self.actor(features)
-        dist = common.CategoricalMasked(logits=action_logits, mask=mask)
+        # dist = common.CategoricalMasked(logits=action_logits, mask=mask)
+        dist = CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), value
@@ -156,7 +193,8 @@ class Agent(nn.Module):
     def predict(self, x, mask):
         with torch.no_grad():
             logits = self.actor(self.features_extractor(x))
-            dist = common.CategoricalMasked(logits=logits, mask=mask)
+            # dist = common.CategoricalMasked(logits=logits, mask=mask)
+            dist = CategoricalMasked(logits=logits, mask=mask)
             return torch.argmax(dist.probs, dim=1).cpu().numpy()
 
 
@@ -235,12 +273,13 @@ def main(args):
         assert start_rollout < args.rollouts_total
 
         for rollout in range(start_rollout, args.rollouts_total + 1):
+            # XXX SIMO: use eval() during experience collection as in SB3
+            agent.eval()
+
             agent.state.global_rollout = rollout
             rollout_start_time = time.time()
             rollout_start_step = agent.state.global_step
 
-            # XXX: eval during experience collection
-            agent.eval()
             for step in range(0, args.num_steps):
                 agent.state.global_step += args.num_envs
                 obs[step] = next_obs
@@ -261,6 +300,9 @@ def main(args):
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
+                # XXX SIMO: SB3 bootstraps here in case of timeout
+                # https://github.com/DLR-RM/stable-baselines3/pull/658
+                #
                 # See notes/gym_vector.txt
                 for final_info, has_final_info in zip(infos.get("final_info", []), infos.get("_final_info", [])):
                     # "final_info" must be None if "has_final_info" is False
@@ -294,12 +336,12 @@ def main(args):
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
 
+            # XXX SIMO SIMO: use train() during optimization as in SB3
+            agent.train()
+
             # Optimizing the policy and value network
             b_inds = np.arange(batch_size)
             clipfracs = []
-
-            # XXX: train during optimization
-            agent.train()
             for epoch in range(args.update_epochs):
                 np.random.shuffle(b_inds)
                 for start in range(0, batch_size, minibatch_size):
@@ -342,7 +384,9 @@ def main(args):
                         v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                         v_loss = 0.5 * v_loss_max.mean()
                     else:
-                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                        # v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                        # XXX: SIMO: don't multiply by 0.5, as in SB3
+                        v_loss = ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                     entropy_loss = entropy.mean()
                     loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
@@ -429,7 +473,7 @@ if __name__ == "__main__":
         resume=False,
         overwrite=[],
         notes=None,
-        agent_load_file="debugging/crl-agent.pt",
+        agent_load_file="debugging/session2/model-crl.pt",
         rollouts_total=1000000,
         rollouts_per_mapchange=1000,
         rollouts_per_log=1000,

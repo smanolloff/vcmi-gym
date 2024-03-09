@@ -1,0 +1,69 @@
+
+>>> [torch.equal(sb3_fe_parameters1[k], crl_fe_parameters1[k]) for k in sb3_fe_parameters1.keys()]
+[True, True, True, True, True, True]
+>>> [torch.equal(sb3_actor_parameters1[k], crl_actor_parameters1[k]) for k in sb3_actor_parameters1.keys()]
+[True, True]
+>>> [torch.equal(sb3_critic_parameters1[k], crl_critic_parameters1[k]) for k in sb3_critic_parameters1.keys()]
+[True, True]
+
+
+###### OK
+obs
+actions
+masks
+parameters (fe, actor, critic)
+values
+logprob
+entropy
+
+###### NOT OK
+# losses
+tensor(2.4085e+09, grad_fn=<AddBackward0>) # sb3
+tensor(1.5738e+09, grad_fn=<AddBackward0>) # crl
+
+# ratio
+tensor([1.0010, 1.0037], grad_fn=<ExpBackward0>)  # sb3
+tensor([1.0015, 0.9999], grad_fn=<ExpBackward0>)  # crl
+
+# old_log_prob
+tensor([-3.8283, -3.7630])  # sb3 rollout_data.old_log_prob
+tensor([-3.8288, -3.7591])  # crl b_logprobs[mb_inds]
+
+# output of features extractor at step 1
+tensor([[ 0.2076, -0.0021,  1.2733,  ..., -0.0021, -0.0030, -0.0098]])  # crl
+tensor([[ 0.1006,  0.0695,  0.1011,  ...,  0.2054, -0.0003, -0.0047]])  # sb3
+
+Turns out named_parameters() are equal, but state_dict() are not
+-- maybe due to network init differences
+
+## Init sb3:
+            module_gains = {
+                self.features_extractor: np.sqrt(2),
+                self.mlp_extractor: np.sqrt(2),
+                self.action_net: 0.01,
+                self.value_net: 1,
+            }
+            if not self.share_features_extractor:
+                # Note(antonin): this is to keep SB3 results
+                # consistent, see GH#1148
+                del module_gains[self.features_extractor]
+                module_gains[self.pi_features_extractor] = np.sqrt(2)
+                module_gains[self.vf_features_extractor] = np.sqrt(2)
+
+            for module, gain in module_gains.items():
+                module.apply(partial(self.init_weights, gain=gain))
+
+## Init crl:
+
+      def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+          torch.nn.init.orthogonal_(layer.weight, std)
+          torch.nn.init.constant_(layer.bias, bias_const)
+
+
+###################### TODO
+###################### check layer init differences
+
+I will start session2 by loading the nets from the same file
+(to eliminate layer init stuff)
+and to see if there is any difference in the algo logic itself
+
