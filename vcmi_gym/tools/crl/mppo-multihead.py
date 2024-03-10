@@ -370,7 +370,7 @@ class Agent(nn.Module):
                 a2_neighbours = b_offsets[i] + a2
                 direction = np.where(a2_neighbours == a3)[0][0]
 
-                # 0 is MOVE, 1 corresponds direction=0 (see hexaction.h)
+                # 0 is MOVE, 1 corresponds to direction=0 (see hexaction.h)
                 return 1 + a2*14 + direction + 1
 
             raise Exception("Should not be here: a1 = %s" % a1)
@@ -382,7 +382,7 @@ class Agent(nn.Module):
 
             # 1. Reshape
             #    [[1, 10], [2, 20], [3, 30]] => [[1, 2, 3], [10, 20, 30]]
-            b_actions = np.transpose([b_action1, b_action2])
+            b_actions = np.transpose([b_action1, b_action2, b_action3])
             # 2. Combine the 3-head actions into a single integer
             #    [[1,2,3], [10,20,30]] => [124, 1631]
             b_action = torch.as_tensor([calc_action(i) for i in range(b_size)])

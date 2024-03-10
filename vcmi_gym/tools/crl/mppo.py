@@ -122,23 +122,23 @@ class Agent(nn.Module):
 
         self.features_extractor = nn.Sequential(
             # => (B, 1, 11, 840)
-            common.layer_init(nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56))),
+            nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56)),
             nn.BatchNorm2d(32),
             nn.LeakyReLU(),
             # => (B, 32, 11, 15)
             nn.Flatten(),
             # => (B, 5280)
-            common.layer_init(nn.Linear(5280, 1024)),
+            nn.Linear(5280, 1024),
             nn.LeakyReLU(),
             # => (B, 1024)
         )
 
-        self.critic = nn.Sequential(
-            common.layer_init(nn.Linear(1024, 1), std=1.0),
-        )
-        self.actor = nn.Sequential(
-            common.layer_init(nn.Linear(1024, action_space.n), std=0.01),
-        )
+        self.critic = nn.Linear(1024, 1)
+        self.actor = nn.Linear(1024, action_space.n)
+
+        common.layer_init(self.features_extractor)
+        common.layer_init(self.critic, gain=0.01)
+        common.layer_init(self.actor, gain=1)
 
     def get_value(self, x):
         return self.critic(self.features_extractor(x))
@@ -261,6 +261,9 @@ def main(args):
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
+                # XXX SIMO: SB3 bootstraps here in case of a truncated episode
+                # https://github.com/DLR-RM/stable-baselines3/pull/658
+
                 # See notes/gym_vector.txt
                 for final_info, has_final_info in zip(infos.get("final_info", []), infos.get("_final_info", [])):
                     # "final_info" must be None if "has_final_info" is False
@@ -342,6 +345,8 @@ def main(args):
                         v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                         v_loss = 0.5 * v_loss_max.mean()
                     else:
+                        # XXX: SIMO: SB3 does not multiply by 0.5 here
+                        #            (ie. SB3's vf_coef is essentially x2)
                         v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
                     entropy_loss = entropy.mean()
