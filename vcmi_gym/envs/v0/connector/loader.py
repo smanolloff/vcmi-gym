@@ -16,6 +16,7 @@
 
 from sb3_contrib import MaskablePPO
 # from sb3_contrib import QRDQN
+import torch
 import connexport
 
 
@@ -38,7 +39,31 @@ class Loader:
                 obs.reshape(OBS_SHAPE),
                 action_masks=actmasks[ACTION_OFFSET:]
             )
-            return action + ACTION_OFFSET
+
+            res = action + ACTION_OFFSET
+            print("MPPO Model predicting: %s" % res)
+            return res
+
+    # # CRL version (untested)
+    # class MPPO:
+    #     def __init__(self, file):
+    #         try:
+    #             self.model = torch.load(file)
+    #         except Exception as e:
+    #             print("MPPO Load Error: %s" % repr(e))
+    #             raise
+    #         # self.obs = np.ndarray((2310,), dtype=np.float32)
+    #         # self.actmasks = np.ndarray((1652,), dtype=np.bool)
+
+    #     def predict(self, obs, actmasks):
+    #         # np.copyto(self.obs, obs)
+    #         # np.copyto(self.actmasks, actmasks)
+    #         action, _states = self.model.predict(
+    #             torch.as_tensor(obs).unsqueeze(0),
+    #             action_masks=torch.as_tensor(actmasks[ACTION_OFFSET:])
+    #         )
+    #         print("PREDICTING.... %s" % action + ACTION_OFFSET)
+    #         return action + ACTION_OFFSET
 
         # #
         # # QRDQN

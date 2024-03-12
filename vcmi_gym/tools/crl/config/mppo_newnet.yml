@@ -1,27 +1,24 @@
 ---
 group_id: crl
-run_id: clone-BattleAI
+run_id: clone-fc1024-newnet
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
 
-notes: ""
+notes: "use no_grad for old part of FE to update only the new one..."
 
 # agent_load_file: ~
-agent_load_file: "data/crl/mult-sanity-clone2/agent-1710255933.pt"
+agent_load_file: "data/sparse-rewards/mult-sanity2-lr0.0001-mgn0.5-e0-1709945944/crl-clone-fc1024-1710147480.pt"
 rollouts_total: 10000
 rollouts_per_mapchange: 20
 rollouts_per_log: 1
+opponent_load_file: ~
 success_rate_target: ~
 mapmask: "ai/generated/B*.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 max_saves: 3
 out_dir_template: "data/{group_id}/{run_id}"
-
-# SBM = StupidAI, BattleAI, MMAI_MODEL
-opponent_sbm_probs: [0.0, 1.0, 0.0]
-opponent_load_file: ~
 
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):

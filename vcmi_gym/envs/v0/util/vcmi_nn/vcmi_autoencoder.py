@@ -1,10 +1,35 @@
+# =============================================================================
+# Copyright 2024 Simeon Manolov <s.manolloff@gmail.com>.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# =============================================================================
+
 import torch
 import torch.optim as optim
+from torch import nn
 import glob
 import numpy as np
 from datetime import datetime
 from collections import deque
 from statistics import mean
+
+from vcmi_gym.tools.crl.mppo_heads import (
+    Bx1x11x15N_to_Bx165xN,
+    Bx165xE_to_Ex11x15
+)
+
+from vcmi_gym.tools.crl.common import layer_init
+
 
 TRAIN_DECODER_ONLY = False
 
@@ -32,123 +57,45 @@ class VcmiAutoencoder(torch.nn.Module):
         super(VcmiAutoencoder, self).__init__()
 
         # Input dim:
-        # (B, Z, Y, X) = (B, 1, 11, 225)
-        # B=batch size
-        # Z=n_channels
+        # => (B, 1, 11, 840)
 
-        self.encoder = torch.nn.Sequential(
-            # <4>
-            # => (B, 1, 11, 225)
-            torch.nn.Conv2d(1, 64, kernel_size=(1, 15), stride=(1, 15)),
+        self.encoder = layer_init(nn.Sequential(
+            # => (B, 1, 11, 840)
+            Bx1x11x15N_to_Bx165xN(n=56),
+            # => (B, 165, 56)
+            nn.Linear(56, 32),
+            nn.LeakyReLU(),
+            # => (B, 165, 32)
+            Bx165xE_to_Ex11x15(e=32),
+            # => (B, 32, 11, 15)
+            nn.Conv2d(32, 32, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+            # => (B, 32, 11, 15)
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+            # => (B, 32, 11, 15)
+        ))
+
+        self.id = "mppo-heads"
+
+        self.decoder = layer_init(torch.nn.Sequential(
+            # => (B, 32, 11, 15)
+            torch.nn.ConvTranspose2d(32, 32, kernel_size=3, stride=1, padding=1),
             torch.nn.LeakyReLU(),
-            # => (B, 64, 11, 15)
-            torch.nn.Conv2d(64, 1, kernel_size=1, stride=1, padding=0),
-            torch.nn.LeakyReLU(),
-            # => (B, 1, 11, 15)
-            # </4>
-
-            # # <3>
-            # # => (B, 1, 11, 225)
-            # torch.nn.Flatten(),  # by default this flattens dims 1..-1 (ie. keeps B)
-            # # => (B, 2475)
-            # torch.nn.Linear(2475, 64),
-            # torch.nn.LeakyReLU()
-            # # </3>
-
-            # # <2>
-            # # => (B, 1, 11, 225)
-            # torch.nn.Conv2d(1, 32, kernel_size=(1, 15), stride=(1, 15)),
-            # torch.nn.BatchNorm2d(num_features=32),
-            # torch.nn.LeakyReLU(),
-            # # torch.nn.Dropout2d(p=0.25, inplace=True),
-            # # => (B, 32, 11, 15)
-            # torch.nn.Flatten(),  # by default this flattens dims 1..-1 (ie. keeps B)
-            # # => (B, 5280)
-            # torch.nn.Linear(5280, 64),  # 5280 = 32*15*11
-            # torch.nn.LeakyReLU()
-            # # </2>
-
-            # # <1>
-            # # => (B, 1, 11, 225)
-            # torch.nn.Conv2d(1, 32, kernel_size=(1, 15), stride=(1, 15)),
-            # torch.nn.BatchNorm2d(num_features=32),
-            # torch.nn.LeakyReLU(),
-            # # torch.nn.Dropout2d(p=0.25, inplace=True),
-            # # # => (B, 32, 11, 15)
-            # torch.nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=0),
-            # torch.nn.BatchNorm2d(num_features=64),
-            # torch.nn.LeakyReLU(),
-            # # torch.nn.Dropout2d(p=0.25, inplace=True),
-            # # => (B, 64, 5, 7)
-            # torch.nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=0),
-            # torch.nn.BatchNorm2d(num_features=64),
-            # torch.nn.LeakyReLU(),
-            # # torch.nn.Dropout2d(p=0.25, inplace=True),
-            # # => (B, 64, 2, 3)
-            # torch.nn.Flatten(),  # by default this flattens dims 1..-1 (ie. keeps B)
-            # # => (B, 384)
-            # torch.nn.Linear(384, 64),  # 5280 = 32*15*11
-            # torch.nn.LeakyReLU()
-            # # # => (B, 1024)
-            # # </1>
-        )
-
-        # self.id = "l1-bn-a-do-f5280"
-        # self.id = "l0-f64"
-        self.id = "l2-bn-f1_11_15"
-
-        self.decoder = torch.nn.Sequential(
-            # <4>
-            # => (B, 1, 11, 15)
-            torch.nn.ConvTranspose2d(1, 64, kernel_size=1, stride=1, padding=0),
-            torch.nn.LeakyReLU(),
-            # => (B, 64, 11, 15)
-            torch.nn.ConvTranspose2d(64, 1, kernel_size=(1, 15), stride=(1, 15)),
-            # => (B, 1, 11, 225)
-            # </4>
-
-            # # <3>
-            # # => (B, 64)
-            # torch.nn.Linear(64, 2475),
-            # # => (B, 384)
-            # torch.nn.Unflatten(1, (1, 11, 225)),
-            # # </3>
-
-            # # <2>
-            # # => (B, 64)
-            # torch.nn.Linear(64, 5280),
-            # torch.nn.LeakyReLU(),
-            # # => (B, 5280)
-            # torch.nn.Unflatten(1, (32, 11, 15)),
-            # # => (B, 32, 11, 15)
-            # torch.nn.ConvTranspose2d(32, 1, kernel_size=(1, 15), stride=(1, 15)),
-            # # => (B, 1, 11, 225)
-            # # </2>
-
-            # # <1>
-            # # => (B, 64)
-            # torch.nn.Linear(64, 384),
-            # torch.nn.LeakyReLU(),
-            # # => (B, 384)
-            # torch.nn.Unflatten(1, (64, 2, 3)),
-            # # => (B, 64, 3, 2)
-            # torch.nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2, padding=0),
-            # torch.nn.BatchNorm2d(num_features=64),
-            # torch.nn.LeakyReLU(),
-            # # torch.nn.Dropout2d(p=0.25, inplace=True),
-            # # => (B, 64, 5, 7)
-            # torch.nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=0),
-            # torch.nn.BatchNorm2d(num_features=32),
-            # torch.nn.LeakyReLU(),
-            # # torch.nn.Dropout2d(p=0.25, inplace=True),
-            # # => (B, 64, 11, 15)
-            # torch.nn.ConvTranspose2d(32, 1, kernel_size=(1, 15), stride=(1, 15)),
-            # # torch.nn.BatchNorm2d(num_features=1),
-            # # => (B, 1, 11, 225)
-            # # </1>
-
-            torch.nn.Sigmoid()
-        )
+            # => (B, 32, 11, 15)
+            torch.nn.ConvTranspose2d(32, 32, kernel_size=5, stride=1, padding=2),
+            nn.LeakyReLU(),
+            # => (B, 32, 11, 15)
+            Ex11x15_to_Bx165xE(e=32),  # TODO
+            # => (B, 165, 32)
+            nn.Linear(32, 56),
+            # torch.nn.Sigmoid()
+            # => (B, 165, 56)
+            Bx165xN_to_Bx1x11x15N(n=56),  # TODO
+            # => (B, 1, 11, 840)
+        ))
 
     def forward(self, x):
         e = self.encoder(x)

@@ -19,7 +19,6 @@
 import os
 import random
 import time
-import shutil
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -71,6 +70,7 @@ class Args:
     rollouts_total: int = 10000
     rollouts_per_mapchange: int = 20
     rollouts_per_log: int = 1
+    opponent_load_file: Optional[str] = None
     success_rate_target: Optional[float] = None
     mapmask: str = "ai/generated/B*.vmap"
     randomize_maps: bool = False
@@ -78,8 +78,6 @@ class Args:
     max_saves: int = 3
     out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
 
-    opponent_load_file: Optional[str] = None
-    opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
     weight_decay: float = 0.0
     learning_rate: float = 2.5e-4
     num_envs: int = 4
@@ -112,11 +110,34 @@ class Args:
             self.state = State(**self.state)
 
 
-class SelfAttention(nn.MultiheadAttention):
+class Bx1x11x15N_to_Bx165xN(nn.Module):
+    def __init__(self, n):
+        self.n = n
+        super().__init__()
+
     def forward(self, x):
-        # TODO: attn_mask
-        res, _weights = super().forward(x, x, x, need_weights=False, attn_mask=None)
-        return res
+        # (B, 1, 11, 15*N) -> (B, N, 11, 15, 1) -> (B, 165, N)
+        return x.unflatten(-1, (15, self.n)) \
+                .permute(0, 4, 2, 3, 1) \
+                .flatten(start_dim=-3) \
+                .permute(0, 2, 1)
+
+
+# See notes/reshape_Bx165xE_to_BxEx11x15.py
+class Bx165xE_to_Ex11x15(nn.Module):
+    def __init__(self, e):
+        self.e = e
+        super().__init__()
+
+    def forward(self, x):
+        # (B, 165, E) -> (B, E, 11, 15)
+        return x.unflatten(1, (11, 15)).permute(0, 3, 1, 2)
+
+
+class BxNx11x15_to_Bx165N(nn.Module):
+    def forward(self, x):
+        # (B, N, 11, 15) -> (B, 11, 15, N) -> (B, 165*N)
+        return x.permute(0, 2, 3, 1).flatten(start_dim=1)
 
 
 class Agent(nn.Module):
@@ -130,32 +151,58 @@ class Agent(nn.Module):
         assert observation_space.shape[2] / 56 == 15
 
         self.features_extractor = common.layer_init(nn.Sequential(
-            # loaded from file
+            # => (B, 1, 11, 840)
+            Bx1x11x15N_to_Bx165xN(n=56),
+            # => (B, 165, 56)
+            nn.Linear(56, 32),
+            nn.LeakyReLU(),
+            # => (B, 165, 32)
+            Bx165xE_to_Ex11x15(e=32),
+            # => (B, 32, 11, 15)
+            nn.Conv2d(32, 32, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+            # => (B, 32, 11, 15)
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+            # => (B, 32, 11, 15)
         ))
 
-        self.actor = common.layer_init(nn.Linear(165, action_space.n), gain=0.01)
-        self.critic = common.layer_init(nn.Linear(165, 1), gain=1.0)
+        # => (B, 32, 11, 15)
+        self.value_net = common.layer_init(nn.Sequential(
+            nn.Flatten(),
+            # => (B, 5280)
+            nn.Linear(5280, 1),
+        ), gain=1.0)
+
+        # => (B, 32, 11, 15)
+        self.action_net = common.layer_init(nn.Sequential(
+            nn.Conv2d(32, 14, kernel_size=1, stride=1, padding=0),
+            # => (B, 14, 11, 15)
+            BxNx11x15_to_Bx165N(),
+            nn.Flatten(),
+            # => (B, 165*N)
+        ), gain=0.01)
 
     def get_value(self, x):
-        return self.critic(self.features_extractor(x))
+        return self.value_net(self.features_extractor(x))
 
     def get_action_and_value(self, x, mask, action=None):
-        with torch.no_grad():
-            old_features = self.features_extractor[:-2](x)
-        features = self.features_extractor[-2:](old_features)
-        value = self.critic(features)
-        action_logits = self.actor(features)
-        dist = common.CategoricalMasked(logits=action_logits, mask=mask)
+        features = self.features_extractor(x)
+        value = self.value_net(features)
+        action_logits = self.action_net(features)
+        dist = common.CategoricalMasked(logits=action_logits, mask=mask[:, 1:])
         if action is None:
             action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), value
 
     # Inference (deterministic)
-    def predict(self, x, mask):
-        with torch.no_grad():
-            logits = self.actor(self.features_extractor(x))
-            dist = common.CategoricalMasked(logits=logits, mask=mask)
-            return torch.argmax(dist.probs, dim=1).cpu().numpy()
+    # def predict(self, x, mask):
+    #     with torch.no_grad():
+    #         logits = self.action_net(self.features_extractor(x))
+    #         dist = common.CategoricalMasked(logits=logits, mask=mask)
+    #         return torch.argmax(dist.probs, dim=1).cpu().numpy()
 
 
 def main(args):
@@ -187,16 +234,9 @@ def main(args):
     start_map_swaps = args.state.map_swaps
 
     if args.agent_load_file:
-        f = args.agent_load_file
-        print("Loading agent from %s" % f)
-        agent = torch.load(f)
+        print("Loading agent from %s" % args.agent_load_file)
+        agent = torch.load(args.agent_load_file)
         start_map_swaps = agent.state.map_swaps
-
-        backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
-        with open(f, 'rb') as fsrc:
-            with open(backup, 'wb') as fdst:
-                shutil.copyfileobj(fsrc, fdst)
-                print("Wrote backup %s" % backup)
 
     try:
         envs = common.create_venv(VcmiEnv, args, writer, start_map_swaps)  # noqa: E501
@@ -260,7 +300,7 @@ def main(args):
                 logprobs[step] = logprob
 
                 # TRY NOT TO MODIFY: execute the game and log data.
-                next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+                next_obs, reward, terminations, truncations, infos = envs.step((action+1).cpu().numpy())
                 next_done = np.logical_or(terminations, truncations)
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
@@ -481,8 +521,7 @@ if __name__ == "__main__":
             step_reward_mult=1,
             term_reward_mult=0,
         ),
-        env_wrappers=[],
-        # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
+        env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
     )
 
     main(args)

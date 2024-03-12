@@ -19,7 +19,6 @@
 import os
 import random
 import time
-import shutil
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -71,6 +70,7 @@ class Args:
     rollouts_total: int = 10000
     rollouts_per_mapchange: int = 20
     rollouts_per_log: int = 1
+    opponent_load_file: Optional[str] = None
     success_rate_target: Optional[float] = None
     mapmask: str = "ai/generated/B*.vmap"
     randomize_maps: bool = False
@@ -78,8 +78,6 @@ class Args:
     max_saves: int = 3
     out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
 
-    opponent_load_file: Optional[str] = None
-    opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
     weight_decay: float = 0.0
     learning_rate: float = 2.5e-4
     num_envs: int = 4
@@ -130,7 +128,18 @@ class Agent(nn.Module):
         assert observation_space.shape[2] / 56 == 15
 
         self.features_extractor = common.layer_init(nn.Sequential(
-            # loaded from file
+            # => (B, 1, 11, 840)
+            nn.Flatten(),
+            # => (B, 9240)
+            nn.Unflatten(dim=1, unflattened_size=[165, 56]),
+            # => (B, 165, 56)
+            SelfAttention(embed_dim=56, num_heads=4, batch_first=True),
+            # => (B, 165, 56)
+            nn.Linear(56, 1),
+            nn.LeakyReLU(),
+            # => (B, 165, 1)
+            nn.Flatten(),
+            # => (B, 165)
         ))
 
         self.actor = common.layer_init(nn.Linear(165, action_space.n), gain=0.01)
@@ -140,9 +149,7 @@ class Agent(nn.Module):
         return self.critic(self.features_extractor(x))
 
     def get_action_and_value(self, x, mask, action=None):
-        with torch.no_grad():
-            old_features = self.features_extractor[:-2](x)
-        features = self.features_extractor[-2:](old_features)
+        features = self.features_extractor(x)
         value = self.critic(features)
         action_logits = self.actor(features)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
@@ -187,16 +194,9 @@ def main(args):
     start_map_swaps = args.state.map_swaps
 
     if args.agent_load_file:
-        f = args.agent_load_file
-        print("Loading agent from %s" % f)
-        agent = torch.load(f)
+        print("Loading agent from %s" % args.agent_load_file)
+        agent = torch.load(args.agent_load_file)
         start_map_swaps = agent.state.map_swaps
-
-        backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
-        with open(f, 'rb') as fsrc:
-            with open(backup, 'wb') as fdst:
-                shutil.copyfileobj(fsrc, fdst)
-                print("Wrote backup %s" % backup)
 
     try:
         envs = common.create_venv(VcmiEnv, args, writer, start_map_swaps)  # noqa: E501

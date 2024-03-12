@@ -53,7 +53,8 @@ function terminate_vcmi_gym() {
   # pkill -g 0
 
   for i in $(seq 3); do
-    pkill -g 0 -f vcmi-gym.py || return 0  # no more procs => termination successful
+    pkill -g 0 -f vcmi-gym.py
+    pgrep -g 0 || return 0  # no more procs => termination successful
 
     for j in $(seq 3); do
       sleep 10

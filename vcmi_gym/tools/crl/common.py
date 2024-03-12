@@ -1,3 +1,19 @@
+# =============================================================================
+# Copyright 2024 Simeon Manolov <s.manolloff@gmail.com>.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# =============================================================================
+
 import torch
 import threading
 import glob
@@ -68,6 +84,16 @@ def create_venv(env_cls, args, writer, map_swaps):
     state = {"n": 0}
     lock = threading.RLock()
 
+    sbm = ["StupidAI", "BattleAI", "MMAI_MODEL"]
+    sbm_probs = torch.tensor(args.opponent_sbm_probs, dtype=torch.float)
+
+    assert len(sbm_probs) == 3
+    if sbm_probs[2] > 0:
+        assert os.path.isfile(args.opponent_load_file)
+
+    dist = Categorical(sbm_probs)
+    opponent = sbm[dist.sample()]
+
     def env_creator():
         with lock:
             assert state["n"] < args.num_envs
@@ -75,11 +101,14 @@ def create_venv(env_cls, args, writer, map_swaps):
             # logfile = f"/tmp/{run_id}-env{state['n']}-actions.log"
             logfile = None
 
+            if opponent == "MMAI_MODEL":
+                assert args.opponent_load_file, "opponent_load_file is required for MMAI_MODEL"
+
             env_kwargs = dict(
                 asdict(args.env),
                 mapname=mapname,
-                attacker="MMAI_MODEL" if args.opponent_load_file else "StupidAI",
-                defender="MMAI_MODEL" if args.opponent_load_file else "StupidAI",
+                attacker=opponent,
+                defender=opponent,
                 attacker_model=args.opponent_load_file,
                 defender_model=args.opponent_load_file,
                 actions_log_file=logfile
@@ -162,9 +191,20 @@ def find_latest_save(group_id, run_id):
     return args_file, agent_file
 
 
-def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
+def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
+    initializable_layers = (
+        torch.nn.Linear,
+        torch.nn.Conv2d,
+        # TODO: other layers? Conv1d?
+    )
+
+    if isinstance(layer, initializable_layers):
+        torch.nn.init.orthogonal_(layer.weight, gain)
+        torch.nn.init.constant_(layer.bias, bias_const)
+
+    for mod in list(layer.modules())[1:]:
+        layer_init(mod, gain, bias_const)
+
     return layer
 
 
@@ -275,6 +315,7 @@ def init_optimizer(args, agent, optimizer):
     optimizer = torch.optim.AdamW(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     if agent.state.optimizer_state_dict:
+        print("Loading optimizer from stored state")
         optimizer.load_state_dict(agent.state.optimizer_state_dict)
 
     # Need to explicitly set lr after loading state

@@ -4,7 +4,7 @@
 #
 # Usage:
 #
-USAGE="zsh crl_watchdog.zsh path/to/config.yml"
+USAGE="zsh crl_watchdog.zsh path/to/config.yml ACTION"
 
 CHECK_FIRST=30
 CHECK_EVERY=600  # seconds
@@ -34,13 +34,13 @@ function terminate_vcmi_gym() {
   # done
 
   #
-  # 2. Alive after 10s => SIGTERM for vcmi-gym.py
+  # 2. Alive after 10s => SIGTERM for vcmi_gym.tools.main_crl
   #
 
   # pkill -g 0
 
   for i in $(seq 3); do
-    pkill -g 0 -f vcmi-gym.py || return 0  # no more procs => termination successful
+    pkill -g 0 -f vcmi_gym.tools.main_crl || return 0  # no more procs => termination successful
 
     for j in $(seq 3); do
       sleep 10
@@ -111,7 +111,7 @@ set -eux
 #
 #
 
-if [ "$#" -ne 1 ]; then
+if [ "$#" -ne 2 ]; then
   echo "Usage: $USAGE"
   exit 1
 fi
@@ -120,6 +120,13 @@ cfg=$1
 resume_cfg="vcmi_gym/tools/crl/config/resume.yml"
 
 [ -r "$resume_cfg" ]
+
+action=$2
+
+[ "$action" = "mppo" -o \
+  "$action" = "mppo_heads" -o \
+  "$action" = "mppo_newnet" -o \
+  "$action" = "mppo_fullyconv" ]
 
 group=$(read_cfg ".group_id" "$cfg")
 run=$(read_cfg ".run_id" "$cfg")
@@ -131,11 +138,11 @@ out_dir="${out_dir/\{run_id\}/$run}"
 args=()
 args+=("-r" "$run")
 args+=("-g" "$group")
-args+=("crl_train_mppo")
+args+=("$action")
 
 echo "$IDENT Watchdog PID: $$"
 
-python vcmi-gym.py -c "$cfg" "${args[@]}" &
+python -m vcmi_gym.tools.main_crl -c "$cfg" "${args[@]}" &
 sleep $CHECK_FIRST
 if ! find_recent_tflogs "$out_dir" $CHECK_EVERY; then
   echo "$IDENT boot failed"
@@ -149,6 +156,6 @@ while sleep $CHECK_EVERY; do
   if ! find_recent_tflogs "$out_dir" $CHECK_EVERY; then
     echo "$IDENT No new tfevents in the last ${CHECK_EVERY}s"
     terminate_vcmi_gym
-    python vcmi-gym.py -R "${args[@]}" &
+    python -m vcmi_gym.tools.main_crl -R "${args[@]}" &
   fi
 done
