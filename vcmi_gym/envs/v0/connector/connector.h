@@ -36,6 +36,7 @@ class Connector {
 
     ConnectorState state = ConnectorState::NEW;
 
+    const std::string gymdir;
     const std::string mapname;
     const std::string loglevelGlobal;
     const std::string loglevelAI;
@@ -56,6 +57,7 @@ class Connector {
     MMAI::Export::Baggage initBaggage();
 public:
     Connector(
+        const std::string gymdir,
         const std::string mapname,
         const std::string loglevelGlobal,
         const std::string loglevelAI,

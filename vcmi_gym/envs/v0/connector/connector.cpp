@@ -18,6 +18,7 @@
 #include "myclient.h"
 
 Connector::Connector(
+    const std::string gymdir_,
     const std::string mapname_,
     const std::string loglevelGlobal_,
     const std::string loglevelAI_,
@@ -25,7 +26,8 @@ Connector::Connector(
     const std::string defender_,
     const std::string attackerModel_,
     const std::string defenderModel_
-) : mapname(mapname_),
+) : gymdir(gymdir_),
+    mapname(mapname_),
     loglevelGlobal(loglevelGlobal_),
     loglevelAI(loglevelAI_),
     attacker(attacker_),
@@ -177,10 +179,6 @@ const P_Result Connector::start() {
     setvbuf(stdout, NULL, _IONBF, 0);
     LOG("start");
 
-    // TODO: read config
-    //
-    std::string gymdir = "/Users/simo/Projects/vcmi-gym";
-
     LOG("obtain lock");
     std::unique_lock lock(m);
     LOG("obtain lock: done");
@@ -305,10 +303,9 @@ PYBIND11_MODULE(connector, m) {
         .def("get_is_battle_over", &P_Result::get_is_battle_over)
         .def("get_is_victorious", &P_Result::get_is_victorious);
 
-    // py::class_<Child, std::shared_ptr<Child>>(m, "Child");
-
     py::class_<Connector, std::unique_ptr<Connector>>(m, "Connector")
         .def(py::init<
+            const std::string &, // gymdir
             const std::string &, // mapname
             const std::string &, // loglevelGlobal
             const std::string &, // loglevelAI

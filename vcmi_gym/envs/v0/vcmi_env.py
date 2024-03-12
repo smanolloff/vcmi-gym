@@ -16,6 +16,7 @@
 
 import numpy as np
 import gymnasium as gym
+import os
 
 from .util import log
 from .util.analyzer import Analyzer, ActionType
@@ -119,6 +120,7 @@ class VcmiEnv(gym.Env):
         self.connector = PyConnector(vcmienv_loglevel, user_timeout, vcmi_timeout, boot_timeout)
 
         result = self.connector.start(
+            os.getcwd(),
             mapname,
             vcmi_loglevel_global,
             vcmi_loglevel_ai,

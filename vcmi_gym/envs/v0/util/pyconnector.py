@@ -330,7 +330,6 @@ class PyConnector():
                 self.set_v_result_act(self.__connector.reset())
             case PyConnector.COMMAND_TYPE_RENDER_ANSI:
                 x = bytes(self.__connector.renderAnsi(), 'utf-8')
-                print("*** BYTES: %d" % len(x))
                 self.v_result_render_ansi.value = bytes(self.__connector.renderAnsi(), 'utf-8')
             case _:
                 raise Exception("Unknown command: %s" % self.v_command_type.value)
