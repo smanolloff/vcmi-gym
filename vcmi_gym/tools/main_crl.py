@@ -20,6 +20,7 @@ import re
 import argparse
 import signal
 import sys
+import importlib
 
 from . import common
 
@@ -34,17 +35,12 @@ def handle_signal(signum, frame):
 
 
 def run(action, cfg, group_id, run_id, resume, cfgpath):
-    if action == "mppo":
-        from .crl.mppo import main as crl_main, Args
-    elif action == "mppo_heads":
-        from .crl.mppo_heads import main as crl_main, Args
-    elif action == "mppo_fullyconv":
-        from .crl.mppo_fullyconv import main as crl_main, Args
-    elif action == "mppo_newnet":
-        from .crl.mppo_newnet import main as crl_main, Args
-    else:
+    try:
+        # XXX: can't use relative imports here
+        mod = importlib.import_module(f"vcmi_gym.tools.crl.{action}")
+    except ModuleNotFoundError:
         print("Unknown action: %s" % action)
-        os.exit(1)
+        sys.exit(1)
 
     cfg["cfg_file"] = cfgpath
 
@@ -64,10 +60,10 @@ def run(action, cfg, group_id, run_id, resume, cfgpath):
     assert re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]+[A-Za-z0-9]$", cfg["group_id"]), \
         "invalid group_id: %s" % cfg["group_id"]
 
-    args = Args(**cfg)
+    args = mod.Args(**cfg)
     print("Starting run %s with seed %s" % (args.run_id, args.seed))
 
-    run_duration, run_values = common.measure(crl_main, dict(args=args))
+    run_duration, run_values = common.measure(mod.main, dict(args=args))
     common.save_run_metadata(
         action=action,
         cfg=vars(args),
@@ -103,14 +99,14 @@ examples:
     args = parser.parse_args()
 
     signal.signal(signal.SIGTERM, handle_signal)
+    cfg = {}
 
-    if args.c is None:
-        args.c = open(os.path.join("config", f"{args.action}.yml"), "r")
+    if args.c is not None:
+        print("Loading configuration from %s" % args.c.name)
+        cfg = yaml.safe_load(args.c)
+        args.c.close()
 
-    print("Loading configuration from %s" % args.c.name)
-    cfg = yaml.safe_load(args.c)
-    args.c.close()
-    run(args.action, cfg, args.g, args.r, args.R, cfgpath=args.c.name)
+    run(args.action, cfg, args.g, args.r, args.R, cfgpath=getattr(args.c, "name", None))
 
 
 if __name__ == "__main__":

@@ -97,7 +97,7 @@ class Args:
     target_kl: float = None
 
     logparams: dict = field(default_factory=dict)
-    cfg_file: str = 'path/to/cfg.yml'
+    cfg_file: Optional[str] = None
     wandb: bool = True
     seed: int = 42
 
@@ -162,6 +162,11 @@ def main(args):
     assert isinstance(args, Args)
 
     args = common.maybe_resume_args(args)
+
+    # XXX: handle newly introduced options
+    args = Args(**vars(args))
+    # TODO: handle removed options
+
     print("Args: %s" % (asdict(args)))
     common.maybe_setup_wandb(args, __file__)
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
@@ -466,7 +471,7 @@ if __name__ == "__main__":
         max_grad_norm=0.5,
         target_kl=None,
         logparams={},
-        cfg_file="/path/to/cfg",
+        cfg_file=None,
         wandb=False,
         seed=42,
         env=EnvArgs(

@@ -249,8 +249,10 @@ def maybe_resume_args(args):
     # List of arg names to overwrite after loading
     # (some args (incl. overwrite itself) must always be overwritten)
     loaded_args.overwrite = args.overwrite
-    loaded_args.cfg_file = args.cfg_file
     loaded_args.wandb = args.wandb
+
+    if args.cfg_file:
+        loaded_args.cfg_file = args.cfg_file
 
     for argname in args.overwrite:
         parts = argname.split(".")
@@ -300,7 +302,7 @@ def maybe_setup_wandb(args, src_file):
     def code_include_fn(path):
         res = (
             path.endswith(os.path.basename(src_file)) or
-            path.endswith(os.path.basename(args.cfg_file)) or
+            path.endswith(os.path.basename(args.cfg_file or "\u0255")) or
             path.endswith("requirements.txt") or
             path.endswith("requirements.lock")
         )

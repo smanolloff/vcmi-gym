@@ -4,7 +4,13 @@
 #
 # Usage:
 #
-USAGE="zsh crl_watchdog.zsh path/to/config.yml ACTION"
+USAGE="
+Usage:
+
+zsh crl_watchdog.zsh -R ACTION GROUP_ID RUN_ID
+<OR>
+zsh crl_watchdog.zsh ACTION path/to/config.yml
+"
 
 CHECK_FIRST=30
 CHECK_EVERY=600  # seconds
@@ -111,38 +117,44 @@ set -eux
 #
 #
 
-if [ "$#" -ne 2 ]; then
-  echo "Usage: $USAGE"
+args=()
+
+if [ "$1" = "-R" ]; then
+  # Resume
+  action=$2
+  group=$3
+  run=$4
+  out_dir_template="data/{group_id}/{run_id}"
+  args+=("-R")
+else
+  # Init
+  action=$1
+  cfg=$2
+  [ -r "$cfg" ]
+  group=$(read_cfg ".group_id" "$cfg")
+  run=$(read_cfg ".run_id" "$cfg")
+  out_dir_template=$(read_cfg ".out_dir_template" "$cfg")
+  args+=("-c" "$cfg")
+fi
+
+if [ -z "$action" \
+    -o -z "$group"
+    -o -z "$run"
+    -o "$out_dir_template" != "data/{group_id}/{run_id}" ]; then
+  echo "$USAGE"
   exit 1
 fi
 
-cfg=$1
-resume_cfg="vcmi_gym/tools/crl/config/resume.yml"
+args+=("-g" "$group")
+args+=("-r" "$run")
+args+=("$action")
 
-[ -r "$resume_cfg" ]
-
-action=$2
-
-[ "$action" = "mppo" -o \
-  "$action" = "mppo_heads" -o \
-  "$action" = "mppo_newnet" -o \
-  "$action" = "mppo_fullyconv" ]
-
-group=$(read_cfg ".group_id" "$cfg")
-run=$(read_cfg ".run_id" "$cfg")
-
-out_dir_template=$(read_cfg ".out_dir_template" "$cfg")
 out_dir="${out_dir_template/\{group_id\}/$group}"
 out_dir="${out_dir/\{run_id\}/$run}"
 
-args=()
-args+=("-r" "$run")
-args+=("-g" "$group")
-args+=("$action")
-
 echo "$IDENT Watchdog PID: $$"
 
-python -m vcmi_gym.tools.main_crl -c "$cfg" "${args[@]}" &
+python -m vcmi_gym.tools.main_crl "${args[@]}" &
 sleep $CHECK_FIRST
 if ! find_recent_tflogs "$out_dir" $CHECK_EVERY; then
   echo "$IDENT boot failed"
@@ -156,6 +168,6 @@ while sleep $CHECK_EVERY; do
   if ! find_recent_tflogs "$out_dir" $CHECK_EVERY; then
     echo "$IDENT No new tfevents in the last ${CHECK_EVERY}s"
     terminate_vcmi_gym
-    python -m vcmi_gym.tools.main_crl -R "${args[@]}" &
+    python -m vcmi_gym.tools.main_crl -R -g "$group" -r "$run" &
   fi
 done

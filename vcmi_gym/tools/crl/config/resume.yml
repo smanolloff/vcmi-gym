@@ -1,8 +1,7 @@
 ---
 group_id: crl
-run_id: mult-sanity2-clone-no-optim
+run_id: mult-sanity-clone2
 resume: True
 overwrite: []
 # overwrite: ["learning_rate", "env.term_reward_mult"]
-notes: ~
 out_dir_template: "data/{group_id}/{run_id}"
