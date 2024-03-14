@@ -10,3 +10,5 @@ conan-generated/
 test.out
 *.pth
 *.pt
+*.so
+*.dylib

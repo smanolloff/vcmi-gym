@@ -48,6 +48,7 @@ class EnvArgs:
     term_reward_mult: int = 0
     reward_clip_mod: Optional[int] = None
     consecutive_error_reward_factor: Optional[int] = None
+    vcmi_timeout: int = 5
 
 
 @dataclass

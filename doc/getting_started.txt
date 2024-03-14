@@ -17,6 +17,7 @@
     $ rm lib/*.dylib
     $ ln -s ../../vcmi/build/bin/libmyclient.so lib/
     $ cmake --build build/
+    $ ln -st . build/connexport*.so
 
 4. Python virtual env (tested with python 3.10.12):
 

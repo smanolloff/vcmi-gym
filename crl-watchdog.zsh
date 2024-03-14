@@ -7,13 +7,25 @@
 USAGE="
 Usage:
 
-zsh crl_watchdog.zsh -R ACTION GROUP_ID RUN_ID
+zsh crl-watchdog.zsh -R ACTION GROUP_ID RUN_ID
 <OR>
-zsh crl_watchdog.zsh ACTION path/to/config.yml
+zsh crl-watchdog.zsh ACTION path/to/config.yml
+<OR>
+CHECK_FIRST=10 CHECK_EVERY=30 zsh crl-watchdog.zsh ACTION path/to/config.yml
 "
 
-CHECK_FIRST=30
-CHECK_EVERY=600  # seconds
+IS_LINUX=false
+if [ "$(uname)" = "Linux" ]; then
+  IS_LINUX=true
+fi
+
+if [ -z "$CHECK_FIRST" ]; then
+  CHECK_FIRST=1
+fi
+
+if [ -z "$CHECK_EVERY" ]; then
+  CHECK_EVERY=10
+fi
 
 IDENT="*** [🐕]"
 
@@ -58,7 +70,15 @@ function terminate_vcmi_gym() {
   # 3. Still alive => SIGTERM for ALL
   #
   for i in $(seq 3); do
-    pkill -g 0 || return 0  # no more procs => termination successful
+
+    if $IS_LINUX; then
+      # Linux process kills itself with -g0...
+      # It also names all sub-proccesses the same way
+      # Apparently, 3 of them always get unresponsive and must be KILLed
+      pkill --signal=9 -g 0 -f vcmi_gym.tools.main_crl || return 0
+    else
+      pkill -g 0 || return 0  # no more procs => termination successful
+    fi
 
     for j in $(seq 3); do
       sleep 10
@@ -101,7 +121,7 @@ function find_latest_loadfile() {
 }
 
 function find_recent_tflogs() {
-  find "$1" -name 'events.out.tfevents.*' -mtime -${2}s | grep -q .
+  find "$1" -name 'events.out.tfevents.*' -mmin -${2} | grep -q .
 }
 
 trap "handle_sigint" INT
@@ -155,8 +175,8 @@ out_dir="${out_dir/\{run_id\}/$run}"
 echo "$IDENT Watchdog PID: $$"
 
 python -m vcmi_gym.tools.main_crl "${args[@]}" &
-sleep $CHECK_FIRST
-if ! find_recent_tflogs "$out_dir" $CHECK_EVERY; then
+sleep $((CHECK_FIRST * 60))
+if ! find_recent_tflogs "$out_dir" $CHECK_FIRST; then
   echo "$IDENT boot failed"
   terminate_vcmi_gym
   # Startup failure is either a syntax error or a wandb "resume" exception
@@ -164,9 +184,9 @@ if ! find_recent_tflogs "$out_dir" $CHECK_EVERY; then
   exit 1
 fi
 
-while sleep $CHECK_EVERY; do
+while sleep $((CHECK_EVERY * 60)); do
   if ! find_recent_tflogs "$out_dir" $CHECK_EVERY; then
-    echo "$IDENT No new tfevents in the last ${CHECK_EVERY}s"
+    echo "$IDENT No new tfevents in the last ${CHECK_EVERY}m"
     terminate_vcmi_gym
     python -m vcmi_gym.tools.main_crl -R -g "$group" -r "$run" &
   fi

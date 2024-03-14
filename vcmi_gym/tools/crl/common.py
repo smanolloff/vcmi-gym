@@ -52,9 +52,9 @@ class CategoricalMasked(Categorical):
 
 
 def create_venv(env_cls, args, writer, map_swaps):
-    mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
+    mappath = "testing/maps"
     all_maps = glob.glob("%s/%s" % (mappath, args.mapmask))
-    all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
+    all_maps = [m.replace("%s/" % mappath, "ai/") for m in all_maps]
     all_maps.sort()
 
     if args.num_envs == 1:
@@ -265,9 +265,9 @@ def maybe_resume_args(args):
             setattr(loaded_args, argname, getattr(args, argname))
         else:
             assert len(parts) == 2
-            sub_loaded = getattr(args, parts[0])
+            sub_loaded = getattr(loaded_args, parts[0])
             sub_arg = getattr(args, parts[0])
-            print("Overwrite %s: %s -> %s" % (argname, getattr(sub_loaded, parts[1]), getattr(sub_arg, args[1])))
+            print("Overwrite %s: %s -> %s" % (argname, getattr(sub_loaded, parts[1]), getattr(sub_arg, parts[1])))
             setattr(sub_loaded, parts[1], getattr(sub_arg, parts[1]))
 
     args = loaded_args

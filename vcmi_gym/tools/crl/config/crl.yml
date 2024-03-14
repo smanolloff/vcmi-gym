@@ -1,6 +1,6 @@
 ---
 group_id: crl
-run_id: clone-BattleAI
+run_id: pc-fc1024-lr0.00005-vf0.8
 resume: True
 overwrite: ["learning_rate"]
 # overwrite: ["learning_rate", "weight_decay"]
@@ -8,41 +8,41 @@ overwrite: ["learning_rate"]
 notes: ""
 
 # agent_load_file: ~
-agent_load_file: "data/crl/mult-sanity-clone2/agent-1710255933.pt"
+agent_load_file: "data/models/clone-fc1024-lr0.000001-1710290127.pt"
 rollouts_total: 10000
 rollouts_per_mapchange: 20
 rollouts_per_log: 1
 success_rate_target: ~
-mapmask: "ai/generated/B*.vmap"
+mapmask: "generated/B*.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 max_saves: 3
 out_dir_template: "data/{group_id}/{run_id}"
 
 # SBM = StupidAI, BattleAI, MMAI_MODEL
-opponent_sbm_probs: [0.0, 1.0, 0.0]
+opponent_sbm_probs: [0.0, 1.0, 0]
 opponent_load_file: ~
 
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-num_envs: 8
+num_envs: 32
 
 #
 # PPO Hyperparams
 #
 weight_decay: 0
-learning_rate: 0.00005
-num_steps: 128       # rollout_buffer = num_steps*num_envs
-num_minibatches: 16  # minibatch_size = rollout_buffer/num_minibatches
+learning_rate: 0.00003
+num_steps: 64        # rollout_buffer = num_steps*num_envs
+num_minibatches: 64  # minibatch_size = rollout_buffer/num_minibatches
 update_epochs: 10    # full passes of rollout_buffer
 gamma: 0.8425
 gae_lambda: 0.8
 norm_adv: true
 clip_coef: 0.4
 clip_vloss: false
-ent_coef: 0.007
-vf_coef: 1.2
+ent_coef: 0.01
+vf_coef: 0.8
 max_grad_norm: 0.5
 target_kl: ~
 
@@ -56,6 +56,7 @@ env:
   sparse_info: true
   step_reward_mult: 1
   term_reward_mult: 0
+  vcmi_timeout: 60
   reward_clip_mod: ~
 
   # 0=hex.id, 1=hex.state, 2=qty, 12=qpos, 13=side, 15=creature type
