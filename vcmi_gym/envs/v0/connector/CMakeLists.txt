@@ -27,3 +27,8 @@ add_executable(loader_main conncommon.h loader_main.cpp)
 target_include_directories(loader_main PUBLIC ${CMAKE_SOURCE_DIR}/include)
 # add_dependencies(loader_main loader)
 # target_link_libraries(loader_main PRIVATE loader)
+
+
+# Make filenames predictable
+set_property(TARGET connexport PROPERTY SUFFIX)
+set_property(TARGET connector PROPERTY SUFFIX)

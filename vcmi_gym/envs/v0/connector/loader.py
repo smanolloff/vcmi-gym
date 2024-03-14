@@ -18,6 +18,7 @@ from sb3_contrib import MaskablePPO
 # from sb3_contrib import QRDQN
 import torch
 import connexport
+import os
 
 
 # XXX: maybe import VcmiEnv and load offset from there?
@@ -28,6 +29,7 @@ OBS_SHAPE = (1, 11, 15 * connexport.get_n_hex_attrs())
 class Loader:
     class MPPO:
         def __init__(self, file):
+            file = os.path.realpath(file)
             self.model = MaskablePPO.load(file)
             # self.obs = np.ndarray((2310,), dtype=np.float32)
             # self.actmasks = np.ndarray((1652,), dtype=np.bool)

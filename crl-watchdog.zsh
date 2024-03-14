@@ -138,8 +138,8 @@ else
 fi
 
 if [ -z "$action" \
-    -o -z "$group"
-    -o -z "$run"
+    -o -z "$group" \
+    -o -z "$run" \
     -o "$out_dir_template" != "data/{group_id}/{run_id}" ]; then
   echo "$USAGE"
   exit 1

@@ -1,7 +1,8 @@
 ---
 group_id: crl
-run_id: mult-sanity-clone2
+run_id: clone-BattleAI
 resume: True
-overwrite: []
+overwrite: ["learning_rate"]
 # overwrite: ["learning_rate", "env.term_reward_mult"]
 out_dir_template: "data/{group_id}/{run_id}"
+learning_rate: 0.00001

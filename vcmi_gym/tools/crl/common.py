@@ -251,8 +251,12 @@ def maybe_resume_args(args):
     loaded_args.overwrite = args.overwrite
     loaded_args.wandb = args.wandb
 
-    if args.cfg_file:
-        loaded_args.cfg_file = args.cfg_file
+    # Overwrite even if None
+    # This can happen in a bare resume where no config is given
+    # The config at the original path may have changed completely
+    # and a new upload of it now would cause confusion
+    # => overwrite with None is good as the config wont be uploaded
+    loaded_args.cfg_file = args.cfg_file
 
     for argname in args.overwrite:
         parts = argname.split(".")
