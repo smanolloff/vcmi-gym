@@ -68,4 +68,4 @@ method where `obs` and `mask` are obtained from VcmiEnv (refer to
 the [Environment docs](./env_info.md)). Save your
 trained model to a file using `torch.save(...)` starting the
 (modified) VCMI binary as described in the "Loading AI Models" section
-[here](https://github.com/smanolloff/vcmi/blob/main/docs/setup_macos.md#loading-ai-models)
+[here](https://github.com/smanolloff/vcmi/blob/mmai/docs/setup_macos.md#loading-ai-models)

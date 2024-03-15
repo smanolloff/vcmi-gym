@@ -49,7 +49,7 @@ _It ain't much, but it's honest work._ ;)
 Fellow HOMM3 AI enthusiasts are more than welcome to help with this project.
 
 I will be really grateful if you can help me with the VCMI
-(features)[https://github.com/smanolloff/vcmi] that are not yet implemented, as
+[features](https://github.com/smanolloff/vcmi) that are not yet implemented, as
 I am having a hard time implementing them myself.
 
 ### Submitting an issue
