@@ -14,8 +14,10 @@ by a FC-1024 layer with batch normalization an LeakyReLU activations and it's
 basically showing a 60+% winrate vs VCMI's Neutral AI (StupidAI) and
 is struggling at around 50% vs. VCMI's Player AI (BattleAI):
 
-<a href="rl-stupidai.png">
-<a href="rl-battleai.png">
+<p>
+<img src="rl-stupidai.png" width="400">
+<img src="rl-battleai.png" width="400">
+</p>
 
 I've historically used PPO implementations from
 [stable-baselines3](https://github.com/DLR-RM/stable-baselines3), but I find it

@@ -35,7 +35,7 @@ The project consists of two main parts:
 
 I managed to put together some docs to get you started:
 
-* Setup guide for MacOS OS, please refer to [this guide](./doc/setup_macos.md)
+* Setup guide for MacOS, please refer to [this guide](./doc/setup_macos.md)
 * Setup guide for Linux/Ubuntu OS, please refer to [this guide](./doc/setup_ubuntu.md)
 * There's an apparent lack of a setup guide for Windows, so any contributions in
 that regard are welcome.
