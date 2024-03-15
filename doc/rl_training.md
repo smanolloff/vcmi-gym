@@ -56,3 +56,16 @@ My messy and unannotated W&B project with some of my older training runs can be
 found [here](https://wandb.ai/s-manolloff/vcmi). Recent training runs will not
 appear there, as I have created a separate W&B project (not public yet), with
 the hope to keep it more organized and suitable and then share it.
+
+## Loading AI models into VCMI directly
+
+Once an AI model is trained and ready for the "real" test (where YOU play
+against it 🤓), you can plug it into VCMI directly in a game where it
+controls the enemy army.
+
+For this purpose, your model must implement a single `.predict(obs, mask)`
+method where `obs` and `mask` are obtained from VcmiEnv (refer to
+the [Environment docs](./env_info.md)). Save your
+trained model to a file using `torch.save(...)` starting the
+(modified) VCMI binary as described in the "Loading AI Models" section
+[here](https://github.com/smanolloff/vcmi/blob/main/docs/setup_macos.md#loading-ai-models)
