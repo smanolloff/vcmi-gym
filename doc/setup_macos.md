@@ -17,11 +17,11 @@ $ export VCMI_DIR="$VCMI_GYM_DIR/vcmi_gym/envs/v0/vcmi"
 
 ### Build VCMI
 
-Please follow the instructions in [this guide](https://github.com/smanolloff/vcmi-gym/blob/main/doc/setup_macos.md).
+Please follow the instructions in [this guide](https://github.com/smanolloff/vcmi/blob/main/doc/setup_macos.md).
 
 ### Build vcmi-gym C++ libs
 
-These libraries are the "link" between the gym env and VCMI itself:
+These libraries are the "link" between the gym env and VCMI itself.
 
 ```bash
 $ cd "$VCMI_GYM_DIR/envs/v0/connector"

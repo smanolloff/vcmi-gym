@@ -11,7 +11,7 @@
 `vcmi-gym` implements the Gym API, please refer to the
 [Gymnasium](https://gymnasium.farama.org/) documentation for reference.
 
-## Action space
+## Observation space
 
 vcmi-gym uses a
 [`Box`](https://gymnasium.farama.org/api/spaces/fundamental/#box)
@@ -21,7 +21,7 @@ not really used and can be ignored. This leaves a `(11, 840)` space which
 is better thought of as `(11, 15 * 56)`, corresponding to the battlefield's
 11x15 hex grid (165 hexes total), with 56 attributes for each hex.
 
-<img src="hexes.jpg" alt="hexes">
+<p align="center"><img src="hexes.jpg" alt="hexes" height="300"></p>
 
 The 56 hex attirbutes are normalized into the `[0,1]` range via a linear
 transformation. A normalized value of `0` typically corresponds to the
@@ -30,36 +30,38 @@ unnormalized value `-1` which is used to indicate a N/A or NULL value
 value of `1` corresponds to whatever maximum is defined for that attribute
 (eg. 5000 for "Stack Quantity"). All unnormalized values are integers.
 
-|Attribute index|Description|Value range (unnormalized)|
-|------|-----------|
-|0|Hex Y coordinate|0..14|
-|1|Hex X coordinate|0..10|
-|2|Hex state (obstacle, occupied, free reachable/unreachable)|1..4|
-|3|Stack Quantity|-1..5000|
-|4|Stack Attack|-1..100|
-|5|Stack Defense|-1..100|
-|6|Stack Shots|-1..32|
-|7|Stack DmgMin|-1..100|
-|8|Stack DmgMax|-1..100|
-|9|Stack HP|-1..1500|
-|10|Stack HPLeft|-1..1500|
-|11|Stack Speed|-1..30|
-|12|Stack Waited (0=no, 1=yes)|-1..1|
-|13|Stack QueuePos|-1..14|
-|14|Stack RetaliationsLeft|-1..3|
-|15|Stack Side (0=attacker, 1=defender)|-1..1|
-|16|Stack Slot|-1..6|
-|17|Stack CreatureType|-1..150|
-|18|Stack AIValue|-1..40000|
-|19|Stack IsActive|-1..1|
-|20|Active unit's dmg modifier for this hex (0.5=half, 1=quarter)|-1..1|
-|21..27|Is hex reachable by friendly stack #1..#7?|-1..1|
-|28..34|Is hex reachable by enemy stack #1..#7?|-1..1|
-|35..41|Is hex next to friendly stack #1..#7|-1..1|
-|42..48|Is hex next to enemy stack #1..#7|-1..1|
-|49..55|Is hex attackable by enemy stack #1..#7\*|-1..1|
+| Attribute index | Description | Value range (unnormalized) |
+| - | - | - |
+| 0 | Hex Y coordinate | 0..14 |
+| 1 | Hex X coordinate | 0..10 |
+| 2 | Hex state \* | 1..4 |
+| 3 | Stack Quantity | -1..5000 |
+| 4 | Stack Attack | -1..100 |
+| 5 | Stack Defense | -1..100 |
+| 6 | Stack Shots | -1..32 |
+| 7 | Stack DmgMin | -1..100 |
+| 8 | Stack DmgMax | -1..100 |
+| 9 | Stack HP | -1..1500 |
+| 10 | Stack HPLeft | -1..1500 |
+| 11 | Stack Speed | -1..30 |
+| 12 | Stack Waited (0=no, 1=yes) | -1..1 |
+| 13 | Stack QueuePos | -1..14 |
+| 14 | Stack RetaliationsLeft | -1..3 |
+| 15 | Stack Side (0=attacker, 1=defender) | -1..1 |
+| 16 | Stack Slot | -1..6 |
+| 17 | Stack CreatureType | -1..150 |
+| 18 | Stack AIValue | -1..40000 |
+| 19 | Stack IsActive | -1..1 |
+| 20 | Ranged dmg modifier for this hex (0.5=½, 1=¼) | -1..1 |
+| 21..27 | Is hex reachable by friendly stack #1..#7? | -1..1 |
+| 28..34 | Is hex reachable by enemy stack #1..#7? | -1..1 |
+| 35..41 | Is hex next to friendly stack #1..#7? | -1..1 |
+| 42..48 | Is hex next to enemy stack #1..#7? | -1..1 |
+| 49..55 | Is hex attackable by enemy stack #1..#7? \*\* | -1..1 |
 
-\* _hex attackable by enemy stack X_ means that the enemy stack X can reach a
+\* The hex states are: obstacle / occupied /  free(unreachable) / free(reachable)
+
+\*\* _hex attackable by enemy stack X_ means that the enemy stack X can reach a
 _neighbouring_ hex and melee attack from there.
 
 Obtaining the attributes for a specific Hex is easier if the observation is
@@ -100,15 +102,14 @@ For a given Hex ID (0..164), the action value is: `hex_id * 14 + (1 + action_ind
 
 e.g. Moving to hex with ID=2 (X=2, Y=0) is described by the action `29`.
 
-\* The 12 attack directions are as follows:
+\* The 12 attack directions are as follows: 0..5 are the hexes that surround
+the current unit, while 7..11 are special cases for 2-hex units (3 per side):
 
-<img src="attacks1.jpg" alt="attacks1">
-
-Directions 6..11 are a special case wide units where they attack with their "back"
-(depending on which side they are on):
-<img src="attacks2.jpg" alt="attacks2">
-<img src="attacks3.jpg" alt="attacks3">
-
+<p align="center">
+<img src="attacks1.jpg" alt="attacks1" height=200>
+<img src="attacks2.jpg" alt="attacks2" height=200>
+<img src="attacks3.jpg" alt="attacks3" height=200>
+</p>
 
 ## Action masking
 
