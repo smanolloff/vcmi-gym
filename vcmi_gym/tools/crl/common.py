@@ -52,9 +52,8 @@ class CategoricalMasked(Categorical):
 
 
 def create_venv(env_cls, args, writer, map_swaps):
-    mappath = "testing/maps"
-    all_maps = glob.glob("%s/%s" % (mappath, args.mapmask))
-    all_maps = [m.replace("%s/" % mappath, "ai/") for m in all_maps]
+    all_maps = glob.glob("maps/%s" % args.mapmask)
+    all_maps = [m.removeprefix("maps/") for m in all_maps]
     all_maps.sort()
 
     if args.num_envs == 1:
@@ -239,7 +238,9 @@ def maybe_resume_args(args):
     assert loaded_args.group_id == args.group_id
     assert loaded_args.run_id == args.run_id
 
-    for f in [args_load_file, agent_load_file]:
+    # for f in [args_load_file, agent_load_file]:
+    # XXX: agent will be backed up later with "loaded-" prefix
+    for f in [args_load_file]:
         backup = "%s/resumed-%s" % (os.path.dirname(f), os.path.basename(f))
         with open(f, 'rb') as fsrc:
             with open(backup, 'wb') as fdst:

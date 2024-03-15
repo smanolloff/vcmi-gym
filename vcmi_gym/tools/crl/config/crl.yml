@@ -13,7 +13,7 @@ rollouts_total: 10000
 rollouts_per_mapchange: 20
 rollouts_per_log: 1
 success_rate_target: ~
-mapmask: "generated/B*.vmap"
+mapmask: "gym/generated/B*.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 max_saves: 3

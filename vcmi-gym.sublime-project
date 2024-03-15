@@ -18,7 +18,7 @@
 				// "vcmi_gym/envs/v0/vcmi/cmake_modules",
 				//"vcmi_gym/envs/v0/vcmi/conan-generated",
 				"vcmi_gym/envs/v0/vcmi/debian",
-				"vcmi_gym/envs/v0/vcmi/docs",
+				// "vcmi_gym/envs/v0/vcmi/docs",
 				"vcmi_gym/envs/v0/vcmi/game",
 				"vcmi_gym/envs/v0/vcmi/ios",
 				// "vcmi_gym/envs/v0/vcmi/mapeditor",

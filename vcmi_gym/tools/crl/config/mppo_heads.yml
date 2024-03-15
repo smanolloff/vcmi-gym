@@ -14,7 +14,7 @@ rollouts_per_mapchange: 100
 rollouts_per_log: 1
 opponent_load_file: ~
 success_rate_target: ~
-mapmask: "ai/M5.vmap"
+mapmask: "gym/M5.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 max_saves: 3

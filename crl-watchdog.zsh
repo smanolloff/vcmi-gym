@@ -90,6 +90,14 @@ function terminate_vcmi_gym() {
   # 4. STILL alive => abort
   #
 
+  # XXX: for Linux, pgrep -g0 returns itself and there is no easy way to
+  # reliably check if all subprocesses were killed.
+  if $IS_LINUX; then
+    # XXX: the -f is crucial here: it filters out our own process to prevent suicide
+    pkill --signal=9 -g 0 -f python
+    return 0
+  fi
+
   ps aux | grep "python@3.10"
   echo "$IDENT ERROR: failed to terminate processes"
   return 1
@@ -188,6 +196,6 @@ while sleep $((CHECK_EVERY * 60)); do
   if ! find_recent_tflogs "$out_dir" $CHECK_EVERY; then
     echo "$IDENT No new tfevents in the last ${CHECK_EVERY}m"
     terminate_vcmi_gym
-    python -m vcmi_gym.tools.main_crl -R -g "$group" -r "$run" &
+    python -m vcmi_gym.tools.main_crl -R -g "$group" -r "$run" $action &
   fi
 done

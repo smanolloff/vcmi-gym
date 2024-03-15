@@ -123,9 +123,8 @@ def load_agent(agent_file, run_id):
 
 
 def create_venv(env_cls, n_envs, run_id, mapmask, opponent):
-    mappath = "/Users/simo/Library/Application Support/vcmi/Maps"
-    all_maps = glob.glob("%s/%s" % (mappath, mapmask))
-    all_maps = [m.replace("%s/" % mappath, "") for m in all_maps]
+    all_maps = glob.glob("maps/%s" % mapmask)
+    all_maps = [m.removeprefix("maps/") for m in all_maps]
     all_maps.sort()
 
     assert n_envs % 2 == 0
@@ -253,7 +252,7 @@ if __name__ == "__main__":
 
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
-                        venv = create_venv(env_cls, 2, run_id, f"ai/generated/{vmap}", opponent)
+                        venv = create_venv(env_cls, 2, run_id, f"gym/generated/{vmap}", opponent)
                         ep_results = evaluate_policy(agent, venv, episodes_per_env=50)
 
                         rewards[opponent].append(np.mean(ep_results["rewards"]))

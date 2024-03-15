@@ -387,6 +387,8 @@ class VcmiEnv(gym.Env):
 
     def _transform_action(self, action):
         # see note for action_space
+        max_action = self.action_space.n - self.action_offset
+        assert action >= 0 and action <= max_action
         return action + self.action_offset
 
     #
