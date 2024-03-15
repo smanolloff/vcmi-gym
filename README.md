@@ -15,7 +15,7 @@ Currently, it's only possible to train "combat" AIs (an RL environment for
 adventure AIs would probably require a project on its own).
 
 I am currently using vcmi-gym to train a VCMI battle-only AI that will
-(hopefully) become "smart" enough to provide a fair combat challenge to HOMM3
+hopefully become "smart" enough to provide a fair combat challenge to HOMM3
 players which (like me) are unhappy with the scripted AI implementations.
 
 The project consists of two main parts:
@@ -28,24 +28,19 @@ The project consists of two main parts:
 
 > [!NOTE]
 > Being a work-in-progress, the codebase/documentation quality is
-> _questionable_ as the project is evolving too frequently at this initial
-> stage :)
-
-## Getting started
-
-`vcmi-gym` is currently tested on MacOS 14.0 and Linux - Ubuntu 22.04 LTS only.
-I was unable to make it work on Windows, but any contributions in that regard
-are welcome.
-
-* For MacOS OS, please refer to [this guide](./doc/setup_macos.md)
-* For Linux (Ubuntu) OS, please refer to [this guide](./doc/setup_ubuntu.md)
+> _questionable_, as the project is evolving too rapidly at this
+> stage. :)
 
 ## Documentation
 
-As any WIP project, the documentation is... not great.
+I managed to put together some docs to get you started:
 
-For now there are [Environment](./doc/env_info.md) and
-[RL Training](./doc/rl_training.md) docs.
+* Setup guide for MacOS OS, please refer to [this guide](./doc/setup_macos.md)
+* Setup guide for Linux/Ubuntu OS, please refer to [this guide](./doc/setup_ubuntu.md)
+* There's an apparent lack of a setup guide for Windows, so any contributions in
+that regard are welcome.
+* RL [Environment doc](./doc/env_info.md)
+* RL [Training doc](./doc/rl_training.md) (which is more like a status report)
 
 _It ain't much, but it's honest work._ ;)
 
@@ -53,7 +48,9 @@ _It ain't much, but it's honest work._ ;)
 
 Fellow HOMM3 AI enthusiasts are more than welcome to help with this project.
 
-Here are some basic guidelines to follow if you'd like to contribute:
+I will be really grateful if you can help me with the VCMI
+(features)[https://github.com/smanolloff/vcmi] that are not yet implemented, as
+I am having a hard time implementing them myself.
 
 ### Submitting an issue
 
