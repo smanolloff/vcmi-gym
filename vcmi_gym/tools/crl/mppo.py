@@ -69,7 +69,7 @@ class Args:
     notes: Optional[str] = None
 
     agent_load_file: Optional[str] = None
-    rollouts_total: int = 10000
+    rollouts_total: int = 0
     rollouts_per_mapchange: int = 20
     rollouts_per_log: int = 1
     success_rate_target: Optional[float] = None
@@ -169,13 +169,9 @@ def main(args):
     # TODO: handle removed options
 
     print("Args: %s" % (asdict(args)))
-    common.maybe_setup_wandb(args, __file__)
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     print("Out dir: %s" % out_dir)
     os.makedirs(out_dir, exist_ok=True)
-
-    writer = SummaryWriter(out_dir)
-    common.log_params(args, writer)
 
     batch_size = int(args.num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
@@ -203,6 +199,10 @@ def main(args):
             with open(backup, 'wb') as fdst:
                 shutil.copyfileobj(fsrc, fdst)
                 print("Wrote backup %s" % backup)
+
+    common.maybe_setup_wandb(args, __file__)
+    writer = SummaryWriter(out_dir)
+    common.log_params(args, writer)
 
     try:
         envs = common.create_venv(VcmiEnv, args, writer, start_map_swaps)  # noqa: E501
@@ -243,9 +243,10 @@ def main(args):
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
         start_rollout = agent.state.global_rollout + 1
-        assert start_rollout < args.rollouts_total
+        end_rollout = args.rollouts_total or 10**9
+        assert start_rollout < end_rollout
 
-        for rollout in range(start_rollout, args.rollouts_total + 1):
+        for rollout in range(start_rollout, end_rollout):
             agent.state.global_rollout = rollout
             rollout_start_time = time.time()
             rollout_start_step = agent.state.global_step
@@ -393,7 +394,9 @@ def main(args):
             writer.add_scalar("rollout/ep_count", envs.episode_count)
             writer.add_scalar("global/num_timesteps", agent.state.global_step)
             writer.add_scalar("global/num_rollouts", agent.state.global_rollout)
-            writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total)
+
+            if args.rollouts_total:
+                writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total)
 
             print(f"global_step={agent.state.global_step}, rollout/ep_rew_mean={common.safe_mean(envs.return_queue)}")
 

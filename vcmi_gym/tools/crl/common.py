@@ -292,8 +292,8 @@ def maybe_setup_wandb(args, src_file):
         name=args.run_id,
         id=args.run_id,
         notes=args.notes,
-        resume="must" if args.resume else "never",
-        # resume="allow",  # XXX: reuse id for insta-failed runs
+        # resume="must" if args.resume else "never",
+        resume="allow",  # XXX: reuse id for insta-failed runs
         config=asdict(args),
         sync_tensorboard=True,
         save_code=False,  # code saved manually below

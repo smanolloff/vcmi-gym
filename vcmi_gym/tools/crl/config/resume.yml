@@ -1,8 +1,8 @@
 ---
 group_id: crl
-run_id: clone-fc1024-lr0.000001
+run_id: fc1024-gd0.99
 resume: True
-overwrite: ["gae_lambda"]
+overwrite: ["mapmask"]
 # overwrite: ["learning_rate", "env.term_reward_mult"]
 out_dir_template: "data/{group_id}/{run_id}"
-gae_lambda: 0.99
+mapmask: "gym/generated/B*.vmap"
