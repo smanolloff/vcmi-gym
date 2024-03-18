@@ -52,7 +52,7 @@ class CategoricalMasked(Categorical):
         return -p_log_p.sum(-1)
 
 
-def create_venv(env_cls, args, writer, map_swaps):
+def create_venv(env_cls, args, map_swaps):
     all_maps = glob.glob("maps/%s" % args.mapmask)
     all_maps = [m.removeprefix("maps/") for m in all_maps]
     all_maps.sort()
@@ -70,8 +70,6 @@ def create_venv(env_cls, args, writer, map_swaps):
     else:
         i = (n_maps * map_swaps) % len(all_maps)
         new_i = (i + n_maps) % len(all_maps)
-        # wandb.log({"map_offset": i}, commit=False)
-        # writer.add_scalar("global/map_offset", i)
         map_offset = i
 
         if new_i > i:
@@ -164,6 +162,14 @@ def maybe_save(t, args, agent, optimizer, out_dir):
     torch.save(args, args_file)
     print("Saved args to %s" % args_file)
 
+    # Save a raw NN via simple torch.save() to allow
+    # for a simple torch.load() in Loader
+    # XXX: this raw model saved like this can't be used for training
+    #      (calling wandb.watch on it will blow up)
+    nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
+    torch.save(agent.NN, nn_file)
+    print("Saved nn to %s" % nn_file)
+
     # save file retention (keep latest N saves)
     files = sorted(
         glob.glob(os.path.join(out_dir, "agent-[0-9]*.zip")),
@@ -217,7 +223,7 @@ def safe_mean(array_like) -> float:
     return np.nan if len(array_like) == 0 else float(np.mean(array_like))
 
 
-def log_params(args, writer):
+def log_params(args, writer, global_step):
     for (k, v) in args.logparams.items():
         value = args
         for part in v.split("."):
@@ -229,7 +235,7 @@ def log_params(args, writer):
         else:
             assert isinstance(value, (int, float, bool)), "Unexpected value type: %s (%s)" % (value, type(value))
 
-        writer.add_scalar(k, float(value))
+        writer.add_scalar(k, float(value), global_step)
         print("%s: %s" % (k, float(value)))
 
 

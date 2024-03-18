@@ -260,8 +260,9 @@ class AgentNN(nn.Module):
         self,
         b_obs: np.ndarray,
         b_mask: np.ndarray,
-        b_env_action: Optional[torch.Tensor] = None,    # batch of consolidated actions (int)
-        b_heads_actions: Optional[torch.Tensor] = None  # batch of per-head actions (3 ints)
+        b_env_action: Optional[torch.Tensor] = None,     # batch of consolidated actions (int)
+        b_heads_actions: Optional[torch.Tensor] = None,  # batch of per-head actions (3 ints)
+        deterministic: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         b_size = len(b_obs)
 
@@ -305,7 +306,10 @@ class AgentNN(nn.Module):
         # When collecting experiences, b_heads_actions is None
         # When optimizing the policy, b_heads_actions is provided
         if b_heads_actions is None:
-            b_action1 = b_action1_dist.sample()
+            if deterministic:
+                b_action1 = torch.argmax(b_action1_dist.probs, dim=1)
+            else:
+                b_action1 = b_action1_dist.sample()
         else:
             b_action1 = b_heads_actions[:, 0]
 
@@ -336,7 +340,10 @@ class AgentNN(nn.Module):
         b_action2_dist = common.CategoricalMasked(logits=b_action2_logits, mask=b_action2_masks)
 
         if b_heads_actions is None:
-            b_action2 = b_action2_dist.sample()
+            if deterministic:
+                b_action2 = torch.argmax(b_action2_dist.probs, dim=1)
+            else:
+                b_action2 = b_action2_dist.sample()
         else:
             b_action2 = b_heads_actions[:, 1]
 
@@ -376,7 +383,10 @@ class AgentNN(nn.Module):
         b_action3_dist = common.CategoricalMasked(logits=b_action3_logits, mask=b_action3_masks)
 
         if b_heads_actions is None:
-            b_action3 = b_action3_dist.sample()
+            if deterministic:
+                b_action3 = torch.argmax(b_action3_dist.probs, dim=1)
+            else:
+                b_action3 = b_action3_dist.sample()
         else:
             b_action3 = b_heads_actions[:, 2]
 
@@ -458,12 +468,11 @@ class AgentNN(nn.Module):
         #   b_value = [5.125, 67.11]
         return b_env_action, b_heads_actions, b_heads_logprobs, b_heads_entropies, b_value
 
-    # # Inference (deterministic)
-    # def predict(self, x, mask):
-    #     with torch.no_grad():
-    #         logits = self.actor(self.features_extractor(x))
-    #         dist = common.CategoricalMasked(logits=logits, mask=mask)
-    #         return torch.argmax(dist.probs, dim=1).cpu().numpy()
+    # Inference (deterministic)
+    def predict(self, b_obs, b_mask):
+        with torch.no_grad():
+            b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+            return b_env_action
 
 
 class Agent(nn.Module):
@@ -476,6 +485,7 @@ class Agent(nn.Module):
 
         self.kur = lambda y: observation_space
         self.NN = AgentNN(action_space, observation_space)
+        self.predict = self.NN.predict
 
 
 def main(args):
@@ -524,15 +534,12 @@ def main(args):
                 shutil.copyfileobj(fsrc, fdst)
                 print("Wrote backup %s" % backup)
 
-    writer = SummaryWriter(out_dir)
-    common.log_params(args, writer)
-
     try:
         loss_weights = {k: np.array(v, dtype=np.float32) for k, v in args.loss_weights.items()}
         for k, v in loss_weights.items():
             assert v.sum().round(3) == 1, "Unexpected loss weights: %s" % v
 
-        envs, map_offset = common.create_venv(VcmiEnv, args, writer, start_map_swaps)
+        envs, map_offset = common.create_venv(VcmiEnv, args, start_map_swaps)
         [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         obs_space = envs.unwrapped.single_observation_space
@@ -542,12 +549,6 @@ def main(args):
 
         if agent is None:
             agent = Agent(obs_space, act_space, args.state).to(device)
-
-        if args.resume:
-            agent.state.resumes += 1
-            writer.add_scalar("global/resumes", agent.state.resumes)
-
-        # print("Agent state: %s" % asdict(agent.state))
 
         if args.wandb:
             import wandb
@@ -561,6 +562,13 @@ def main(args):
             action_types = ["WAIT", "MOVE", "AMOVE", "SHOOT"]
 
         writer = SummaryWriter(out_dir)
+        common.log_params(args, writer, agent.state.global_step)
+
+        if args.resume:
+            agent.state.resumes += 1
+            writer.add_scalar("global/resumes", agent.state.resumes, agent.state.global_step)
+
+        # print("Agent state: %s" % asdict(agent.state))
 
         optimizer = common.init_optimizer(args, agent, optimizer)
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
@@ -768,34 +776,33 @@ def main(args):
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             # writer.add_scalar("params/learning_rate", optimizer.param_groups[0]["lr"], agent.state.global_step)
-            writer.add_scalar("losses/total_loss", loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/value_loss", v_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head1_policy_loss", head1_pg_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head2_policy_loss", head2_pg_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head3_policy_loss", head3_pg_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head1_entropy", head1_entropy_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head2_entropy", head2_entropy_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head3_entropy", head3_entropy_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), agent.state.global_step)
-            writer.add_scalar("losses/approx_kl", approx_kl.item(), agent.state.global_step)
-            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), agent.state.global_step)
-            writer.add_scalar("losses/explained_variance", explained_var, agent.state.global_step)
-            writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time)
-            writer.add_scalar("time/steps_per_second", (agent.state.global_step - rollout_start_step) / (time.time() - rollout_start_time))  # noqa: E501
-            writer.add_scalar("rollout/ep_rew_mean", common.safe_mean(envs.return_queue))
-            writer.add_scalar("rollout/ep_len_mean", common.safe_mean(envs.length_queue))
-            writer.add_scalar("rollout/ep_value_mean", common.safe_mean(ep_net_value_queue))
-            writer.add_scalar("rollout/ep_success_rate", common.safe_mean(ep_is_success_queue))
-            writer.add_scalar("rollout/ep_count", envs.episode_count)
-            writer.add_scalar("global/num_timesteps", agent.state.global_step)
-            writer.add_scalar("global/num_rollouts", agent.state.global_rollout)
-
-            breakpoint()
+            gs = agent.state.global_step
+            writer.add_scalar("losses/total_loss", loss.item(), gs)
+            writer.add_scalar("losses/value_loss", v_loss.item(), gs)
+            writer.add_scalar("losses/head1_policy_loss", head1_pg_loss.item(), gs)
+            writer.add_scalar("losses/head2_policy_loss", head2_pg_loss.item(), gs)
+            writer.add_scalar("losses/head3_policy_loss", head3_pg_loss.item(), gs)
+            writer.add_scalar("losses/head1_entropy", head1_entropy_loss.item(), gs)
+            writer.add_scalar("losses/head2_entropy", head2_entropy_loss.item(), gs)
+            writer.add_scalar("losses/head3_entropy", head3_entropy_loss.item(), gs)
+            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), gs)
+            writer.add_scalar("losses/approx_kl", approx_kl.item(), gs)
+            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), gs)
+            writer.add_scalar("losses/explained_variance", explained_var, gs)
+            writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time, gs)
+            writer.add_scalar("time/steps_per_second", (gs - rollout_start_step) / (time.time() - rollout_start_time), gs)  # noqa: E501
+            writer.add_scalar("rollout/ep_rew_mean", common.safe_mean(envs.return_queue), gs)
+            writer.add_scalar("rollout/ep_len_mean", common.safe_mean(envs.length_queue), gs)
+            writer.add_scalar("rollout/ep_value_mean", common.safe_mean(ep_net_value_queue), gs)
+            writer.add_scalar("rollout/ep_success_rate", common.safe_mean(ep_is_success_queue), gs)
+            writer.add_scalar("rollout/ep_count", envs.episode_count, gs)
+            writer.add_scalar("global/num_timesteps", gs, gs)
+            writer.add_scalar("global/num_rollouts", agent.state.global_rollout, gs)
 
             if args.rollouts_total:
-                writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total)
+                writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total, gs)
 
-            print(f"global_step={agent.state.global_step}, rollout/ep_rew_mean={common.safe_mean(envs.return_queue)}")
+            print(f"global_step={gs}, rollout/ep_rew_mean={common.safe_mean(envs.return_queue)}")
 
             if args.success_rate_target and common.safe_mean(ep_is_success_queue) >= args.success_rate_target:
                 writer.flush()
@@ -811,8 +818,8 @@ def main(args):
                     counters = np.array([counters[1], counters[2], counters[3:14].sum(), counters[15]])
                     dist = Categorical(torch.tensor(counters))
                     data = [[t, c] for (t, c) in zip(action_types, dist.probs)]
-                    # wt = wandb.Table(columns=["key", "value"], data=data)
-                    # wandb.log({"action_type_counters": wt})
+                    wt = wandb.Table(columns=["key", "value"], data=data)
+                    wandb.log({"action_type_counters": wt}, commit=False)
                 else:
                     log_action_types_2d_queue.append(np.sum(ep_action_types_2d_queue, axis=0))
 
@@ -828,7 +835,7 @@ def main(args):
             if args.rollouts_per_mapchange and map_rollouts % args.rollouts_per_mapchange == 0:
                 map_rollouts = 0
                 agent.state.map_swaps += 1
-                writer.add_scalar("global/map_swaps", agent.state.map_swaps)
+                writer.add_scalar("global/map_swaps", agent.state.map_swaps, gs)
                 envs.close()
                 envs = common.create_venv(VcmiEnv, args, writer, agent.state.map_swaps)  # noqa: E501
                 next_obs, _ = envs.reset(seed=args.seed)

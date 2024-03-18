@@ -165,11 +165,16 @@ def main(args):
 
     args = common.maybe_resume_args(args)
 
-    # XXX: handle newly introduced options
+    # Prevent errors from newly introduced args when loading/resuming
+    # TODO: handle removed args
     args = Args(**vars(args))
-    # TODO: handle removed options
 
-    print("Args: %s" % (asdict(args)))
+    # Printing optimizer_state_dict is too much spam
+    printargs = asdict(args).copy()
+    printargs["state"] = {k: v for k, v in printargs["state"].items() if k != "optimizer_state_dict"}
+    printargs["state"]["optimizer_state_dict"] = "..."
+
+    print("Args: %s" % printargs)
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     print("Out dir: %s" % out_dir)
     os.makedirs(out_dir, exist_ok=True)
@@ -201,11 +206,8 @@ def main(args):
                 shutil.copyfileobj(fsrc, fdst)
                 print("Wrote backup %s" % backup)
 
-    writer = SummaryWriter(out_dir)
-    common.log_params(args, writer)
-
     try:
-        envs, map_offset = common.create_venv(VcmiEnv, args, writer, start_map_swaps)
+        envs, map_offset = common.create_venv(VcmiEnv, args, start_map_swaps)
         obs_space = envs.unwrapped.single_observation_space
         act_space = envs.unwrapped.single_action_space
 
@@ -214,14 +216,16 @@ def main(args):
         if agent is None:
             agent = Agent(obs_space, act_space, args.state).to(device)
 
-        if args.resume:
-            agent.state.resumes += 1
-            writer.add_scalar("global/resumes", agent.state.resumes)
-
-        # print("Agent state: %s" % asdict(agent.state))
-
         if args.wandb:
             common.setup_wandb(args, agent, __file__)
+
+        # XXX: writers must be created *after* wandb init
+        writer = SummaryWriter(out_dir)
+        common.log_params(args, writer, agent.state.global_step)
+
+        if args.resume:
+            agent.state.resumes += 1
+            writer.add_scalar("global/resumes", agent.state.resumes, agent.state.global_step)
 
         optimizer = common.init_optimizer(args, agent, optimizer)
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
@@ -381,25 +385,26 @@ def main(args):
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             # writer.add_scalar("params/learning_rate", optimizer.param_groups[0]["lr"], agent.state.global_step)
-            writer.add_scalar("losses/value_loss", v_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/policy_loss", pg_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/entropy", entropy_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), agent.state.global_step)
-            writer.add_scalar("losses/approx_kl", approx_kl.item(), agent.state.global_step)
-            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), agent.state.global_step)
-            writer.add_scalar("losses/explained_variance", explained_var, agent.state.global_step)
-            writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time)
-            writer.add_scalar("time/steps_per_second", (agent.state.global_step - rollout_start_step) / (time.time() - rollout_start_time))  # noqa: E501
-            writer.add_scalar("rollout/ep_rew_mean", common.safe_mean(envs.return_queue))
-            writer.add_scalar("rollout/ep_len_mean", common.safe_mean(envs.length_queue))
-            writer.add_scalar("rollout/ep_value_mean", common.safe_mean(ep_net_value_queue))
-            writer.add_scalar("rollout/ep_success_rate", common.safe_mean(ep_is_success_queue))
-            writer.add_scalar("rollout/ep_count", envs.episode_count)
-            writer.add_scalar("global/num_timesteps", agent.state.global_step)
-            writer.add_scalar("global/num_rollouts", agent.state.global_rollout)
+            gs = agent.state.global_step
+            writer.add_scalar("losses/value_loss", v_loss.item(), gs)
+            writer.add_scalar("losses/policy_loss", pg_loss.item(), gs)
+            writer.add_scalar("losses/entropy", entropy_loss.item(), gs)
+            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), gs)
+            writer.add_scalar("losses/approx_kl", approx_kl.item(), gs)
+            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), gs)
+            writer.add_scalar("losses/explained_variance", explained_var, gs)
+            writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time, gs)
+            writer.add_scalar("time/steps_per_second", (agent.state.global_step - rollout_start_step) / (time.time() - rollout_start_time), gs)  # noqa: E501
+            writer.add_scalar("rollout/ep_rew_mean", common.safe_mean(envs.return_queue), gs)
+            writer.add_scalar("rollout/ep_len_mean", common.safe_mean(envs.length_queue), gs)
+            writer.add_scalar("rollout/ep_value_mean", common.safe_mean(ep_net_value_queue), gs)
+            writer.add_scalar("rollout/ep_success_rate", common.safe_mean(ep_is_success_queue), gs)
+            writer.add_scalar("rollout/ep_count", envs.episode_count, gs)
+            writer.add_scalar("global/num_timesteps", agent.state.global_step, gs)
+            writer.add_scalar("global/num_rollouts", agent.state.global_rollout, gs)
 
             if args.rollouts_total:
-                writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total)
+                writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total, gs)
 
             print(f"global_step={agent.state.global_step}, rollout/ep_rew_mean={common.safe_mean(envs.return_queue)}")
 
@@ -423,7 +428,7 @@ def main(args):
 
             if rollout > start_rollout and rollout % args.rollouts_per_mapchange == 0:
                 agent.state.map_swaps += 1
-                writer.add_scalar("global/map_swaps", agent.state.map_swaps)
+                writer.add_scalar("global/map_swaps", agent.state.map_swaps, gs)
                 envs.close()
                 envs = common.create_venv(VcmiEnv, args, writer, agent.state.map_swaps)  # noqa: E501
                 next_obs, _ = envs.reset(seed=args.seed)

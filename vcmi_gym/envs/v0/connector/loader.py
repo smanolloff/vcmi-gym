@@ -16,6 +16,7 @@
 
 # from sb3_contrib import QRDQN
 import torch
+import numpy as np
 import connexport
 import os
 
@@ -39,8 +40,8 @@ class Loader:
 
         def predict(self, obs, mask):
             actions = self.model.predict(
-                torch.as_tensor(obs).reshape(OBS_SHAPE).unsqueeze(0),
-                mask=torch.as_tensor(mask[ACTION_OFFSET:]).unsqueeze(0)
+                np.expand_dims(obs.reshape(OBS_SHAPE), axis=0),
+                np.expand_dims(mask[ACTION_OFFSET:], axis=0)
             )
             action = actions[0] + ACTION_OFFSET
             print("Agent prediction: %s" % action)
