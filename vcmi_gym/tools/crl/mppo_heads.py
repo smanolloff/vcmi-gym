@@ -19,6 +19,7 @@
 import os
 import random
 import time
+import shutil
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -30,8 +31,9 @@ import torch.nn as nn
 # import tyro
 import enum
 from torch.utils.tensorboard import SummaryWriter
+from torch.distributions.categorical import Categorical
 
-from vcmi_gym import VcmiEnv
+from vcmi_gym import VcmiEnv, InfoDict
 
 from . import common
 
@@ -66,6 +68,7 @@ class EnvArgs:
     term_reward_mult: int = 0
     reward_clip_mod: Optional[int] = None
     consecutive_error_reward_factor: Optional[int] = None
+    vcmi_timeout: int = 5
 
 
 @dataclass
@@ -86,10 +89,10 @@ class Args:
     notes: Optional[str] = None
 
     agent_load_file: Optional[str] = None
-    rollouts_total: int = 10000
+    rollouts_total: int = 0
     rollouts_per_mapchange: int = 20
     rollouts_per_log: int = 1
-    opponent_load_file: Optional[str] = None
+    rollouts_per_table_log: int = 10
     success_rate_target: Optional[float] = None
     mapmask: str = "ai/generated/B*.vmap"
     randomize_maps: bool = False
@@ -97,6 +100,8 @@ class Args:
     max_saves: int = 3
     out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
 
+    opponent_load_file: Optional[str] = None
+    opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
     weight_decay: float = 0.0
     learning_rate: float = 2.5e-4
     num_envs: int = 4
@@ -117,7 +122,7 @@ class Args:
     loss_weights: dict = field(default_factory=dict)
 
     logparams: dict = field(default_factory=dict)
-    cfg_file: str = 'path/to/cfg.yml'
+    cfg_file: Optional[str] = None
     wandb: bool = True
     seed: int = 42
 
@@ -156,12 +161,9 @@ class Bx165xE_to_Ex11x15(nn.Module):
         return x.unflatten(1, (11, 15)).permute(0, 3, 1, 2)
 
 
-class Agent(nn.Module):
-    def __init__(self, observation_space, action_space, state):
+class AgentNN(nn.Module):
+    def __init__(self, action_space, observation_space):
         super().__init__()
-
-        self.state = state
-
         # 1 nonhex action (RETREAT) + 165 hexex*14 actions each
         assert action_space.n == 1 + (165*14)
 
@@ -464,18 +466,36 @@ class Agent(nn.Module):
     #         return torch.argmax(dist.probs, dim=1).cpu().numpy()
 
 
+class Agent(nn.Module):
+    def __init__(self, observation_space, action_space, state):
+        super().__init__()
+
+        self.observation_space = observation_space  # needed for save/load
+        self.action_space = action_space  # needed for save/load
+        self.state = state
+
+        self.kur = lambda y: observation_space
+        self.NN = AgentNN(action_space, observation_space)
+
+
 def main(args):
     assert isinstance(args, Args)
 
     args = common.maybe_resume_args(args)
-    print("Args: %s" % (asdict(args)))
-    common.maybe_setup_wandb(args, __file__)
+
+    # Prevent errors from newly introduced args when loading/resuming
+    # TODO: handle removed args
+    args = Args(**vars(args))
+
+    # Printing optimizer_state_dict is too much spam
+    printargs = asdict(args).copy()
+    printargs["state"] = {k: v for k, v in printargs["state"].items() if k != "optimizer_state_dict"}
+    printargs["state"]["optimizer_state_dict"] = "..."
+
+    print("Args: %s" % printargs)
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     print("Out dir: %s" % out_dir)
     os.makedirs(out_dir, exist_ok=True)
-
-    writer = SummaryWriter(out_dir)
-    common.log_params(args, writer)
 
     batch_size = int(args.num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
@@ -493,16 +513,26 @@ def main(args):
     start_map_swaps = args.state.map_swaps
 
     if args.agent_load_file:
-        print("Loading agent from %s" % args.agent_load_file)
-        agent = torch.load(args.agent_load_file)
+        f = args.agent_load_file
+        print("Loading agent from %s" % f)
+        agent = common.load(Agent, f)
         start_map_swaps = agent.state.map_swaps
+
+        backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
+        with open(f, 'rb') as fsrc:
+            with open(backup, 'wb') as fdst:
+                shutil.copyfileobj(fsrc, fdst)
+                print("Wrote backup %s" % backup)
+
+    writer = SummaryWriter(out_dir)
+    common.log_params(args, writer)
 
     try:
         loss_weights = {k: np.array(v, dtype=np.float32) for k, v in args.loss_weights.items()}
         for k, v in loss_weights.items():
             assert v.sum().round(3) == 1, "Unexpected loss weights: %s" % v
 
-        envs = common.create_venv(VcmiEnv, args, writer, start_map_swaps)  # noqa: E501
+        envs, map_offset = common.create_venv(VcmiEnv, args, writer, start_map_swaps)
         [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         obs_space = envs.unwrapped.single_observation_space
@@ -519,9 +549,29 @@ def main(args):
 
         # print("Agent state: %s" % asdict(agent.state))
 
+        if args.wandb:
+            import wandb
+            common.setup_wandb(args, agent, __file__)
+            all_action_types = InfoDict.D1_ARRAY_VALUES["action_type_counters"]
+            assert all_action_types[1] == "WAIT"
+            assert all_action_types[2] == "MOVE"
+            assert all(at.startswith("AMOVE_") for at in all_action_types[3:14])
+            assert all_action_types[15] == "SHOOT"
+            assert len(all_action_types) == 16
+            action_types = ["WAIT", "MOVE", "AMOVE", "SHOOT"]
+
+        writer = SummaryWriter(out_dir)
+
         optimizer = common.init_optimizer(args, agent, optimizer)
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
+        ep_action_types_2d_queue = deque(maxlen=envs.return_queue.maxlen)
+
+        # On each "regular log", if it's not time for "table log",
+        # aggregate ep_action_types_2d_queue to get a 1d array and append
+        # it to log_action_types_2d_queue
+        assert args.rollouts_per_table_log % args.rollouts_per_log == 0
+        log_action_types_2d_queue = deque(maxlen=args.rollouts_per_table_log // args.rollouts_per_log)
 
         assert act_space.shape == ()
 
@@ -545,12 +595,15 @@ def main(args):
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
         start_rollout = agent.state.global_rollout + 1
-        assert start_rollout < args.rollouts_total
+        end_rollout = args.rollouts_total or 10**9
+        assert start_rollout < end_rollout
+        map_rollouts = 0
 
-        for rollout in range(start_rollout, args.rollouts_total + 1):
+        for rollout in range(start_rollout, end_rollout):
             agent.state.global_rollout = rollout
             rollout_start_time = time.time()
             rollout_start_step = agent.state.global_step
+            map_rollouts += 1
 
             # XXX: eval during experience collection
             agent.eval()
@@ -563,7 +616,7 @@ def main(args):
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
                     env_action, heads_action, heads_logprob, _, value = \
-                        agent.get_action_and_value(next_obs, next_mask)
+                        agent.NN.get_action_and_value(next_obs, next_mask)
                     values[step] = value.flatten()
 
                 env_actions[step] = env_action
@@ -584,10 +637,11 @@ def main(args):
                         assert final_info is not None, "has_final_info=True, but final_info=None"
                         ep_net_value_queue.append(final_info["net_value"])
                         ep_is_success_queue.append(final_info["is_success"])
+                        ep_action_types_2d_queue.append(final_info["action_type_counters"])
 
             # bootstrap value if not done
             with torch.no_grad():
-                next_value = agent.get_value(next_obs).reshape(1, -1)
+                next_value = agent.NN.get_value(next_obs).reshape(1, -1)
                 advantages = torch.zeros_like(rewards).to(device)
                 lastgaelam = 0
                 for t in reversed(range(args.num_steps)):
@@ -628,7 +682,7 @@ def main(args):
                     # mb_heads_actions is of shape (B, 3)
                     mb_heads_actions = b_heads_actions.long()[mb_inds]
 
-                    _, _, newheads_logprob, heads_entropy, newvalue = agent.get_action_and_value(
+                    _, _, newheads_logprob, heads_entropy, newvalue = agent.NN.get_action_and_value(
                         b_obs[mb_inds],
                         b_masks[mb_inds],
                         mb_env_actions,
@@ -643,8 +697,8 @@ def main(args):
                     heads_logratio = newheads_logprob - b_heads_logprobs[mb_inds]
                     heads_ratio = heads_logratio.exp()
 
-                    logratio = heads_logratio.sum(dim=1)
-                    ratio = logratio.exp()  # XXX: same as heads_logratio.prod(dim=1)?
+                    logratio = heads_logratio.sum(dim=1)  # XXX: same as heads_ratio.prod(dim=1)?
+                    ratio = logratio.exp()
 
                     # loss_weights is of shape (B, 3)
                     # Example (2 batches):
@@ -702,7 +756,7 @@ def main(args):
 
                     optimizer.zero_grad()
                     loss.backward()
-                    nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                    nn.utils.clip_grad_norm_(agent.NN.parameters(), args.max_grad_norm)
                     optimizer.step()
 
                 if args.target_kl is not None and approx_kl > args.target_kl:
@@ -735,19 +789,33 @@ def main(args):
             writer.add_scalar("rollout/ep_count", envs.episode_count)
             writer.add_scalar("global/num_timesteps", agent.state.global_step)
             writer.add_scalar("global/num_rollouts", agent.state.global_rollout)
-            writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total)
+
+            breakpoint()
+
+            if args.rollouts_total:
+                writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total)
 
             print(f"global_step={agent.state.global_step}, rollout/ep_rew_mean={common.safe_mean(envs.return_queue)}")
 
             if args.success_rate_target and common.safe_mean(ep_is_success_queue) >= args.success_rate_target:
                 writer.flush()
-                print("Early stopping after %d rollouts due to: success rate > %.2f (%.2f)" % (
-                    rollout % args.rollouts_per_mapchange,
+                print("Early stopping after %d map rollouts due to: success rate > %.2f (%.2f)" % (
+                    map_rollouts,
                     args.success_rate_target,
                     common.safe_mean(ep_is_success_queue)
                 ))
 
             if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
+                if args.wandb and rollout % args.rollouts_per_table_log == 0:
+                    counters = np.sum(log_action_types_2d_queue, axis=0)
+                    counters = np.array([counters[1], counters[2], counters[3:14].sum(), counters[15]])
+                    dist = Categorical(torch.tensor(counters))
+                    data = [[t, c] for (t, c) in zip(action_types, dist.probs)]
+                    # wt = wandb.Table(columns=["key", "value"], data=data)
+                    # wandb.log({"action_type_counters": wt})
+                else:
+                    log_action_types_2d_queue.append(np.sum(ep_action_types_2d_queue, axis=0))
+
                 writer.flush()
                 # reset per-rollout stats (affects only logging)
                 envs.return_queue.clear()
@@ -757,7 +825,8 @@ def main(args):
                 ep_is_success_queue.clear()
                 envs.episode_count = 0
 
-            if rollout > start_rollout and rollout % args.rollouts_per_mapchange == 0:
+            if args.rollouts_per_mapchange and map_rollouts % args.rollouts_per_mapchange == 0:
+                map_rollouts = 0
                 agent.state.map_swaps += 1
                 writer.add_scalar("global/map_swaps", agent.state.map_swaps)
                 envs.close()
@@ -791,13 +860,14 @@ if __name__ == "__main__":
         rollouts_total=1000000,
         rollouts_per_mapchange=1000,
         rollouts_per_log=1000,
-        opponent_load_file=None,
         success_rate_target=None,
         mapmask="ai/generated/B001.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
         max_saves=0,
         out_dir_template="data/debug-crl/debug-crl",
+        opponent_load_file=None,
+        opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.0,
         learning_rate=0.001,
         num_envs=1,
@@ -816,12 +886,12 @@ if __name__ == "__main__":
         loss_weights={
             "DEFEND": [1, 0, 0],
             "WAIT": [1, 0, 0],
-            "SHOOT": [0.3, 0.7, 0],
-            "MOVE": [0.3, 0.7, 0],
-            "AMOVE": [0.3, 0.3, 0.4],
+            "SHOOT": [0.5, 0.5, 0],
+            "MOVE": [0.5, 0.5, 0],
+            "AMOVE": [0.33, 0.33, 0.34],
         },
         logparams={},
-        cfg_file="/path/to/cfg",
+        cfg_file=None,
         wandb=False,
         seed=42,
         env=EnvArgs(

@@ -29,6 +29,7 @@ import numpy as np
 
 from dataclasses import asdict
 from torch.distributions.categorical import Categorical
+from stable_baselines3.common.save_util import save_to_zip_file, load_from_zip_file
 
 
 # https://boring-guy.sh/posts/masking-rl/
@@ -55,6 +56,7 @@ def create_venv(env_cls, args, writer, map_swaps):
     all_maps = glob.glob("maps/%s" % args.mapmask)
     all_maps = [m.removeprefix("maps/") for m in all_maps]
     all_maps.sort()
+    map_offset = None
 
     if args.num_envs == 1:
         n_maps = 1
@@ -69,7 +71,8 @@ def create_venv(env_cls, args, writer, map_swaps):
         i = (n_maps * map_swaps) % len(all_maps)
         new_i = (i + n_maps) % len(all_maps)
         # wandb.log({"map_offset": i}, commit=False)
-        writer.add_scalar("global/map_offset", i)
+        # writer.add_scalar("global/map_offset", i)
+        map_offset = i
 
         if new_i > i:
             maps = all_maps[i:new_i]
@@ -138,7 +141,8 @@ def create_venv(env_cls, args, writer, map_swaps):
         vec_env = gym.vector.SyncVectorEnv([env_creator])
 
     vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env)
-    return vec_env
+
+    return vec_env, map_offset
 
 
 def maybe_save(t, args, agent, optimizer, out_dir):
@@ -151,9 +155,9 @@ def maybe_save(t, args, agent, optimizer, out_dir):
         return t
 
     os.makedirs(out_dir, exist_ok=True)
-    agent_file = os.path.join(out_dir, "agent-%d.pt" % now)
+    agent_file = os.path.join(out_dir, "agent-%d.zip" % now)
     agent.state.optimizer_state_dict = optimizer.state_dict()
-    torch.save(agent, agent_file)
+    save(agent, agent_file)
     print("Saved agent to %s" % agent_file)
 
     args_file = os.path.join(out_dir, "args-%d.pt" % now)
@@ -162,7 +166,7 @@ def maybe_save(t, args, agent, optimizer, out_dir):
 
     # save file retention (keep latest N saves)
     files = sorted(
-        glob.glob(os.path.join(out_dir, "agent-[0-9]*.pt")),
+        glob.glob(os.path.join(out_dir, "agent-[0-9]*.zip")),
         key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()),
         reverse=True
     )
@@ -170,7 +174,8 @@ def maybe_save(t, args, agent, optimizer, out_dir):
     for file in files[args.max_saves:]:
         print("Deleting %s" % file)
         os.remove(file)
-        argfile = "%s/args-%s" % (os.path.dirname(file), os.path.basename(file).removeprefix("agent-"))
+        base = os.path.basename(file).removeprefix("agent-").removesuffix(".zip")
+        argfile = "%s/args-%s.pt" % (os.path.dirname(file), base)
         if os.path.isfile(argfile):
             print("Deleting %s" % argfile)
             os.remove(argfile)
@@ -179,12 +184,13 @@ def maybe_save(t, args, agent, optimizer, out_dir):
 
 
 def find_latest_save(group_id, run_id):
-    pattern = f"data/{group_id}/{run_id}/agent-[0-9]*.pt"
+    pattern = f"data/{group_id}/{run_id}/agent-[0-9]*.zip"
     files = glob.glob(pattern)
     assert len(files) > 0, f"No files found for: {pattern}"
 
     agent_file = max(files, key=os.path.getmtime)
-    args_file = "%s/args-%s" % (os.path.dirname(agent_file), os.path.basename(agent_file).removeprefix("agent-"))
+    base = os.path.basename(agent_file).removeprefix("agent-").removesuffix(".zip")
+    args_file = "%s/args-%s.pt" % (os.path.dirname(agent_file), base)
     assert os.path.isfile(args_file)
 
     return args_file, agent_file
@@ -280,14 +286,11 @@ def maybe_resume_args(args):
     return args
 
 
-def maybe_setup_wandb(args, src_file):
-    if not args.wandb:
-        return
-
+def setup_wandb(args, agent, src_file):
     import wandb
 
     wandb.init(
-        project="vcmi-gym",
+        project="test",
         group=args.group_id,
         name=args.run_id,
         id=args.run_id,
@@ -306,6 +309,7 @@ def maybe_setup_wandb(args, src_file):
     #      but args.cfg_file is relative to vcmi-gym ROOT dir
     def code_include_fn(path):
         res = (
+            (os.path.basename(path) == os.path.basename(__file__)) or
             path.endswith(os.path.basename(src_file)) or
             path.endswith(os.path.basename(args.cfg_file or "\u0255")) or
             path.endswith("requirements.txt") or
@@ -316,6 +320,7 @@ def maybe_setup_wandb(args, src_file):
         return res
 
     wandb.run.log_code(root=os.path.dirname(src_file), include_fn=code_include_fn)
+    # wandb.watch(agent, log="all", log_graph=True, log_freq=1000)
 
 
 def init_optimizer(args, agent, optimizer):
@@ -340,3 +345,26 @@ def init_optimizer(args, agent, optimizer):
     print("Learning rate: %s" % optimizer.param_groups[0]["lr"])
     print("Weight decay: %s" % optimizer.param_groups[0]["weight_decay"])
     return optimizer
+
+
+# Saving/loading with sb3's zip format is needed because
+# torch.save(agent) blows up after wandb.watch(agent)
+# Here we can save specific agent attrs + NN state_dicts
+def save(agent, path):
+    # The non-NN attrs to save:
+    attrs = ["observation_space", "action_space", "state"]
+    data = {k: agent.__dict__[k] for k in attrs}
+    # The NN attrs to save:
+    nn_names = ["NN"]
+    params = {k: getattr(agent, k).state_dict() for k in nn_names}
+    save_to_zip_file(path, data=data, params=params)
+
+
+def load(agent_cls, path):
+    data, params, pytorch_variables = load_from_zip_file(path)
+    assert data is not None, "No data found in the saved file"
+    assert params is not None, "No params found in the saved file"
+    assert "NN" in params and len(params) == 1
+    agent = agent_cls(**data)
+    agent.NN.load_state_dict(params["NN"], strict=True)
+    return agent

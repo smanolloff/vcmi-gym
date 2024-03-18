@@ -5,25 +5,29 @@ resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
 
-notes: "try with increased gae_lambda"
+notes: ""
 
-# agent_load_file: ~
-agent_load_file: "data/crl/clone-fc1024-lr0.000001/agent-1710499118.pt"
+agent_load_file: ~
+# agent_load_file: "data/crl/clone-fc1024-lr0.000001/agent-1710499118.pt"
 rollouts_total: 0
 rollouts_per_mapchange: 20
 rollouts_per_log: 1
 opponent_load_file: ~
 success_rate_target: ~
-mapmask: "gym/generated/B*.vmap"
+mapmask: "gym/A1.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 max_saves: 3
 out_dir_template: "data/{group_id}/{run_id}"
 
+# SBM = StupidAI, BattleAI, MMAI_MODEL
+opponent_sbm_probs: [1.0, 0.0, 0]
+opponent_load_file: ~
+
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-num_envs: 8
+num_envs: 1
 
 #
 # PPO Hyperparams

@@ -131,7 +131,8 @@ class Agent(nn.Module):
         assert observation_space.shape[2] / 56 == 15
 
         self.features_extractor = common.layer_init(nn.Sequential(
-            # loaded from file
+            nn.Conv2d(in_channels=1, out_channels=1, kernel_size=[1, 56], stride=[1, 56], padding=0),
+            nn.Flatten()
         ))
 
         self.actor = common.layer_init(nn.Linear(165, action_space.n), gain=0.01)
@@ -200,12 +201,11 @@ def main(args):
                 shutil.copyfileobj(fsrc, fdst)
                 print("Wrote backup %s" % backup)
 
-    common.maybe_setup_wandb(args, __file__)
     writer = SummaryWriter(out_dir)
     common.log_params(args, writer)
 
     try:
-        envs = common.create_venv(VcmiEnv, args, writer, start_map_swaps)  # noqa: E501
+        envs, map_offset = common.create_venv(VcmiEnv, args, writer, start_map_swaps)
         obs_space = envs.unwrapped.single_observation_space
         act_space = envs.unwrapped.single_action_space
 
@@ -219,6 +219,9 @@ def main(args):
             writer.add_scalar("global/resumes", agent.state.resumes)
 
         # print("Agent state: %s" % asdict(agent.state))
+
+        if args.wandb:
+            common.setup_wandb(args, agent, __file__)
 
         optimizer = common.init_optimizer(args, agent, optimizer)
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
@@ -454,14 +457,14 @@ if __name__ == "__main__":
         rollouts_per_log=1000,
         opponent_load_file=None,
         success_rate_target=None,
-        mapmask="ai/P1.vmap",
+        mapmask="gym/P1.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
         max_saves=0,
         out_dir_template="data/debug-crl/debug-crl",
         weight_decay=0.0,
         learning_rate=0.001,
-        num_envs=2,
+        num_envs=1,
         num_steps=4,
         gamma=0.8,
         gae_lambda=0.8,
