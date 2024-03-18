@@ -1,8 +1,10 @@
 ---
-group_id: crl
-run_id: fc1024-gd0.99
+group_id: heads
+run_id: heads-simple-A1
 resume: True
-overwrite: ["mapmask"]
+overwrite: ["learning_rate"]
 # overwrite: ["learning_rate", "env.term_reward_mult"]
 out_dir_template: "data/{group_id}/{run_id}"
 mapmask: "gym/generated/B*.vmap"
+
+learning_rate: 0.000003

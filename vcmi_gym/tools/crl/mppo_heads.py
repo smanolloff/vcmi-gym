@@ -33,7 +33,7 @@ import enum
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributions.categorical import Categorical
 
-from vcmi_gym import VcmiEnv, InfoDict
+from vcmi_gym import VcmiEnv
 
 from . import common
 
@@ -64,6 +64,7 @@ class EnvArgs:
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
     sparse_info: bool = True
+    step_reward_fixed: int = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
     reward_clip_mod: Optional[int] = None
@@ -550,16 +551,12 @@ def main(args):
         if agent is None:
             agent = Agent(obs_space, act_space, args.state).to(device)
 
+        assert args.rollouts_per_table_log % args.rollouts_per_log == 0
+
         if args.wandb:
             import wandb
             common.setup_wandb(args, agent, __file__)
-            all_action_types = InfoDict.D1_ARRAY_VALUES["action_type_counters"]
-            assert all_action_types[1] == "WAIT"
-            assert all_action_types[2] == "MOVE"
-            assert all(at.startswith("AMOVE_") for at in all_action_types[3:14])
-            assert all_action_types[15] == "SHOOT"
-            assert len(all_action_types) == 16
-            action_types = ["WAIT", "MOVE", "AMOVE", "SHOOT"]
+            action_types = [Action(i).value for i in range(Action.COUNT)]
 
         writer = SummaryWriter(out_dir)
         common.log_params(args, writer, agent.state.global_step)
@@ -573,14 +570,8 @@ def main(args):
         optimizer = common.init_optimizer(args, agent, optimizer)
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
-        ep_action_types_2d_queue = deque(maxlen=envs.return_queue.maxlen)
 
-        # On each "regular log", if it's not time for "table log",
-        # aggregate ep_action_types_2d_queue to get a 1d array and append
-        # it to log_action_types_2d_queue
-        assert args.rollouts_per_table_log % args.rollouts_per_log == 0
-        log_action_types_2d_queue = deque(maxlen=args.rollouts_per_table_log // args.rollouts_per_log)
-
+        action_counters = np.zeros(Action.COUNT, dtype=np.int64)
         assert act_space.shape == ()
 
         # ALGO Logic: Storage setup
@@ -638,6 +629,9 @@ def main(args):
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
+                # Count just the primary action (first head)
+                action_counters += np.bincount(heads_action[:, 0], minlength=Action.COUNT)
+
                 # See notes/gym_vector.txt
                 for final_info, has_final_info in zip(infos.get("final_info", []), infos.get("_final_info", [])):
                     # "final_info" must be None if "has_final_info" is False
@@ -645,7 +639,6 @@ def main(args):
                         assert final_info is not None, "has_final_info=True, but final_info=None"
                         ep_net_value_queue.append(final_info["net_value"])
                         ep_is_success_queue.append(final_info["is_success"])
-                        ep_action_types_2d_queue.append(final_info["action_type_counters"])
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -814,14 +807,11 @@ def main(args):
 
             if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
                 if args.wandb and rollout % args.rollouts_per_table_log == 0:
-                    counters = np.sum(log_action_types_2d_queue, axis=0)
-                    counters = np.array([counters[1], counters[2], counters[3:14].sum(), counters[15]])
-                    dist = Categorical(torch.tensor(counters))
-                    data = [[t, c] for (t, c) in zip(action_types, dist.probs)]
+                    dist = Categorical(torch.tensor(action_counters))
+                    data = [[Action(t).name, c.item()] for (t, c) in zip(action_types, dist.probs)]
                     wt = wandb.Table(columns=["key", "value"], data=data)
-                    wandb.log({"action_type_counters": wt}, commit=False)
-                else:
-                    log_action_types_2d_queue.append(np.sum(ep_action_types_2d_queue, axis=0))
+                    wandb.log({"action_distribution": wt})
+                    action_counters[:] = 0
 
                 writer.flush()
                 # reset per-rollout stats (affects only logging)
@@ -843,10 +833,10 @@ def main(args):
                 next_done = torch.zeros(args.num_envs).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
-            save_ts = common.maybe_save(save_ts, args, agent, optimizer, out_dir)
+            save_ts = common.maybe_save(save_ts, args, agent, AgentNN, optimizer, out_dir)
 
     finally:
-        common.maybe_save(0, args, agent, optimizer, out_dir)
+        common.maybe_save(0, args, agent, AgentNN, optimizer, out_dir)
         envs.close()
         writer.close()
 
@@ -910,6 +900,7 @@ if __name__ == "__main__":
             vcmienv_loglevel="WARN",
             consecutive_error_reward_factor=-1,
             sparse_info=True,
+            step_reward_fixed=0,
             step_reward_mult=1,
             term_reward_mult=0,
         ),

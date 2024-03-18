@@ -143,7 +143,7 @@ def create_venv(env_cls, args, map_swaps):
     return vec_env, map_offset
 
 
-def maybe_save(t, args, agent, optimizer, out_dir):
+def maybe_save(t, args, agent, nn_cls, optimizer, out_dir):
     now = time.time()
 
     if t is None:
@@ -167,7 +167,9 @@ def maybe_save(t, args, agent, optimizer, out_dir):
     # XXX: this raw model saved like this can't be used for training
     #      (calling wandb.watch on it will blow up)
     nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
-    torch.save(agent.NN, nn_file)
+    nn_model = nn_cls(agent.action_space, agent.observation_space)
+    nn_model.load_state_dict(nn_model.state_dict(), strict=True)
+    torch.save(nn_model, nn_file)
     print("Saved nn to %s" % nn_file)
 
     # save file retention (keep latest N saves)
@@ -296,13 +298,13 @@ def setup_wandb(args, agent, src_file):
     import wandb
 
     wandb.init(
-        project="test",
+        project="vcmi-gym",
         group=args.group_id,
         name=args.run_id,
         id=args.run_id,
         notes=args.notes,
-        # resume="must" if args.resume else "never",
-        resume="allow",  # XXX: reuse id for insta-failed runs
+        resume="must" if args.resume else "never",
+        # resume="allow",  # XXX: reuse id for insta-failed runs
         config=asdict(args),
         sync_tensorboard=True,
         save_code=False,  # code saved manually below
@@ -326,7 +328,7 @@ def setup_wandb(args, agent, src_file):
         return res
 
     wandb.run.log_code(root=os.path.dirname(src_file), include_fn=code_include_fn)
-    # wandb.watch(agent, log="all", log_graph=True, log_freq=1000)
+    return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
 
 
 def init_optimizer(args, agent, optimizer):

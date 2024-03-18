@@ -106,6 +106,7 @@ class VcmiEnv(gym.Env):
         hexattr_filter=None,
         reward_dmg_factor=5,
         reward_clip_mod=None,  # clip at +/- this value
+        step_reward_fixed=0,
         step_reward_mult=1,
         term_reward_mult=1,  # at term step, reward = diff in total army values
     ):
@@ -175,6 +176,7 @@ class VcmiEnv(gym.Env):
         self.hexattr_filter = hexattr_filter
         self.reward_clip_mod = reward_clip_mod
         self.reward_dmg_factor = reward_dmg_factor
+        self.step_reward_fixed = step_reward_fixed
         self.step_reward_mult = step_reward_mult
         self.term_reward_mult = term_reward_mult
         # </params>
@@ -442,7 +444,7 @@ class VcmiEnv(gym.Env):
             vdiff = -vdiff if res.side == 1 else vdiff
             rew += (self.term_reward_mult * vdiff)
 
-        rew = int(self.reward_scaling_factor * rew)
+        rew = int(self.reward_scaling_factor * rew + self.step_reward_fixed)
 
         if self.reward_clip_mod:
             clipped = max(min(rew, self.reward_clip_mod), -self.reward_clip_mod)

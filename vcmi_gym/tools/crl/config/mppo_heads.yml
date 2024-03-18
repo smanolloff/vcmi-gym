@@ -1,6 +1,6 @@
 ---
 group_id: heads
-run_id: heads-A1-6
+run_id: heads-simple-A1
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
@@ -63,6 +63,7 @@ env:
   vcmienv_loglevel: "WARN"
   consecutive_error_reward_factor: -1
   sparse_info: true
+  step_reward_fixed: -100
   step_reward_mult: 1
   term_reward_mult: 0
   reward_clip_mod: ~

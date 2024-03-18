@@ -44,6 +44,7 @@ class EnvArgs:
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
     sparse_info: bool = True
+    step_reward_fixed: int = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
     reward_clip_mod: Optional[int] = None
@@ -495,6 +496,7 @@ if __name__ == "__main__":
             vcmienv_loglevel="WARN",
             consecutive_error_reward_factor=-1,
             sparse_info=True,
+            step_reward_fixed=0,
             step_reward_mult=1,
             term_reward_mult=0,
         ),
