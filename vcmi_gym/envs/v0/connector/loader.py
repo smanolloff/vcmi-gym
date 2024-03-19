@@ -38,11 +38,9 @@ class Loader:
             # self.obs = np.ndarray((2310,), dtype=np.float32)
             # self.actmasks = np.ndarray((1652,), dtype=np.bool)
 
+        # Obs is flattened here (shape is (9240))
         def predict(self, obs, mask):
-            actions = self.model.predict(
-                np.expand_dims(obs.reshape(OBS_SHAPE), axis=0),
-                np.expand_dims(mask[ACTION_OFFSET:], axis=0)
-            )
-            action = actions[0] + ACTION_OFFSET
+            action = self.model.predict(obs.reshape(OBS_SHAPE), mask[ACTION_OFFSET:])
+            action += ACTION_OFFSET
             print("Agent prediction: %s" % action)
             return action

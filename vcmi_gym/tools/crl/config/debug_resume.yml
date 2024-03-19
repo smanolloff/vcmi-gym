@@ -1,0 +1,8 @@
+---
+group_id: heads
+run_id: heads-simple-A1
+wandb_project: ~
+resume: True
+overwrite: ["wandb_project"]
+# overwrite: ["learning_rate", "env.term_reward_mult"]
+out_dir_template: "data/{group_id}/{run_id}"

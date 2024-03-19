@@ -1,22 +1,21 @@
 ---
-wandb_project: vcmi-gym
-group_id: heads
-run_id: heads-simple-A1-8
+wandb_project: test
+group_id: debug
+run_id: debug-heads-simple-A1-3
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
 
-notes: "Try clip_vloss=false"
+notes: ""
 
-agent_load_file: ~
-# agent_load_file: "data/crl/crl-mult-sanity2-lr0.0001-wd0/agent-1709801900.pt"
+# agent_load_file: ~
+agent_load_file: "data/heads/heads-simple-A1/agent-1710806916.zip"
 rollouts_total: 0
 rollouts_per_mapchange: 0
 rollouts_per_log: 1
 rollouts_per_table_log: 10
 opponent_load_file: ~
 success_rate_target: ~
-success_target_quit: False
 mapmask: "gym/A1.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
@@ -36,16 +35,15 @@ num_envs: 1
 # PPO Hyperparams
 #
 weight_decay: 0.05
-learning_rate: 0.0001
-num_steps: 16         # rollout_buffer = num_steps*num_envs
-num_minibatches: 2    # minibatch_size = rollout_buffer/num_minibatches
-update_epochs: 2      # full passes of rollout_buffer
-stats_buffer_size: 5  # ~= episodes per rollout
+learning_rate: 0.00003
+num_steps: 256       # rollout_buffer = num_steps*num_envs
+num_minibatches: 16  # minibatch_size = rollout_buffer/num_minibatches
+update_epochs: 10    # full passes of rollout_buffer
 gamma: 0.8
 gae_lambda: 0.8
 norm_adv: true
 clip_coef: 0.3
-clip_vloss: false
+clip_vloss: true
 ent_coef: 0.1
 vf_coef: 1.2
 max_grad_norm: 0.5

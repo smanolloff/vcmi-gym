@@ -52,7 +52,7 @@ class CategoricalMasked(Categorical):
         return -p_log_p.sum(-1)
 
 
-def create_venv(env_cls, args, map_swaps):
+def create_venv(env_cls, args, map_swaps, stats_buffer_size):
     all_maps = glob.glob("maps/%s" % args.mapmask)
     all_maps = [m.removeprefix("maps/") for m in all_maps]
     all_maps.sort()
@@ -138,7 +138,7 @@ def create_venv(env_cls, args, map_swaps):
     else:
         vec_env = gym.vector.SyncVectorEnv([env_creator])
 
-    vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env)
+    vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env, deque_size=stats_buffer_size)
 
     return vec_env, map_offset
 
@@ -168,7 +168,7 @@ def maybe_save(t, args, agent, nn_cls, optimizer, out_dir):
     #      (calling wandb.watch on it will blow up)
     nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
     nn_model = nn_cls(agent.action_space, agent.observation_space)
-    nn_model.load_state_dict(nn_model.state_dict(), strict=True)
+    nn_model.load_state_dict(agent.NN.state_dict(), strict=True)
     torch.save(nn_model, nn_file)
     print("Saved nn to %s" % nn_file)
 
@@ -226,6 +226,7 @@ def safe_mean(array_like) -> float:
 
 
 def log_params(args, writer, global_step):
+    logged = {}
     for (k, v) in args.logparams.items():
         value = args
         for part in v.split("."):
@@ -238,7 +239,8 @@ def log_params(args, writer, global_step):
             assert isinstance(value, (int, float, bool)), "Unexpected value type: %s (%s)" % (value, type(value))
 
         writer.add_scalar(k, float(value), global_step)
-        print("%s: %s" % (k, float(value)))
+        logged[k] = float(value)
+    print("Params: %s" % logged)
 
 
 def maybe_resume_args(args):
@@ -264,7 +266,7 @@ def maybe_resume_args(args):
     # List of arg names to overwrite after loading
     # (some args (incl. overwrite itself) must always be overwritten)
     loaded_args.overwrite = args.overwrite
-    loaded_args.wandb = args.wandb
+    # loaded_args.wandb_project = args.wandb_project
 
     # Overwrite even if None
     # This can happen in a bare resume where no config is given
@@ -297,20 +299,21 @@ def maybe_resume_args(args):
 def setup_wandb(args, agent, src_file):
     import wandb
 
-    wandb.init(
-        project="vcmi-gym",
-        group=args.group_id,
-        name=args.run_id,
-        id=args.run_id,
-        notes=args.notes,
-        resume="must" if args.resume else "never",
-        # resume="allow",  # XXX: reuse id for insta-failed runs
-        config=asdict(args),
-        sync_tensorboard=True,
-        save_code=False,  # code saved manually below
-        allow_val_change=args.resume,
-        settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
-    )
+    if not args.skip_wandb_init:
+        wandb.init(
+            project=args.wandb_project,
+            group=args.group_id,
+            name=args.run_id,
+            id=args.run_id,
+            notes=args.notes,
+            resume="must" if args.resume else "never",
+            # resume="allow",  # XXX: reuse id for insta-failed runs
+            config=asdict(args),
+            sync_tensorboard=True,
+            save_code=False,  # code saved manually below
+            allow_val_change=args.resume,
+            settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
+        )
 
     # https://docs.wandb.ai/ref/python/run#log_code
     # XXX: "path" is relative to THIS dir
@@ -328,7 +331,7 @@ def setup_wandb(args, agent, src_file):
         return res
 
     wandb.run.log_code(root=os.path.dirname(src_file), include_fn=code_include_fn)
-    return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
+    return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=100)#1000)
 
 
 def init_optimizer(args, agent, optimizer):

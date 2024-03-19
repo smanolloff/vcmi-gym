@@ -1,0 +1,40 @@
+---
+program: wandb-agent.py
+project: vcmi-gym
+method: grid
+metric:
+  name: rollout/ep_rew_mean
+  goal: maximize
+parameters:
+  action: { value: train_ppo }
+  c:
+    parameters:
+      wandb_project: { value: "vcmi-gym" }
+      group_id: { value: "A1-sweep" }
+      rollouts_total: { value: 1000 }
+      rollouts_per_mapchange: { value: 0 }
+      rollouts_per_log: { value: 1 }
+      rollouts_per_table_log: { value: 0 }
+      success_rate_target: { value: 0 }
+      ep_rew_mean_target: { value: 0 }
+      quit_on_target: { value: True }
+      mapmask: { value: "gym/A1.vmap" }
+      save_every: { value: 3600 } # seconds
+      max_saves: { value: 3 }
+      out_dir_template: { value: "data/{group_id}/{run_id}" }
+      num_envs: { value: 1 }
+
+      weight_decay: { values: [0, 0.1] }
+      learning_rate: { values: [0.001, 0.00005] }
+      num_steps: { values: [64, 1024] }
+      num_minibatches: { values: [8, 16] }
+      update_epochs: { values: [5, 50] }
+      stats_buffer_size: { value: 100 }
+      gamma: { values: [0.8, 0.98] }
+      gae_lambda: { values: [0.8, 0.98] }
+      norm_adv: { values: [false, true] }
+      clip_coef: { values: [0.2, 0.5] }
+      clip_vloss: { values: [false, true] }
+      ent_coef: { value: 0.007 }
+      vf_coef: { values: [0.3, 1.5] }
+      max_grad_norm: { values: [0.1, 1, 5] }
