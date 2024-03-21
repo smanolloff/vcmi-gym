@@ -40,8 +40,6 @@ ONE = DTYPE(1)
 TRACE = True
 MAXLEN = 80
 
-ARMY_VALUE_REF = 600_000
-
 
 def tracelog(func, maxlen=MAXLEN):
     if not TRACE:
@@ -105,8 +103,9 @@ class VcmiEnv(gym.Env):
         boot_timeout=0,  # seconds
         hexattr_filter=None,
         reward_dmg_factor=5,
-        reward_clip_mod=None,  # clip at +/- this value
-        step_reward_fixed=0,
+        reward_clip_tanh_army_frac=1,  # max action reward relative to starting army value
+        reward_army_value_ref=0,  # scale rewards relative to starting army value (0=no scaling)
+        step_reward_fixed=0,  # fixed reward
         step_reward_mult=1,
         term_reward_mult=1,  # at term step, reward = diff in total army values
     ):
@@ -174,7 +173,8 @@ class VcmiEnv(gym.Env):
         self.defender_model = defender_model
         self.actions_log_file = actions_log_file
         self.hexattr_filter = hexattr_filter
-        self.reward_clip_mod = reward_clip_mod
+        self.reward_clip_tanh_army_frac = reward_clip_tanh_army_frac
+        self.reward_army_value_ref = reward_army_value_ref
         self.reward_dmg_factor = reward_dmg_factor
         self.step_reward_fixed = step_reward_fixed
         self.step_reward_mult = step_reward_mult
@@ -375,10 +375,27 @@ class VcmiEnv(gym.Env):
         self.reward_total = 0
         self.reward_clip_abs_total = 0
         self.reward_clip_abs_max = 0
-        self.reward_scaling_factor = ARMY_VALUE_REF / (res.side0_army_value + res.side1_army_value)
         self.net_value_last = 0
         self.terminated = False
         self.truncated = False
+
+        # TODO: handle unequal starting army values
+        #       e.g. smaller starting army = larger rew for that side?
+
+        # Tanh clipping:
+        # Used to clip max reward for a single action
+        # The clip value is relative to the avg starting army value
+        avg_army_value = (res.side0_army_value + res.side1_army_value) / 2
+        self.reward_clip_tanh_value = avg_army_value * self.reward_clip_tanh_army_frac
+
+        # Reward scaling factor:
+        # Used to equalize avg rewards for different starting army values
+        # E.g. 1K starting armies will have similar avg rewards as 100K armies
+        # This scaling is applied last, after all other reward modifiers
+        if self.reward_army_value_ref:
+            self.reward_scaling_factor = self.reward_army_value_ref / avg_army_value
+        else:
+            self.reward_scaling_factor = 1
 
         # Vars updated after other events
         self.analyzer = Analyzer(N_ACTIONS - self.action_offset)
@@ -444,11 +461,18 @@ class VcmiEnv(gym.Env):
             vdiff = -vdiff if res.side == 1 else vdiff
             rew += (self.term_reward_mult * vdiff)
 
-        rew = int(self.reward_scaling_factor * rew + self.step_reward_fixed)
+        rew += self.step_reward_fixed
 
-        if self.reward_clip_mod:
-            clipped = max(min(rew, self.reward_clip_mod), -self.reward_clip_mod)
+        # Visualize on https://www.desmos.com/calculator
+        # In expression 1 type: s = 5000
+        # In expression 2 type: s * tanh(x/s)
+        # NOTE: this seems useless
+        if self.reward_clip_tanh_value:
+            clipped = self.reward_clip_tanh_value * np.tanh(rew / self.reward_clip_tanh_value)
         else:
             clipped = rew
+
+        rew *= self.reward_scaling_factor
+        clipped *= self.reward_scaling_factor
 
         return clipped, rew

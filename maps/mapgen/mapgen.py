@@ -21,12 +21,39 @@ import copy
 import io
 import zipfile
 
+# relative to script dir
+MAP_DIR = "../gym/generated/mirror_3stack"
 
-ARMY_VALUE_MAX = 500_000
-ARMY_VALUE_MIN = 10_000
+# id of maps to generate (inclusive)
+MAP_ID_START = 1
+MAP_ID_END = 8
+
+# name template containing a single integer to be replaced with MAP_ID
+MAP_NAME_TEMPLATE = "M%02d"
+
+ARMY_N_STACKS_SAME = True  # same for both sides
+ARMY_N_STACKS_MAX = 3
+ARMY_N_STACKS_MIN = 3
+ARMY_VALUE_SAME = True  # same for both sides
+ARMY_VALUE_MAX = 30_000
+ARMY_VALUE_MIN = 5_000
+
+# Rounding for values for better descirptions
+ARMY_VALUE_ROUND = 1000
+
+# Max value for (unused_credits / target_value)
+ARMY_UNUSED_CREDIT_FRACTION_MAX = 0.1
 
 
 class StackTooBigError(Exception):
+    pass
+
+
+class UnusedCreditError(Exception):
+    pass
+
+
+class NotEnoughStacksError(Exception):
     pass
 
 
@@ -59,25 +86,25 @@ def get_templates():
 
 
 def build_army_with_retry(*args, **kwargs):
-    retry_limit = 10
+    retry_limit = 100
     retries = 0
 
     while True:
         try:
             return build_army(*args, **kwargs)
-        except StackTooBigError as e:
+        except (StackTooBigError, UnusedCreditError) as e:
             if retries < retry_limit:
-                print("Rebuilding army due to: %s" % e.str())
                 retries += 1
+                print("[%d] Rebuilding army due to: %s" % (retries, str(e)))
             else:
                 raise Exception("Retry limit (%d) hit" % retry_limit)
 
 
-def build_army(all_creatures, value):
-    per_stack = value / 7
-    army_creatures = random.sample(all_creatures, 7)
+def build_army(all_creatures, value, n_stacks):
+    per_stack = value / n_stacks
+    army_creatures = random.sample(all_creatures, n_stacks)
 
-    army = [None] * 7
+    army = [None] * n_stacks
     credit = value
     for (i, (vcminame, name, aivalue)) in enumerate(army_creatures):
         number = int(per_stack / aivalue)
@@ -96,7 +123,14 @@ def build_army(all_creatures, value):
         assert name0 == name
         army[i] = (vcminame, name, number0 + number)
 
-    print("Leftover credit: %d" % credit)
+    frac = credit / value
+    print("Leftover credit: %d (%.2f%%)" % (credit, frac * 100))
+    if frac > ARMY_UNUSED_CREDIT_FRACTION_MAX:
+        raise UnusedCreditError("Too much unused credit: %d (target value: %d)" % (credit, value))
+
+    if any(s is None for s in army):
+        raise NotEnoughStacksError("Not all stacks were filled")
+
     # list of (vcminame, name, number) tuples
     return army
 
@@ -117,7 +151,7 @@ def save(header, objects, surface_terrain):
         zipf.writestr('surface_terrain.json', json.dumps(surface_terrain))
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    dest = os.path.relpath(f"{current_dir}/../maps/generated/{header['name']}.vmap", os.getcwd())
+    dest = os.path.relpath(f"{current_dir}/{MAP_DIR}/{header['name']}.vmap", os.getcwd())
 
     print("Creating %s" % dest)
     with open(dest, 'wb') as f:
@@ -127,16 +161,17 @@ def save(header, objects, surface_terrain):
 if __name__ == "__main__":
     header0, objects0, surface_terrain0 = get_templates()
     all_creatures = get_all_creatures()
+    all_values = list(range(ARMY_VALUE_MIN, ARMY_VALUE_MAX, ARMY_VALUE_ROUND))
 
-    for i in range(1, 5):
-        mult = 10_000
-
-        value = mult * random.randint(ARMY_VALUE_MIN / mult, ARMY_VALUE_MAX / mult)
-        army_a = build_army_with_retry(all_creatures, value)
-        army_b = build_army_with_retry(all_creatures, value)
+    for i in range(MAP_ID_START, MAP_ID_END + 1):
+        value = random.choice(all_values)
+        stacks_a = random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
+        stacks_b = stacks_a if ARMY_N_STACKS_SAME else random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
+        army_a = build_army_with_retry(all_creatures, value, stacks_a)
+        army_b = army_a if ARMY_VALUE_SAME else build_army_with_retry(all_creatures, value, stacks_b)
 
         header = copy.deepcopy(header0)
-        header["name"] = "T%02d" % i
+        header["name"] = MAP_NAME_TEMPLATE % i
         header["description"] = "AI test map %s\n\nTarget army values: %d\nAttacker:\n%s\n\nDefender:\n%s" % (
             header["name"],
             value,

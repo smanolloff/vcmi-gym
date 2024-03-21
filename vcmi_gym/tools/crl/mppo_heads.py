@@ -68,9 +68,10 @@ class EnvArgs:
     step_reward_fixed: int = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
-    reward_clip_mod: Optional[int] = None
     consecutive_error_reward_factor: Optional[int] = None
     vcmi_timeout: int = 5
+    reward_clip_tanh_army_frac: int = 1
+    reward_army_value_ref: int = 0
 
 
 @dataclass
@@ -92,6 +93,8 @@ class Args:
     notes: Optional[str] = None
 
     agent_load_file: Optional[str] = None
+    timesteps_total: int = 0
+    timesteps_per_mapchange: int = 0
     rollouts_total: int = 0
     rollouts_per_mapchange: int = 20
     rollouts_per_log: int = 1
@@ -99,6 +102,7 @@ class Args:
     success_rate_target: Optional[float] = None
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
+    mapside: str = "both"
     mapmask: str = "ai/generated/B*.vmap"
     randomize_maps: bool = False
     save_every: int = 3600  # seconds
@@ -197,6 +201,7 @@ class AgentNN(nn.Module):
             # => (B, 165, 56)
             nn.Linear(56, 32),
             nn.LeakyReLU(),
+            # nn.BatchNorm1d(32),
             # => (B, 165, 32)
             Bx165xE_to_Ex11x15(e=32),
             # => (B, 32, 11, 15)
@@ -216,6 +221,7 @@ class AgentNN(nn.Module):
             nn.Flatten(),
             # => (B, 5280)
             nn.Linear(5280, 256),
+            # nn.BatchNorm1d(256),
             nn.LeakyReLU(),
             # => (B, 256)
         ))
@@ -520,6 +526,20 @@ def main(args):
 
     args = common.maybe_resume_args(args)
 
+    timesteps_per_rollout = args.num_steps * args.num_envs
+
+    if args.rollouts_total:
+        assert not args.timesteps_total, "cannot have both rollouts_total and timesteps_total"
+        rollouts_total = args.rollouts_total
+    else:
+        rollouts_total = args.timesteps_total // timesteps_per_rollout
+
+    if args.rollouts_per_mapchange:
+        assert not args.timesteps_per_mapchange, "cannot have both rollouts_per_mapchange and timesteps_per_mapchange"
+        rollouts_per_mapchange = args.rollouts_per_mapchange
+    else:
+        rollouts_per_mapchange = args.timesteps_per_mapchange // timesteps_per_rollout
+
     # Prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
     args = Args(**vars(args))
@@ -553,6 +573,7 @@ def main(args):
         f = args.agent_load_file
         print("Loading agent from %s" % f)
         agent = common.load(Agent, f)
+        agent.state = State()
         start_map_swaps = agent.state.map_swaps
 
         backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
@@ -566,7 +587,7 @@ def main(args):
         for k, v in loss_weights.items():
             assert v.sum().round(3) == 1, "Unexpected loss weights: %s" % v
 
-        envs, map_offset = common.create_venv(VcmiEnv, args, start_map_swaps, args.stats_buffer_size)
+        envs, _ = common.create_venv(VcmiEnv, args, start_map_swaps)
         [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         obs_space = envs.unwrapped.single_observation_space
@@ -620,7 +641,8 @@ def main(args):
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
         start_rollout = agent.state.global_rollout + 1
-        end_rollout = args.rollouts_total or 10**9
+
+        end_rollout = rollouts_total or 10**9
         assert start_rollout < end_rollout
         map_rollouts = 0
 
@@ -820,10 +842,12 @@ def main(args):
             writer.add_scalar("global/num_timesteps", gs, gs)
             writer.add_scalar("global/num_rollouts", agent.state.global_rollout, gs)
 
-            if args.rollouts_total:
-                writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total, gs)
+            if rollouts_total:
+                writer.add_scalar("global/progress", agent.state.global_rollout / rollouts_total, gs)
 
-            print(f"global_step={gs}, rollout/ep_rew_mean={ep_rew_mean}")
+            print("global_step=%d, rollout/ep_rew_mean=%.2f, loss=%.2f, variance=%.2f" % (
+                gs, ep_rew_mean, loss.item(), explained_var
+            ))
 
             if args.success_rate_target and common.safe_mean(ep_is_success_queue) >= args.success_rate_target:
                 writer.flush()
@@ -834,6 +858,7 @@ def main(args):
                 ))
 
                 if args.quit_on_target:
+                    # XXX: break?
                     sys.exit(0)
                 else:
                     raise Exception("Not implemented: map change on target")
@@ -847,12 +872,13 @@ def main(args):
                 ))
 
                 if args.quit_on_target:
+                    # XXX: break?
                     sys.exit(0)
                 else:
                     raise Exception("Not implemented: map change on target")
 
             if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
-                if args.wandb_project and rollout % args.rollouts_per_table_log == 0:
+                if args.wandb_project and args.rollouts_per_table_log and rollout % args.rollouts_per_table_log == 0:
                     dist = Categorical(torch.tensor(action_counters))
                     data = [[Action(t).name, c.item()] for (t, c) in zip(action_types, dist.probs)]
                     wt = wandb.Table(columns=["key", "value"], data=data)
@@ -868,12 +894,12 @@ def main(args):
                 # ep_is_success_queue.clear()
                 envs.episode_count = 0
 
-            if args.rollouts_per_mapchange and map_rollouts % args.rollouts_per_mapchange == 0:
+            if rollouts_per_mapchange and map_rollouts % rollouts_per_mapchange == 0:
                 map_rollouts = 0
                 agent.state.map_swaps += 1
                 writer.add_scalar("global/map_swaps", agent.state.map_swaps, gs)
                 envs.close()
-                envs = common.create_venv(VcmiEnv, args, writer, agent.state.map_swaps, args.stats_buffer_size)
+                envs, _ = common.create_venv(VcmiEnv, args, agent.state.map_swaps)
                 next_obs, _ = envs.reset(seed=args.seed)
                 next_obs = torch.Tensor(next_obs).to(device)
                 next_done = torch.zeros(args.num_envs).to(device)
@@ -902,6 +928,8 @@ if __name__ == "__main__":
         notes=None,
         # agent_load_file="data/heads/heads-simple-A1/agent-1710806916.zip",
         agent_load_file=None,
+        timesteps_total=0,
+        timesteps_per_mapchange=0,
         rollouts_total=0,
         rollouts_per_mapchange=0,
         rollouts_per_log=100000,
@@ -909,6 +937,7 @@ if __name__ == "__main__":
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
+        mapside="both",
         mapmask="gym/A1.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
@@ -947,7 +976,6 @@ if __name__ == "__main__":
         skip_wandb_init=False,
         env=EnvArgs(
             max_steps=500,
-            reward_clip_mod=None,
             reward_dmg_factor=5,
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
@@ -957,6 +985,9 @@ if __name__ == "__main__":
             step_reward_fixed=-100,
             step_reward_mult=1,
             term_reward_mult=0,
+            reward_clip_tanh_army_frac=1,
+            reward_army_value_ref=0,
+
         ),
         env_wrappers=[],
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],

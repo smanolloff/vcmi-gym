@@ -18,10 +18,10 @@
 	"name" : "P-TEMPLATE",
 	"players" : {
 		"blue" : {
-			"canPlay" : "AIOnly",
+			"canPlay" : "PlayerOrAI",
 			"heroes" : {
 				"hero_1" : {
-					"type" : "core:lorelei"
+					"type" : "core:fiona"
 				}
 			}
 		},
@@ -29,7 +29,7 @@
 			"canPlay" : "PlayerOrAI",
 			"heroes" : {
 				"hero_0" : {
-					"type" : "core:thorgrim"
+					"type" : "core:orrin"
 				}
 			}
 		}

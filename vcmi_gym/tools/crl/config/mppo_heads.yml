@@ -10,6 +10,7 @@ notes: "Try clip_vloss=false"
 
 agent_load_file: ~
 # agent_load_file: "data/crl/crl-mult-sanity2-lr0.0001-wd0/agent-1709801900.pt"
+timesteps_total: 0
 rollouts_total: 0
 rollouts_per_mapchange: 0
 rollouts_per_log: 1
@@ -17,6 +18,7 @@ rollouts_per_table_log: 10
 opponent_load_file: ~
 success_rate_target: ~
 success_target_quit: False
+mapside: "attacker"  # attacker/defender/both
 mapmask: "gym/A1.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
@@ -31,6 +33,7 @@ opponent_load_file: ~
 #      To increase (current shell session only):
 #           ulimit -n 1024
 num_envs: 1
+
 
 #
 # PPO Hyperparams
@@ -69,7 +72,8 @@ env:
   step_reward_fixed: -100
   step_reward_mult: 1
   term_reward_mult: 0
-  reward_clip_mod: ~
+  reward_clip_tanh_scale: 5000
+  reward_army_value_ref: 0
 
   # 0=hex.id, 1=hex.state, 2=qty, 12=qpos, 13=side, 15=creature type
   #   Visualize with:

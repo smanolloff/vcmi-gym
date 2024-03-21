@@ -52,18 +52,25 @@ class CategoricalMasked(Categorical):
         return -p_log_p.sum(-1)
 
 
-def create_venv(env_cls, args, map_swaps, stats_buffer_size):
+def create_venv(env_cls, args, map_swaps):
     all_maps = glob.glob("maps/%s" % args.mapmask)
     all_maps = [m.removeprefix("maps/") for m in all_maps]
     all_maps.sort()
     map_offset = None
 
+    assert args.mapside in ["attacker", "defender", "both"]
+
+    if args.mapside == "both":
+        sides = ["attacker", "defender"]
+    else:
+        sides = [args.mapside]
+
     if args.num_envs == 1:
         n_maps = 1
     else:
-        assert args.num_envs % 2 == 0
-        assert args.num_envs <= len(all_maps) * 2
-        n_maps = args.num_envs // 2
+        assert args.num_envs % len(sides) == 0
+        assert args.num_envs <= len(all_maps) * len(sides)
+        n_maps = args.num_envs // len(sides)
 
     if args.randomize_maps:
         maps = random.sample(all_maps, n_maps)
@@ -79,7 +86,8 @@ def create_venv(env_cls, args, map_swaps, stats_buffer_size):
 
         assert len(maps) == n_maps
 
-    pairs = [[("attacker", m), ("defender", m)] for m in maps]
+    # pairs = [[("attacker", m), ("defender", m)] for m in maps]
+    pairs = [[(s, m) for s in sides] for m in maps]
     pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
     state = {"n": 0}
     lock = threading.RLock()
@@ -138,7 +146,7 @@ def create_venv(env_cls, args, map_swaps, stats_buffer_size):
     else:
         vec_env = gym.vector.SyncVectorEnv([env_creator])
 
-    vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env, deque_size=stats_buffer_size)
+    vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env, deque_size=args.stats_buffer_size)
 
     return vec_env, map_offset
 
@@ -327,7 +335,7 @@ def setup_wandb(args, agent, src_file):
             path.endswith("requirements.lock")
         )
 
-        print("Should include %s: %s" % (path, res))
+        # print("Should include %s: %s" % (path, res))
         return res
 
     wandb.run.log_code(root=os.path.dirname(src_file), include_fn=code_include_fn)

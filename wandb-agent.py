@@ -4,8 +4,6 @@ import os
 from vcmi_gym.tools.crl.mppo_heads import main, Args
 
 if __name__ == "__main__":
-    print(os.environ)
-
     wandb.init(
         sync_tensorboard=True,
         save_code=False,  # code saved manually below
