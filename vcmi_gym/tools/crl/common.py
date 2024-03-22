@@ -26,6 +26,7 @@ import re
 import shutil
 import importlib
 import numpy as np
+import string
 
 from dataclasses import asdict
 from torch.distributions.categorical import Categorical
@@ -387,3 +388,8 @@ def load(agent_cls, path):
     agent = agent_cls(**data)
     agent.NN.load_state_dict(params["NN"], strict=True)
     return agent
+
+
+def gen_id():
+    population = string.ascii_lowercase + string.digits
+    return str.join("", random.choices(population, k=8))

@@ -6,52 +6,66 @@ metric:
   name: rollout/ep_rew_mean
   goal: maximize
 parameters:
-  action: { value: train_ppo }
-  c:
+  script:
     parameters:
-      wandb_project: { value: "vcmi-gym" }
-      group_id: { value: "sweeps" }
-      agent_load_file: { value: ~ } #"/Users/simo/Projects/vcmi-gym/data/A3-sweep/h98k5nhr/agent-1710918951.zip"}
-      timesteps_total: { value: 100000 }
-      timesteps_per_mapchange: { value: 0 }
-      rollouts_total: { value: 0 }
-      rollouts_per_mapchange: { value: 0 }
-      rollouts_per_log: { value: 1 }
-      rollouts_per_table_log: { value: 0 }
-      success_rate_target: { value: 0 }
-      ep_rew_mean_target: { value: 0 }
-      quit_on_target: { value: True }
-      mapside: { value: "attacker" }
-      mapmask: { value: "gym/generated/mirror_3stack/*.vmap" }
-      save_every: { value: 3600 } # seconds
-      max_saves: { value: 3 }
-      out_dir_template: { value: "data/{group_id}/{run_id}" }
-      num_envs: { value: 4 }
+      module: { value: "mppo_heads" }
 
-      # TODO: use distributions for clearer visualization of sweeps
-      # (to prevent line stacking and decoloring)
-      # https://docs.wandb.ai/guides/sweeps/sweep-config-keys#distribution-options-for-random-and-bayesian-search
+  group_id: { value: "sweeps" }
+  agent_load_file: { value: ~ } #"/Users/simo/Projects/vcmi-gym/data/A3-sweep/h98k5nhr/agent-1710918951.zip"}
+  timesteps_total: { value: 200_000 }
+  timesteps_per_mapchange: { value: 10_000 }
+  rollouts_total: { value: 0 }
+  rollouts_per_mapchange: { value: 0 }
+  rollouts_per_log: { value: 1 }
+  rollouts_per_table_log: { value: 0 }
+  success_rate_target: { value: 0 }
+  ep_rew_mean_target: { value: 0 }
+  quit_on_target: { value: True }
+  mapside: { value: "both" }
+  mapmask: { value: "gym/generated/B*.vmap" }
+  save_every: { value: 3600 } # seconds
+  max_saves: { value: 3 }
+  out_dir_template: { value: "data/{group_id}/{run_id}" }
+  num_envs: { value: 4 }
 
-      clip_coef: { value: 0.2 }
-      clip_vloss: { value: true }
-      ent_coef: { value: 0.007 }
-      gae_lambda: { value: 0.98 }
-      gamma: { value: 0.8 }
-      learning_rate: { value: 0.0003 }
-      max_grad_norm: { value: 1 }
-      norm_adv: { value: true }
-      num_minibatches: { value: 8 }
-      num_steps: { value: 64 }
-      stats_buffer_size: { value: 100 }
-      update_epochs: { value: 50 }
-      vf_coef: { value: 0.3 }
-      weight_decay: { value: 0 }
+  # TODO: use distributions for clearer visualization of sweeps
+  # (to prevent line stacking and decoloring)
+  # https://docs.wandb.ai/guides/sweeps/sweep-config-keys#distribution-options-for-random-and-bayesian-search
 
-      env:
-        parameters:
-          reward_dmg_factor: { value: 5 }
-          step_reward_fixed: { value: -100 }
-          step_reward_mult: { value: 1 }
-          term_reward_mult: { value: 0 }
-          reward_clip_tanh_army_frac: { value: 1 }
-          reward_army_value_ref: { values: [1, 10, 100] }
+  clip_coef: { value: 0.2 }
+  clip_vloss: { value: true }
+  ent_coef: { value: 0.007 }
+  gae_lambda: { value: 0.98 }
+  gamma: { value: 0.8 }
+  learning_rate: { values: [0.0001, 0.0003, 0.0005] }
+  max_grad_norm: { value: 1 }
+  norm_adv: { value: true }
+  num_minibatches: { value: 8 }
+  num_steps: { value: 64 }
+  stats_buffer_size: { value: 100 }
+  update_epochs: { value: 50 }
+  vf_coef: { value: 0.3 }
+  weight_decay: { value: 0 }
+
+  loss_weights:
+    value:
+      DEFEND: [1, 0, 0]
+      WAIT: [1, 0, 0]
+      SHOOT: [0.5, 0.5, 0]
+      MOVE: [0.5, 0.5, 0]
+      AMOVE: [0.33, 0.33, 0.34]
+
+  opponent_sbm_probs:
+    value:
+    - 1  # StupidAI
+    - 0  # BattleAI
+    - 0  # MMAI_MODEL
+
+  env:
+    parameters:
+      reward_dmg_factor: { value: 5 }
+      step_reward_fixed: { value: -100 }
+      step_reward_mult: { value: 1 }
+      term_reward_mult: { value: 0 }
+      reward_clip_tanh_army_frac: { value: 1 }
+      reward_army_value_ref: { value: 500 }

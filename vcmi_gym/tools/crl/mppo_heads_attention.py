@@ -156,6 +156,30 @@ class Args:
             self.state = State(**self.state)
 
 
+class Bx1x11x15N_to_Bx165xN(nn.Module):
+    def __init__(self, n):
+        self.n = n
+        super().__init__()
+
+    def forward(self, x):
+        # (B, 1, 11, 15*N) -> (B, N, 11, 15, 1) -> (B, 165, N)
+        return x.unflatten(-1, (15, self.n)) \
+                .permute(0, 4, 2, 3, 1) \
+                .flatten(start_dim=-3) \
+                .permute(0, 2, 1)
+
+
+# See notes/reshape_Bx165xE_to_BxEx11x15.py
+class Bx165xE_to_Ex11x15(nn.Module):
+    def __init__(self, e):
+        self.e = e
+        super().__init__()
+
+    def forward(self, x):
+        # (B, 165, E) -> (B, E, 11, 15)
+        return x.unflatten(1, (11, 15)).permute(0, 3, 1, 2)
+
+
 class SelfAttention(nn.MultiheadAttention):
     def forward(self, x):
         # TODO: attn_mask
@@ -205,13 +229,25 @@ class AgentNN(nn.Module):
         # Produces hex embeddings
         self.hex_embedder = common.layer_init(nn.Sequential(
             # => (B, 1, 11, 840)
+
+            # Bx1x11x15N_to_Bx165xN(n=56),
+            # # => (B, 165, 56)
+            # nn.Linear(56, 32),
+            # nn.LeakyReLU(),
+            # # nn.BatchNorm1d(165),
             nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56), padding=0),
-            # => (B, 32, 11, 15)
-            nn.Conv2d(32, 32, kernel_size=5, stride=1, padding=2),
             nn.LeakyReLU(),
             # => (B, 32, 11, 15)
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-            nn.LeakyReLU(),
+
+            nn.Flatten(start_dim=2),
+            # => (B, 32, 165)
+            Transpose(1, 2),
+            # => (B, 165, 32)
+            SelfAttention(embed_dim=32, num_heads=4, batch_first=True),
+            # => (B, 165, 32)
+            Transpose(1, 2),
+            # => (B, 32, 165)
+            nn.Unflatten(2, (11, 15)),
             # => (B, 32, 11, 15)
         ))
 
@@ -310,10 +346,10 @@ class AgentNN(nn.Module):
         # Head 1
         #
 
-        # XXX: don't call .forward (skips hooks and breaks wandb graph)
-        b_hex_embeddings = self.hex_embedder(torch.as_tensor(b_obs))
-        b_summary_embedding = self.summary_embedder(b_hex_embeddings)
-        b_value = self.value_net(b_summary_embedding)
+        b_hex_embeddings = self.hex_embedder.forward(torch.as_tensor(b_obs))
+        b_summary_embedding = self.summary_embedder.forward(b_hex_embeddings)
+        b_value = self.value_net.forward(b_summary_embedding)
+        # breakpoint()
 
         def mask_for_action1(i):
             res = np.ndarray(Action.COUNT, dtype=bool)
@@ -325,7 +361,7 @@ class AgentNN(nn.Module):
             return res
 
         b_action1_masks = torch.as_tensor(np.array([mask_for_action1(i) for i in range(b_size)]))
-        b_action1_logits = self.action1_net(b_summary_embedding)
+        b_action1_logits = self.action1_net.forward(b_summary_embedding)
         b_action1_dist = common.CategoricalMasked(logits=b_action1_logits, mask=b_action1_masks)
 
         # When collecting experiences, b_heads_actions is None
@@ -361,7 +397,7 @@ class AgentNN(nn.Module):
                 else Exception("not supposed to be here: action1=%s" % action1)
 
         b_action2_masks = torch.as_tensor(np.array([mask_for_action2(i) for i in range(b_size)]))
-        b_action2_logits = self.action2_net(b_hex_embeddings2)
+        b_action2_logits = self.action2_net.forward(b_hex_embeddings2)
         b_action2_dist = common.CategoricalMasked(logits=b_action2_logits, mask=b_action2_masks)
 
         if b_heads_actions is None:
@@ -404,7 +440,7 @@ class AgentNN(nn.Module):
             return res
 
         b_action3_masks = torch.as_tensor(np.array([mask_for_action3(i) for i in range(b_size)]))
-        b_action3_logits = self.action3_net(b_hex_embeddings3)
+        b_action3_logits = self.action3_net.forward(b_hex_embeddings3)
         b_action3_dist = common.CategoricalMasked(logits=b_action3_logits, mask=b_action3_masks)
 
         if b_heads_actions is None:
@@ -599,7 +635,6 @@ def main(args):
 
         assert args.rollouts_per_table_log % args.rollouts_per_log == 0
 
-        print("WANDB_PROJECT: %s" % args.wandb_project)
         if args.wandb_project:
             import wandb
             common.setup_wandb(args, agent, __file__)
@@ -913,8 +948,13 @@ def main(args):
         writer.close()
 
 
-def debug_args():
-    return Args(
+# if __name__ == "__main__":
+#     args = tyro.cli(Args)
+#     main(args)
+
+
+if __name__ == "__main__":
+    args = Args(
         "debug-crl",
         "debug-crl",
         wandb_project=None,
@@ -943,14 +983,14 @@ def debug_args():
         weight_decay=0.05,
         learning_rate=0.00003,
         num_envs=1,
-        num_steps=4,
-        # num_steps=256,
+        # num_steps=4,
+        num_steps=256,
         gamma=0.8,
         gae_lambda=0.8,
-        num_minibatches=2,
-        # num_minibatches=16,
-        update_epochs=2,
-        # update_epochs=10,
+        # num_minibatches=2,
+        num_minibatches=16,
+        # update_epochs=2,
+        update_epochs=10,
         norm_adv=True,
         clip_coef=0.3,
         clip_vloss=True,
@@ -988,10 +1028,4 @@ def debug_args():
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
     )
 
-
-# if __name__ == "__main__":
-#     args = tyro.cli(Args)
-#     main(args)
-
-if __name__ == "__main__":
-    main(debug_args())
+    main(args)

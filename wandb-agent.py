@@ -1,9 +1,18 @@
 import wandb
 import os
+import sys
+import signal
+import importlib
 
-from vcmi_gym.tools.crl.mppo_heads import main, Args
+
+def handle_signal(signum, frame):
+    print("*** [main.py] received signal %s ***" % signum)
+    sys.exit(0)
+
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, handle_signal)
+
     wandb.init(
         sync_tensorboard=True,
         save_code=False,  # code saved manually below
@@ -11,10 +20,13 @@ if __name__ == "__main__":
     )
 
     config = dict(
-        wandb.config["c"],
+        wandb.config,
+        wandb_project=os.environ["WANDB_PROJECT"],
         run_id=os.environ["WANDB_RUN_ID"],
         skip_wandb_init=True,
     )
 
-    args = Args(**config)
-    main(args)
+    script_cfg = config.pop("script")
+    mod = importlib.import_module("vcmi_gym.tools.crl.%s" % script_cfg["module"])
+    args = mod.Args(**config)
+    mod.main(args)

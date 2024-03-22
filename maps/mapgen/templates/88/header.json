@@ -1,0 +1,315 @@
+{
+	"allowedArtifacts" : {
+		"anyOf" : [
+			"core:pendantOfFreeWill"
+		]
+	},
+	"defeatIconIndex" : 3,
+	"description" : "a",
+	"difficulty" : "NORMAL",
+	"mapLevels" : {
+		"surface" : {
+			"height" : 12,
+			"index" : 0,
+			"width" : 16
+		}
+	},
+	"mods" : null,
+	"name" : "88 tml",
+	"players" : {
+		"blue" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_8" : {
+					"type" : "core:ufretin"
+				},
+				"hero_9" : {
+					"type" : "core:ufretin"
+				},
+				"hero_10" : {
+					"type" : "core:ufretin"
+				},
+				"hero_11" : {
+					"type" : "core:ufretin"
+				},
+				"hero_12" : {
+					"type" : "core:ufretin"
+				},
+				"hero_13" : {
+					"type" : "core:ufretin"
+				},
+				"hero_14" : {
+					"type" : "core:ufretin"
+				},
+				"hero_15" : {
+					"type" : "core:ufretin"
+				}
+			}
+		},
+		"green" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_24" : {
+					"type" : "core:rashka"
+				},
+				"hero_25" : {
+					"type" : "core:rashka"
+				},
+				"hero_26" : {
+					"type" : "core:rashka"
+				},
+				"hero_27" : {
+					"type" : "core:rashka"
+				},
+				"hero_28" : {
+					"type" : "core:rashka"
+				},
+				"hero_29" : {
+					"type" : "core:rashka"
+				},
+				"hero_30" : {
+					"type" : "core:rashka"
+				},
+				"hero_31" : {
+					"type" : "core:rashka"
+				}
+			}
+		},
+		"orange" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_32" : {
+					"type" : "core:isra"
+				},
+				"hero_33" : {
+					"type" : "core:isra"
+				},
+				"hero_34" : {
+					"type" : "core:isra"
+				},
+				"hero_35" : {
+					"type" : "core:isra"
+				},
+				"hero_36" : {
+					"type" : "core:isra"
+				},
+				"hero_37" : {
+					"type" : "core:isra"
+				},
+				"hero_38" : {
+					"type" : "core:isra"
+				},
+				"hero_39" : {
+					"type" : "core:isra"
+				}
+			}
+		},
+		"pink" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_56" : {
+					"type" : "core:andra"
+				},
+				"hero_57" : {
+					"type" : "core:andra"
+				},
+				"hero_58" : {
+					"type" : "core:andra"
+				},
+				"hero_59" : {
+					"type" : "core:andra"
+				},
+				"hero_60" : {
+					"type" : "core:andra"
+				},
+				"hero_61" : {
+					"type" : "core:andra"
+				},
+				"hero_62" : {
+					"type" : "core:andra"
+				},
+				"hero_63" : {
+					"type" : "core:andra"
+				}
+			}
+		},
+		"purple" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_40" : {
+					"type" : "core:lorelei"
+				},
+				"hero_41" : {
+					"type" : "core:lorelei"
+				},
+				"hero_42" : {
+					"type" : "core:lorelei"
+				},
+				"hero_43" : {
+					"type" : "core:lorelei"
+				},
+				"hero_44" : {
+					"type" : "core:lorelei"
+				},
+				"hero_45" : {
+					"type" : "core:lorelei"
+				},
+				"hero_46" : {
+					"type" : "core:lorelei"
+				},
+				"hero_47" : {
+					"type" : "core:lorelei"
+				}
+			}
+		},
+		"red" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_2" : {
+					"type" : "core:sylvia"
+				},
+				"hero_3" : {
+					"type" : "core:sylvia"
+				},
+				"hero_4" : {
+					"type" : "core:sylvia"
+				},
+				"hero_5" : {
+					"type" : "core:sylvia"
+				},
+				"hero_6" : {
+					"type" : "core:sylvia"
+				},
+				"hero_7" : {
+					"type" : "core:sylvia"
+				},
+				"hero_0" : {
+					"type" : "core:sylvia"
+				},
+				"hero_1" : {
+					"type" : "core:sylvia"
+				}
+			}
+		},
+		"tan" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_16" : {
+					"type" : "core:josephine"
+				},
+				"hero_17" : {
+					"type" : "core:josephine"
+				},
+				"hero_18" : {
+					"type" : "core:josephine"
+				},
+				"hero_19" : {
+					"type" : "core:josephine"
+				},
+				"hero_20" : {
+					"type" : "core:josephine"
+				},
+				"hero_21" : {
+					"type" : "core:josephine"
+				},
+				"hero_22" : {
+					"type" : "core:josephine"
+				},
+				"hero_23" : {
+					"type" : "core:josephine"
+				}
+			}
+		},
+		"teal" : {
+			"canPlay" : "PlayerOrAI",
+			"heroes" : {
+				"hero_48" : {
+					"type" : "core:oris"
+				},
+				"hero_49" : {
+					"type" : "core:oris"
+				},
+				"hero_50" : {
+					"type" : "core:oris"
+				},
+				"hero_51" : {
+					"type" : "core:oris"
+				},
+				"hero_52" : {
+					"type" : "core:oris"
+				},
+				"hero_53" : {
+					"type" : "core:oris"
+				},
+				"hero_54" : {
+					"type" : "core:oris"
+				},
+				"hero_55" : {
+					"type" : "core:oris"
+				}
+			}
+		}
+	},
+	"rumors" : [
+	],
+	"triggeredEvents" : {
+		"standardDefeat" : {
+			"condition" : [
+				"daysWithoutTown",
+				{
+					"value" : 7
+				}
+			],
+			"effect" : {
+				"messageToSend" : {
+					"exactStrings" : null,
+					"localStrings" : null,
+					"message" : null,
+					"numbers" : null,
+					"stringsTextID" : null
+				},
+				"type" : "defeat"
+			},
+			"message" : {
+				"exactStrings" : null,
+				"localStrings" : null,
+				"message" : [
+					2
+				],
+				"numbers" : null,
+				"stringsTextID" : [
+					"core.genrltxt.7"
+				]
+			}
+		},
+		"standardVictory" : {
+			"condition" : [
+				"standardWin"
+			],
+			"effect" : {
+				"messageToSend" : {
+					"exactStrings" : null,
+					"localStrings" : null,
+					"message" : null,
+					"numbers" : null,
+					"stringsTextID" : null
+				},
+				"type" : "victory"
+			},
+			"message" : {
+				"exactStrings" : null,
+				"localStrings" : null,
+				"message" : [
+					2
+				],
+				"numbers" : null,
+				"stringsTextID" : [
+					"core.genrltxt.659"
+				]
+			}
+		}
+	},
+	"versionMajor" : 1,
+	"versionMinor" : 1,
+	"victoryIconIndex" : 11
+}

@@ -16,9 +16,11 @@
 # This file contains a modified version of CleanRL's PPO implementation:
 # https://github.com/vwxyzjn/cleanrl/blob/e421c2e50b81febf639fced51a69e2602593d50d/cleanrl/ppo.py
 
+import sys
 import os
 import random
 import time
+import shutil
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -30,6 +32,7 @@ import torch.nn as nn
 # import tyro
 import enum
 from torch.utils.tensorboard import SummaryWriter
+from torch.distributions.categorical import Categorical
 
 from vcmi_gym import VcmiEnv
 
@@ -62,10 +65,13 @@ class EnvArgs:
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
     sparse_info: bool = True
+    step_reward_fixed: int = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
-    reward_clip_mod: Optional[int] = None
     consecutive_error_reward_factor: Optional[int] = None
+    vcmi_timeout: int = 5
+    reward_clip_tanh_army_frac: int = 1
+    reward_army_value_ref: int = 0
 
 
 @dataclass
@@ -81,27 +87,36 @@ class State:
 class Args:
     run_id: str
     group_id: str
+    wandb_project: Optional[str] = None
     resume: bool = False
     overwrite: list = field(default_factory=list)
     notes: Optional[str] = None
 
     agent_load_file: Optional[str] = None
-    rollouts_total: int = 10000
+    timesteps_total: int = 0
+    timesteps_per_mapchange: int = 0
+    rollouts_total: int = 0
     rollouts_per_mapchange: int = 20
     rollouts_per_log: int = 1
-    opponent_load_file: Optional[str] = None
+    rollouts_per_table_log: int = 10
     success_rate_target: Optional[float] = None
+    ep_rew_mean_target: Optional[float] = None
+    quit_on_target: bool = False
+    mapside: str = "both"
     mapmask: str = "ai/generated/B*.vmap"
     randomize_maps: bool = False
     save_every: int = 3600  # seconds
     max_saves: int = 3
     out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
 
+    opponent_load_file: Optional[str] = None
+    opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
     weight_decay: float = 0.0
     learning_rate: float = 2.5e-4
     num_envs: int = 4
     num_steps: int = 128
     gamma: float = 0.99
+    stats_buffer_size: int = 100
     gae_lambda: float = 0.95
     num_minibatches: int = 4
     update_epochs: int = 4
@@ -117,15 +132,24 @@ class Args:
     loss_weights: dict = field(default_factory=dict)
 
     logparams: dict = field(default_factory=dict)
-    cfg_file: str = 'path/to/cfg.yml'
-    wandb: bool = True
+    cfg_file: Optional[str] = None
     seed: int = 42
+    skip_wandb_init: bool = False
 
     env: EnvArgs = EnvArgs()
     env_wrappers: list = field(default_factory=list)
     state: State = State()
 
     def __post_init__(self):
+        if not self.loss_weights:
+            self.loss_weights = dict(
+                DEFEND=[1, 0, 0],
+                WAIT=[1, 0, 0],
+                SHOOT=[0.5, 0.5, 0],
+                MOVE=[0.5, 0.5, 0],
+                AMOVE=[0.33, 0.33, 0.34],
+            )
+
         if not isinstance(self.env, EnvArgs):
             self.env = EnvArgs(**self.env)
         if not isinstance(self.state, State):
@@ -163,13 +187,39 @@ class SelfAttention(nn.MultiheadAttention):
         return res
 
 
-class Agent(nn.Module):
-    def __init__(self, observation_space, action_space, state):
+class MaskedSelfAttention(nn.MultiheadAttention):
+    # mask must be of shape (B*num_heads, target_seq_len, src_seq_len)
+    # Here, both seq_lens are 165, but they are not the same:
+    # [
+    #   [165 bools for output Hex1], aka. QUERY = Hex1, keys=the 165 bools
+    #   [165 bools for output Hex2],
+    #   ...
+    #   [165 bools for output Hex165],
+    # ]
+    #
+    def forward(self, x, mask):
+        res, _weights = super().forward(x, x, x, need_weights=False, attn_mask=mask)
+        return res
+
+
+class Transpose(nn.Module):
+    def __init__(self, dim0, dim1):
+        self.dim0 = dim0
+        self.dim1 = dim1
         super().__init__()
 
-        self.state = state
+    def forward(self, x):
+        return x.transpose(self.dim0, self.dim1)
 
-        # 1 nonhex action (RETREAT) + 165 hexex*14 actions each
+
+class AgentNN(nn.Module):
+    def __init__(self, action_space, observation_space):
+        super().__init__()
+
+        self.observation_space = observation_space
+        self.action_space = action_space
+
+        # 1 nonhex action (RETREAT) + 165 hexes*14 actions each
         assert action_space.n == 1 + (165*14)
 
         assert observation_space.shape[0] == 1
@@ -179,10 +229,19 @@ class Agent(nn.Module):
         # Produces hex embeddings
         self.hex_embedder = common.layer_init(nn.Sequential(
             # => (B, 1, 11, 840)
-            nn.Conv2d(1, 32, kernel_size=[1, 56], stride=[1, 56], padding=0),
+            Bx1x11x15N_to_Bx165xN(n=56),
+            # => (B, 165, 56)
+            nn.Linear(56, 32),
+            nn.LeakyReLU(),
+            # => (B, 165, 32)
+            Bx165xE_to_Ex11x15(e=32),
+            # => (B, 32, 11, 15)
+            nn.Conv2d(32, 32, kernel_size=5, stride=1, padding=2),
             nn.LeakyReLU(),
             # => (B, 32, 11, 15)
-            SelfAttention(),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            nn.LeakyReLU(),
+            # => (B, 32, 11, 15)
         ))
 
         # Produces a summary embedding
@@ -254,8 +313,9 @@ class Agent(nn.Module):
         self,
         b_obs: np.ndarray,
         b_mask: np.ndarray,
-        b_env_action: Optional[torch.Tensor] = None,    # batch of consolidated actions (int)
-        b_heads_actions: Optional[torch.Tensor] = None  # batch of per-head actions (3 ints)
+        b_env_action: Optional[torch.Tensor] = None,     # batch of consolidated actions (int)
+        b_heads_actions: Optional[torch.Tensor] = None,  # batch of per-head actions (3 ints)
+        deterministic: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         b_size = len(b_obs)
 
@@ -279,9 +339,10 @@ class Agent(nn.Module):
         # Head 1
         #
 
-        b_hex_embeddings = self.hex_embedder(torch.as_tensor(b_obs))
-        b_summary_embedding = self.summary_embedder(b_hex_embeddings)
-        b_value = self.value_net(b_summary_embedding)
+        b_hex_embeddings = self.hex_embedder.forward(torch.as_tensor(b_obs))
+        b_summary_embedding = self.summary_embedder.forward(b_hex_embeddings)
+        b_value = self.value_net.forward(b_summary_embedding)
+        # breakpoint()
 
         def mask_for_action1(i):
             res = np.ndarray(Action.COUNT, dtype=bool)
@@ -293,13 +354,16 @@ class Agent(nn.Module):
             return res
 
         b_action1_masks = torch.as_tensor(np.array([mask_for_action1(i) for i in range(b_size)]))
-        b_action1_logits = self.action1_net(b_summary_embedding)
+        b_action1_logits = self.action1_net.forward(b_summary_embedding)
         b_action1_dist = common.CategoricalMasked(logits=b_action1_logits, mask=b_action1_masks)
 
         # When collecting experiences, b_heads_actions is None
         # When optimizing the policy, b_heads_actions is provided
         if b_heads_actions is None:
-            b_action1 = b_action1_dist.sample()
+            if deterministic:
+                b_action1 = torch.argmax(b_action1_dist.probs, dim=1)
+            else:
+                b_action1 = b_action1_dist.sample()
         else:
             b_action1 = b_heads_actions[:, 0]
 
@@ -326,11 +390,14 @@ class Agent(nn.Module):
                 else Exception("not supposed to be here: action1=%s" % action1)
 
         b_action2_masks = torch.as_tensor(np.array([mask_for_action2(i) for i in range(b_size)]))
-        b_action2_logits = self.action2_net(b_hex_embeddings2)
+        b_action2_logits = self.action2_net.forward(b_hex_embeddings2)
         b_action2_dist = common.CategoricalMasked(logits=b_action2_logits, mask=b_action2_masks)
 
         if b_heads_actions is None:
-            b_action2 = b_action2_dist.sample()
+            if deterministic:
+                b_action2 = torch.argmax(b_action2_dist.probs, dim=1)
+            else:
+                b_action2 = b_action2_dist.sample()
         else:
             b_action2 = b_heads_actions[:, 1]
 
@@ -366,11 +433,14 @@ class Agent(nn.Module):
             return res
 
         b_action3_masks = torch.as_tensor(np.array([mask_for_action3(i) for i in range(b_size)]))
-        b_action3_logits = self.action3_net(b_hex_embeddings3)
+        b_action3_logits = self.action3_net.forward(b_hex_embeddings3)
         b_action3_dist = common.CategoricalMasked(logits=b_action3_logits, mask=b_action3_masks)
 
         if b_heads_actions is None:
-            b_action3 = b_action3_dist.sample()
+            if deterministic:
+                b_action3 = torch.argmax(b_action3_dist.probs, dim=1)
+            else:
+                b_action3 = b_action3_dist.sample()
         else:
             b_action3 = b_heads_actions[:, 2]
 
@@ -452,26 +522,65 @@ class Agent(nn.Module):
         #   b_value = [5.125, 67.11]
         return b_env_action, b_heads_actions, b_heads_logprobs, b_heads_entropies, b_value
 
-    # # Inference (deterministic)
-    # def predict(self, x, mask):
-    #     with torch.no_grad():
-    #         logits = self.actor(self.features_extractor(x))
-    #         dist = common.CategoricalMasked(logits=logits, mask=mask)
-    #         return torch.argmax(dist.probs, dim=1).cpu().numpy()
+    # Inference (deterministic)
+    def predict(self, b_obs, b_mask):
+        with torch.no_grad():
+            # Return unbatched action if input was unbatched
+            if b_obs.shape == self.observation_space.shape:
+                b_obs = np.expand_dims(b_obs, axis=0)
+                b_mask = np.expand_dims(b_mask, axis=0)
+                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                return b_env_action[0].item()
+            else:
+                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                return b_env_action.numpy()
+
+
+class Agent(nn.Module):
+    def __init__(self, observation_space, action_space, state):
+        super().__init__()
+
+        self.observation_space = observation_space  # needed for save/load
+        self.action_space = action_space  # needed for save/load
+        self.state = state
+
+        self.kur = lambda y: observation_space
+        self.NN = AgentNN(action_space, observation_space)
+        self.predict = self.NN.predict
 
 
 def main(args):
     assert isinstance(args, Args)
 
     args = common.maybe_resume_args(args)
-    print("Args: %s" % (asdict(args)))
-    common.maybe_setup_wandb(args, __file__)
+
+    timesteps_per_rollout = args.num_steps * args.num_envs
+
+    if args.rollouts_total:
+        assert not args.timesteps_total, "cannot have both rollouts_total and timesteps_total"
+        rollouts_total = args.rollouts_total
+    else:
+        rollouts_total = args.timesteps_total // timesteps_per_rollout
+
+    if args.rollouts_per_mapchange:
+        assert not args.timesteps_per_mapchange, "cannot have both rollouts_per_mapchange and timesteps_per_mapchange"
+        rollouts_per_mapchange = args.rollouts_per_mapchange
+    else:
+        rollouts_per_mapchange = args.timesteps_per_mapchange // timesteps_per_rollout
+
+    # Prevent errors from newly introduced args when loading/resuming
+    # TODO: handle removed args
+    args = Args(**vars(args))
+
+    # Printing optimizer_state_dict is too much spam
+    printargs = asdict(args).copy()
+    printargs["state"] = {k: v for k, v in printargs["state"].items() if k != "optimizer_state_dict"}
+    printargs["state"]["optimizer_state_dict"] = "..."
+
+    print("Args: %s" % printargs)
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     print("Out dir: %s" % out_dir)
     os.makedirs(out_dir, exist_ok=True)
-
-    writer = SummaryWriter(out_dir)
-    common.log_params(args, writer)
 
     batch_size = int(args.num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
@@ -489,16 +598,24 @@ def main(args):
     start_map_swaps = args.state.map_swaps
 
     if args.agent_load_file:
-        print("Loading agent from %s" % args.agent_load_file)
-        agent = torch.load(args.agent_load_file)
+        f = args.agent_load_file
+        print("Loading agent from %s" % f)
+        agent = common.load(Agent, f)
+        agent.state = State()
         start_map_swaps = agent.state.map_swaps
+
+        backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
+        with open(f, 'rb') as fsrc:
+            with open(backup, 'wb') as fdst:
+                shutil.copyfileobj(fsrc, fdst)
+                print("Wrote backup %s" % backup)
 
     try:
         loss_weights = {k: np.array(v, dtype=np.float32) for k, v in args.loss_weights.items()}
         for k, v in loss_weights.items():
             assert v.sum().round(3) == 1, "Unexpected loss weights: %s" % v
 
-        envs = common.create_venv(VcmiEnv, args, writer, start_map_swaps)  # noqa: E501
+        envs, _ = common.create_venv(VcmiEnv, args, start_map_swaps)
         [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         obs_space = envs.unwrapped.single_observation_space
@@ -509,9 +626,19 @@ def main(args):
         if agent is None:
             agent = Agent(obs_space, act_space, args.state).to(device)
 
+        assert args.rollouts_per_table_log % args.rollouts_per_log == 0
+
+        if args.wandb_project:
+            import wandb
+            common.setup_wandb(args, agent, __file__)
+            action_types = [Action(i).value for i in range(Action.COUNT)]
+
+        writer = SummaryWriter(out_dir)
+        common.log_params(args, writer, agent.state.global_step)
+
         if args.resume:
             agent.state.resumes += 1
-            writer.add_scalar("global/resumes", agent.state.resumes)
+            writer.add_scalar("global/resumes", agent.state.resumes, agent.state.global_step)
 
         # print("Agent state: %s" % asdict(agent.state))
 
@@ -519,6 +646,7 @@ def main(args):
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
 
+        action_counters = np.zeros(Action.COUNT, dtype=np.int64)
         assert act_space.shape == ()
 
         # ALGO Logic: Storage setup
@@ -541,12 +669,16 @@ def main(args):
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
         start_rollout = agent.state.global_rollout + 1
-        assert start_rollout < args.rollouts_total
 
-        for rollout in range(start_rollout, args.rollouts_total + 1):
+        end_rollout = rollouts_total or 10**9
+        assert start_rollout < end_rollout
+        map_rollouts = 0
+
+        for rollout in range(start_rollout, end_rollout):
             agent.state.global_rollout = rollout
             rollout_start_time = time.time()
             rollout_start_step = agent.state.global_step
+            map_rollouts += 1
 
             # XXX: eval during experience collection
             agent.eval()
@@ -559,7 +691,7 @@ def main(args):
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
                     env_action, heads_action, heads_logprob, _, value = \
-                        agent.get_action_and_value(next_obs, next_mask)
+                        agent.NN.get_action_and_value(next_obs, next_mask)
                     values[step] = value.flatten()
 
                 env_actions[step] = env_action
@@ -573,6 +705,9 @@ def main(args):
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
+                # Count just the primary action (first head)
+                action_counters += np.bincount(heads_action[:, 0], minlength=Action.COUNT)
+
                 # See notes/gym_vector.txt
                 for final_info, has_final_info in zip(infos.get("final_info", []), infos.get("_final_info", [])):
                     # "final_info" must be None if "has_final_info" is False
@@ -583,7 +718,7 @@ def main(args):
 
             # bootstrap value if not done
             with torch.no_grad():
-                next_value = agent.get_value(next_obs).reshape(1, -1)
+                next_value = agent.NN.get_value(next_obs).reshape(1, -1)
                 advantages = torch.zeros_like(rewards).to(device)
                 lastgaelam = 0
                 for t in reversed(range(args.num_steps)):
@@ -624,7 +759,7 @@ def main(args):
                     # mb_heads_actions is of shape (B, 3)
                     mb_heads_actions = b_heads_actions.long()[mb_inds]
 
-                    _, _, newheads_logprob, heads_entropy, newvalue = agent.get_action_and_value(
+                    _, _, newheads_logprob, heads_entropy, newvalue = agent.NN.get_action_and_value(
                         b_obs[mb_inds],
                         b_masks[mb_inds],
                         mb_env_actions,
@@ -635,12 +770,13 @@ def main(args):
                     if args.norm_adv:
                         mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
-                    # ratios are of shape (B, 3)
+                    # heads_ratios are of shape (B, 3)
                     heads_logratio = newheads_logprob - b_heads_logprobs[mb_inds]
                     heads_ratio = heads_logratio.exp()
 
-                    logratio = heads_logratio.sum(dim=1)
-                    ratio = logratio.exp()  # XXX: same as heads_logratio.prod(dim=1)?
+                    # summed ratio of shape (B)
+                    logratio = heads_logratio.sum(dim=1)  # XXX: same as heads_ratio.prod(dim=1)?
+                    ratio = logratio.exp()
 
                     # loss_weights is of shape (B, 3)
                     # Example (2 batches):
@@ -698,7 +834,7 @@ def main(args):
 
                     optimizer.zero_grad()
                     loss.backward()
-                    nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
+                    nn.utils.clip_grad_norm_(agent.NN.parameters(), args.max_grad_norm)
                     optimizer.step()
 
                 if args.target_kl is not None and approx_kl > args.target_kl:
@@ -710,63 +846,97 @@ def main(args):
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             # writer.add_scalar("params/learning_rate", optimizer.param_groups[0]["lr"], agent.state.global_step)
-            writer.add_scalar("losses/total_loss", loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/value_loss", v_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head1_policy_loss", head1_pg_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head2_policy_loss", head2_pg_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head3_policy_loss", head3_pg_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head1_entropy", head1_entropy_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head2_entropy", head2_entropy_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/head3_entropy", head3_entropy_loss.item(), agent.state.global_step)
-            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), agent.state.global_step)
-            writer.add_scalar("losses/approx_kl", approx_kl.item(), agent.state.global_step)
-            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), agent.state.global_step)
-            writer.add_scalar("losses/explained_variance", explained_var, agent.state.global_step)
-            writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time)
-            writer.add_scalar("time/steps_per_second", (agent.state.global_step - rollout_start_step) / (time.time() - rollout_start_time))  # noqa: E501
-            writer.add_scalar("rollout/ep_rew_mean", common.safe_mean(envs.return_queue))
-            writer.add_scalar("rollout/ep_len_mean", common.safe_mean(envs.length_queue))
-            writer.add_scalar("rollout/ep_value_mean", common.safe_mean(ep_net_value_queue))
-            writer.add_scalar("rollout/ep_success_rate", common.safe_mean(ep_is_success_queue))
-            writer.add_scalar("rollout/ep_count", envs.episode_count)
-            writer.add_scalar("global/num_timesteps", agent.state.global_step)
-            writer.add_scalar("global/num_rollouts", agent.state.global_rollout)
-            writer.add_scalar("global/progress", agent.state.global_rollout / args.rollouts_total)
+            gs = agent.state.global_step
+            ep_rew_mean = common.safe_mean(envs.return_queue)
+            writer.add_scalar("losses/total_loss", loss.item(), gs)
+            writer.add_scalar("losses/value_loss", v_loss.item(), gs)
+            writer.add_scalar("losses/head1_policy_loss", head1_pg_loss.item(), gs)
+            writer.add_scalar("losses/head2_policy_loss", head2_pg_loss.item(), gs)
+            writer.add_scalar("losses/head3_policy_loss", head3_pg_loss.item(), gs)
+            writer.add_scalar("losses/head1_entropy", head1_entropy_loss.item(), gs)
+            writer.add_scalar("losses/head2_entropy", head2_entropy_loss.item(), gs)
+            writer.add_scalar("losses/head3_entropy", head3_entropy_loss.item(), gs)
+            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), gs)
+            writer.add_scalar("losses/approx_kl", approx_kl.item(), gs)
+            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), gs)
+            writer.add_scalar("losses/explained_variance", explained_var, gs)
+            writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time, gs)
+            writer.add_scalar("time/steps_per_second", (gs - rollout_start_step) / (time.time() - rollout_start_time), gs)  # noqa: E501
+            writer.add_scalar("rollout/ep_rew_mean", ep_rew_mean, gs)
+            writer.add_scalar("rollout/ep_len_mean", common.safe_mean(envs.length_queue), gs)
+            writer.add_scalar("rollout/ep_value_mean", common.safe_mean(ep_net_value_queue), gs)
+            writer.add_scalar("rollout/ep_success_rate", common.safe_mean(ep_is_success_queue), gs)
+            writer.add_scalar("rollout/ep_count", envs.episode_count, gs)
+            writer.add_scalar("global/num_timesteps", gs, gs)
+            writer.add_scalar("global/num_rollouts", agent.state.global_rollout, gs)
 
-            print(f"global_step={agent.state.global_step}, rollout/ep_rew_mean={common.safe_mean(envs.return_queue)}")
+            if rollouts_total:
+                writer.add_scalar("global/progress", agent.state.global_rollout / rollouts_total, gs)
+
+            print("global_step=%d, rollout/ep_rew_mean=%.2f, loss=%.2f, variance=%.2f" % (
+                gs, ep_rew_mean, loss.item(), explained_var
+            ))
 
             if args.success_rate_target and common.safe_mean(ep_is_success_queue) >= args.success_rate_target:
                 writer.flush()
-                print("Early stopping after %d rollouts due to: success rate > %.2f (%.2f)" % (
-                    rollout % args.rollouts_per_mapchange,
+                print("Early stopping after %d map rollouts due to: success rate > %.2f (%.2f)" % (
+                    map_rollouts,
                     args.success_rate_target,
                     common.safe_mean(ep_is_success_queue)
                 ))
 
+                if args.quit_on_target:
+                    # XXX: break?
+                    sys.exit(0)
+                else:
+                    raise Exception("Not implemented: map change on target")
+
+            if args.ep_rew_mean_target and ep_rew_mean >= args.ep_rew_mean_target:
+                writer.flush()
+                print("Early stopping after %d map rollouts due to: ep_rew_mean > %.2f (%.2f)" % (
+                    map_rollouts,
+                    args.ep_rew_mean_target,
+                    ep_rew_mean
+                ))
+
+                if args.quit_on_target:
+                    # XXX: break?
+                    sys.exit(0)
+                else:
+                    raise Exception("Not implemented: map change on target")
+
             if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
+                if args.wandb_project and args.rollouts_per_table_log and rollout % args.rollouts_per_table_log == 0:
+                    dist = Categorical(torch.tensor(action_counters))
+                    data = [[Action(t).name, c.item()] for (t, c) in zip(action_types, dist.probs)]
+                    wt = wandb.Table(columns=["key", "value"], data=data)
+                    wandb.log({"action_distribution": wt})
+                    action_counters[:] = 0
+
                 writer.flush()
                 # reset per-rollout stats (affects only logging)
-                envs.return_queue.clear()
-                envs.length_queue.clear()
+                # envs.return_queue.clear()
+                # envs.length_queue.clear()
                 # envs.time_queue.clear()  # irrelevant
-                ep_net_value_queue.clear()
-                ep_is_success_queue.clear()
+                # ep_net_value_queue.clear()
+                # ep_is_success_queue.clear()
                 envs.episode_count = 0
 
-            if rollout > start_rollout and rollout % args.rollouts_per_mapchange == 0:
+            if rollouts_per_mapchange and map_rollouts % rollouts_per_mapchange == 0:
+                map_rollouts = 0
                 agent.state.map_swaps += 1
-                writer.add_scalar("global/map_swaps", agent.state.map_swaps)
+                writer.add_scalar("global/map_swaps", agent.state.map_swaps, gs)
                 envs.close()
-                envs = common.create_venv(VcmiEnv, args, writer, agent.state.map_swaps)  # noqa: E501
+                envs, _ = common.create_venv(VcmiEnv, args, agent.state.map_swaps)
                 next_obs, _ = envs.reset(seed=args.seed)
                 next_obs = torch.Tensor(next_obs).to(device)
                 next_done = torch.zeros(args.num_envs).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
-            save_ts = common.maybe_save(save_ts, args, agent, optimizer, out_dir)
+            save_ts = common.maybe_save(save_ts, args, agent, AgentNN, optimizer, out_dir)
 
     finally:
-        common.maybe_save(0, args, agent, optimizer, out_dir)
+        common.maybe_save(0, args, agent, AgentNN, optimizer, out_dir)
         envs.close()
         writer.close()
 
@@ -780,57 +950,72 @@ if __name__ == "__main__":
     args = Args(
         "debug-crl",
         "debug-crl",
+        wandb_project=None,
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="debugging/crl-agent.pt",
-        rollouts_total=1000000,
-        rollouts_per_mapchange=1000,
-        rollouts_per_log=1000,
-        opponent_load_file=None,
+        # agent_load_file="data/heads/heads-simple-A1/agent-1710806916.zip",
+        agent_load_file=None,
+        timesteps_total=0,
+        timesteps_per_mapchange=0,
+        rollouts_total=0,
+        rollouts_per_mapchange=0,
+        rollouts_per_log=100000,
+        rollouts_per_table_log=100000,
         success_rate_target=None,
-        mapmask="ai/generated/B001.vmap",
+        ep_rew_mean_target=None,
+        quit_on_target=False,
+        mapside="both",
+        mapmask="gym/A1.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
         max_saves=0,
         out_dir_template="data/debug-crl/debug-crl",
-        weight_decay=0.0,
-        learning_rate=0.001,
+        opponent_load_file=None,
+        opponent_sbm_probs=[1, 0, 0],
+        weight_decay=0.05,
+        learning_rate=0.00003,
         num_envs=1,
-        num_steps=4,
+        # num_steps=4,
+        num_steps=256,
         gamma=0.8,
         gae_lambda=0.8,
-        num_minibatches=2,
-        update_epochs=2,
+        # num_minibatches=2,
+        num_minibatches=16,
+        # update_epochs=2,
+        update_epochs=10,
         norm_adv=True,
-        clip_coef=0.4,
-        clip_vloss=False,
+        clip_coef=0.3,
+        clip_vloss=True,
         ent_coef=0.01,
-        vf_coef=0.5,
+        vf_coef=1.2,
         max_grad_norm=0.5,
         target_kl=None,
         loss_weights={
             "DEFEND": [1, 0, 0],
             "WAIT": [1, 0, 0],
-            "SHOOT": [0.3, 0.7, 0],
-            "MOVE": [0.3, 0.7, 0],
-            "AMOVE": [0.3, 0.3, 0.4],
+            "SHOOT": [0.5, 0.5, 0],
+            "MOVE": [0.5, 0.5, 0],
+            "AMOVE": [0.33, 0.33, 0.34],
         },
         logparams={},
-        cfg_file="/path/to/cfg",
-        wandb=False,
+        cfg_file=None,
         seed=42,
+        skip_wandb_init=False,
         env=EnvArgs(
             max_steps=500,
-            reward_clip_mod=None,
             reward_dmg_factor=5,
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
             vcmienv_loglevel="WARN",
             consecutive_error_reward_factor=-1,
             sparse_info=True,
+            step_reward_fixed=-100,
             step_reward_mult=1,
             term_reward_mult=0,
+            reward_clip_tanh_army_frac=1,
+            reward_army_value_ref=0,
+
         ),
         env_wrappers=[],
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],

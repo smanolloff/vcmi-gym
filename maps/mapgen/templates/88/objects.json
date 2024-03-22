@@ -1,0 +1,2128 @@
+{
+	"hero_0" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "red",
+			"portrait" : "core:sylvia",
+			"type" : "core:sylvia"
+		},
+		"subtype" : "core:knight",
+		"template" : {
+			"animation" : "AH00_.def",
+			"editorAnimation" : "AH00_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 2,
+		"y" : 8
+	},
+	"hero_1" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "red",
+			"portrait" : "core:sylvia",
+			"type" : "core:sylvia"
+		},
+		"subtype" : "core:knight",
+		"template" : {
+			"animation" : "AH00_.def",
+			"editorAnimation" : "AH00_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 1,
+		"y" : 9
+	},
+	"hero_2" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "red",
+			"portrait" : "core:sylvia",
+			"type" : "core:sylvia"
+		},
+		"subtype" : "core:knight",
+		"template" : {
+			"animation" : "AH00_.def",
+			"editorAnimation" : "AH00_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 1,
+		"y" : 10
+	},
+	"hero_3" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "red",
+			"portrait" : "core:sylvia",
+			"type" : "core:sylvia"
+		},
+		"subtype" : "core:knight",
+		"template" : {
+			"animation" : "AH00_.def",
+			"editorAnimation" : "AH00_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 1,
+		"y" : 11
+	},
+	"hero_4" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "red",
+			"portrait" : "core:sylvia",
+			"type" : "core:sylvia"
+		},
+		"subtype" : "core:knight",
+		"template" : {
+			"animation" : "AH00_.def",
+			"editorAnimation" : "AH00_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 1,
+		"y" : 8
+	},
+	"hero_5" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "red",
+			"portrait" : "core:sylvia",
+			"type" : "core:sylvia"
+		},
+		"subtype" : "core:knight",
+		"template" : {
+			"animation" : "AH00_.def",
+			"editorAnimation" : "AH00_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 2,
+		"y" : 9
+	},
+	"hero_6" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "red",
+			"portrait" : "core:sylvia",
+			"type" : "core:sylvia"
+		},
+		"subtype" : "core:knight",
+		"template" : {
+			"animation" : "AH00_.def",
+			"editorAnimation" : "AH00_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 2,
+		"y" : 10
+	},
+	"hero_7" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "red",
+			"portrait" : "core:sylvia",
+			"type" : "core:sylvia"
+		},
+		"subtype" : "core:knight",
+		"template" : {
+			"animation" : "AH00_.def",
+			"editorAnimation" : "AH00_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 2,
+		"y" : 11
+	},
+	"hero_8" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "blue",
+			"portrait" : "core:ufretin",
+			"type" : "core:ufretin"
+		},
+		"subtype" : "core:ranger",
+		"template" : {
+			"animation" : "AH02_.def",
+			"editorAnimation" : "AH02_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 3,
+		"y" : 8
+	},
+	"hero_9" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "blue",
+			"portrait" : "core:ufretin",
+			"type" : "core:ufretin"
+		},
+		"subtype" : "core:ranger",
+		"template" : {
+			"animation" : "AH02_.def",
+			"editorAnimation" : "AH02_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 3,
+		"y" : 9
+	},
+	"hero_10" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "blue",
+			"portrait" : "core:ufretin",
+			"type" : "core:ufretin"
+		},
+		"subtype" : "core:ranger",
+		"template" : {
+			"animation" : "AH02_.def",
+			"editorAnimation" : "AH02_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 3,
+		"y" : 10
+	},
+	"hero_11" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "blue",
+			"portrait" : "core:ufretin",
+			"type" : "core:ufretin"
+		},
+		"subtype" : "core:ranger",
+		"template" : {
+			"animation" : "AH02_.def",
+			"editorAnimation" : "AH02_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 3,
+		"y" : 11
+	},
+	"hero_12" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "blue",
+			"portrait" : "core:ufretin",
+			"type" : "core:ufretin"
+		},
+		"subtype" : "core:ranger",
+		"template" : {
+			"animation" : "AH02_.def",
+			"editorAnimation" : "AH02_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 4,
+		"y" : 8
+	},
+	"hero_13" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "blue",
+			"portrait" : "core:ufretin",
+			"type" : "core:ufretin"
+		},
+		"subtype" : "core:ranger",
+		"template" : {
+			"animation" : "AH02_.def",
+			"editorAnimation" : "AH02_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 4,
+		"y" : 9
+	},
+	"hero_14" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "blue",
+			"portrait" : "core:ufretin",
+			"type" : "core:ufretin"
+		},
+		"subtype" : "core:ranger",
+		"template" : {
+			"animation" : "AH02_.def",
+			"editorAnimation" : "AH02_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 4,
+		"y" : 10
+	},
+	"hero_15" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "blue",
+			"portrait" : "core:ufretin",
+			"type" : "core:ufretin"
+		},
+		"subtype" : "core:ranger",
+		"template" : {
+			"animation" : "AH02_.def",
+			"editorAnimation" : "AH02_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 4,
+		"y" : 11
+	},
+	"hero_16" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "tan",
+			"portrait" : "core:josephine",
+			"spellBook" : [],
+			"type" : "core:josephine"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 5,
+		"y" : 8
+	},
+	"hero_17" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "tan",
+			"portrait" : "core:josephine",
+			"spellBook" : [],
+			"type" : "core:josephine"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 5,
+		"y" : 9
+	},
+	"hero_18" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "tan",
+			"portrait" : "core:josephine",
+			"spellBook" : [],
+			"type" : "core:josephine"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 5,
+		"y" : 10
+	},
+	"hero_19" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "tan",
+			"portrait" : "core:josephine",
+			"spellBook" : [],
+			"type" : "core:josephine"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 5,
+		"y" : 11
+	},
+	"hero_20" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "tan",
+			"portrait" : "core:josephine",
+			"spellBook" : [],
+			"type" : "core:josephine"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 6,
+		"y" : 8
+	},
+	"hero_21" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "tan",
+			"portrait" : "core:josephine",
+			"spellBook" : [],
+			"type" : "core:josephine"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 6,
+		"y" : 9
+	},
+	"hero_22" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "tan",
+			"portrait" : "core:josephine",
+			"spellBook" : [],
+			"type" : "core:josephine"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 6,
+		"y" : 10
+	},
+	"hero_23" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "tan",
+			"portrait" : "core:josephine",
+			"spellBook" : [],
+			"type" : "core:josephine"
+		},
+		"subtype" : "core:alchemist",
+		"template" : {
+			"animation" : "AH04_.def",
+			"editorAnimation" : "AH04_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 6,
+		"y" : 11
+	},
+	"hero_24" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "green",
+			"portrait" : "core:rashka",
+			"type" : "core:rashka"
+		},
+		"subtype" : "core:demoniac",
+		"template" : {
+			"animation" : "AH06_.def",
+			"editorAnimation" : "AH06_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 7,
+		"y" : 8
+	},
+	"hero_25" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "green",
+			"portrait" : "core:rashka",
+			"type" : "core:rashka"
+		},
+		"subtype" : "core:demoniac",
+		"template" : {
+			"animation" : "AH06_.def",
+			"editorAnimation" : "AH06_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 7,
+		"y" : 9
+	},
+	"hero_26" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "green",
+			"portrait" : "core:rashka",
+			"type" : "core:rashka"
+		},
+		"subtype" : "core:demoniac",
+		"template" : {
+			"animation" : "AH06_.def",
+			"editorAnimation" : "AH06_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 7,
+		"y" : 10
+	},
+	"hero_27" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "green",
+			"portrait" : "core:rashka",
+			"type" : "core:rashka"
+		},
+		"subtype" : "core:demoniac",
+		"template" : {
+			"animation" : "AH06_.def",
+			"editorAnimation" : "AH06_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 7,
+		"y" : 11
+	},
+	"hero_28" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "green",
+			"portrait" : "core:rashka",
+			"type" : "core:rashka"
+		},
+		"subtype" : "core:demoniac",
+		"template" : {
+			"animation" : "AH06_.def",
+			"editorAnimation" : "AH06_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 8,
+		"y" : 8
+	},
+	"hero_29" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "green",
+			"portrait" : "core:rashka",
+			"type" : "core:rashka"
+		},
+		"subtype" : "core:demoniac",
+		"template" : {
+			"animation" : "AH06_.def",
+			"editorAnimation" : "AH06_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 8,
+		"y" : 9
+	},
+	"hero_30" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "green",
+			"portrait" : "core:rashka",
+			"type" : "core:rashka"
+		},
+		"subtype" : "core:demoniac",
+		"template" : {
+			"animation" : "AH06_.def",
+			"editorAnimation" : "AH06_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 8,
+		"y" : 10
+	},
+	"hero_31" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"owner" : "green",
+			"portrait" : "core:rashka",
+			"type" : "core:rashka"
+		},
+		"subtype" : "core:demoniac",
+		"template" : {
+			"animation" : "AH06_.def",
+			"editorAnimation" : "AH06_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 8,
+		"y" : 11
+	},
+	"hero_32" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "orange",
+			"portrait" : "core:isra",
+			"spellBook" : [],
+			"type" : "core:isra"
+		},
+		"subtype" : "core:deathknight",
+		"template" : {
+			"animation" : "AH08_.def",
+			"editorAnimation" : "AH08_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 9,
+		"y" : 8
+	},
+	"hero_33" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "orange",
+			"portrait" : "core:isra",
+			"spellBook" : [],
+			"type" : "core:isra"
+		},
+		"subtype" : "core:deathknight",
+		"template" : {
+			"animation" : "AH08_.def",
+			"editorAnimation" : "AH08_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 9,
+		"y" : 9
+	},
+	"hero_34" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "orange",
+			"portrait" : "core:isra",
+			"spellBook" : [],
+			"type" : "core:isra"
+		},
+		"subtype" : "core:deathknight",
+		"template" : {
+			"animation" : "AH08_.def",
+			"editorAnimation" : "AH08_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 9,
+		"y" : 10
+	},
+	"hero_35" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "orange",
+			"portrait" : "core:isra",
+			"spellBook" : [],
+			"type" : "core:isra"
+		},
+		"subtype" : "core:deathknight",
+		"template" : {
+			"animation" : "AH08_.def",
+			"editorAnimation" : "AH08_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 9,
+		"y" : 11
+	},
+	"hero_36" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "orange",
+			"portrait" : "core:isra",
+			"spellBook" : [],
+			"type" : "core:isra"
+		},
+		"subtype" : "core:deathknight",
+		"template" : {
+			"animation" : "AH08_.def",
+			"editorAnimation" : "AH08_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 10,
+		"y" : 8
+	},
+	"hero_37" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "orange",
+			"portrait" : "core:isra",
+			"spellBook" : [],
+			"type" : "core:isra"
+		},
+		"subtype" : "core:deathknight",
+		"template" : {
+			"animation" : "AH08_.def",
+			"editorAnimation" : "AH08_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 10,
+		"y" : 9
+	},
+	"hero_38" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "orange",
+			"portrait" : "core:isra",
+			"spellBook" : [],
+			"type" : "core:isra"
+		},
+		"subtype" : "core:deathknight",
+		"template" : {
+			"animation" : "AH08_.def",
+			"editorAnimation" : "AH08_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 10,
+		"y" : 10
+	},
+	"hero_39" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "orange",
+			"portrait" : "core:isra",
+			"spellBook" : [],
+			"type" : "core:isra"
+		},
+		"subtype" : "core:deathknight",
+		"template" : {
+			"animation" : "AH08_.def",
+			"editorAnimation" : "AH08_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 10,
+		"y" : 11
+	},
+	"hero_40" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "purple",
+			"portrait" : "core:lorelei",
+			"type" : "core:lorelei"
+		},
+		"subtype" : "core:warlock",
+		"template" : {
+			"animation" : "AH11_.def",
+			"editorAnimation" : "AH11_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 11,
+		"y" : 8
+	},
+	"hero_41" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "purple",
+			"portrait" : "core:lorelei",
+			"type" : "core:lorelei"
+		},
+		"subtype" : "core:warlock",
+		"template" : {
+			"animation" : "AH11_.def",
+			"editorAnimation" : "AH11_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 11,
+		"y" : 9
+	},
+	"hero_42" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "purple",
+			"portrait" : "core:lorelei",
+			"type" : "core:lorelei"
+		},
+		"subtype" : "core:warlock",
+		"template" : {
+			"animation" : "AH11_.def",
+			"editorAnimation" : "AH11_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 11,
+		"y" : 10
+	},
+	"hero_43" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "purple",
+			"portrait" : "core:lorelei",
+			"type" : "core:lorelei"
+		},
+		"subtype" : "core:warlock",
+		"template" : {
+			"animation" : "AH11_.def",
+			"editorAnimation" : "AH11_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 11,
+		"y" : 11
+	},
+	"hero_44" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "purple",
+			"portrait" : "core:lorelei",
+			"type" : "core:lorelei"
+		},
+		"subtype" : "core:warlock",
+		"template" : {
+			"animation" : "AH11_.def",
+			"editorAnimation" : "AH11_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 12,
+		"y" : 8
+	},
+	"hero_45" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "purple",
+			"portrait" : "core:lorelei",
+			"type" : "core:lorelei"
+		},
+		"subtype" : "core:warlock",
+		"template" : {
+			"animation" : "AH11_.def",
+			"editorAnimation" : "AH11_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 12,
+		"y" : 9
+	},
+	"hero_46" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "purple",
+			"portrait" : "core:lorelei",
+			"type" : "core:lorelei"
+		},
+		"subtype" : "core:warlock",
+		"template" : {
+			"animation" : "AH11_.def",
+			"editorAnimation" : "AH11_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 12,
+		"y" : 10
+	},
+	"hero_47" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "purple",
+			"portrait" : "core:lorelei",
+			"type" : "core:lorelei"
+		},
+		"subtype" : "core:warlock",
+		"template" : {
+			"animation" : "AH11_.def",
+			"editorAnimation" : "AH11_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 12,
+		"y" : 11
+	},
+	"hero_48" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "teal",
+			"portrait" : "core:oris",
+			"spellBook" : [],
+			"type" : "core:oris"
+		},
+		"subtype" : "core:battlemage",
+		"template" : {
+			"animation" : "AH13_.def",
+			"editorAnimation" : "AH13_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 13,
+		"y" : 8
+	},
+	"hero_49" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "teal",
+			"portrait" : "core:oris",
+			"spellBook" : [],
+			"type" : "core:oris"
+		},
+		"subtype" : "core:battlemage",
+		"template" : {
+			"animation" : "AH13_.def",
+			"editorAnimation" : "AH13_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 13,
+		"y" : 9
+	},
+	"hero_50" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "teal",
+			"portrait" : "core:oris",
+			"spellBook" : [],
+			"type" : "core:oris"
+		},
+		"subtype" : "core:battlemage",
+		"template" : {
+			"animation" : "AH13_.def",
+			"editorAnimation" : "AH13_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 13,
+		"y" : 10
+	},
+	"hero_51" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "teal",
+			"portrait" : "core:oris",
+			"spellBook" : [],
+			"type" : "core:oris"
+		},
+		"subtype" : "core:battlemage",
+		"template" : {
+			"animation" : "AH13_.def",
+			"editorAnimation" : "AH13_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 13,
+		"y" : 11
+	},
+	"hero_52" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "teal",
+			"portrait" : "core:oris",
+			"spellBook" : [],
+			"type" : "core:oris"
+		},
+		"subtype" : "core:battlemage",
+		"template" : {
+			"animation" : "AH13_.def",
+			"editorAnimation" : "AH13_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 14,
+		"y" : 8
+	},
+	"hero_53" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "teal",
+			"portrait" : "core:oris",
+			"spellBook" : [],
+			"type" : "core:oris"
+		},
+		"subtype" : "core:battlemage",
+		"template" : {
+			"animation" : "AH13_.def",
+			"editorAnimation" : "AH13_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 14,
+		"y" : 9
+	},
+	"hero_54" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "teal",
+			"portrait" : "core:oris",
+			"spellBook" : [],
+			"type" : "core:oris"
+		},
+		"subtype" : "core:battlemage",
+		"template" : {
+			"animation" : "AH13_.def",
+			"editorAnimation" : "AH13_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 14,
+		"y" : 10
+	},
+	"hero_55" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "teal",
+			"portrait" : "core:oris",
+			"spellBook" : [],
+			"type" : "core:oris"
+		},
+		"subtype" : "core:battlemage",
+		"template" : {
+			"animation" : "AH13_.def",
+			"editorAnimation" : "AH13_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 14,
+		"y" : 11
+	},
+	"hero_56" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "pink",
+			"portrait" : "core:andra",
+			"spellBook" : [],
+			"type" : "core:andra"
+		},
+		"subtype" : "core:witch",
+		"template" : {
+			"animation" : "AH15_.def",
+			"editorAnimation" : "AH15_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 15,
+		"y" : 8
+	},
+	"hero_57" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "pink",
+			"portrait" : "core:andra",
+			"spellBook" : [],
+			"type" : "core:andra"
+		},
+		"subtype" : "core:witch",
+		"template" : {
+			"animation" : "AH15_.def",
+			"editorAnimation" : "AH15_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 15,
+		"y" : 9
+	},
+	"hero_58" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "pink",
+			"portrait" : "core:andra",
+			"spellBook" : [],
+			"type" : "core:andra"
+		},
+		"subtype" : "core:witch",
+		"template" : {
+			"animation" : "AH15_.def",
+			"editorAnimation" : "AH15_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 15,
+		"y" : 10
+	},
+	"hero_59" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "pink",
+			"portrait" : "core:andra",
+			"spellBook" : [],
+			"type" : "core:andra"
+		},
+		"subtype" : "core:witch",
+		"template" : {
+			"animation" : "AH15_.def",
+			"editorAnimation" : "AH15_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 15,
+		"y" : 11
+	},
+	"hero_60" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "pink",
+			"portrait" : "core:andra",
+			"spellBook" : [],
+			"type" : "core:andra"
+		},
+		"subtype" : "core:witch",
+		"template" : {
+			"animation" : "AH15_.def",
+			"editorAnimation" : "AH15_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 16,
+		"y" : 8
+	},
+	"hero_61" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "pink",
+			"portrait" : "core:andra",
+			"spellBook" : [],
+			"type" : "core:andra"
+		},
+		"subtype" : "core:witch",
+		"template" : {
+			"animation" : "AH15_.def",
+			"editorAnimation" : "AH15_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 16,
+		"y" : 9
+	},
+	"hero_62" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "pink",
+			"portrait" : "core:andra",
+			"spellBook" : [],
+			"type" : "core:andra"
+		},
+		"subtype" : "core:witch",
+		"template" : {
+			"animation" : "AH15_.def",
+			"editorAnimation" : "AH15_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 16,
+		"y" : 10
+	},
+	"hero_63" : {
+		"l" : 0,
+		"options" : {
+			"experience" : 9223372036854775807,
+			"formation" : "wide",
+			"gender" : 1,
+			"owner" : "pink",
+			"portrait" : "core:andra",
+			"spellBook" : [],
+			"type" : "core:andra"
+		},
+		"subtype" : "core:witch",
+		"template" : {
+			"animation" : "AH15_.def",
+			"editorAnimation" : "AH15_E.def",
+			"mask" : [
+				"VVV",
+				"VAV"
+			],
+			"visitableFrom" : [
+				"+++",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "hero",
+		"x" : 16,
+		"y" : 11
+	},
+	"town_0" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "red",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "castle",
+		"template" : {
+			"animation" : "AVCCAST0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 3,
+		"y" : 2
+	},
+	"town_1" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "blue",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "rampart",
+		"template" : {
+			"animation" : "AVCRAMP0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 7,
+		"y" : 2
+	},
+	"town_2" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "tan",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "tower",
+		"template" : {
+			"animation" : "AVCTOWR0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 12,
+		"y" : 2
+	},
+	"town_3" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "green",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "inferno",
+		"template" : {
+			"animation" : "AVCINFT0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 16,
+		"y" : 2
+	},
+	"town_4" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "orange",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "necropolis",
+		"template" : {
+			"animation" : "AVCNECR0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 3,
+		"y" : 6
+	},
+	"town_5" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "purple",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "dungeon",
+		"template" : {
+			"animation" : "AVCDUNG0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 7,
+		"y" : 6
+	},
+	"town_6" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "teal",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "stronghold",
+		"template" : {
+			"animation" : "AVCSTRO0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 12,
+		"y" : 6
+	},
+	"town_7" : {
+		"l" : 0,
+		"options" : {
+			"buildings" : {
+				"allOf" : [
+					"core:tavern"
+				]
+			},
+			"owner" : "pink",
+			"tightFormation" : "wide"
+		},
+		"subtype" : "fortress",
+		"template" : {
+			"animation" : "AVCFTRT0.DEF",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVBBBV",
+				"VBBBBB",
+				"VBBABB"
+			],
+			"visitableFrom" : [
+				"---",
+				"+-+",
+				"+++"
+			]
+		},
+		"type" : "town",
+		"x" : 16,
+		"y" : 6
+	},
+	"cursedGround_0" : {
+		"l" : 0,
+		"subtype" : "object",
+		"template" : {
+			"animation" : "AVXcrsd0.def",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV"
+			],
+			"zIndex" : 100
+		},
+		"type" : "cursedGround",
+		"x" : 5,
+		"y" : 11
+	},
+	"cursedGround_1" : {
+		"l" : 0,
+		"subtype" : "object",
+		"template" : {
+			"animation" : "AVXcrsd0.def",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV"
+			],
+			"zIndex" : 100
+		},
+		"type" : "cursedGround",
+		"x" : 11,
+		"y" : 11
+	},
+	"cursedGround_2" : {
+		"l" : 0,
+		"subtype" : "object",
+		"template" : {
+			"animation" : "AVXcrsd0.def",
+			"editorAnimation" : "",
+			"mask" : [
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV",
+				"VVVVVV"
+			],
+			"zIndex" : 100
+		},
+		"type" : "cursedGround",
+		"x" : 17,
+		"y" : 11
+	}
+}

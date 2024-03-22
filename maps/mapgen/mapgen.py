@@ -17,28 +17,24 @@
 import json
 import os
 import random
-import copy
 import io
 import zipfile
 
 # relative to script dir
-MAP_DIR = "../gym/generated/mirror_3stack"
-
+MAP_DIR = "../gym/generated/88"
+# name template containing a single integer to be replaced with MAP_ID
+MAP_NAME_TEMPLATE = "88-1stack-%02d"
 # id of maps to generate (inclusive)
 MAP_ID_START = 1
 MAP_ID_END = 8
 
-# name template containing a single integer to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "M%02d"
-
 ARMY_N_STACKS_SAME = True  # same for both sides
-ARMY_N_STACKS_MAX = 3
-ARMY_N_STACKS_MIN = 3
-ARMY_VALUE_SAME = True  # same for both sides
-ARMY_VALUE_MAX = 30_000
-ARMY_VALUE_MIN = 5_000
+ARMY_N_STACKS_MAX = 1
+ARMY_N_STACKS_MIN = 1
+ARMY_VALUE_MAX = 100_000
+ARMY_VALUE_MIN = 30_000
 
-# Rounding for values for better descirptions
+# Round values for better descruptions
 ARMY_VALUE_ROUND = 1000
 
 # Max value for (unused_credits / target_value)
@@ -71,15 +67,15 @@ def get_templates():
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
     header = None
-    with open(os.path.join(current_dir, "templates", "header.json"), "r") as f:
+    with open(os.path.join(current_dir, "templates", "88", "header.json"), "r") as f:
         header = json.load(f)
 
     objects = None
-    with open(os.path.join(current_dir, "templates", "objects.json"), "r") as f:
+    with open(os.path.join(current_dir, "templates", "88", "objects.json"), "r") as f:
         objects = json.load(f)
 
     surface_terrain = None
-    with open(os.path.join(current_dir, "templates", "surface_terrain.json"), "r") as f:
+    with open(os.path.join(current_dir, "templates", "88", "surface_terrain.json"), "r") as f:
         surface_terrain = json.load(f)
 
     return header, objects, surface_terrain
@@ -159,35 +155,27 @@ def save(header, objects, surface_terrain):
 
 
 if __name__ == "__main__":
-    header0, objects0, surface_terrain0 = get_templates()
     all_creatures = get_all_creatures()
     all_values = list(range(ARMY_VALUE_MIN, ARMY_VALUE_MAX, ARMY_VALUE_ROUND))
 
-    for i in range(MAP_ID_START, MAP_ID_END + 1):
+    for mapid in range(MAP_ID_START, MAP_ID_END + 1):
+        print(f"*** Generating map #{mapid}")
+        header, objects, surface_terrain0 = get_templates()
         value = random.choice(all_values)
-        stacks_a = random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
-        stacks_b = stacks_a if ARMY_N_STACKS_SAME else random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
-        army_a = build_army_with_retry(all_creatures, value, stacks_a)
-        army_b = army_a if ARMY_VALUE_SAME else build_army_with_retry(all_creatures, value, stacks_b)
+        stacks = random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
 
-        header = copy.deepcopy(header0)
-        header["name"] = MAP_NAME_TEMPLATE % i
-        header["description"] = "AI test map %s\n\nTarget army values: %d\nAttacker:\n%s\n\nDefender:\n%s" % (
-            header["name"],
-            value,
-            describe(army_a),
-            describe(army_b)
-        )
+        header["name"] = MAP_NAME_TEMPLATE % mapid
+        header["description"] = "AI test map %s\nTarget army values: %d" % (header["name"], value)
 
-        objects = copy.deepcopy(objects0)
-        for (i, (vcminame, _, number)) in enumerate(army_a):
-            if army_a[i] is None:
-                continue
-            objects["hero_0"]["options"]["army"][i] = dict(amount=number, type=f"core:{vcminame}")
+        for j in range(0, 64):
+            print(f"* Generating army for hero #{j}")
+            stacks = stacks if ARMY_N_STACKS_SAME else random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
+            army = build_army_with_retry(all_creatures, value, stacks)
+            objects[f"hero_{j}"]["options"]["army"] = [{} for i in range(7)]
 
-        for (i, (vcminame, _, number)) in enumerate(army_b):
-            if army_b[i] is None:
-                continue
-            objects["hero_1"]["options"]["army"][i] = dict(amount=number, type=f"core:{vcminame}")
+            for (slot, (vcminame, _, number)) in enumerate(army):
+                if army[slot] is None:
+                    continue
+                objects[f"hero_{j}"]["options"]["army"][slot] = dict(amount=number, type=f"core:{vcminame}")
 
         save(header, objects, surface_terrain0)
