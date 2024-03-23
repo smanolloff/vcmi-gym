@@ -2,7 +2,7 @@
 	"hero_0" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 0,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "red",
@@ -30,7 +30,7 @@
 	"hero_1" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 1,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "red",
@@ -58,7 +58,7 @@
 	"hero_2" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 2,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "red",
@@ -86,7 +86,7 @@
 	"hero_3" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 3,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "red",
@@ -114,7 +114,7 @@
 	"hero_4" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 4,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "red",
@@ -142,7 +142,7 @@
 	"hero_5" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 5,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "red",
@@ -170,7 +170,7 @@
 	"hero_6" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 6,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "red",
@@ -198,7 +198,7 @@
 	"hero_7" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 7,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "red",
@@ -226,7 +226,7 @@
 	"hero_8" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 8,
 			"formation" : "wide",
 			"owner" : "blue",
 			"portrait" : "core:ufretin",
@@ -253,7 +253,7 @@
 	"hero_9" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 9,
 			"formation" : "wide",
 			"owner" : "blue",
 			"portrait" : "core:ufretin",
@@ -280,7 +280,7 @@
 	"hero_10" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 10,
 			"formation" : "wide",
 			"owner" : "blue",
 			"portrait" : "core:ufretin",
@@ -307,7 +307,7 @@
 	"hero_11" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 11,
 			"formation" : "wide",
 			"owner" : "blue",
 			"portrait" : "core:ufretin",
@@ -334,7 +334,7 @@
 	"hero_12" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 12,
 			"formation" : "wide",
 			"owner" : "blue",
 			"portrait" : "core:ufretin",
@@ -361,7 +361,7 @@
 	"hero_13" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 13,
 			"formation" : "wide",
 			"owner" : "blue",
 			"portrait" : "core:ufretin",
@@ -388,7 +388,7 @@
 	"hero_14" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 14,
 			"formation" : "wide",
 			"owner" : "blue",
 			"portrait" : "core:ufretin",
@@ -415,7 +415,7 @@
 	"hero_15" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 15,
 			"formation" : "wide",
 			"owner" : "blue",
 			"portrait" : "core:ufretin",
@@ -442,7 +442,7 @@
 	"hero_16" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 16,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "tan",
@@ -471,7 +471,7 @@
 	"hero_17" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 17,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "tan",
@@ -500,7 +500,7 @@
 	"hero_18" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 18,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "tan",
@@ -529,7 +529,7 @@
 	"hero_19" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 19,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "tan",
@@ -558,7 +558,7 @@
 	"hero_20" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 20,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "tan",
@@ -587,7 +587,7 @@
 	"hero_21" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 21,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "tan",
@@ -616,7 +616,7 @@
 	"hero_22" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 22,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "tan",
@@ -645,7 +645,7 @@
 	"hero_23" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 23,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "tan",
@@ -674,7 +674,7 @@
 	"hero_24" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 24,
 			"formation" : "wide",
 			"owner" : "green",
 			"portrait" : "core:rashka",
@@ -701,7 +701,7 @@
 	"hero_25" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 25,
 			"formation" : "wide",
 			"owner" : "green",
 			"portrait" : "core:rashka",
@@ -728,7 +728,7 @@
 	"hero_26" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 26,
 			"formation" : "wide",
 			"owner" : "green",
 			"portrait" : "core:rashka",
@@ -755,7 +755,7 @@
 	"hero_27" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 27,
 			"formation" : "wide",
 			"owner" : "green",
 			"portrait" : "core:rashka",
@@ -782,7 +782,7 @@
 	"hero_28" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 28,
 			"formation" : "wide",
 			"owner" : "green",
 			"portrait" : "core:rashka",
@@ -809,7 +809,7 @@
 	"hero_29" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 29,
 			"formation" : "wide",
 			"owner" : "green",
 			"portrait" : "core:rashka",
@@ -836,7 +836,7 @@
 	"hero_30" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 30,
 			"formation" : "wide",
 			"owner" : "green",
 			"portrait" : "core:rashka",
@@ -863,7 +863,7 @@
 	"hero_31" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 31,
 			"formation" : "wide",
 			"owner" : "green",
 			"portrait" : "core:rashka",
@@ -890,7 +890,7 @@
 	"hero_32" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 32,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "orange",
@@ -919,7 +919,7 @@
 	"hero_33" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 33,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "orange",
@@ -948,7 +948,7 @@
 	"hero_34" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 34,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "orange",
@@ -977,7 +977,7 @@
 	"hero_35" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 35,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "orange",
@@ -1006,7 +1006,7 @@
 	"hero_36" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 36,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "orange",
@@ -1035,7 +1035,7 @@
 	"hero_37" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 37,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "orange",
@@ -1064,7 +1064,7 @@
 	"hero_38" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 38,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "orange",
@@ -1093,7 +1093,7 @@
 	"hero_39" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 39,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "orange",
@@ -1122,7 +1122,7 @@
 	"hero_40" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 40,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "purple",
@@ -1150,7 +1150,7 @@
 	"hero_41" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 41,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "purple",
@@ -1178,7 +1178,7 @@
 	"hero_42" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 42,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "purple",
@@ -1206,7 +1206,7 @@
 	"hero_43" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 43,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "purple",
@@ -1234,7 +1234,7 @@
 	"hero_44" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 44,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "purple",
@@ -1262,7 +1262,7 @@
 	"hero_45" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 45,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "purple",
@@ -1290,7 +1290,7 @@
 	"hero_46" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 46,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "purple",
@@ -1318,7 +1318,7 @@
 	"hero_47" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 47,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "purple",
@@ -1346,7 +1346,7 @@
 	"hero_48" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 48,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "teal",
@@ -1375,7 +1375,7 @@
 	"hero_49" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 49,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "teal",
@@ -1404,7 +1404,7 @@
 	"hero_50" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 50,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "teal",
@@ -1433,7 +1433,7 @@
 	"hero_51" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 51,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "teal",
@@ -1462,7 +1462,7 @@
 	"hero_52" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 52,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "teal",
@@ -1491,7 +1491,7 @@
 	"hero_53" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 53,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "teal",
@@ -1520,7 +1520,7 @@
 	"hero_54" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 54,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "teal",
@@ -1549,7 +1549,7 @@
 	"hero_55" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 55,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "teal",
@@ -1578,7 +1578,7 @@
 	"hero_56" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 56,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "pink",
@@ -1607,7 +1607,7 @@
 	"hero_57" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 57,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "pink",
@@ -1636,7 +1636,7 @@
 	"hero_58" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 58,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "pink",
@@ -1665,7 +1665,7 @@
 	"hero_59" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 59,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "pink",
@@ -1694,7 +1694,7 @@
 	"hero_60" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 60,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "pink",
@@ -1723,7 +1723,7 @@
 	"hero_61" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 61,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "pink",
@@ -1752,7 +1752,7 @@
 	"hero_62" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 62,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "pink",
@@ -1781,7 +1781,7 @@
 	"hero_63" : {
 		"l" : 0,
 		"options" : {
-			"experience" : 9223372036854775807,
+			"experience" : 63,
 			"formation" : "wide",
 			"gender" : 1,
 			"owner" : "pink",
