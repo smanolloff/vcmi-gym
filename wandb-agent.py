@@ -14,7 +14,8 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, handle_signal)
 
     wandb.init(
-        sync_tensorboard=True,
+        # sync_tensorboard=True,
+        sync_tensorboard=False,  # tb logs are just filling up disk space
         save_code=False,  # code saved manually below
         settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
     )

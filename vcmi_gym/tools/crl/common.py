@@ -234,7 +234,7 @@ def safe_mean(array_like) -> float:
     return np.nan if len(array_like) == 0 else float(np.mean(array_like))
 
 
-def log_params(args, writer, global_step):
+def log_params(args, wandb_log):
     logged = {}
     for (k, v) in args.logparams.items():
         value = args
@@ -247,7 +247,7 @@ def log_params(args, writer, global_step):
         else:
             assert isinstance(value, (int, float, bool)), "Unexpected value type: %s (%s)" % (value, type(value))
 
-        writer.add_scalar(k, float(value), global_step)
+        wandb_log({k: float(value)})
         logged[k] = float(value)
     print("Params: %s" % logged)
 
@@ -340,7 +340,7 @@ def setup_wandb(args, agent, src_file):
         return res
 
     wandb.run.log_code(root=os.path.dirname(src_file), include_fn=code_include_fn)
-    return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=100)#1000)
+    return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
 
 
 def init_optimizer(args, agent, optimizer):

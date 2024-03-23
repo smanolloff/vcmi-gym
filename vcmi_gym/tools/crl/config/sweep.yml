@@ -1,7 +1,8 @@
 ---
 program: wandb-agent.py
 project: vcmi-gym
-method: grid
+# method: grid
+method: random
 metric:
   name: rollout/ep_rew_mean
   goal: maximize
@@ -12,8 +13,8 @@ parameters:
 
   group_id: { value: "sweeps" }
   agent_load_file: { value: ~ } #"/Users/simo/Projects/vcmi-gym/data/A3-sweep/h98k5nhr/agent-1710918951.zip"}
-  timesteps_total: { value: 200_000 }
-  timesteps_per_mapchange: { value: 10_000 }
+  timesteps_total: { value: 50_000 }
+  timesteps_per_mapchange: { value: 0 }
   rollouts_total: { value: 0 }
   rollouts_per_mapchange: { value: 0 }
   rollouts_per_log: { value: 1 }
@@ -22,28 +23,31 @@ parameters:
   ep_rew_mean_target: { value: 0 }
   quit_on_target: { value: True }
   mapside: { value: "both" }
-  mapmask: { value: "gym/generated/B*.vmap" }
+  mapmask: { value: "gym/generated/88/88-1stack-*.vmap" }
   save_every: { value: 3600 } # seconds
   max_saves: { value: 3 }
   out_dir_template: { value: "data/{group_id}/{run_id}" }
-  num_envs: { value: 4 }
+  num_envs: { value: 2 }
 
   # TODO: use distributions for clearer visualization of sweeps
   # (to prevent line stacking and decoloring)
   # https://docs.wandb.ai/guides/sweeps/sweep-config-keys#distribution-options-for-random-and-bayesian-search
 
-  clip_coef: { value: 0.2 }
+  # clip_coef: { value: 0.2 }
+  clip_coef: { distribution: "uniform", min: 0.05, max: 0.5 }
   clip_vloss: { value: true }
   ent_coef: { value: 0.007 }
   gae_lambda: { value: 0.98 }
   gamma: { value: 0.8 }
-  learning_rate: { values: [0.0001, 0.0003, 0.0005] }
+  # learning_rate: { values: [0.0001, 0.0003, 0.0005] }
+  learning_rate: { distribution: "inv_log_uniform_values", min: 0.000001, max: 0.0001 }
   max_grad_norm: { value: 1 }
   norm_adv: { value: true }
   num_minibatches: { value: 8 }
-  num_steps: { value: 64 }
+  # num_steps: { value: 64 }
+  num_steps: { distribution: "q_uniform", q: 8, min: 16, max: 256 }
   stats_buffer_size: { value: 100 }
-  update_epochs: { value: 50 }
+  update_epochs: { distribution: "int_uniform", min: 10, max: 250 }
   vf_coef: { value: 0.3 }
   weight_decay: { value: 0 }
 

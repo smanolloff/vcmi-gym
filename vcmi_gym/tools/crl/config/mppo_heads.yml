@@ -1,7 +1,7 @@
 ---
 wandb_project: vcmi-gym
 group_id: heads
-run_id: simotest-130
+run_id: simotest-131
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]

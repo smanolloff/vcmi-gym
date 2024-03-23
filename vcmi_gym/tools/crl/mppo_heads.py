@@ -31,7 +31,6 @@ import torch
 import torch.nn as nn
 # import tyro
 import enum
-from torch.utils.tensorboard import SummaryWriter
 from torch.distributions.categorical import Categorical
 
 from vcmi_gym import VcmiEnv
@@ -599,24 +598,32 @@ def main(args):
 
         assert args.rollouts_per_table_log % args.rollouts_per_log == 0
 
-        print("WANDB_PROJECT: %s" % args.wandb_project)
         if args.wandb_project:
             import wandb
             common.setup_wandb(args, agent, __file__)
             action_types = [Action(i).value for i in range(Action.COUNT)]
 
-        writer = SummaryWriter(out_dir)
-        common.log_params(args, writer, agent.state.global_step)
+            # For wandb.log, commit=True by default
+            # for wandb_log, commit=False by default
+            def wandb_log(*args, **kwargs):
+                wandb.log(*args, **dict({"commit": False}, **kwargs))
+        else:
+            def wandb_log(*args, **kwargs):
+                pass
+
+        common.log_params(args, wandb_log)
 
         if args.resume:
             agent.state.resumes += 1
-            writer.add_scalar("global/resumes", agent.state.resumes, agent.state.global_step)
+            wandb_log({"global/resumes", agent.state.resumes})
 
         # print("Agent state: %s" % asdict(agent.state))
 
         optimizer = common.init_optimizer(args, agent, optimizer)
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
+
+        rollout_net_value_queue_100 = deque(maxlen=100)
 
         action_counters = np.zeros(Action.COUNT, dtype=np.int64)
         assert act_space.shape == ()
@@ -820,37 +827,38 @@ def main(args):
             # writer.add_scalar("params/learning_rate", optimizer.param_groups[0]["lr"], agent.state.global_step)
             gs = agent.state.global_step
             ep_rew_mean = common.safe_mean(envs.return_queue)
-            writer.add_scalar("losses/total_loss", loss.item(), gs)
-            writer.add_scalar("losses/value_loss", v_loss.item(), gs)
-            writer.add_scalar("losses/head1_policy_loss", head1_pg_loss.item(), gs)
-            writer.add_scalar("losses/head2_policy_loss", head2_pg_loss.item(), gs)
-            writer.add_scalar("losses/head3_policy_loss", head3_pg_loss.item(), gs)
-            writer.add_scalar("losses/head1_entropy", head1_entropy_loss.item(), gs)
-            writer.add_scalar("losses/head2_entropy", head2_entropy_loss.item(), gs)
-            writer.add_scalar("losses/head3_entropy", head3_entropy_loss.item(), gs)
-            writer.add_scalar("losses/old_approx_kl", old_approx_kl.item(), gs)
-            writer.add_scalar("losses/approx_kl", approx_kl.item(), gs)
-            writer.add_scalar("losses/clipfrac", np.mean(clipfracs), gs)
-            writer.add_scalar("losses/explained_variance", explained_var, gs)
-            writer.add_scalar("time/rollout_duration", time.time() - rollout_start_time, gs)
-            writer.add_scalar("time/steps_per_second", (gs - rollout_start_step) / (time.time() - rollout_start_time), gs)  # noqa: E501
-            writer.add_scalar("rollout/ep_rew_mean", ep_rew_mean, gs)
-            writer.add_scalar("rollout/ep_len_mean", common.safe_mean(envs.length_queue), gs)
-            writer.add_scalar("rollout/ep_value_mean", common.safe_mean(ep_net_value_queue), gs)
-            writer.add_scalar("rollout/ep_success_rate", common.safe_mean(ep_is_success_queue), gs)
-            writer.add_scalar("rollout/ep_count", envs.episode_count, gs)
-            writer.add_scalar("global/num_timesteps", gs, gs)
-            writer.add_scalar("global/num_rollouts", agent.state.global_rollout, gs)
+            ep_value_mean = common.safe_mean(ep_net_value_queue)
+            rollout_net_value_queue_100.append(ep_value_mean)
+
+            wandb_log({"losses/total_loss": loss.item()})
+            wandb_log({"losses/value_loss": v_loss.item()})
+            wandb_log({"losses/head1_policy_loss": head1_pg_loss.item()})
+            wandb_log({"losses/head2_policy_loss": head2_pg_loss.item()})
+            wandb_log({"losses/head3_policy_loss": head3_pg_loss.item()})
+            wandb_log({"losses/head1_entropy": head1_entropy_loss.item()})
+            wandb_log({"losses/head2_entropy": head2_entropy_loss.item()})
+            wandb_log({"losses/head3_entropy": head3_entropy_loss.item()})
+            wandb_log({"losses/old_approx_kl": old_approx_kl.item()})
+            wandb_log({"losses/approx_kl": approx_kl.item()})
+            wandb_log({"losses/clipfrac": np.mean(clipfracs)})
+            wandb_log({"losses/explained_variance": explained_var})
+            wandb_log({"time/rollout_duration": time.time() - rollout_start_time})
+            wandb_log({"time/steps_per_second": (gs - rollout_start_step) / (time.time() - rollout_start_time)})  # noqa: E501
+            wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
+            wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
+            wandb_log({"rollout/ep_value_mean": ep_value_mean})
+            wandb_log({"rollout/ep_success_rate": common.safe_mean(ep_is_success_queue)})
+            wandb_log({"rollout/ep_count": envs.episode_count})
+            wandb_log({"global/num_rollouts": agent.state.global_rollout})
 
             if rollouts_total:
-                writer.add_scalar("global/progress", agent.state.global_rollout / rollouts_total, gs)
+                wandb_log({"global/progress": agent.state.global_rollout / rollouts_total})
 
             print("global_step=%d, rollout/ep_rew_mean=%.2f, loss=%.2f, variance=%.2f" % (
                 gs, ep_rew_mean, loss.item(), explained_var
             ))
 
             if args.success_rate_target and common.safe_mean(ep_is_success_queue) >= args.success_rate_target:
-                writer.flush()
                 print("Early stopping after %d map rollouts due to: success rate > %.2f (%.2f)" % (
                     map_rollouts,
                     args.success_rate_target,
@@ -864,7 +872,6 @@ def main(args):
                     raise Exception("Not implemented: map change on target")
 
             if args.ep_rew_mean_target and ep_rew_mean >= args.ep_rew_mean_target:
-                writer.flush()
                 print("Early stopping after %d map rollouts due to: ep_rew_mean > %.2f (%.2f)" % (
                     map_rollouts,
                     args.ep_rew_mean_target,
@@ -882,10 +889,9 @@ def main(args):
                     dist = Categorical(torch.tensor(action_counters))
                     data = [[Action(t).name, c.item()] for (t, c) in zip(action_types, dist.probs)]
                     wt = wandb.Table(columns=["key", "value"], data=data)
-                    wandb.log({"action_distribution": wt})
+                    wandb_log({"action_distribution": wt})
                     action_counters[:] = 0
 
-                writer.flush()
                 # reset per-rollout stats (affects only logging)
                 # envs.return_queue.clear()
                 # envs.length_queue.clear()
@@ -897,7 +903,7 @@ def main(args):
             if rollouts_per_mapchange and map_rollouts % rollouts_per_mapchange == 0:
                 map_rollouts = 0
                 agent.state.map_swaps += 1
-                writer.add_scalar("global/map_swaps", agent.state.map_swaps, gs)
+                wandb_log({"global/map_swaps": agent.state.map_swaps})
                 envs.close()
                 envs, _ = common.create_venv(VcmiEnv, args, agent.state.map_swaps)
                 next_obs, _ = envs.reset(seed=args.seed)
@@ -906,11 +912,11 @@ def main(args):
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
             save_ts = common.maybe_save(save_ts, args, agent, AgentNN, optimizer, out_dir)
+            wandb_log({"global/num_timesteps": gs}, commit=True)  # commit on final log line
 
     finally:
         common.maybe_save(0, args, agent, AgentNN, optimizer, out_dir)
         envs.close()
-        writer.close()
 
 
 def debug_args():
