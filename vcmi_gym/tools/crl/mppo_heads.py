@@ -514,7 +514,6 @@ class Agent(nn.Module):
         self.action_space = action_space  # needed for save/load
         self.state = state
 
-        self.kur = lambda y: observation_space
         self.NN = AgentNN(action_space, observation_space)
         self.predict = self.NN.predict
 
@@ -884,22 +883,6 @@ def main(args):
                 else:
                     raise Exception("Not implemented: map change on target")
 
-            if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
-                if args.wandb_project and args.rollouts_per_table_log and rollout % args.rollouts_per_table_log == 0:
-                    dist = Categorical(torch.tensor(action_counters))
-                    data = [[Action(t).name, c.item()] for (t, c) in zip(action_types, dist.probs)]
-                    wt = wandb.Table(columns=["key", "value"], data=data)
-                    wandb_log({"action_distribution": wt})
-                    action_counters[:] = 0
-
-                # reset per-rollout stats (affects only logging)
-                # envs.return_queue.clear()
-                # envs.length_queue.clear()
-                # envs.time_queue.clear()  # irrelevant
-                # ep_net_value_queue.clear()
-                # ep_is_success_queue.clear()
-                envs.episode_count = 0
-
             if rollouts_per_mapchange and map_rollouts % rollouts_per_mapchange == 0:
                 map_rollouts = 0
                 agent.state.map_swaps += 1
@@ -911,8 +894,18 @@ def main(args):
                 next_done = torch.zeros(args.num_envs).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
 
+            if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
+                if args.wandb_project and args.rollouts_per_table_log and rollout % args.rollouts_per_table_log == 0:
+                    dist = Categorical(torch.tensor(action_counters))
+                    data = [[Action(t).name, c.item()] for (t, c) in zip(action_types, dist.probs)]
+                    wt = wandb.Table(columns=["key", "value"], data=data)
+                    wandb_log({"action_distribution": wt})
+                    action_counters[:] = 0
+
+                envs.episode_count = 0
+                wandb_log({"global/num_timesteps": gs}, commit=True)  # commit on final log line
+
             save_ts = common.maybe_save(save_ts, args, agent, AgentNN, optimizer, out_dir)
-            wandb_log({"global/num_timesteps": gs}, commit=True)  # commit on final log line
 
     finally:
         common.maybe_save(0, args, agent, AgentNN, optimizer, out_dir)
