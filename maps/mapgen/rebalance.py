@@ -42,7 +42,10 @@ from mapgen import (
 )
 
 # Max value for (unused_credits / target_value)
-ARMY_VALUE_ERROR_MAX = 0.1
+ARMY_VALUE_ERROR_MAX = 0.01
+
+# Limit corrections to (1-clip, 1+clip) to avoid destructive updates
+ARMY_VALUE_CORRECTION_CLIP = 0.03
 
 # Change army composition if the current one does not allow for adjustment
 ALLOW_ARMY_COMP_CHANGE = False
@@ -80,11 +83,13 @@ def save(path, header, objects, surface_terrain):
     with open(path, 'wb') as f:
         f.write(memory_zip.getvalue())
 
+
 def backup(path):
     for i in reversed(range(1, 3)):
         if os.path.exists(f"{path}.{i}"):
             shutil.move(f"{path}.{i}", f"{path}.{i+1}")
     shutil.move(path, f"{path}.1")
+
 
 if __name__ == "__main__":
     j = json.loads(sys.argv[1])
@@ -106,11 +111,8 @@ if __name__ == "__main__":
             sys.exit(1)
 
     for (hero_name, hero_wins) in j["wins"].items():
-        # Vanilla ratio may lead to stuff like
-        #       Adjusting army value of hero_49: 3990 -> 50354
-        # => use log ratio is better
-        # correction_factor = mean_wins / hero_wins
         correction_factor = (log(mean_wins) / log(hero_wins))**1
+        correction_factor = np.clip(correction_factor, 1-ARMY_VALUE_CORRECTION_CLIP, 1+ARMY_VALUE_CORRECTION_CLIP)
 
         if abs(1 - correction_factor) <= ARMY_VALUE_ERROR_MAX:
             # nothing to correct
@@ -129,7 +131,12 @@ if __name__ == "__main__":
             old_army.append((cr_vcminame, None, stack["amount"]))
 
         new_value = int(army_value * correction_factor)
-        print(f"Adjusting army value of {hero_name}: {army_value} -> {new_value}")
+        print("Adjusting army value of %s: %d -> %d (%.2f%%)" % (
+            hero_name,
+            army_value,
+            new_value,
+            correction_factor * 100,
+        ))
 
         new_army = None
         for r in range(1, 10):

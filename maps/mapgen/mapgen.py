@@ -23,7 +23,7 @@ import zipfile
 # relative to script dir
 MAP_DIR = "../gym/generated/88"
 # name template containing a single integer to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "88-1stack-fixed-%02d"
+MAP_NAME_TEMPLATE = "88-3stack-%02d"
 # id of maps to generate (inclusive)
 MAP_ID_START = 1
 MAP_ID_END = 1
