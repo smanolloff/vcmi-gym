@@ -21,9 +21,10 @@ parameters:
   rollouts_per_table_log: { value: 0 }
   success_rate_target: { value: 0 }
   ep_rew_mean_target: { value: 0 }
-  quit_on_target: { value: True }
-  mapside: { value: "both" }
-  mapmask: { value: "gym/generated/88/88-1stack-*.vmap" }
+  quit_on_target: { value: true }
+  random_combat: { value: true }
+  mapside: { value: "attacker" }
+  mapmask: { value: "gym/generated/88/88-3stack-01.vmap" }
   save_every: { value: 3600 } # seconds
   max_saves: { value: 3 }
   out_dir_template: { value: "data/{group_id}/{run_id}" }

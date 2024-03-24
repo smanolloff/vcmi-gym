@@ -18,7 +18,8 @@ rollouts_per_table_log: 0
 opponent_load_file: ~
 success_rate_target: ~
 ep_rew_mean_target: ~
-quit_on_target: False
+quit_on_target: false
+random_combat: true
 mapside: "attacker"  # attacker/defender/both
 mapmask: "gym/generated/mirror_3stack/*.vmap"
 randomize_maps: false

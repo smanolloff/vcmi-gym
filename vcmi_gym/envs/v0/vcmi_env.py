@@ -105,6 +105,7 @@ class VcmiEnv(gym.Env):
         reward_dmg_factor=5,
         reward_clip_tanh_army_frac=1,  # max action reward relative to starting army value
         reward_army_value_ref=0,  # scale rewards relative to starting army value (0=no scaling)
+        random_combat=True,
         step_reward_fixed=0,  # fixed reward
         step_reward_mult=1,
         term_reward_mult=1,  # at term step, reward = diff in total army values
@@ -122,6 +123,7 @@ class VcmiEnv(gym.Env):
         result = self.connector.start(
             os.getcwd(),
             mapname,
+            random_combat,
             vcmi_loglevel_global,
             vcmi_loglevel_ai,
             attacker,
