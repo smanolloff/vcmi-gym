@@ -23,10 +23,10 @@ import zipfile
 # relative to script dir
 MAP_DIR = "../gym/generated/88"
 # name template containing a single integer to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "88-1stack-%02d"
+MAP_NAME_TEMPLATE = "88-1stack-fixed-%02d"
 # id of maps to generate (inclusive)
 MAP_ID_START = 1
-MAP_ID_END = 8
+MAP_ID_END = 1
 
 ARMY_N_STACKS_SAME = True  # same for both sides
 ARMY_N_STACKS_MAX = 1
@@ -210,5 +210,13 @@ if __name__ == "__main__":
 
             for (slot, (vcminame, _, number)) in enumerate(army):
                 objects[f"hero_{j}"]["options"]["army"][slot] = dict(amount=number, type=f"core:{vcminame}")
+
+            # prevent horizontally neighbouring friendly heroes
+            # (VCMI assignigns unpredictable IDs and it might turn out that
+            # there is no enemy to the right of the red hero)
+            div = j // 8
+            rem = j % 8
+            objects[f"hero_{j}"]["x"] = 1 + 8*(rem//4) + div
+            objects[f"hero_{j}"]["y"] = 8 + rem % 4
 
         save(header, objects, surface_terrain0)
