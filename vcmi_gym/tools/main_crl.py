@@ -51,6 +51,8 @@ def run(action, cfg, group_id, run_id, resume, cfgpath):
 
     if run_id is not None:
         cfg["run_id"] = run_id
+    elif not cfg.get("run_id", None):
+        cfg["run_id"] = common.gen_id()
 
     if resume is not None:
         cfg["resume"] = resume

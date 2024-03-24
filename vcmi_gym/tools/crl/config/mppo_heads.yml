@@ -19,7 +19,6 @@ opponent_load_file: ~
 success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
-random_combat: true
 mapside: "attacker"  # attacker/defender/both
 mapmask: "gym/generated/mirror_3stack/*.vmap"
 randomize_maps: false
@@ -71,6 +70,7 @@ env:
   term_reward_mult: 0
   reward_clip_tanh_army_frac: 1
   reward_army_value_ref: 1000
+  random_combat: true
 
   # 0=hex.id, 1=hex.state, 2=qty, 12=qpos, 13=side, 15=creature type
   #   Visualize with:

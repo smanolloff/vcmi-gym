@@ -22,13 +22,12 @@ parameters:
   success_rate_target: { value: 0 }
   ep_rew_mean_target: { value: 0 }
   quit_on_target: { value: true }
-  random_combat: { value: true }
   mapside: { value: "attacker" }
   mapmask: { value: "gym/generated/88/88-3stack-01.vmap" }
   save_every: { value: 3600 } # seconds
   max_saves: { value: 3 }
   out_dir_template: { value: "data/{group_id}/{run_id}" }
-  num_envs: { value: 2 }
+  num_envs: { value: 1 }
 
   # TODO: use distributions for clearer visualization of sweeps
   # (to prevent line stacking and decoloring)
@@ -38,7 +37,7 @@ parameters:
   clip_coef: { distribution: "uniform", min: 0.05, max: 0.5 }
   clip_vloss: { value: true }
   ent_coef: { value: 0.007 }
-  gae_lambda: { value: 0.98 }
+  gae_lambda: { distribution: "uniform", min: 0.7, max: 0.99 }
   gamma: { value: 0.8 }
   # learning_rate: { values: [0.0001, 0.0003, 0.0005] }
   learning_rate: { distribution: "inv_log_uniform_values", min: 0.000001, max: 0.0001 }
@@ -74,3 +73,4 @@ parameters:
       term_reward_mult: { value: 0 }
       reward_clip_tanh_army_frac: { value: 1 }
       reward_army_value_ref: { value: 500 }
+      random_combat: { value: true }

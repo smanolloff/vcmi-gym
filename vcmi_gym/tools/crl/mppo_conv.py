@@ -54,6 +54,7 @@ class EnvArgs:
     term_reward_mult: int = 0
     consecutive_error_reward_factor: Optional[int] = None
     vcmi_timeout: int = 5
+    random_combat: bool = True
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
 
@@ -162,12 +163,16 @@ class AgentNN(nn.Module):
         assert observation_space.shape[2] / 56 == 15
 
         self.features_extractor = common.layer_init(nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=1, kernel_size=[1, 56], stride=[1, 56], padding=0),
-            nn.Flatten()
+            nn.Conv2d(in_channels=1, out_channels=32, kernel_size=[1, 56], stride=[1, 56], padding=0),
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+            nn.Flatten(),
+            nn.Linear(5280, 1024),
+            nn.LeakyReLU()
         ))
 
-        self.actor = common.layer_init(nn.Linear(165, action_space.n), gain=0.01)
-        self.critic = common.layer_init(nn.Linear(165, 1), gain=1.0)
+        self.actor = common.layer_init(nn.Linear(1024, action_space.n), gain=0.01)
+        self.critic = common.layer_init(nn.Linear(1024, 1), gain=1.0)
 
     def get_value(self, x):
         return self.critic(self.features_extractor(x))
@@ -481,6 +486,7 @@ def main(args):
             wandb_log({"rollout/ep_value_mean": ep_value_mean})
             wandb_log({"rollout/ep_success_rate": common.safe_mean(ep_is_success_queue)})
             wandb_log({"rollout/ep_count": envs.episode_count})
+            wandb_log({"rollout/value_mean_100": common.safe_mean(rollout_net_value_queue_100)})
             wandb_log({"global/num_rollouts": agent.state.global_rollout})
 
             if rollouts_total:
@@ -610,6 +616,7 @@ def debug_args():
             step_reward_fixed=-100,
             step_reward_mult=1,
             term_reward_mult=0,
+            random_combat=False,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
 
