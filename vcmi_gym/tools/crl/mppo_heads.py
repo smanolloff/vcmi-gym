@@ -845,9 +845,10 @@ def main(args):
             wandb_log({"time/steps_per_second": (gs - rollout_start_step) / (time.time() - rollout_start_time)})  # noqa: E501
             wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
             wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
-            wandb_log({"rollout/ep_value_mean": ep_value_mean})
             wandb_log({"rollout/ep_success_rate": common.safe_mean(ep_is_success_queue)})
             wandb_log({"rollout/ep_count": envs.episode_count})
+            wandb_log({"rollout/ep_value_mean": ep_value_mean})
+            wandb_log({"rollout/value_mean_100": common.safe_mean(rollout_net_value_queue_100)})
             wandb_log({"global/num_rollouts": agent.state.global_rollout})
 
             if rollouts_total:

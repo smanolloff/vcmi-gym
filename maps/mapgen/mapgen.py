@@ -29,17 +29,16 @@ MAP_ID_START = 1
 MAP_ID_END = 1
 
 ARMY_N_STACKS_SAME = True  # same for both sides
-ARMY_N_STACKS_MAX = 1
-ARMY_N_STACKS_MIN = 1
+ARMY_N_STACKS_MAX = 3
+ARMY_N_STACKS_MIN = 3
 
-# FIXME: same army values currently cause an 
-ARMY_VALUE_MAX = 10000
-ARMY_VALUE_MIN = 9000
+ARMY_VALUE_MAX = 30000
+ARMY_VALUE_MIN = 30000
 
-# Round values for better descruptions
+# Round values for better descriptions
 ARMY_VALUE_ROUND = 1000
 
-# Max value for abs(army_value / target_value)
+# Max value for abs(1 - army_value/target_value)
 ARMY_VALUE_ERROR_MAX = 0.1
 
 # Hero IDs are re-mapped when game starts
