@@ -30,6 +30,7 @@ import zipfile
 import io
 import json
 import sys
+import shutil
 import random
 import numpy as np
 from math import log
@@ -79,6 +80,11 @@ def save(path, header, objects, surface_terrain):
     with open(path, 'wb') as f:
         f.write(memory_zip.getvalue())
 
+def backup(path):
+    for i in reversed(range(1, 3)):
+        if os.path.exists(f"{path}.{i}"):
+            shutil.move(f"{path}.{i}", f"{path}.{i+1}")
+    shutil.move(path, f"{path}.1")
 
 if __name__ == "__main__":
     j = json.loads(sys.argv[1])
@@ -92,12 +98,19 @@ if __name__ == "__main__":
 
     print("Stats:\nmean_wins: %d\nstddev: %d (%.2f%%)" % (mean_wins, stddev, stddev_percent))
 
+    if len(sys.argv) > 2:
+        if sys.argv[2] in ["-a", "--analyze"]:
+            sys.exit(0)
+        else:
+            print("Unrecognized arguments: %s" % sys.argv[2:])
+            sys.exit(1)
+
     for (hero_name, hero_wins) in j["wins"].items():
         # Vanilla ratio may lead to stuff like
         #       Adjusting army value of hero_49: 3990 -> 50354
         # => use log ratio is better
         # correction_factor = mean_wins / hero_wins
-        correction_factor = (log(mean_wins) / log(hero_wins))**2
+        correction_factor = (log(mean_wins) / log(hero_wins))**1
 
         if abs(1 - correction_factor) <= ARMY_VALUE_ERROR_MAX:
             # nothing to correct
@@ -106,12 +119,14 @@ if __name__ == "__main__":
         army = [a for a in objects[hero_name]["options"]["army"] if a]
         army_value = 0
         army_creatures = []
+        old_army = []
 
         for stack in army:
             cr_vcminame = stack["type"].removeprefix("core:")
             cr_name, cr_value = creatures_dict[cr_vcminame]
             army_value += stack["amount"] * cr_value
             army_creatures.append((cr_vcminame, cr_name, cr_value))
+            old_army.append((cr_vcminame, None, stack["amount"]))
 
         new_value = int(army_value * correction_factor)
         print(f"Adjusting army value of {hero_name}: {army_value} -> {new_value}")
@@ -122,6 +137,10 @@ if __name__ == "__main__":
                 new_army = build_army_with_retry(new_value, ARMY_VALUE_ERROR_MAX, creatures=army_creatures)
                 break
             except MaxAttemptsExceeded:
+                if not ALLOW_ARMY_COMP_CHANGE:
+                    print("Give up rebuilding (ALLOW_ARMY_COMP_CHANGE=false); skipping hero")
+                    new_army = old_army
+                    break
 
                 print("[%d] Trying different army composition for hero %s" % (r, hero_name))
                 army_creatures = random.sample(list(creatures_dict.items()), len(army_creatures))
@@ -135,4 +154,5 @@ if __name__ == "__main__":
         for (slot, (vcminame, _, number)) in enumerate(new_army):
             objects[hero_name]["options"]["army"][slot] = dict(amount=number, type=f"core:{vcminame}")
 
+    backup(path)
     save(path, header, objects, surface_terrain)
