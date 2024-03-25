@@ -25,8 +25,8 @@ MAP_DIR = "../gym/generated/88"
 # name template containing a single {id} token to be replaced with MAP_ID
 MAP_NAME_TEMPLATE = "88-7stack-{id:02d}"
 # id of maps to generate (inclusive)
-MAP_ID_START = 1
-MAP_ID_END = 1
+MAP_ID_START = 2
+MAP_ID_END = 2
 
 ARMY_N_STACKS_SAME = True  # same for both sides
 ARMY_N_STACKS_MIN = 7

@@ -45,7 +45,7 @@ from mapgen import (
 ARMY_VALUE_ERROR_MAX = 0.01
 
 # Limit corrections to (1-clip, 1+clip) to avoid destructive updates
-ARMY_VALUE_CORRECTION_CLIP = 0.02
+ARMY_VALUE_CORRECTION_CLIP = 0.04
 
 # Change army composition if the current one does not allow for adjustment
 ALLOW_ARMY_COMP_CHANGE = False
