@@ -1,17 +1,19 @@
 ---
 wandb_project: vcmi-gym
-group_id: heads
-run_id: simotest-131
+group_id: heads-ujw53ibc
+run_id: ~
+run_name: "[ujw53ibc] mb=2 lr=0.000001"
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
 
-notes: "Replace input layer (transformation + MLP) with Conv2d"
+notes: "Solo continuation of run ujw53ibc (from sweep 2oftyu2b)"
 
-agent_load_file: ~
-# agent_load_file: "data/crl/crl-mult-sanity2-lr0.0001-wd0/agent-1709801900.pt"
-timesteps_total: 50000
+# agent_load_file: ~
+agent_load_file: "data/sweeps/ujw53ibc/agent-1711299495.zip"
 rollouts_total: 0
+timesteps_total: 0
+timesteps_per_mapchange: 0
 rollouts_per_mapchange: 0
 rollouts_per_log: 1
 rollouts_per_table_log: 0
@@ -20,7 +22,7 @@ success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
-mapmask: "gym/generated/mirror_3stack/*.vmap"
+mapmask: "gym/generated/88/88-3stack-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 max_saves: 3
@@ -33,23 +35,22 @@ opponent_load_file: ~
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-num_envs: 4
+num_envs: 1
 
 
 #
 # PPO Hyperparams
 #
 
-
-clip_coef: 0.2
+clip_coef: 0.19
 clip_vloss: true
 ent_coef: 0.007
-gae_lambda: 0.98
+gae_lambda: 0.7
 gamma: 0.8
-learning_rate: 0.0003
+learning_rate: 0.000001
 max_grad_norm: 1
 norm_adv: true
-num_minibatches: 8      # minibatch_size = rollout_buffer/num_minibatches
+num_minibatches: 2      # minibatch_size = rollout_buffer/num_minibatches
 num_steps: 64           # rollout_buffer = num_steps*num_envs
 stats_buffer_size: 100  # ~= episodes per rollout
 update_epochs: 50       # full passes of rollout_buffer
@@ -72,39 +73,5 @@ env:
   reward_army_value_ref: 1000
   random_combat: true
 
-  # 0=hex.id, 1=hex.state, 2=qty, 12=qpos, 13=side, 15=creature type
-  #   Visualize with:
-  #   o = obs.reshape(11, 15, 6)[0][0] * [164, 4, 5001, 15, 2, 151])
-  #   o.astype(int)
-  # hexattr_filter: [0, 1, 2, 12, 13, 15]
-
-  # Set dynamically
-  # mapname: "ai/generated/A01.vmap"
-  # attacker: "MMAI_USER"  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
-  # defender: "StupidAI"   # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
-  # attacker_model: ~  # MPPO zip model (if attacker=MMAI_MODEL)
-  # defender_model: ~  # MPPO zip model (if defender=MMAI_MODEL)
-
 env_wrappers: []
-
 logparams: {}
-  # "config/rollouts_per_mapchange": "rollouts_per_mapchange"
-  # "config/learning_rate": "learning_rate"
-  # "config/gamma": "gamma"
-  # "config/ent_coef": "ent_coef"
-  # "config/vf_coef": "vf_coef"
-  # "config/max_grad_norm": "max_grad_norm"
-  # "config/weight_decay": "weight_decay"
-  # "config/num_steps": "num_steps"
-  # "config/num_minibatches": "num_minibatches"
-  # "config/update_epochs": "update_epochs"
-  # "config/gae_lambda": "gae_lambda"
-  # "config/norm_adv": "norm_adv"
-  # "config/clip_coef": "clip_coef"
-  # "config/clip_vloss": "clip_vloss"
-  # "config/env/reward_dmg_factor": "env.reward_dmg_factor"
-  # "config/env/max_steps": "env.max_steps"
-  # "config/env/CERF": "env.consecutive_error_reward_factor"
-  # "config/env/step_reward_mult:": "env.step_reward_mult"
-  # "config/env/term_reward_mult:": "env.term_reward_mult"
-  # "config/env/reward_clip_mod:": "env.reward_clip_mod"

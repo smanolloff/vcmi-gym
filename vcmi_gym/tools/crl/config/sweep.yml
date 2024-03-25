@@ -12,8 +12,8 @@ parameters:
       module: { value: "mppo_heads" }
 
   group_id: { value: "sweeps" }
-  agent_load_file: { value: ~ } #"/Users/simo/Projects/vcmi-gym/data/A3-sweep/h98k5nhr/agent-1710918951.zip"}
-  timesteps_total: { value: 50_000 }
+  agent_load_file: { value: "data/sweeps/ujw53ibc/agent-1711299495.zip" }
+  timesteps_total: { value: 100_000 }
   timesteps_per_mapchange: { value: 0 }
   rollouts_total: { value: 0 }
   rollouts_per_mapchange: { value: 0 }

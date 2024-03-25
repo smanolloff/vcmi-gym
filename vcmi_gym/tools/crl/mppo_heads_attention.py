@@ -88,6 +88,7 @@ class State:
 class Args:
     run_id: str
     group_id: str
+    run_name: Optional[str] = None
     wandb_project: Optional[str] = None
     resume: bool = False
     overwrite: list = field(default_factory=list)
@@ -958,6 +959,7 @@ if __name__ == "__main__":
     args = Args(
         "debug-crl",
         "debug-crl",
+        run_name=None,
         wandb_project=None,
         resume=False,
         overwrite=[],

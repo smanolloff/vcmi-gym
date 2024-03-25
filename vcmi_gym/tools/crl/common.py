@@ -312,7 +312,7 @@ def setup_wandb(args, agent, src_file):
         wandb.init(
             project=args.wandb_project,
             group=args.group_id,
-            name=args.run_id,
+            name=args.run_name or args.run_id,
             id=args.run_id,
             notes=args.notes,
             resume="must" if args.resume else "never",
