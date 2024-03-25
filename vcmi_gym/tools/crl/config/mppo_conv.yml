@@ -1,16 +1,16 @@
 ---
 wandb_project: vcmi-gym
-group_id: crl
-run_id: mult-sanity-clone3-armyswap-both-mb4-lr0.000001
-run_name: ~
+group_id: classic
+run_id: ~
+run_name: "[C] lr=5e-7"
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
 
-notes: "try the pre-trained mult-sanity run on armyswaps"
+notes: ""
 
-agent_load_file: ~
-agent_load_file: "data/crl/mult-sanity-clone2/migrated-agent-1710318396.zip"
+#agent_load_file: ~
+agent_load_file: "data/crl/mult-sanity-clone3-armyswap-attacker-mb2-lr0.000001/agent-1711337191.zip"
 rollouts_total: 0
 timesteps_total: 0
 timesteps_per_mapchange: 0
@@ -21,8 +21,8 @@ opponent_load_file: ~
 success_rate_target: ~
 ep_rew_mean_target: 0
 quit_on_target: false
-mapside: "both"
-mapmask: "gym/generated/88/88-7stack.vmap"
+mapside: "attacker"
+mapmask: "gym/generated/88/88-7stack-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 max_saves: 3
@@ -35,7 +35,7 @@ opponent_load_file: ~
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
 #      To increase (current shell session only):
 #           ulimit -n 1024
-num_envs: 2
+num_envs: 1
 
 
 #
@@ -47,10 +47,10 @@ clip_vloss: false
 ent_coef: 0.007
 gae_lambda: 0.8
 gamma: 0.8425
-learning_rate: 0.000001
+learning_rate: 5.0e-7
 max_grad_norm: 0.5
 norm_adv: true
-num_minibatches: 4   # minibatch_size = rollout_buffer/num_minibatches
+num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches
 num_steps: 128       # rollout_buffer = num_steps*num_envs
 update_epochs: 10    # full passes of rollout_buffer
 vf_coef: 1.2
@@ -63,7 +63,7 @@ env:
   term_reward_mult: 0
   reward_clip_tanh_army_frac: 1
   reward_army_value_ref: 300_000
-  random_combat: false
+  random_combat: true
 
 env_wrappers: []
 logparams: {}
