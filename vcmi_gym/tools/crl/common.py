@@ -344,25 +344,18 @@ def setup_wandb(args, agent, src_file):
 
 
 def init_optimizer(args, agent, optimizer):
-    optimizer = torch.optim.AdamW(agent.parameters(), lr=args.learning_rate, eps=1e-5)
+    # lr will be set on each rollout
+    optimizer = torch.optim.AdamW(agent.parameters(), eps=1e-5)
 
     if agent.state.optimizer_state_dict:
         print("Loading optimizer from stored state")
         optimizer.load_state_dict(agent.state.optimizer_state_dict)
-
-    # Need to explicitly set lr after loading state
-    # When resuming runs, explicitly check lr (it's easy to mess it up)
-    if args.resume and "learning_rate" not in args.overwrite:
-        assert optimizer.param_groups[0]["lr"] == args.learning_rate
-    else:
-        optimizer.param_groups[0]["lr"] = args.learning_rate
 
     if args.resume and "weight_decay" not in args.overwrite:
         assert optimizer.param_groups[0]["weight_decay"] == args.weight_decay
     else:
         optimizer.param_groups[0]["weight_decay"] = args.weight_decay
 
-    print("Learning rate: %s" % optimizer.param_groups[0]["lr"])
     print("Weight decay: %s" % optimizer.param_groups[0]["weight_decay"])
     return optimizer
 
@@ -393,3 +386,23 @@ def load(agent_cls, path):
 def gen_id():
     population = string.ascii_lowercase + string.digits
     return str.join("", random.choices(population, k=8))
+
+
+def schedule_fn(schedule):
+    assert schedule.mode in ["const", "lin_decay", "exp_decay"]
+
+    if schedule.mode != "const":
+        assert schedule.start > schedule.end
+        assert schedule.end > 0
+        assert schedule.rate > 0
+
+    high = schedule.start
+    low = schedule.end
+    rate = schedule.rate
+
+    if schedule.mode == "lin_decay":
+        return lambda p: np.clip(high - (high - low) * (rate * p), low, high)
+    elif schedule.mode == "exp_decay":
+        return lambda p: low + (high - low) * np.exp(-rate * p)
+    else:
+        return lambda _: high

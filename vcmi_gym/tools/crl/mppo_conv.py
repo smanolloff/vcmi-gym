@@ -42,6 +42,15 @@ def render():
 
 
 @dataclass
+class ScheduleArgs:
+    # const / lin_decay / exp_decay
+    mode: str = "const"
+    start: float = 2.5e-4
+    end: float = 0
+    rate: float = 10
+
+
+@dataclass
 class EnvArgs:
     max_steps: int = 500
     reward_dmg_factor: int = 5
@@ -97,8 +106,8 @@ class Args:
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
+    lr_schedule: ScheduleArgs = ScheduleArgs()
     weight_decay: float = 0.0
-    learning_rate: float = 2.5e-4
     num_envs: int = 4
     num_steps: int = 128
     gamma: float = 0.99
@@ -140,6 +149,8 @@ class Args:
             self.env = EnvArgs(**self.env)
         if not isinstance(self.state, State):
             self.state = State(**self.state)
+        if not isinstance(self.lr_schedule, ScheduleArgs):
+            self.lr_schedule = ScheduleArgs(**self.lr_schedule)
 
 
 class SelfAttention(nn.MultiheadAttention):
@@ -240,6 +251,8 @@ def main(args):
     print("Out dir: %s" % out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
+    lr_schedule_fn = common.schedule_fn(args.lr_schedule)
+
     batch_size = int(args.num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
 
@@ -307,6 +320,7 @@ def main(args):
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
 
         rollout_net_value_queue_100 = deque(maxlen=100)
+        rollout_net_value_queue_1000 = deque(maxlen=1000)
 
         assert act_space.shape == ()
 
@@ -333,12 +347,18 @@ def main(args):
         end_rollout = rollouts_total or 10**9
         assert start_rollout < end_rollout
         map_rollouts = 0
+        progress = 0
 
         for rollout in range(start_rollout, end_rollout):
             agent.state.global_rollout = rollout
             rollout_start_time = time.time()
             rollout_start_step = agent.state.global_step
             map_rollouts += 1
+
+            optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
+
+            if rollouts_total:
+                progress = rollout / rollouts_total
 
             # XXX: eval during experience collection
             agent.eval()
@@ -466,12 +486,13 @@ def main(args):
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
             # TRY NOT TO MODIFY: record rewards for plotting purposes
-            # writer.add_scalar("params/learning_rate", optimizer.param_groups[0]["lr"], agent.state.global_step)
             gs = agent.state.global_step
             ep_rew_mean = common.safe_mean(envs.return_queue)
             ep_value_mean = common.safe_mean(ep_net_value_queue)
             rollout_net_value_queue_100.append(ep_value_mean)
+            rollout_net_value_queue_1000.append(ep_value_mean)
 
+            wandb_log({"params/learning_rate": optimizer.param_groups[0]["lr"]})
             wandb_log({"losses/total_loss": loss.item()})
             wandb_log({"losses/value_loss": v_loss.item()})
             wandb_log({"losses/policy_loss": pg_loss.item()})
@@ -484,14 +505,15 @@ def main(args):
             wandb_log({"time/steps_per_second": (gs - rollout_start_step) / (time.time() - rollout_start_time)})  # noqa: E501
             wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
             wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
-            wandb_log({"rollout/ep_value_mean": ep_value_mean})
             wandb_log({"rollout/ep_success_rate": common.safe_mean(ep_is_success_queue)})
             wandb_log({"rollout/ep_count": envs.episode_count})
+            wandb_log({"rollout/ep_value_mean": ep_value_mean})
             wandb_log({"rollout/value_mean_100": common.safe_mean(rollout_net_value_queue_100)})
+            wandb_log({"rollout/value_mean_1000": common.safe_mean(rollout_net_value_queue_1000)})
             wandb_log({"global/num_rollouts": agent.state.global_rollout})
 
             if rollouts_total:
-                wandb_log({"global/progress": agent.state.global_rollout / rollouts_total})
+                wandb_log({"global/progress": progress})
 
             print("global_step=%d, rollout/ep_rew_mean=%.2f, loss=%.2f, variance=%.2f" % (
                 gs, ep_rew_mean, loss.item(), explained_var
@@ -579,7 +601,7 @@ def debug_args():
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
-        learning_rate=0.00003,
+        lr_schedule=ScheduleArgs(mode="const", start=0.001),
         num_envs=1,
         num_steps=4,
         # num_steps=256,

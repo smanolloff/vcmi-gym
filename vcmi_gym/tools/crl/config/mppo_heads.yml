@@ -2,7 +2,7 @@
 wandb_project: vcmi-gym
 group_id: heads-ujw53ibc
 run_id: ~
-run_name: "[ujw53ibc] mb=2 lr=0.000001"
+run_name: "lr=0.000001"
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
@@ -43,14 +43,14 @@ num_envs: 1
 #
 
 clip_coef: 0.19
-clip_vloss: true
+clip_vloss: false
 ent_coef: 0.007
 gae_lambda: 0.7
 gamma: 0.8
-learning_rate: 0.000001
+lr_schedule: { mode: const, start: 1.0e-6 }
 max_grad_norm: 1
 norm_adv: true
-num_minibatches: 2      # minibatch_size = rollout_buffer/num_minibatches
+num_minibatches: 8      # minibatch_size = rollout_buffer/num_minibatches
 num_steps: 64           # rollout_buffer = num_steps*num_envs
 stats_buffer_size: 100  # ~= episodes per rollout
 update_epochs: 50       # full passes of rollout_buffer
