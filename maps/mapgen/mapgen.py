@@ -22,18 +22,18 @@ import zipfile
 
 # relative to script dir
 MAP_DIR = "../gym/generated/88"
-# name template containing a single integer to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "88-3stack-%02d"
+# name template containing a single {id} token to be replaced with MAP_ID
+MAP_NAME_TEMPLATE = "88-7stack-{id:02d}"
 # id of maps to generate (inclusive)
 MAP_ID_START = 1
 MAP_ID_END = 1
 
 ARMY_N_STACKS_SAME = True  # same for both sides
-ARMY_N_STACKS_MAX = 3
-ARMY_N_STACKS_MIN = 3
+ARMY_N_STACKS_MIN = 7
+ARMY_N_STACKS_MAX = 7
 
-ARMY_VALUE_MAX = 30000
-ARMY_VALUE_MIN = 30000
+ARMY_VALUE_MIN = 300_000
+ARMY_VALUE_MAX = 300_000
 
 # Round values for better descriptions
 ARMY_VALUE_ROUND = 1000
@@ -197,7 +197,7 @@ if __name__ == "__main__":
         value = random.choice(all_values)
         n_stacks = random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
 
-        header["name"] = MAP_NAME_TEMPLATE % mapid
+        header["name"] = MAP_NAME_TEMPLATE.format(id=mapid)
         header["description"] = "AI test map %s\nTarget army values: %d" % (header["name"], value)
 
         for j in range(0, 64):
