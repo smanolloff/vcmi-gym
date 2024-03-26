@@ -197,6 +197,11 @@ def maybe_save(t, args, agent, nn_cls, optimizer, out_dir):
             print("Deleting %s" % argfile)
             os.remove(argfile)
 
+        nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
+        if os.path.isfile(nn_file):
+            print("Deleting %s" % nn_file)
+            os.remove(nn_file)
+
     return now
 
 

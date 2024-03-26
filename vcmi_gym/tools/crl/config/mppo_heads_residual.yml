@@ -1,13 +1,13 @@
 ---
 wandb_project: vcmi-gym
-group_id: heads-ujw53ibc
+group_id: heads-residual
 run_id: ~
-run_name: "weights=1"
+run_name: "lr=1e-5"
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
 
-notes: ""
+notes: "Solo continuation of run ujw53ibc (from sweep 2oftyu2b)"
 
 agent_load_file: ~
 # agent_load_file: "data/sweeps/ujw53ibc/agent-1711299495.zip"
@@ -47,7 +47,7 @@ clip_vloss: false
 ent_coef: 0.007
 gae_lambda: 0.7
 gamma: 0.8
-lr_schedule: { mode: const, start: 1.0e-6 }
+lr_schedule: { mode: const, start: 1.0e-5 }
 max_grad_norm: 1
 norm_adv: true
 num_minibatches: 8      # minibatch_size = rollout_buffer/num_minibatches
@@ -60,9 +60,9 @@ weight_decay: 0
 loss_weights:
   DEFEND: [1, 0, 0]
   WAIT: [1, 0, 0]
-  SHOOT: [1, 1, 0]
-  MOVE: [1, 1, 0]
-  AMOVE: [1, 1, 1]
+  SHOOT: [0.5, 0.5, 0]
+  MOVE: [0.5, 0.5, 0]
+  AMOVE: [0.33, 0.33, 0.34]
 
 env:
   reward_dmg_factor: 5

@@ -551,7 +551,7 @@ def main(args):
     else:
         rollouts_per_mapchange = args.timesteps_per_mapchange // timesteps_per_rollout
 
-    # Prevent errors from newly introduced args when loading/resuming
+    # Re-initialize to prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
     args = Args(**vars(args))
 
@@ -586,7 +586,6 @@ def main(args):
         f = args.agent_load_file
         print("Loading agent from %s" % f)
         agent = common.load(Agent, f)
-        agent.state = State()
         start_map_swaps = agent.state.map_swaps
 
         backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
@@ -597,8 +596,9 @@ def main(args):
 
     try:
         loss_weights = {k: np.array(v, dtype=np.float32) for k, v in args.loss_weights.items()}
-        for k, v in loss_weights.items():
-            assert v.sum().round(3) == 1, "Unexpected loss weights: %s" % v
+
+        # for k, v in loss_weights.items():
+        #     assert v.sum().round(3) == 1, "Unexpected loss weights: %s" % v
 
         envs, _ = common.create_venv(VcmiEnv, args, start_map_swaps)
         [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG

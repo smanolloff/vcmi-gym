@@ -160,6 +160,28 @@ class SelfAttention(nn.MultiheadAttention):
         return res
 
 
+# https://blog.paperspace.com/writing-resnet-from-scratch-in-pytorch/
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = common.layer_init(nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU()
+        ))
+
+        self.conv2 = common.layer_init(nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding),
+            nn.BatchNorm2d(out_channels)
+        ))
+
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        out = self.conv2(self.conv1(x))
+        return self.relu(out + x)
+
+
 class AgentNN(nn.Module):
     def __init__(self, action_space, observation_space):
         super().__init__()
@@ -175,9 +197,17 @@ class AgentNN(nn.Module):
         assert observation_space.shape[2] / 56 == 15
 
         self.features_extractor = common.layer_init(nn.Sequential(
+            # => (B, 1, 11, 840)
             nn.Conv2d(in_channels=1, out_channels=32, kernel_size=[1, 56], stride=[1, 56], padding=0),
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(),
+            nn.ReLU(),
+            # => (B, 32, 11, 15)
+            ResidualBlock(32, 32, kernel_size=3, stride=1, padding=1),
+            ResidualBlock(32, 32, kernel_size=3, stride=1, padding=1),
+            ResidualBlock(32, 32, kernel_size=3, stride=1, padding=1),
+            ResidualBlock(32, 32, kernel_size=5, stride=1, padding=2),
+            ResidualBlock(32, 32, kernel_size=5, stride=1, padding=2),
+            ResidualBlock(32, 32, kernel_size=5, stride=1, padding=2),
+            # => (B, 32, 11, 15)
             nn.Flatten(),
             nn.Linear(5280, 1024),
             nn.LeakyReLU()
