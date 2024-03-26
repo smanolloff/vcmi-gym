@@ -208,7 +208,7 @@ def find_latest_save(group_id, run_id):
     agent_file = max(files, key=os.path.getmtime)
     base = os.path.basename(agent_file).removeprefix("agent-").removesuffix(".zip")
     args_file = "%s/args-%s.pt" % (os.path.dirname(agent_file), base)
-    assert os.path.isfile(args_file)
+    assert os.path.isfile(args_file), args_file
 
     return args_file, agent_file
 

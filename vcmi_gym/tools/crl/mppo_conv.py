@@ -239,7 +239,11 @@ def main(args):
 
     # Prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
-    args = Args(**vars(args))
+    kwargs = vars(args)
+    if "learning_rate" in kwargs:
+        kwargs["lr_schedule"] = {"mode": "const", "start": kwargs["learning_rate"]}
+        del kwargs["learning_rate"]
+    args = Args(**kwargs)
 
     # Printing optimizer_state_dict is too much spam
     printargs = asdict(args).copy()
@@ -272,7 +276,6 @@ def main(args):
         f = args.agent_load_file
         print("Loading agent from %s" % f)
         agent = common.load(Agent, f)
-        agent.state = State()
         start_map_swaps = agent.state.map_swaps
 
         backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
@@ -311,7 +314,7 @@ def main(args):
 
         if args.resume:
             agent.state.resumes += 1
-            wandb_log({"global/resumes", agent.state.resumes})
+            wandb_log({"global/resumes": agent.state.resumes})
 
         # print("Agent state: %s" % asdict(agent.state))
 
