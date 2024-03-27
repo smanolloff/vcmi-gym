@@ -314,7 +314,9 @@ def maybe_resume_args(args):
 def setup_wandb(args, agent, src_file):
     import wandb
 
-    if not args.skip_wandb_init:
+    if args.skip_wandb_init:
+        wandb.run.tags = args.tags
+    else:
         wandb.init(
             project=args.wandb_project,
             group=args.group_id,

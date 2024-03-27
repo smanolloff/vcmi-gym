@@ -17,6 +17,7 @@ if __name__ == "__main__":
         # sync_tensorboard=True,
         sync_tensorboard=False,  # tb logs are just filling up disk space
         save_code=False,  # code saved manually below
+        group="sweeps",  # can't set group after wandb.init was called => hard-code
         settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
     )
 
@@ -24,6 +25,7 @@ if __name__ == "__main__":
         wandb.config,
         wandb_project=os.environ["WANDB_PROJECT"],
         run_id=os.environ["WANDB_RUN_ID"],
+        group_id="sweeps",
         skip_wandb_init=True,
     )
 

@@ -11,8 +11,7 @@ parameters:
     parameters:
       module: { value: "mppo_fc" }
 
-  group_id: { value: "sweeps" }
-  tags: { value: ["Classic", "Map-3stack-01"] }
+  tags: { value: ["FC", "Map-3stack-01"] }
 
   agent_load_file: { value: ~ }
   timesteps_total: { value: 60_000 }  # mandatory for sweep!
