@@ -9,6 +9,9 @@
 # Variants of this arch (e.g. ResNet variant) should include both tags
 - Heads
 
+# Simplest net arch - FC only (any number of layers).
+- FC
+
 # Variants where each Conv2d layer is replaced by 2 or 3 Conv3d layers with
 # residual connections
 - ResNet

@@ -177,13 +177,9 @@ class AgentNN(nn.Module):
 
         self.features_extractor = common.layer_init(nn.Sequential(
             # => (B, 1, 11, 840)
-            nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56), padding=0),
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(),
-            # => (B, 32, 11, 15)
             nn.Flatten(),
-            # => (B, 5280)
-            nn.Linear(5280, 1024),
+            # => (B, 9240)
+            nn.Linear(9240, 1024),
             nn.LeakyReLU()
             # => (B, 1024)
         ))
