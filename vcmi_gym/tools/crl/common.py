@@ -27,6 +27,7 @@ import shutil
 import importlib
 import numpy as np
 import string
+import yaml
 
 from dataclasses import asdict
 from torch.distributions.categorical import Categorical
@@ -320,10 +321,11 @@ def setup_wandb(args, agent, src_file):
             name=args.run_name or args.run_id,
             id=args.run_id,
             notes=args.notes,
+            tags=args.tags,
             resume="must" if args.resume else "never",
             # resume="allow",  # XXX: reuse id for insta-failed runs
             config=asdict(args),
-            sync_tensorboard=True,
+            sync_tensorboard=False,
             save_code=False,  # code saved manually below
             allow_val_change=args.resume,
             settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
@@ -411,3 +413,11 @@ def schedule_fn(schedule):
         return lambda p: low + (high - low) * np.exp(-rate * p)
     else:
         return lambda _: high
+
+
+def validate_tags(tags):
+    all_tags_file = os.path.join(os.path.dirname(__file__), "config", "tags.yml")
+    with open(all_tags_file, "r") as f:
+        all_tags = yaml.safe_load(f)
+    for tag in tags:
+        assert tag in all_tags, f"Invalid tag: {tag}"

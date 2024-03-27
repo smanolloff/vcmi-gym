@@ -86,6 +86,7 @@ class Args:
     resume: bool = False
     overwrite: list = field(default_factory=list)
     notes: Optional[str] = None
+    tags: Optional[list] = field(default_factory=list)
 
     agent_load_file: Optional[str] = None
     timesteps_total: int = 0
@@ -323,6 +324,7 @@ def main(args):
             agent = Agent(obs_space, act_space, args.state).to(device)
 
         assert args.rollouts_per_table_log % args.rollouts_per_log == 0
+        common.validate_tags(args.tags)
 
         if args.wandb_project:
             import wandb

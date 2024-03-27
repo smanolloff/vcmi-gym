@@ -86,6 +86,7 @@ class Args:
     resume: bool = False
     overwrite: list = field(default_factory=list)
     notes: Optional[str] = None
+    tags: Optional[list] = field(default_factory=list)
 
     agent_load_file: Optional[str] = None
     timesteps_total: int = 0
@@ -175,12 +176,16 @@ class AgentNN(nn.Module):
         assert observation_space.shape[2] / 56 == 15
 
         self.features_extractor = common.layer_init(nn.Sequential(
+            # => (B, 1, 11, 840)
             nn.Conv2d(in_channels=1, out_channels=32, kernel_size=[1, 56], stride=[1, 56], padding=0),
             nn.BatchNorm2d(32),
             nn.LeakyReLU(),
+            # => (B, 32, 11, 15)
             nn.Flatten(),
+            # => (B, 5280)
             nn.Linear(5280, 1024),
             nn.LeakyReLU()
+            # => (B, 1024)
         ))
 
         self.actor = common.layer_init(nn.Linear(1024, action_space.n), gain=0.01)
@@ -293,6 +298,7 @@ def main(args):
             agent = Agent(obs_space, act_space, args.state).to(device)
 
         assert args.rollouts_per_table_log % args.rollouts_per_log == 0
+        common.validate_tags(args.tags)
 
         if args.wandb_project:
             import wandb

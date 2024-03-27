@@ -1,8 +1,10 @@
 ---
+group_id: heads-vs-classic
+run_name: "[C] ResNet"
+tags: ["Classic", "ResNet", "Map-3stack-01"]
+
 wandb_project: vcmi-gym
-group_id: conv-residual
 run_id: ~
-run_name: "lr=1e-5"
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
@@ -12,7 +14,7 @@ notes: ""
 agent_load_file: ~
 # agent_load_file: "data/crl/mult-sanity-clone3-armyswap-attacker-mb2-lr0.000001/agent-1711337191.zip"
 rollouts_total: 0
-timesteps_total: 50_000  # exp_decay requires timesteps_total
+timesteps_total: 0  # exp_decay requires timesteps_total
 timesteps_per_mapchange: 0
 rollouts_per_mapchange: 0
 rollouts_per_log: 1
@@ -21,8 +23,8 @@ opponent_load_file: ~
 success_rate_target: ~
 ep_rew_mean_target: 0
 quit_on_target: false
-mapside: "attacker"
-mapmask: "gym/generated/88/88-7stack-01.vmap"
+mapside: "attacker"  # attacker/defender/both
+mapmask: "gym/generated/88/88-3stack-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 max_saves: 3
@@ -47,10 +49,10 @@ clip_vloss: false
 ent_coef: 0.007
 gae_lambda: 0.8
 gamma: 0.8425
-lr_schedule: { mode: exp_decay, start: 0.001, end: 1.0e-5, rate: 10 }
+lr_schedule: { mode: const, start: 1.0e-5, end: 1.0e-5, rate: 10 }
 max_grad_norm: 0.5
 norm_adv: true
-num_minibatches: 4   # minibatch_size = rollout_buffer/num_minibatches
+num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches
 num_steps: 128       # rollout_buffer = num_steps*num_envs
 update_epochs: 10    # full passes of rollout_buffer
 vf_coef: 1.2

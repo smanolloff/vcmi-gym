@@ -1,8 +1,10 @@
 ---
+group_id: heads-vs-classic
+run_name: "[H] as yrzdlvel, lr=5e-7"
+tags: ["Heads", "Map-3stack-01"]
+
 wandb_project: vcmi-gym
-group_id: heads-ujw53ibc
 run_id: ~
-run_name: "weights=1"
 resume: False
 overwrite: []
 # overwrite: ["learning_rate", "weight_decay"]
@@ -12,7 +14,7 @@ notes: ""
 agent_load_file: ~
 # agent_load_file: "data/sweeps/ujw53ibc/agent-1711299495.zip"
 rollouts_total: 0
-timesteps_total: 0
+timesteps_total: 0  # exp_decay requires timesteps_total
 timesteps_per_mapchange: 0
 rollouts_per_mapchange: 0
 rollouts_per_log: 1
@@ -47,7 +49,7 @@ clip_vloss: false
 ent_coef: 0.007
 gae_lambda: 0.7
 gamma: 0.8
-lr_schedule: { mode: const, start: 1.0e-6 }
+lr_schedule: { mode: const, start: 5.0e-7 }
 max_grad_norm: 1
 norm_adv: true
 num_minibatches: 8      # minibatch_size = rollout_buffer/num_minibatches
