@@ -28,10 +28,14 @@ import importlib
 import numpy as np
 import string
 import yaml
+import json
+import base64
+import cloudpickle
+import zipfile
+import io
 
 from dataclasses import asdict
 from torch.distributions.categorical import Categorical
-from stable_baselines3.common.save_util import save_to_zip_file, load_from_zip_file
 
 
 # https://boring-guy.sh/posts/masking-rl/
@@ -369,29 +373,6 @@ def init_optimizer(args, agent, optimizer):
     return optimizer
 
 
-# Saving/loading with sb3's zip format is needed because
-# torch.save(agent) blows up after wandb.watch(agent)
-# Here we can save specific agent attrs + NN state_dicts
-def save(agent, path):
-    # The non-NN attrs to save:
-    attrs = ["observation_space", "action_space", "state"]
-    data = {k: agent.__dict__[k] for k in attrs}
-    # The NN attrs to save:
-    nn_names = ["NN"]
-    params = {k: getattr(agent, k).state_dict() for k in nn_names}
-    save_to_zip_file(path, data=data, params=params)
-
-
-def load(agent_cls, path):
-    data, params, pytorch_variables = load_from_zip_file(path)
-    assert data is not None, "No data found in the saved file"
-    assert params is not None, "No params found in the saved file"
-    assert "NN" in params and len(params) == 1
-    agent = agent_cls(**data)
-    agent.NN.load_state_dict(params["NN"], strict=True)
-    return agent
-
-
 def gen_id():
     population = string.ascii_lowercase + string.digits
     return str.join("", random.choices(population, k=8))
@@ -423,3 +404,118 @@ def validate_tags(tags):
         all_tags = yaml.safe_load(f)
     for tag in tags:
         assert tag in all_tags, f"Invalid tag: {tag}"
+
+
+#
+# SAVE/LOAD logic taken from SB3's save_util:
+# https://github.com/DLR-RM/stable-baselines3/blob/v2.1.0/stable_baselines3/common/save_util.py
+#
+
+def is_json_serializable(item):
+    json_serializable = True
+    try:
+        _ = json.dumps(item)
+    except TypeError:
+        json_serializable = False
+    return json_serializable
+
+
+def data_to_json(data):
+    serializable_data = {}
+    for data_key, data_item in data.items():
+        if is_json_serializable(data_item):
+            serializable_data[data_key] = data_item
+        else:
+            base64_encoded = base64.b64encode(cloudpickle.dumps(data_item)).decode()
+            cloudpickle_serialization = {
+                ":type:": str(type(data_item)),
+                ":serialized:": base64_encoded,
+            }
+
+            if hasattr(data_item, "__dict__") or isinstance(data_item, dict):
+                item_generator = data_item.items if isinstance(data_item, dict) else data_item.__dict__.items
+                for variable_name, variable_item in item_generator():
+                    if is_json_serializable(variable_item):
+                        cloudpickle_serialization[variable_name] = variable_item
+                    else:
+                        cloudpickle_serialization[variable_name] = str(variable_item)
+
+            serializable_data[data_key] = cloudpickle_serialization
+    json_string = json.dumps(serializable_data, indent=4)
+    return json_string
+
+
+def save_to_zip_file(save_path, data, params):
+    serialized_data = data_to_json(data)
+    with zipfile.ZipFile(save_path, mode="w") as archive:
+        archive.writestr("data", serialized_data)
+        for file_name, dict_ in params.items():
+            with archive.open(file_name + ".pth", mode="w", force_zip64=True) as param_file:
+                torch.save(dict_, param_file)
+
+
+def json_to_data(json_string):
+    json_dict = json.loads(json_string)
+    return_data = {}
+    for data_key, data_item in json_dict.items():
+        if isinstance(data_item, dict) and ":serialized:" in data_item.keys():
+            serialization = data_item[":serialized:"]
+            base64_object = base64.b64decode(serialization.encode())
+            deserialized_object = cloudpickle.loads(base64_object)
+            return_data[data_key] = deserialized_object
+        else:
+            # Read as it is
+            return_data[data_key] = data_item
+    return return_data
+
+
+def load_from_zip_file(load_path):
+    # XXX: ensure PC's CUDA does not actually makes things worse
+    device = torch.device("cuda") if torch.cuda.is_available() else "cpu"
+
+    with zipfile.ZipFile(load_path) as archive:
+        namelist = archive.namelist()
+        data = None
+        pytorch_variables = None
+        params = {}
+
+        if "data" in namelist:
+            json_data = archive.read("data").decode()
+            data = json_to_data(json_data)
+
+        pth_files = [file_name for file_name in namelist if os.path.splitext(file_name)[1] == ".pth"]
+        for file_path in pth_files:
+            with archive.open(file_path, mode="r") as param_file:
+                file_content = io.BytesIO()
+                file_content.write(param_file.read())
+                file_content.seek(0)
+                th_object = torch.load(file_content, map_location=device)
+                params[os.path.splitext(file_path)[0]] = th_object
+    return data, params, pytorch_variables
+
+
+# Saving/loading with sb3's zip format is needed because
+# torch.save(agent) blows up after wandb.watch(agent)
+# Here we can save specific agent attrs + NN state_dicts
+def save(agent, path):
+    # The non-NN attrs to save:
+    attrs = ["observation_space", "action_space", "state"]
+    data = {k: agent.__dict__[k] for k in attrs}
+    # The NN attrs to save:
+    nn_names = ["NN"]
+    params = {k: getattr(agent, k).state_dict() for k in nn_names}
+    save_to_zip_file(path, data=data, params=params)
+
+
+def load(agent_cls, path):
+    data, params, pytorch_variables = load_from_zip_file(path)
+    assert data is not None, "No data found in the saved file"
+    assert params is not None, "No params found in the saved file"
+    assert "NN" in params and len(params) == 1
+    agent = agent_cls(**data)
+    agent.NN.load_state_dict(params["NN"], strict=True)
+    return agent
+
+#
+# End of SAVE/LOAD logic
+#
