@@ -78,7 +78,7 @@ class EnvArgs:
     term_reward_mult: int = 0
     consecutive_error_reward_factor: Optional[int] = None
     vcmi_timeout: int = 5
-    random_combat: bool = True
+    random_combat: int = 1
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
 
@@ -1000,7 +1000,7 @@ def debug_args():
             step_reward_fixed=-100,
             step_reward_mult=1,
             term_reward_mult=0,
-            random_combat=False,
+            random_combat=0,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
 

@@ -20,7 +20,7 @@
 Connector::Connector(
     const std::string gymdir_,
     const std::string mapname_,
-    const bool randomCombat_,
+    const int randomCombat_,
     const std::string loglevelGlobal_,
     const std::string loglevelAI_,
     const std::string attacker_,
@@ -311,7 +311,7 @@ PYBIND11_MODULE(connector, m) {
         .def(py::init<
             const std::string &, // gymdir
             const std::string &, // mapname
-            const bool &,        // randomCombat
+            const int &,         // randomCombat
             const std::string &, // loglevelGlobal
             const std::string &, // loglevelAI
             const std::string &, // attacker

@@ -38,7 +38,7 @@ class Connector {
 
     const std::string gymdir;
     const std::string mapname;
-    const bool randomCombat;
+    const int randomCombat;
     const std::string loglevelGlobal;
     const std::string loglevelAI;
     const std::string attacker;
@@ -60,7 +60,7 @@ public:
     Connector(
         const std::string gymdir,
         const std::string mapname,
-        const bool randomCombat,
+        const int randomCombat,
         const std::string loglevelGlobal,
         const std::string loglevelAI,
         const std::string attacker,
