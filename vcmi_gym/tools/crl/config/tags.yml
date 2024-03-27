@@ -12,6 +12,9 @@
 # Simplest net arch - FC only (any number of layers).
 - FC
 
+# Some mixtures of the above. Eventually, everything may become "Hybrid"...
+- Hybrid
+
 # Variants where each Conv2d layer is replaced by 2 or 3 Conv3d layers with
 # residual connections
 - ResNet
