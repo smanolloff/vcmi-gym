@@ -1,6 +1,6 @@
 ---
 group_id: hybrids
-run_name: "[H-hybrid] no-upscaler-act"
+run_name: "[H-hybrid] upscaler-act"
 tags: ["Heads", "Hybrid", "Map-3stack-01"]
 
 wandb_project: vcmi-gym

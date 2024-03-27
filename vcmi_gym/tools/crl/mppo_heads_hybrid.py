@@ -256,13 +256,13 @@ class AgentNN(nn.Module):
         #
         # Action Head #2: one of 165 hexes given hex_embeddings + action
         #
-        self.action1_upscaler = common.layer_init(nn.Linear(5, 256))
+        self.action1_upscaler = common.layer_init(nn.Sequential(nn.Linear(5, 256), nn.LeakyReLU()))
         self.action2_net = common.layer_init(nn.Linear(256, 165), gain=0.01)
 
         #
         # Action Head #3: one of 165 hexes given hex_embeddings + action + hex1
         #
-        self.action2_upscaler = common.layer_init(nn.Linear(165, 256))
+        self.action2_upscaler = common.layer_init(nn.Sequential(nn.Linear(165, 256), nn.LeakyReLU()))
         self.action3_net = common.layer_init(nn.Linear(256, 165), gain=0.01)
 
     # see notes/concat_B_and_BxNx11x15.py
