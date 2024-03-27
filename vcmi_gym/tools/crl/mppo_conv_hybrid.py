@@ -272,7 +272,7 @@ def main(args):
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
-    device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_ts = None
     agent = None
     optimizer = None
@@ -301,6 +301,8 @@ def main(args):
 
         if agent is None:
             agent = Agent(obs_space, act_space, args.state).to(device)
+
+        agent = agent.to(device)
 
         assert args.rollouts_per_table_log % args.rollouts_per_log == 0
         common.validate_tags(args.tags)
