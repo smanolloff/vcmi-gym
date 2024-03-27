@@ -1,6 +1,6 @@
 ---
-group_id: heads-vs-classic
-run_name: "[H] as yrzdlvel, lr=5e-7"
+group_id: heads-ujw53ibc
+run_name: "[H] as yrzdlvel, lr=5e-8"
 tags: ["Heads", "Map-3stack-01"]
 
 wandb_project: vcmi-gym
@@ -49,7 +49,7 @@ clip_vloss: false
 ent_coef: 0.007
 gae_lambda: 0.7
 gamma: 0.8
-lr_schedule: { mode: const, start: 5.0e-7 }
+lr_schedule: { mode: const, start: 5.0e-8 }
 max_grad_norm: 1
 norm_adv: true
 num_minibatches: 8      # minibatch_size = rollout_buffer/num_minibatches
