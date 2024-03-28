@@ -21,7 +21,7 @@ import random
 import time
 import shutil
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import Optional, List
 from collections import deque
 
 import gymnasium as gym
@@ -66,6 +66,13 @@ class EnvArgs:
     random_combat: int = 1
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
+
+
+@dataclass
+class NetworkArgs:
+    features_extractor: list[dict] = field(default_factory=list)
+    actor: dict = field(default_factory=dict)
+    critic: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -134,6 +141,7 @@ class Args:
 
     env: EnvArgs = EnvArgs()
     env_wrappers: list = field(default_factory=list)
+    network: NetworkArgs = NetworkArgs()
 
     def __post_init__(self):
         if not self.loss_weights:
@@ -149,6 +157,8 @@ class Args:
             self.env = EnvArgs(**self.env)
         if not isinstance(self.lr_schedule, ScheduleArgs):
             self.lr_schedule = ScheduleArgs(**self.lr_schedule)
+        if not isinstance(self.network, NetworkArgs):
+            self.network = NetworkArgs(**self.network)
 
 
 class SelfAttention(nn.MultiheadAttention):
@@ -159,7 +169,14 @@ class SelfAttention(nn.MultiheadAttention):
 
 
 class AgentNN(nn.Module):
-    def __init__(self, action_space, observation_space):
+    @staticmethod
+    def build_layer(spec):
+        kwargs = dict(spec)  # copy
+        t = kwargs.pop("t")
+        layer_cls = getattr(torch.nn, t, None) or globals()[t]
+        return layer_cls(**kwargs)
+
+    def __init__(self, network, action_space, observation_space):
         super().__init__()
 
         self.observation_space = observation_space
@@ -172,21 +189,13 @@ class AgentNN(nn.Module):
         assert observation_space.shape[1] == 11
         assert observation_space.shape[2] / 56 == 15
 
-        self.features_extractor = common.layer_init(nn.Sequential(
-            # => (B, 1, 11, 840)
-            nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56), padding=0),
-            # nn.BatchNorm2d(32),
-            nn.LeakyReLU(),
-            # => (B, 32, 11, 15)
-            nn.Flatten(),
-            # => (B, 5280)
-            nn.Linear(5280, 1024),
-            nn.LeakyReLU()
-            # => (B, 1024)
-        ))
+        self.features_extractor = torch.nn.Sequential()
+        for spec in network.features_extractor:
+            layer = AgentNN.build_layer(spec)
+            self.features_extractor.append(common.layer_init(layer))
 
-        self.actor = common.layer_init(nn.Linear(1024, action_space.n), gain=0.01)
-        self.critic = common.layer_init(nn.Linear(1024, 1), gain=1.0)
+        self.actor = common.layer_init(AgentNN.build_layer(network.actor), gain=0.01)
+        self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
     def get_value(self, x):
         return self.critic(self.features_extractor(x))
@@ -216,7 +225,7 @@ class Agent(nn.Module):
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
 
-        self.NN = AgentNN(action_space, observation_space)
+        self.NN = AgentNN(args.network, action_space, observation_space)
         self.predict = self.NN.predict
         self.optimizer = optimizer or torch.optim.AdamW(self.parameters(), eps=1e-5)
         self.state = state or State()

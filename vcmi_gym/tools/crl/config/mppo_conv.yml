@@ -40,6 +40,19 @@ opponent_load_file: ~
 #           ulimit -n 1024
 num_envs: 1
 
+network:
+  features_extractor:
+    # => (B, 1, 11, 840)
+    - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 56], stride: [1, 56], padding: 0}
+    - {t: "LeakyReLU"}
+    # => (B, 32, 11, 15)
+    - {t: "Flatten"}
+    # => (B, 5280)
+    - {t: "Linear", in_features: 5280, out_features: 1024}
+    - {t: "LeakyReLU"}
+    # => (B, 1024)
+  actor: {t: "Linear", in_features: 1024, out_features: 2311}
+  critic: {t: "Linear", in_features: 1024, out_features: 1}
 
 #
 # PPO Hyperparams
