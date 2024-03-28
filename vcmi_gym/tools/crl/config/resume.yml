@@ -1,11 +1,10 @@
 ---
 wandb_project: vcmi-gym
-group_id: heads
-run_id: heads-simple-A1-4
+group_id: hybrids
+run_id: 40l60e99
 resume: True
-overwrite: ["learning_rate"]
+overwrite: ["lr_schedule.start"]
 # overwrite: ["learning_rate", "env.term_reward_mult"]
 out_dir_template: "data/{group_id}/{run_id}"
-mapmask: "gym/generated/B*.vmap"
 
-learning_rate: 0.0001
+lr_schedule: { start: 1.0e-7 }

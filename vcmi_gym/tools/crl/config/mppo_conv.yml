@@ -1,6 +1,6 @@
 ---
-group_id: heads-vs-classic
-run_name: "[C] as b7orey9t"
+group_id: nth-random
+run_name: "[C] n=50"
 tags: ["Classic", "Map-3stack-01"]
 
 wandb_project: vcmi-gym
@@ -65,7 +65,7 @@ env:
   term_reward_mult: 0
   reward_clip_tanh_army_frac: 1
   reward_army_value_ref: 500
-  random_combat: 1
+  random_combat: 50
 
 env_wrappers: []
 logparams: {}

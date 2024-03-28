@@ -28,11 +28,6 @@ import importlib
 import numpy as np
 import string
 import yaml
-import json
-import base64
-import cloudpickle
-import zipfile
-import io
 
 from dataclasses import asdict
 from torch.distributions.categorical import Categorical
@@ -157,7 +152,7 @@ def create_venv(env_cls, args, map_swaps):
     return vec_env, map_offset
 
 
-def maybe_save(t, args, agent, nn_cls, optimizer, out_dir):
+def maybe_save(t, args, agent, out_dir):
     now = time.time()
 
     if t is None:
@@ -167,60 +162,30 @@ def maybe_save(t, args, agent, nn_cls, optimizer, out_dir):
         return t
 
     os.makedirs(out_dir, exist_ok=True)
-    agent_file = os.path.join(out_dir, "agent-%d.zip" % now)
-    agent.state.optimizer_state_dict = optimizer.state_dict()
-    save(agent, agent_file)
-    print("Saved agent to %s" % agent_file)
-
-    args_file = os.path.join(out_dir, "args-%d.pt" % now)
-    torch.save(args, args_file)
-    print("Saved args to %s" % args_file)
-
-    # Save a raw NN via simple torch.save() to allow
-    # for a simple torch.load() in Loader
-    # XXX: this raw model saved like this can't be used for training
-    #      (calling wandb.watch on it will blow up)
+    agent_file = os.path.join(out_dir, "agent-%d.pt" % now)
     nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
-    nn_model = nn_cls(agent.action_space, agent.observation_space)
-    nn_model.load_state_dict(agent.NN.state_dict(), strict=True)
-    torch.save(nn_model, nn_file)
-    print("Saved nn to %s" % nn_file)
+    save(agent, agent_file, nn_file)
 
     # save file retention (keep latest N saves)
-    files = sorted(
-        glob.glob(os.path.join(out_dir, "agent-[0-9]*.zip")),
-        key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()),
-        reverse=True
-    )
+    for pattern in ["agent-[0-9]*.pt", "nn-[0-9]*.pt"]:
+        files = sorted(
+            glob.glob(os.path.join(out_dir, pattern)),
+            key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()),
+            reverse=True
+        )
 
-    for file in files[args.max_saves:]:
-        print("Deleting %s" % file)
-        os.remove(file)
-        base = os.path.basename(file).removeprefix("agent-").removesuffix(".zip")
-        argfile = "%s/args-%s.pt" % (os.path.dirname(file), base)
-        if os.path.isfile(argfile):
-            print("Deleting %s" % argfile)
-            os.remove(argfile)
-
-        nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
-        if os.path.isfile(nn_file):
-            print("Deleting %s" % nn_file)
-            os.remove(nn_file)
+        for file in files[args.max_saves:]:
+            print("Deleting %s" % file)
+            os.remove(file)
 
     return now
 
 
 def find_latest_save(group_id, run_id):
-    pattern = f"data/{group_id}/{run_id}/agent-[0-9]*.zip"
+    pattern = f"data/{group_id}/{run_id}/agent-[0-9]*.pt"
     files = glob.glob(pattern)
     assert len(files) > 0, f"No files found for: {pattern}"
-
-    agent_file = max(files, key=os.path.getmtime)
-    base = os.path.basename(agent_file).removeprefix("agent-").removesuffix(".zip")
-    args_file = "%s/args-%s.pt" % (os.path.dirname(agent_file), base)
-    assert os.path.isfile(args_file), args_file
-
-    return args_file, agent_file
+    return max(files, key=os.path.getmtime)
 
 
 def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
@@ -262,57 +227,65 @@ def log_params(args, wandb_log):
     print("Params: %s" % logged)
 
 
-def maybe_resume_args(args):
+def maybe_resume(args):
     if not args.resume:
         print("Starting new run %s/%s" % (args.group_id, args.run_id))
-        return args
+        return None, args
+
+    print("Resuming run %s/%s" % (args.group_id, args.run_id))
 
     # XXX: resume will overwrite all input args except run_id & group_id
-    args_load_file, agent_load_file = find_latest_save(args.group_id, args.run_id)
-    loaded_args = torch.load(args_load_file)
-    assert loaded_args.group_id == args.group_id
-    assert loaded_args.run_id == args.run_id
+    file = find_latest_save(args.group_id, args.run_id)
+    agent = torch.load(file)
+    print("Loaded agent from %s" % file)
 
-    # for f in [args_load_file, agent_load_file]:
-    # XXX: agent will be backed up later with "loaded-" prefix
-    for f in [args_load_file]:
-        backup = "%s/resumed-%s" % (os.path.dirname(f), os.path.basename(f))
-        with open(f, 'rb') as fsrc:
-            with open(backup, 'wb') as fdst:
-                shutil.copyfileobj(fsrc, fdst)
-                print("Wrote backup %s" % backup)
+    assert agent.args.group_id == args.group_id
+    assert agent.args.run_id == args.run_id
 
-    # List of arg names to overwrite after loading
-    # (some args (incl. overwrite itself) must always be overwritten)
-    loaded_args.overwrite = args.overwrite
-    # loaded_args.wandb_project = args.wandb_project
+    # XXX: both `args` and `agent.args` are of class Args, but...
+    #      it is not the same class (the loaded Args is an *older snapshot*)
+    #
+    #      Re-initializing it to the *new* Args will:
+    #      * allow to assign newly introduced fields
+    #      * (FIXME) blow up for dropped fields
+    # a = vars(agent.args)
+    # a = {k: v for (k, v) in a.items() if k != "state"}
+    # agent.args = args.__class__(**a)
+    agent.args = args.__class__(**vars(agent.args))
+
+    agent.args.overwrite = args.overwrite
+    # agent.args.wandb_project = args.wandb_project
 
     # Overwrite even if None
     # This can happen in a bare resume where no config is given
     # The config at the original path may have changed completely
     # and a new upload of it now would cause confusion
     # => overwrite with None is good as the config wont be uploaded
-    loaded_args.cfg_file = args.cfg_file
+    agent.args.cfg_file = args.cfg_file
 
     for argname in args.overwrite:
         parts = argname.split(".")
         if len(parts) == 1:
-            print("Overwrite %s: %s -> %s" % (argname, getattr(loaded_args, argname), getattr(args, argname)))
-            setattr(loaded_args, argname, getattr(args, argname))
+            print("Overwrite %s: %s -> %s" % (argname, getattr(agent.args, argname), getattr(args, argname)))
+            setattr(agent.args, argname, getattr(args, argname))
         else:
             assert len(parts) == 2
-            sub_loaded = getattr(loaded_args, parts[0])
+            sub_loaded = getattr(agent.args, parts[0])
             sub_arg = getattr(args, parts[0])
             print("Overwrite %s: %s -> %s" % (argname, getattr(sub_loaded, parts[1]), getattr(sub_arg, parts[1])))
             setattr(sub_loaded, parts[1], getattr(sub_arg, parts[1]))
 
-    args = loaded_args
+    args = agent.args
     args.resume = True
-    args.agent_load_file = agent_load_file
+    args.agent_load_file = file
 
-    print("Resuming run %s/%s" % (args.group_id, args.run_id))
-    print("Loaded args from %s" % args_load_file)
-    return args
+    with open(file, 'rb') as fsrc:
+        backup = "%s/resumed-%s" % (os.path.dirname(file), os.path.basename(file))
+        with open(backup, 'wb') as fdst:
+            shutil.copyfileobj(fsrc, fdst)
+            print("Wrote backup %s" % backup)
+
+    return agent, args
 
 
 def setup_wandb(args, agent, src_file):
@@ -356,23 +329,6 @@ def setup_wandb(args, agent, src_file):
     return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
 
 
-def init_optimizer(args, agent, optimizer):
-    # lr will be set on each rollout
-    optimizer = torch.optim.AdamW(agent.parameters(), eps=1e-5)
-
-    if agent.state.optimizer_state_dict:
-        print("Loading optimizer from stored state")
-        optimizer.load_state_dict(agent.state.optimizer_state_dict)
-
-    if args.resume and "weight_decay" not in args.overwrite:
-        assert optimizer.param_groups[0]["weight_decay"] == args.weight_decay
-    else:
-        optimizer.param_groups[0]["weight_decay"] = args.weight_decay
-
-    print("Weight decay: %s" % optimizer.param_groups[0]["weight_decay"])
-    return optimizer
-
-
 def gen_id():
     population = string.ascii_lowercase + string.digits
     return str.join("", random.choices(population, k=8))
@@ -406,116 +362,17 @@ def validate_tags(tags):
         assert tag in all_tags, f"Invalid tag: {tag}"
 
 
-#
-# SAVE/LOAD logic taken from SB3's save_util:
-# https://github.com/DLR-RM/stable-baselines3/blob/v2.1.0/stable_baselines3/common/save_util.py
-#
-
-def is_json_serializable(item):
-    json_serializable = True
-    try:
-        _ = json.dumps(item)
-    except TypeError:
-        json_serializable = False
-    return json_serializable
-
-
-def data_to_json(data):
-    serializable_data = {}
-    for data_key, data_item in data.items():
-        if is_json_serializable(data_item):
-            serializable_data[data_key] = data_item
-        else:
-            base64_encoded = base64.b64encode(cloudpickle.dumps(data_item)).decode()
-            cloudpickle_serialization = {
-                ":type:": str(type(data_item)),
-                ":serialized:": base64_encoded,
-            }
-
-            if hasattr(data_item, "__dict__") or isinstance(data_item, dict):
-                item_generator = data_item.items if isinstance(data_item, dict) else data_item.__dict__.items
-                for variable_name, variable_item in item_generator():
-                    if is_json_serializable(variable_item):
-                        cloudpickle_serialization[variable_name] = variable_item
-                    else:
-                        cloudpickle_serialization[variable_name] = str(variable_item)
-
-            serializable_data[data_key] = cloudpickle_serialization
-    json_string = json.dumps(serializable_data, indent=4)
-    return json_string
-
-
-def save_to_zip_file(save_path, data, params):
-    serialized_data = data_to_json(data)
-    with zipfile.ZipFile(save_path, mode="w") as archive:
-        archive.writestr("data", serialized_data)
-        for file_name, dict_ in params.items():
-            with archive.open(file_name + ".pth", mode="w", force_zip64=True) as param_file:
-                torch.save(dict_, param_file)
-
-
-def json_to_data(json_string):
-    json_dict = json.loads(json_string)
-    return_data = {}
-    for data_key, data_item in json_dict.items():
-        if isinstance(data_item, dict) and ":serialized:" in data_item.keys():
-            serialization = data_item[":serialized:"]
-            base64_object = base64.b64decode(serialization.encode())
-            deserialized_object = cloudpickle.loads(base64_object)
-            return_data[data_key] = deserialized_object
-        else:
-            # Read as it is
-            return_data[data_key] = data_item
-    return return_data
-
-
-def load_from_zip_file(load_path):
-    # XXX: ensure PC's CUDA does not actually makes things worse
-    device = torch.device("cuda") if torch.cuda.is_available() else "cpu"
-
-    with zipfile.ZipFile(load_path) as archive:
-        namelist = archive.namelist()
-        data = None
-        pytorch_variables = None
-        params = {}
-
-        if "data" in namelist:
-            json_data = archive.read("data").decode()
-            data = json_to_data(json_data)
-
-        pth_files = [file_name for file_name in namelist if os.path.splitext(file_name)[1] == ".pth"]
-        for file_path in pth_files:
-            with archive.open(file_path, mode="r") as param_file:
-                file_content = io.BytesIO()
-                file_content.write(param_file.read())
-                file_content.seek(0)
-                th_object = torch.load(file_content, map_location=device)
-                params[os.path.splitext(file_path)[0]] = th_object
-    return data, params, pytorch_variables
-
-
-# Saving/loading with sb3's zip format is needed because
-# torch.save(agent) blows up after wandb.watch(agent)
-# Here we can save specific agent attrs + NN state_dicts
-def save(agent, path):
-    # The non-NN attrs to save:
-    attrs = ["observation_space", "action_space", "state"]
+def save(agent, agent_file, nn_file):
+    attrs = ["args", "observation_space", "action_space", "optimizer", "state"]
     data = {k: agent.__dict__[k] for k in attrs}
-    # The NN attrs to save:
-    nn_names = ["NN"]
-    params = {k: getattr(agent, k).state_dict() for k in nn_names}
-    save_to_zip_file(path, data=data, params=params)
-
-
-def load(agent_cls, path):
-    data, params, pytorch_variables = load_from_zip_file(path)
-    assert data is not None, "No data found in the saved file"
-    assert params is not None, "No params found in the saved file"
-    assert "NN" in params and len(params) == 1
-    agent = agent_cls(**data)
-    agent.NN.load_state_dict(params["NN"], strict=True)
-    return agent
-
-#
-# End of SAVE/LOAD logic
-#
+    state_dict = agent.state_dict()
+    # Re-create the entire agent to ensure it's "clean"
+    clean_agent = agent.__class__(**data)
+    clean_agent.load_state_dict(state_dict, strict=True)
+    torch.save(clean_agent, agent_file)
+    print("Saved agent to %s" % agent_file)
+    # Save the NN state separately
+    # (loading the entire Agent model means torch.load will look for the Agent
+    #  module and will break if it has changed)
+    torch.save(agent.NN.state_dict(), nn_file)
+    print("Saved NN state to %s" % nn_file)

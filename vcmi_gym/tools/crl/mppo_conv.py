@@ -74,7 +74,6 @@ class State:
     map_swaps: int = 0
     global_step: int = 0
     global_rollout: int = 0
-    optimizer_state_dict: Optional[dict] = None
 
 
 @dataclass
@@ -134,7 +133,6 @@ class Args:
 
     env: EnvArgs = EnvArgs()
     env_wrappers: list = field(default_factory=list)
-    state: State = State()
 
     def __post_init__(self):
         if not self.loss_weights:
@@ -148,8 +146,6 @@ class Args:
 
         if not isinstance(self.env, EnvArgs):
             self.env = EnvArgs(**self.env)
-        if not isinstance(self.state, State):
-            self.state = State(**self.state)
         if not isinstance(self.lr_schedule, ScheduleArgs):
             self.lr_schedule = ScheduleArgs(**self.lr_schedule)
 
@@ -178,7 +174,7 @@ class AgentNN(nn.Module):
         self.features_extractor = common.layer_init(nn.Sequential(
             # => (B, 1, 11, 840)
             nn.Conv2d(1, 32, kernel_size=(1, 56), stride=(1, 56), padding=0),
-            nn.BatchNorm2d(32),
+            # nn.BatchNorm2d(32),
             nn.LeakyReLU(),
             # => (B, 32, 11, 15)
             nn.Flatten(),
@@ -212,21 +208,23 @@ class AgentNN(nn.Module):
 
 
 class Agent(nn.Module):
-    def __init__(self, observation_space, action_space, state):
+    def __init__(self, args, observation_space, action_space, optimizer=None, state=None):
         super().__init__()
 
+        self.args = args
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
-        self.state = state
 
         self.NN = AgentNN(action_space, observation_space)
         self.predict = self.NN.predict
+        self.optimizer = optimizer or torch.optim.AdamW(self.parameters(), eps=1e-5)
+        self.state = state or State()
 
 
 def main(args):
     assert isinstance(args, Args)
 
-    args = common.maybe_resume_args(args)
+    agent, args = common.maybe_resume(args)
 
     timesteps_per_rollout = args.num_steps * args.num_envs
 
@@ -245,13 +243,9 @@ def main(args):
     # Re-initialize to prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
     args = Args(**vars(args))
-
-    # Printing optimizer_state_dict is too much spam
     printargs = asdict(args).copy()
-    printargs["state"] = {k: v for k, v in printargs["state"].items() if k != "optimizer_state_dict"}
-    printargs["state"]["optimizer_state_dict"] = "..."
-
     print("Args: %s" % printargs)
+
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     print("Out dir: %s" % out_dir)
     os.makedirs(out_dir, exist_ok=True)
@@ -270,13 +264,13 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_ts = None
     agent = None
-    optimizer = None
-    start_map_swaps = args.state.map_swaps
+    start_map_swaps = 0
 
     if args.agent_load_file:
         f = args.agent_load_file
         print("Loading agent from %s" % f)
-        agent = common.load(Agent, f)
+        agent = torch.load(f)
+        agent.args = args
         start_map_swaps = agent.state.map_swaps
 
         backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
@@ -295,7 +289,7 @@ def main(args):
         assert isinstance(act_space, gym.spaces.Discrete), "only discrete action space is supported"
 
         if agent is None:
-            agent = Agent(obs_space, act_space, args.state).to(device)
+            agent = Agent(args, obs_space, act_space)
 
         agent = agent.to(device)
 
@@ -322,7 +316,6 @@ def main(args):
 
         # print("Agent state: %s" % asdict(agent.state))
 
-        optimizer = common.init_optimizer(args, agent, optimizer)
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
 
@@ -362,7 +355,7 @@ def main(args):
             rollout_start_step = agent.state.global_step
             map_rollouts += 1
 
-            optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
+            agent.optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
 
             if rollouts_total:
                 progress = rollout / rollouts_total
@@ -480,10 +473,10 @@ def main(args):
                     entropy_loss = entropy.mean()
                     loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
 
-                    optimizer.zero_grad()
+                    agent.optimizer.zero_grad()
                     loss.backward()
                     nn.utils.clip_grad_norm_(agent.NN.parameters(), args.max_grad_norm)
-                    optimizer.step()
+                    agent.optimizer.step()
 
                 if args.target_kl is not None and approx_kl > args.target_kl:
                     break
@@ -499,7 +492,7 @@ def main(args):
             rollout_net_value_queue_100.append(ep_value_mean)
             rollout_net_value_queue_1000.append(ep_value_mean)
 
-            wandb_log({"params/learning_rate": optimizer.param_groups[0]["lr"]})
+            wandb_log({"params/learning_rate": agent.optimizer.param_groups[0]["lr"]})
             wandb_log({"losses/total_loss": loss.item()})
             wandb_log({"losses/value_loss": v_loss.item()})
             wandb_log({"losses/policy_loss": pg_loss.item()})
@@ -567,10 +560,10 @@ def main(args):
                 envs.episode_count = 0
                 wandb_log({"global/num_timesteps": gs}, commit=True)  # commit on final log line
 
-            save_ts = common.maybe_save(save_ts, args, agent, AgentNN, optimizer, out_dir)
+            save_ts = common.maybe_save(save_ts, args, agent, out_dir)
 
     finally:
-        common.maybe_save(0, args, agent, AgentNN, optimizer, out_dir)
+        common.maybe_save(0, args, agent, out_dir)
         envs.close()
 
 

@@ -23,7 +23,7 @@ Custom-made libraries that "connect" VCMI with the gym env:
 ```bash
 $ sudo apt install pybind11-dev
 $ cd "$VCMI_GYM_DIR/envs/v0/connector"
-$ cmake --fresh -S . -B build -Wno-dev \
+$ cmake -S . -B build -Wno-dev \
     -D CMAKE_BUILD_TYPE=Debug \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=1
 

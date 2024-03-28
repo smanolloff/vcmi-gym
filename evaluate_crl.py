@@ -113,12 +113,7 @@ def evaluate_policy(agent, venv, episodes_per_env):
 def load_agent(agent_file, run_id):
     print("Loading agent from %s" % agent_file)
     agent = torch.load(agent_file)
-
-    args_file = "%s/args-%s" % (os.path.dirname(agent_file), os.path.basename(agent_file).removeprefix("agent-"))
-    print("Loading args from %s" % args_file)
-    args = torch.load(args_file)
-
-    assert args.run_id == run_id
+    assert agent.args.run_id == run_id
     return agent
 
 

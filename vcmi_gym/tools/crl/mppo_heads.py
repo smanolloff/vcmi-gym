@@ -536,7 +536,7 @@ class Agent(nn.Module):
 def main(args):
     assert isinstance(args, Args)
 
-    args = common.maybe_resume_args(args)
+    agent, args = common.maybe_resume(args)
 
     timesteps_per_rollout = args.num_steps * args.num_envs
 
@@ -551,10 +551,6 @@ def main(args):
         rollouts_per_mapchange = args.rollouts_per_mapchange
     else:
         rollouts_per_mapchange = args.timesteps_per_mapchange // timesteps_per_rollout
-
-    # Re-initialize to prevent errors from newly introduced args when loading/resuming
-    # TODO: handle removed args
-    args = Args(**vars(args))
 
     # Printing optimizer_state_dict is too much spam
     printargs = asdict(args).copy()
@@ -579,14 +575,14 @@ def main(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_ts = None
-    agent = None
     optimizer = None
     start_map_swaps = args.state.map_swaps
 
-    if args.agent_load_file:
+    if agent is None and args.agent_load_file:
         f = args.agent_load_file
         print("Loading agent from %s" % f)
-        agent = common.load(Agent, f)
+        agent = torch.load(f)
+        agent.args = args
         start_map_swaps = agent.state.map_swaps
 
         backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
@@ -634,7 +630,7 @@ def main(args):
 
         if args.resume:
             agent.state.resumes += 1
-            wandb_log({"global/resumes", agent.state.resumes})
+            wandb_log({"global/resumes": agent.state.resumes})
 
         # print("Agent state: %s" % asdict(agent.state))
 
