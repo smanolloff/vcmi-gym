@@ -23,17 +23,17 @@ import zipfile
 # relative to script dir
 MAP_DIR = "../gym/generated/88"
 # name template containing a single {id} token to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "88-7stack-{id:02d}"
+MAP_NAME_TEMPLATE = "88-3stack-20K-{id:02d}"
 # id of maps to generate (inclusive)
-MAP_ID_START = 2
-MAP_ID_END = 2
+MAP_ID_START = 5
+MAP_ID_END = 5
 
 ARMY_N_STACKS_SAME = True  # same for both sides
-ARMY_N_STACKS_MIN = 7
-ARMY_N_STACKS_MAX = 7
+ARMY_N_STACKS_MIN = 3
+ARMY_N_STACKS_MAX = 3
 
-ARMY_VALUE_MIN = 300_000
-ARMY_VALUE_MAX = 300_000
+ARMY_VALUE_MIN = 20_000
+ARMY_VALUE_MAX = 20_000
 
 # Round values for better descriptions
 ARMY_VALUE_ROUND = 1000
@@ -140,7 +140,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
     real_value = real_value or 1  # fix zero div error theres no army
     error = 1 - target_value/real_value
 
-    print("Army value: %d of %d (%.2f%%)" % (target_value, real_value, error*100))
+    print("Army value: %d of %d (%.2f%%)" % (real_value, target_value, error*100))
 
     if abs(error) > err_frac_max:
         # raise UnusedCreditError("Too much unused credit: %d (target value: %d)" % (credit, value))
@@ -149,10 +149,10 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         # Try adding 1 of the weakest creature to see if it gets us closer
         # (this will cause negative remaining credit => use abs)
         i, (vcminame, name, aivalue) = min(enumerate(creatures), key=lambda x: x[1][2])
-        real_value -= aivalue
+        real_value += aivalue
         real_value = real_value or 1  # fix zero div error theres no army
         error = 1 - target_value/real_value
-        print("Army value: %d of %d (%.2f%%)" % (target_value, real_value, error*100))
+        print("Army value: %d of %d (%.2f%%)" % (real_value, target_value, error*100))
 
         if abs(error) > err_frac_max:
             raise UnusedCreditError(f"Could not reach target value of {target_value}")

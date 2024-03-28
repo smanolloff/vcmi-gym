@@ -42,14 +42,12 @@ from mapgen import (
 )
 
 # Max value for (unused_credits / target_value)
-ARMY_VALUE_ERROR_MAX = 0.03
+ARMY_VALUE_ERROR_MAX = 0.01
 
 # Limit corrections to (1-clip, 1+clip) to avoid destructive updates
-# (None = auto)
-ARMY_VALUE_CORRECTION_CLIP = None
+ARMY_VALUE_CORRECTION_CLIP = 0.045
 
 # Change army composition if the current one does not allow for adjustment
-# (overriden to True if "-c" flag is given)
 ALLOW_ARMY_COMP_CHANGE = False
 
 
@@ -101,29 +99,20 @@ if __name__ == "__main__":
     winlist = list(j["wins"].values())
     mean_wins = np.mean(winlist)
     stddev = np.std(winlist)
-    stddev_frac = stddev / mean_wins
-    clip = ARMY_VALUE_CORRECTION_CLIP or (stddev_frac / 5)
+    stddev_percent = (stddev / mean_wins) * 100
 
-    print("Stats:\nmean_wins: %d\nstddev: %d (%.2f%%)\nCorrection clip: %.2f" % (
-        mean_wins,
-        stddev,
-        stddev_frac * 100,
-        clip
-    ))
+    print("Stats:\nmean_wins: %d\nstddev: %d (%.2f%%)" % (mean_wins, stddev, stddev_percent))
 
     if len(sys.argv) > 2:
-        for arg in sys.argv[2:]:
-            if arg in ["-a", "--analyze"]:
-                sys.exit(0)
-            elif arg in ["-c", "--change"]:
-                ALLOW_ARMY_COMP_CHANGE = True
-            else:
-                print("Unrecognized argument: %s" % arg)
-                sys.exit(1)
+        if sys.argv[2] in ["-a", "--analyze"]:
+            sys.exit(0)
+        else:
+            print("Unrecognized arguments: %s" % sys.argv[2:])
+            sys.exit(1)
 
     for (hero_name, hero_wins) in j["wins"].items():
         correction_factor = (log(mean_wins) / log(hero_wins))**1
-        correction_factor = np.clip(correction_factor, 1-clip, 1+clip)
+        correction_factor = np.clip(correction_factor, 1-ARMY_VALUE_CORRECTION_CLIP, 1+ARMY_VALUE_CORRECTION_CLIP)
 
         if abs(1 - correction_factor) <= ARMY_VALUE_ERROR_MAX:
             # nothing to correct

@@ -152,19 +152,25 @@ def create_venv(env_cls, args, map_swaps):
     return vec_env, map_offset
 
 
-def maybe_save(t, args, agent, out_dir):
+def maybe_save(t_save, t_permasave, args, agent, out_dir):
     now = time.time()
 
-    if t is None:
-        return now
+    if t_save or t_permasave is None:
+        return now, now
 
-    if t + args.save_every > now:
-        return t
+    if t_save + args.save_every > now:
+        return t_save
 
     os.makedirs(out_dir, exist_ok=True)
     agent_file = os.path.join(out_dir, "agent-%d.pt" % now)
     nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
-    save(agent, agent_file, nn_file)
+    save(agent, agent_file, nn_file=nn_file)
+    t_save = now
+
+    if t_permasave + args.save_every <= now:
+        permasave_file = os.path.join(out_dir, "agent-permasave-%d.pt" % now)
+        save(agent, permasave_file)
+        t_permasave = now
 
     # save file retention (keep latest N saves)
     for pattern in ["agent-[0-9]*.pt", "nn-[0-9]*.pt"]:
@@ -178,7 +184,7 @@ def maybe_save(t, args, agent, out_dir):
             print("Deleting %s" % file)
             os.remove(file)
 
-    return now
+    return t_save, t_permasave
 
 
 def find_latest_save(group_id, run_id):
@@ -362,7 +368,7 @@ def validate_tags(tags):
         assert tag in all_tags, f"Invalid tag: {tag}"
 
 
-def save(agent, agent_file, nn_file):
+def save(agent, agent_file, nn_file=None):
     attrs = ["args", "observation_space", "action_space", "optimizer", "state"]
     data = {k: agent.__dict__[k] for k in attrs}
     state_dict = agent.state_dict()
@@ -371,8 +377,9 @@ def save(agent, agent_file, nn_file):
     clean_agent.load_state_dict(state_dict, strict=True)
     torch.save(clean_agent, agent_file)
     print("Saved agent to %s" % agent_file)
-    # Save the NN state separately
-    # (loading the entire Agent model means torch.load will look for the Agent
-    #  module and will break if it has changed)
-    torch.save(agent.NN.state_dict(), nn_file)
-    print("Saved NN state to %s" % nn_file)
+
+    # Optionally, save the NN state separately
+    # Useful as it is decoupled from the Agent module (which changes often)
+    if nn_file:
+        torch.save(agent.NN.state_dict(), nn_file)
+        print("Saved NN state to %s" % nn_file)

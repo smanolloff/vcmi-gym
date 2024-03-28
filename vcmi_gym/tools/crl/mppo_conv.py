@@ -100,9 +100,10 @@ class Args:
     mapside: str = "both"
     mapmask: str = "ai/generated/B*.vmap"
     randomize_maps: bool = False
-    save_every: int = 3600  # seconds
+    permasave_every: int = 7200  # seconds; no retention
+    save_every: int = 3600  # seconds; retention (see max_saves)
     max_saves: int = 3
-    out_dir_template: str = "data/CRL_MPPO-{group_id}/{run_id}"
+    out_dir_template: str = "data/{group_id}/{run_id}"
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
@@ -263,6 +264,7 @@ def main(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_ts = None
+    permasave_ts = None
     agent = None
     start_map_swaps = 0
 
@@ -560,10 +562,10 @@ def main(args):
                 envs.episode_count = 0
                 wandb_log({"global/num_timesteps": gs}, commit=True)  # commit on final log line
 
-            save_ts = common.maybe_save(save_ts, args, agent, out_dir)
+            save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
 
     finally:
-        common.maybe_save(0, args, agent, out_dir)
+        common.maybe_save(0, 10e9, args, agent, out_dir)
         envs.close()
 
 
@@ -596,6 +598,7 @@ def debug_args():
         mapmask="gym/A1.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
+        backup_every=2000000000,  # greater than time.time()
         max_saves=0,
         out_dir_template="data/debug-crl/debug-crl",
         opponent_load_file=None,

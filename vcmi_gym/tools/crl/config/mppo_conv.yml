@@ -26,7 +26,8 @@ quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
 mapmask: "gym/generated/88/88-3stack-01.vmap"
 randomize_maps: false
-save_every: 3600  # seconds
+save_every: 1200  # seconds
+backup_every: 7200  # seconds
 max_saves: 3
 out_dir_template: "data/{group_id}/{run_id}"
 
