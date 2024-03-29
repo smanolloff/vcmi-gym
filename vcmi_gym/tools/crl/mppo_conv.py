@@ -131,9 +131,6 @@ class Args:
     max_grad_norm: float = 0.5
     target_kl: float = None
 
-    # {"DEFEND": [1,0,0], "WAIT": [1,0,0], ...}
-    loss_weights: dict = field(default_factory=dict)
-
     logparams: dict = field(default_factory=dict)
     cfg_file: Optional[str] = None
     seed: int = 42
@@ -144,15 +141,6 @@ class Args:
     network: NetworkArgs = NetworkArgs()
 
     def __post_init__(self):
-        if not self.loss_weights:
-            self.loss_weights = dict(
-                DEFEND=[1, 0, 0],
-                WAIT=[1, 0, 0],
-                SHOOT=[0.5, 0.5, 0],
-                MOVE=[0.5, 0.5, 0],
-                AMOVE=[0.33, 0.33, 0.34],
-            )
-
         if not isinstance(self.env, EnvArgs):
             self.env = EnvArgs(**self.env)
         if not isinstance(self.lr_schedule, ScheduleArgs):
@@ -630,13 +618,6 @@ def debug_args():
         vf_coef=1.2,
         max_grad_norm=0.5,
         target_kl=None,
-        loss_weights={
-            "DEFEND": [1, 0, 0],
-            "WAIT": [1, 0, 0],
-            "SHOOT": [0.5, 0.5, 0],
-            "MOVE": [0.5, 0.5, 0],
-            "AMOVE": [0.33, 0.33, 0.34],
-        },
         logparams={},
         cfg_file=None,
         seed=42,
