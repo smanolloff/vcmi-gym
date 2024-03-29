@@ -155,11 +155,15 @@ def create_venv(env_cls, args, map_swaps):
 def maybe_save(t_save, t_permasave, args, agent, out_dir):
     now = time.time()
 
-    if t_save or t_permasave is None:
+    # Used in cases of some sweeps with hundreds of short-lived agents
+    if os.environ.get("NO_SAVE", "false") == "true":
+        return now, now
+
+    if t_save is None or t_permasave is None:
         return now, now
 
     if t_save + args.save_every > now:
-        return t_save
+        return t_save, t_permasave
 
     os.makedirs(out_dir, exist_ok=True)
     agent_file = os.path.join(out_dir, "agent-%d.pt" % now)

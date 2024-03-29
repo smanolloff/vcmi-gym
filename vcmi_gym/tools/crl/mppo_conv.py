@@ -607,7 +607,7 @@ def debug_args():
         mapmask="gym/A1.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
-        backup_every=2000000000,  # greater than time.time()
+        permasave_every=2000000000,  # greater than time.time()
         max_saves=0,
         out_dir_template="data/debug-crl/debug-crl",
         opponent_load_file=None,

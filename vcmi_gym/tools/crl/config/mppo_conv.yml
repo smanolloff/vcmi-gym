@@ -1,6 +1,6 @@
 ---
-group_id: nth-random
-run_name: "[C] n=50"
+group_id: hybrids
+run_name: "[C] tiny"
 tags: ["Classic", "Map-3stack-01"]
 
 wandb_project: vcmi-gym
@@ -27,7 +27,7 @@ mapside: "attacker"  # attacker/defender/both
 mapmask: "gym/generated/88/88-3stack-01.vmap"
 randomize_maps: false
 save_every: 1200  # seconds
-backup_every: 7200  # seconds
+permasave_every: 7200  # seconds
 max_saves: 3
 out_dir_template: "data/{group_id}/{run_id}"
 
@@ -43,16 +43,17 @@ num_envs: 1
 network:
   features_extractor:
     # => (B, 1, 11, 840)
-    - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 56], stride: [1, 56], padding: 0}
+    - {t: "Conv2d", in_channels: 1, out_channels: 16, kernel_size: [1, 56], stride: [1, 56], padding: 0}
     - {t: "LeakyReLU"}
-    # => (B, 32, 11, 15)
+    - {t: "BatchNorm2d", num_features: 16}
+    # => (B, 16, 11, 15)
     - {t: "Flatten"}
-    # => (B, 5280)
-    - {t: "Linear", in_features: 5280, out_features: 1024}
+    # => (B, 2640)
+    - {t: "Linear", in_features: 2640, out_features: 64}
     - {t: "LeakyReLU"}
-    # => (B, 1024)
-  actor: {t: "Linear", in_features: 1024, out_features: 2311}
-  critic: {t: "Linear", in_features: 1024, out_features: 1}
+    # => (B, 64)
+  actor: {t: "Linear", in_features: 64, out_features: 2311}
+  critic: {t: "Linear", in_features: 64, out_features: 1}
 
 #
 # PPO Hyperparams
@@ -79,7 +80,7 @@ env:
   term_reward_mult: 0
   reward_clip_tanh_army_frac: 1
   reward_army_value_ref: 500
-  random_combat: 50
+  random_combat: 1
 
 env_wrappers: []
 logparams: {}

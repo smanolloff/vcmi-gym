@@ -20,18 +20,12 @@ import wandb
 import datetime
 import os
 import sys
-import signal
 import itertools
 import numpy as np
 import time
 import torch
 
 import vcmi_gym
-
-
-def handle_signal(signum, frame):
-    print("*** [evaluator.py] received signal %s ***" % signum)
-    sys.exit(0)
 
 
 def evaluate_policy(agent, venv, episodes_per_env):
@@ -115,7 +109,7 @@ def evaluate_policy(agent, venv, episodes_per_env):
 
 
 def load_agent(agent_file, run_id):
-    print("Loading agent from %s" % agent_file)
+    # print("Loading agent from %s" % agent_file)
     agent = torch.load(agent_file)
     assert agent.args.run_id == run_id
     return agent
@@ -135,7 +129,7 @@ def create_venv(env_cls, mapname, role, opponent):
         )
 
         env_kwargs[role] = "MMAI_USER"
-        print("Env kwargs: %s" % env_kwargs)
+        # print("Env kwargs: %s" % env_kwargs)
         return env_cls(**env_kwargs)
 
     vec_env = gym.vector.SyncVectorEnv([env_creator])
@@ -182,7 +176,7 @@ def wandb_log(*args, **kwargs):
 
 
 if __name__ == "__main__":
-    signal.signal(signal.SIGTERM, handle_signal)
+    os.environ["WANDB_SILENT"] = "true"
 
     # prevent warnings for action_masks method
     env_cls = vcmi_gym.VcmiEnv
