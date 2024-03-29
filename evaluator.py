@@ -24,6 +24,8 @@ import itertools
 import numpy as np
 import time
 import torch
+import logging
+import traceback
 
 import vcmi_gym
 
@@ -109,7 +111,7 @@ def evaluate_policy(agent, venv, episodes_per_env):
 
 
 def load_agent(agent_file, run_id):
-    # print("Loading agent from %s" % agent_file)
+    # logging.debug("Loading agent from %s" % agent_file)
     agent = torch.load(agent_file)
     assert agent.args.run_id == run_id
     return agent
@@ -129,30 +131,24 @@ def create_venv(env_cls, mapname, role, opponent):
         )
 
         env_kwargs[role] = "MMAI_USER"
-        # print("Env kwargs: %s" % env_kwargs)
+        # logging.debug("Env kwargs: %s" % env_kwargs)
         return env_cls(**env_kwargs)
 
     vec_env = gym.vector.SyncVectorEnv([env_creator])
     return gym.wrappers.RecordEpisodeStatistics(vec_env)
 
 
-def wandb_init(id, group):
+def wandb_init(run):
     wandb.init(
         project="vcmi-gym",
-        group=group,
-        name=id,
-        id=id,
+        group="evaluator",
+        name=f"(E) {run.name}",
+        id=f"eval-{run_id}",
         resume="allow",
         reinit=True,
         sync_tensorboard=False,  # no tensorboard during eval
         save_code=False,  # code saved manually below
         settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
-    )
-
-    # https://docs.wandb.ai/ref/python/run#log_code
-    wandb.run.log_code(
-        root=os.path.dirname(__file__),
-        include_fn=lambda path: path.endswith(os.path.basename(__file__))
     )
 
 
@@ -171,12 +167,21 @@ def find_agents():
 # For wandb.log, commit=True by default
 # for wandb_log, commit=False by default
 def wandb_log(*args, **kwargs):
-    # print("wandb.log: %s %s" % (args, kwargs))
+    # logging.debug("wandb.log: %s %s" % (args, kwargs))
     wandb.log(*args, **dict({"commit": False}, **kwargs))
 
 
 if __name__ == "__main__":
     os.environ["WANDB_SILENT"] = "true"
+
+    # Logger
+    formatter = logging.Formatter("-- %(asctime)s %(levelname)s: %(message)s")
+    formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
+    formatter.default_msec_format = None
+    loghandler = logging.StreamHandler()
+    loghandler.setLevel(logging.DEBUG)
+    loghandler.setFormatter(formatter)
+    logging.basicConfig(level=logging.INFO, handlers=[loghandler])
 
     # prevent warnings for action_masks method
     env_cls = vcmi_gym.VcmiEnv
@@ -185,6 +190,7 @@ if __name__ == "__main__":
     run_id = None
     agent_load_file = None
     once = False
+    api = wandb.Api()
 
     if len(sys.argv) == 3:
         run_id = sys.argv[1]
@@ -202,16 +208,26 @@ if __name__ == "__main__":
             # Discard "evaluated" agents which are no longer candidates
             evaluated = [x for x in evaluated if x in agents.values()]
 
-            print("Agents: %s\nEvaluated: %s" % (agents, evaluated))
+            logging.debug("Agents: %s\nEvaluated: %s" % (agents, evaluated))
 
             for run_id, agent_load_file in agents.items():
                 if agent_load_file in evaluated:
-                    print("Skip agent: %s (already evaluated)" % (agent_load_file))
+                    logging.debug("Skip agent: %s (already evaluated)" % (agent_load_file))
                     continue
 
-                print("*** Evaluating agent %s" % agent_load_file)
+                logging.info('Evaluating %s' % (agent_load_file))
+
+                try:
+                    run = api.run(f"s-manolloff/vcmi-gym/{run_id}")
+                except Exception as e:
+                    logging.warning("\n".join(traceback.format_exception_only(e)))
+                    continue
+
+                assert run.id == run_id
+
                 agent = load_agent(agent_file=agent_load_file, run_id=run_id)
-                wandb_init(id=f"eval-{run_id}", group="evaluator")
+                wandb_init(run)
+
                 wandb_log({"evaluator/busy": 0}, commit=True)
                 wandb_log({"agent/num_timesteps": agent.state.global_step})
                 wandb_log({"agent/num_rollouts": agent.state.global_rollout})
@@ -245,13 +261,14 @@ if __name__ == "__main__":
 
                         venv.close()
 
-                        print("%s/%s: reward=%d length=%d net_value=%d is_success=%.2f (%.2fs)" % (
+                        print("%-25s %-10s %-8s reward=%-6d net_value=%-6d is_success=%-6.2f length=%-3d (%.2fs)" % (
+                            run.name,
                             vmap,
                             opponent,
-                            np.mean(ep_results["rewards"]),
-                            np.mean(ep_results["lengths"]),
-                            np.mean(ep_results["net_values"]),
-                            np.mean(ep_results["is_successes"]),
+                            np.mean(rewards[vmap]),
+                            np.mean(net_values[vmap]),
+                            np.mean(is_successes[vmap]),
+                            np.mean(lengths[vmap]),
                             time.time() - tstart
                         ))
 
@@ -260,13 +277,13 @@ if __name__ == "__main__":
                     wandb_log({f"map/{vmap}/net_value": np.mean(net_values[vmap])})
                     wandb_log({f"map/{vmap}/is_success": np.mean(is_successes[vmap])})
 
-                    print("%s: reward=%d length=%d net_value=%d is_success=%.2f" % (
-                        vmap,
-                        np.mean(rewards[vmap]),
-                        np.mean(lengths[vmap]),
-                        np.mean(net_values[vmap]),
-                        np.mean(is_successes[vmap]),
-                    ))
+                    # print("%-20s %-20s reward=%-6d net_value=%-6d is_success=%-6.2f length=%-3d" % (
+                    #     vmap,
+                    #     np.mean(rewards[vmap]),
+                    #     np.mean(net_values[vmap]),
+                    #     np.mean(is_successes[vmap]),
+                    #     np.mean(lengths[vmap]),
+                    # ))
 
                 # no need to flatten lists, they are all the same lengths so np.mean just works
                 wandb_log({"opponent/StupidAI/reward": np.mean(rewards["StupidAI"])})
@@ -285,13 +302,13 @@ if __name__ == "__main__":
                 wandb_log({"all/is_success": np.mean(is_successes["StupidAI"] + is_successes["BattleAI"])}, commit=True)
                 # ^^^^^^^ commit here
 
-                print("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
-                    run_id,
-                    np.mean(rewards["StupidAI"] + rewards["BattleAI"]),
-                    np.mean(lengths["StupidAI"] + lengths["BattleAI"]),
-                    np.mean(net_values["StupidAI"] + net_values["BattleAI"]),
-                    np.mean(is_successes["StupidAI"] + is_successes["BattleAI"]),
-                ))
+                # logging.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
+                #     run_id,
+                #     np.mean(rewards["StupidAI"] + rewards["BattleAI"]),
+                #     np.mean(lengths["StupidAI"] + lengths["BattleAI"]),
+                #     np.mean(net_values["StupidAI"] + net_values["BattleAI"]),
+                #     np.mean(is_successes["StupidAI"] + is_successes["BattleAI"]),
+                # ))
 
                 evaluated.append(agent_load_file)
 
@@ -303,7 +320,7 @@ if __name__ == "__main__":
             if once:
                 break
 
-            print("Sleeping 300s...")
+            logging.debug("Sleeping 300s...")
             time.sleep(30)
     finally:
         if venv:

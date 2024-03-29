@@ -188,21 +188,33 @@ class AgentNN(nn.Module):
     def get_value(self, x):
         return self.critic(self.features_extractor(x))
 
-    def get_action_and_value(self, x, mask, action=None):
+    def get_action_and_value(self, x, mask, action=None, deterministic=False):
         features = self.features_extractor(x)
         value = self.critic(features)
         action_logits = self.actor(features)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
-            action = dist.sample()
+            if deterministic:
+                action = torch.argmax(dist.probs, dim=1)
+            else:
+                action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), value
 
     # Inference (deterministic)
-    def predict(self, x, mask):
+    def predict(self, b_obs, b_mask):
         with torch.no_grad():
-            logits = self.actor(self.features_extractor(x))
-            dist = common.CategoricalMasked(logits=logits, mask=mask)
-            return torch.argmax(dist.probs, dim=1).cpu().numpy()
+            b_obs = torch.as_tensor(b_obs).cpu()
+            b_mask = torch.as_tensor(b_mask).cpu()
+
+            # Return unbatched action if input was unbatched
+            if b_obs.shape == self.observation_space.shape:
+                b_obs = b_obs.unsqueeze(dim=0)
+                b_mask = b_mask.unsqueeze(dim=0)
+                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                return b_env_action[0].cpu().item()
+            else:
+                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                return b_env_action.cpu().numpy()
 
 
 class Agent(nn.Module):

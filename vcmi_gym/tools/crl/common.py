@@ -171,7 +171,7 @@ def maybe_save(t_save, t_permasave, args, agent, out_dir):
     save(agent, agent_file, nn_file=nn_file)
     t_save = now
 
-    if t_permasave + args.save_every <= now:
+    if t_permasave + args.permasave_every <= now:
         permasave_file = os.path.join(out_dir, "agent-permasave-%d.pt" % now)
         save(agent, permasave_file)
         t_permasave = now
@@ -258,8 +258,10 @@ def maybe_resume(args):
     #      Re-initializing it to the *new* Args will:
     #      * allow to assign newly introduced fields
     #      * (FIXME) blow up for dropped fields
+    #
+    # # TMP fix for dropped fields
     # a = vars(agent.args)
-    # a = {k: v for (k, v) in a.items() if k != "state"}
+    # a = {k: v for (k, v) in a.items() if k != "loss_weights"}
     # agent.args = args.__class__(**a)
     agent.args = args.__class__(**vars(agent.args))
 
