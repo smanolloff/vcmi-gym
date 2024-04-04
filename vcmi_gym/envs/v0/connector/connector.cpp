@@ -200,7 +200,7 @@ const P_Result Connector::start() {
         defender,
         attackerModel,
         defenderModel,
-        false,
+        0,
         true  // VCMI GUI requires main thread (where SDL loop runs forever)
     );
 

@@ -23,17 +23,17 @@ import zipfile
 # relative to script dir
 MAP_DIR = "../gym/generated/88"
 # name template containing a single {id} token to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "88-3stack-20K-{id:02d}"
+MAP_NAME_TEMPLATE = "88-7stack-300K-{id:02d}"
 # id of maps to generate (inclusive)
-MAP_ID_START = 5
-MAP_ID_END = 5
+MAP_ID_START = 2
+MAP_ID_END = 2
 
 ARMY_N_STACKS_SAME = True  # same for both sides
 ARMY_N_STACKS_MIN = 3
 ARMY_N_STACKS_MAX = 3
 
-ARMY_VALUE_MIN = 20_000
-ARMY_VALUE_MAX = 20_000
+ARMY_VALUE_MIN = 300_000
+ARMY_VALUE_MAX = 300_000
 
 STACK_QTY_MAX = 1023
 

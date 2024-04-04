@@ -24,6 +24,25 @@
 #
 # ("map" is absolute or relative to "<script_dir>/..")
 # rebalance the value of each hero's army with respect to the winrate.
+#
+# Script also supports STDIN, can be used to continuously rebalance a map
+# like so (fish shell):
+#
+# for i in (seq 5)
+#   $VCMI/rel/bin/myclient-headless --gymdir $VCMIGYM \
+#       --map gym/generated/88/88-7stack-300K-00.vmap --loglevel-ai error \
+#       --loglevel-global error --attacker-ai StupidAI --defender-ai StupidAI \
+#       --random-combat 1 --map-eval 10000 | python maps/mapgen/rebalance.py -
+#
+#   if test $status -ne 0
+#       # means no more optimization to do or a script error
+#       break
+#   end
+# end
+#
+# Note VCMI terminates rather abruptly (exit(0) from a non-main thread), so
+# there will be occasional error messages, but a loop here takes care for that.
+
 
 import os
 import zipfile
@@ -94,7 +113,22 @@ def backup(path):
 
 
 if __name__ == "__main__":
-    j = json.loads(sys.argv[1])
+    j = None
+    if (sys.argv[1] == "-"):
+        print("Waiting for stdin...")
+        try:
+            j = input()
+            print("Got json: %s" % j)
+            j = json.loads(j)
+        except EOFError:
+            pass
+    else:
+        j = json.loads(sys.argv[1])
+
+    if j is None:
+        print("Failed to read stdin")
+        sys.exit(0)
+
     path, (header, objects, surface_terrain) = load(j["map"])
     creatures_dict = {vcminame: (name, value) for (vcminame, name, value) in get_all_creatures()}
 
@@ -121,8 +155,10 @@ if __name__ == "__main__":
                 print("Unrecognized argument: %s" % arg)
                 sys.exit(1)
 
+    changed = False
+
     for (hero_name, hero_wins) in j["wins"].items():
-        correction_factor = (log(mean_wins) / log(hero_wins))**1
+        correction_factor = (log(mean_wins) / log(hero_wins or 2))**1
         correction_factor = np.clip(correction_factor, 1-clip, 1+clip)
 
         if abs(1 - correction_factor) <= ARMY_VALUE_ERROR_MAX:
@@ -172,5 +208,9 @@ if __name__ == "__main__":
         for (slot, (vcminame, _, number)) in enumerate(new_army):
             objects[hero_name]["options"]["army"][slot] = dict(amount=number, type=f"core:{vcminame}")
 
-    backup(path)
-    save(path, header, objects, surface_terrain)
+    if not changed:
+        print("Nothing to do.")
+        sys.exit(1)
+    else:
+        backup(path)
+        save(path, header, objects, surface_terrain)
