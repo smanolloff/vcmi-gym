@@ -11,10 +11,10 @@ parameters:
     parameters:
       module: { value: "mppo_conv" }
 
-  tags: { value: ["Classic", "Map-3stack-01"] }
+  tags: { value: ["Classic", "Map-7stack-01", "StupidAI", "no-eval"] }
 
-  agent_load_file: { value: ~ }
-  timesteps_total: { value: 100_000 }  # mandatory for sweep!
+  agent_load_file: { value: "data/hybrids/sp6iid0m/agent-permasave-1711733837.pt" }
+  timesteps_total: { value: 1_000_000 }  # mandatory for sweep!
   timesteps_per_mapchange: { value: 0 }
   rollouts_total: { value: 0 }
   rollouts_per_mapchange: { value: 0 }
@@ -24,10 +24,10 @@ parameters:
   ep_rew_mean_target: { value: 0 }
   quit_on_target: { value: true }
   mapside: { value: "attacker" }
-  mapmask: { value: "gym/generated/88/88-3stack-01.vmap" }
+  mapmask: { value: "gym/generated/88/88-7stack-01.vmap" }
   save_every: { value: 3600 } # seconds  # XXX: run sweeps with NO_SAVE=true
-  permasave_every: { value: 7200 } # seconds  # XXX: run sweeps with NO_SAVE=true
-  max_saves: { value: 3 }
+  permasave_every: { value: 2e9 } # seconds  # XXX: run sweeps with NO_SAVE=true
+  max_saves: { value: 2 }
   out_dir_template: { value: "data/{group_id}/{run_id}" }
   num_envs: { value: 1 }
 
@@ -35,43 +35,42 @@ parameters:
   # (to prevent line stacking and decoloring)
   # https://docs.wandb.ai/guides/sweeps/sweep-config-keys#distribution-options-for-random-and-bayesian-search
 
-  # clip_coef: { value: 0.2 }
-  clip_coef: { distribution: "uniform", min: 0.05, max: 0.5 }
-  clip_vloss: { value: false }
-  ent_coef: { value: 0.01 }
-  gae_lambda: { distribution: "uniform", min: 0.5, max: 0.99 }
-  gamma: { distribution: "uniform", min: 0.5, max: 0.99 }
+  clip_coef: { distribution: "uniform", min: 0.1, max: 0.99 }
+  clip_vloss: { values: [false, true] }
+  ent_coef: { distribution: "inv_log_uniform_values", max: 0.1, min: 0.001 }
+  gae_lambda: { value: 0.9325 }
+  gamma: { value: 0.95 }
 
   lr_schedule:
     parameters:
       mode: { value: "const" }
-      start: { distribution: "inv_log_uniform_values", max: 1.0e-4, min: 1.0e-6 }
+      start: { value: 1.0e-5 }
+      # start: { distribution: "inv_log_uniform_values", max: 1.0e-4, min: 1.0e-6 }
 
-  max_grad_norm: { distribution: "uniform", min: 0.1, max: 10 }
-  norm_adv: { value: true }
-  num_minibatches: { value: 8 }
-  # num_steps: { value: 64 }
-  num_steps: { distribution: "q_uniform", q: 8, min: 16, max: 256 }
+  max_grad_norm: { distribution: "uniform", min: 0.2, max: 5 }
+  norm_adv: { values: [false, true] }
+  num_minibatches: { value: 2 }
+  num_steps: { value: 64 }
   stats_buffer_size: { value: 100 }
-  update_epochs: { distribution: "int_uniform", min: 10, max: 50 }
-  vf_coef: { distribution: "uniform", min: 0.1, max: 1.5 }
-  weight_decay: { value: 0 }
+  update_epochs: { value: 12 }
+  vf_coef: { distribution: "uniform", min: 0.2, max: 2 }
+  weight_decay: { distribution: "inv_log_uniform_values", max: 0.5, min: 0.001 }
 
   network:
     value:
       features_extractor:
         # => (B, 1, 11, 840)
-        - {t: "Conv2d", in_channels: 1, out_channels: 16, kernel_size: [1, 56], stride: [1, 56], padding: 0}
+        - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 56], stride: [1, 56], padding: 0}
         - {t: "LeakyReLU"}
-        - {t: "BatchNorm2d", num_features: 16}
+        - {t: "BatchNorm2d", num_features: 32}
         # => (B, 16, 11, 15)
         - {t: "Flatten"}
         # => (B, 2640)
-        - {t: "Linear", in_features: 2640, out_features: 64}
+        - {t: "Linear", in_features: 5280, out_features: 1024}
         - {t: "LeakyReLU"}
-        # => (B, 64)
-      actor: {t: "Linear", in_features: 64, out_features: 2311}
-      critic: {t: "Linear", in_features: 64, out_features: 1}
+        # => (B, 1024)
+      actor: {t: "Linear", in_features: 1024, out_features: 2311}
+      critic: {t: "Linear", in_features: 1024, out_features: 1}
 
   opponent_sbm_probs:
     value:

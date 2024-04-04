@@ -215,15 +215,22 @@ if __name__ == "__main__":
                     logging.debug("Skip agent: %s (already evaluated)" % (agent_load_file))
                     continue
 
-                logging.info('Evaluating %s' % (agent_load_file))
+                logging.debug('Evaluating %s' % (agent_load_file))
 
                 try:
                     run = api.run(f"s-manolloff/vcmi-gym/{run_id}")
                 except Exception as e:
-                    logging.warning("\n".join(traceback.format_exception_only(e)))
+                    logging.warning("Error while evaluating %s: %s", (
+                        agent_load_file,
+                        "\n".join(traceback.format_exception_only(e))
+                    ))
                     continue
 
                 assert run.id == run_id
+
+                if "no-eval" in run.tags:
+                    logging.debug('Skip %s' % (agent_load_file))
+                    continue
 
                 agent = load_agent(agent_file=agent_load_file, run_id=run_id)
                 wandb_init(run)

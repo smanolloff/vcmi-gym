@@ -1,7 +1,7 @@
 ---
-group_id: hybrids
-run_name: "[C] BN 7stack vs BattleAI"
-tags: ["Classic", "Map-7stack-01", "BattleAI"]
+group_id: stalled
+run_name: "[C] from edm5538z"
+tags: ["Classic", "Map-7stack-01", "StupidAI"]
 
 wandb_project: vcmi-gym
 run_id: ~
@@ -11,8 +11,8 @@ overwrite: []
 
 notes: ""
 
-# agent_load_file: ~
-agent_load_file: "data/hybrids/sp6iid0m/agent-1711696825.pt"
+agent_load_file: ~
+# agent_load_file: "data/sweeps/utfvzqho/agent-1711826518.pt"
 rollouts_total: 0
 timesteps_total: 0  # exp_decay requires timesteps_total
 timesteps_per_mapchange: 0
@@ -32,7 +32,7 @@ max_saves: 3
 out_dir_template: "data/{group_id}/{run_id}"
 
 # SBM = StupidAI, BattleAI, MMAI_MODEL
-opponent_sbm_probs: [0, 1, 0]
+opponent_sbm_probs: [1, 0, 0]
 opponent_load_file: ~
 
 # XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
@@ -43,34 +43,34 @@ num_envs: 1
 network:
   features_extractor:
     # => (B, 1, 11, 840)
-    - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 56], stride: [1, 56], padding: 0}
+    - {t: "Conv2d", in_channels: 1, out_channels: 16, kernel_size: [1, 56], stride: [1, 56], padding: 0}
     - {t: "LeakyReLU"}
-    - {t: "BatchNorm2d", num_features: 32}
+    - {t: "BatchNorm2d", num_features: 16}
     # => (B, 16, 11, 15)
     - {t: "Flatten"}
     # => (B, 2640)
-    - {t: "Linear", in_features: 5280, out_features: 1024}
+    - {t: "Linear", in_features: 2640, out_features: 64}
     - {t: "LeakyReLU"}
-    # => (B, 1024)
-  actor: {t: "Linear", in_features: 1024, out_features: 2311}
-  critic: {t: "Linear", in_features: 1024, out_features: 1}
+    # => (B, 64)
+  actor: {t: "Linear", in_features: 64, out_features: 2311}
+  critic: {t: "Linear", in_features: 64, out_features: 1}
 
 #
 # PPO Hyperparams
 #
 
-clip_coef: 0.4
+clip_coef: 0.191
 clip_vloss: false
-ent_coef: 0.007
-gae_lambda: 0.8
-gamma: 0.8425
-lr_schedule: { mode: const, start: 1.0e-5, end: 1.0e-5, rate: 10 }
-max_grad_norm: 0.5
+ent_coef: 0.01
+gae_lambda: 0.756
+gamma: 0.53
+lr_schedule: { mode: const, start: 0.00001578, end: 1.0e-5, rate: 10 }
+max_grad_norm: 5.88
 norm_adv: true
-num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches
-num_steps: 128       # rollout_buffer = num_steps*num_envs
-update_epochs: 10    # full passes of rollout_buffer
-vf_coef: 1.2
+num_minibatches: 8   # minibatch_size = rollout_buffer/num_minibatches
+num_steps: 216       # rollout_buffer = num_steps*num_envs
+update_epochs: 42    # full passes of rollout_buffer
+vf_coef: 1.1
 weight_decay: 0
 
 env:

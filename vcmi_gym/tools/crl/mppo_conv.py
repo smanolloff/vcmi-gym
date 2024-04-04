@@ -21,7 +21,7 @@ import random
 import time
 import shutil
 from dataclasses import dataclass, field, asdict
-from typing import Optional, List
+from typing import Optional
 from collections import deque
 
 import gymnasium as gym
@@ -283,6 +283,8 @@ def main(args):
         agent = torch.load(f)
         agent.args = args
         start_map_swaps = agent.state.map_swaps
+        if rollouts_total > 0:
+            rollouts_total += agent.state.global_rollout
 
         backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
         with open(f, 'rb') as fsrc:

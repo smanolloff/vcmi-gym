@@ -26,3 +26,6 @@
 # Opponents
 - StupidAI
 - BattleAI
+
+# Prevent evaluator from picking those up
+- no-eval

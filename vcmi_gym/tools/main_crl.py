@@ -46,6 +46,9 @@ def run(action, cfg, group_id, run_id, resume, cfgpath):
 
     os.environ["WANDB_SILENT"] = "true"
 
+    if os.environ.get("NO_WANDB", "false") == "true":
+        cfg["wandb_project"] = None
+
     if group_id is not None:
         cfg["group_id"] = group_id
 
