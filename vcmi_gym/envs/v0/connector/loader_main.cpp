@@ -18,6 +18,7 @@
 #include <dlfcn.h>
 
 #include "loader.h"
+#include "mmai_export.h"
 
 int main() {
     void* handle = dlopen("build/libloader.dylib", RTLD_LAZY);
@@ -55,19 +56,22 @@ int main() {
     auto modelpath = "data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip";
     f_init(gympath, modelpath);
 
+    auto stateUnencoded = MMAI::Export::StateUnencoded{};
     auto state = MMAI::Export::State{};
 
+    for (int i=0; i<165; i++)
+        for (int i=0; i<static_cast<int>(MMAI::Export::Attribute::_count); i++)
+        stateUnencoded.at(i) = MMAI::Export::OneHot(MMAI::Export::Attribute(i));
+
     for (int i=0; i<state.size(); i++)
-        state[i] = MMAI::Export::NValue(i, 0, state.size()-1);
+        state[i] = 0;
 
     auto actmask = MMAI::Export::ActMask{};
     for (int i=0; i < actmask.size(); i++) {
         actmask[i] = (i % 2 == 0);
     }
 
-    auto result = MMAI::Export::Result(state, actmask, MMAI::Export::Side(0), 0, 0, 0, 0, 0, 0, 0, 0);
-    printf("IN MAIN: GOT ACTION: %d\n", f_getAction(&result));
-    printf("IN MAIN: GOT ACTION: %d\n", f_getAction(&result));
+    auto result = MMAI::Export::Result(stateUnencoded, state, actmask, MMAI::Export::Side(0), 0, 0, 0, 0, 0, 0, 0, 0);
     printf("IN MAIN: GOT ACTION: %d\n", f_getAction(&result));
     return 0;
 }

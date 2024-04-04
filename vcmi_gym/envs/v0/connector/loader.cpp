@@ -123,11 +123,11 @@ MMAI::Export::Action getAction(MMAI::Export::Side side, const MMAI::Export::Resu
         auto ps = P_State(r->state.size());
         auto psmd = ps.mutable_data();
         for (int i=0; i < r->state.size(); i++) {
-            if (r->state[i].norm > 1 || r->state[i].norm < 0) {
-                printf("Bad state[%d]: %f\n", i, r->state[i].norm);
+            if (r->state[i] != 0 || r->state[i] != 1 && r->state[i] != MMAI::Export::STATE_VALUE_NA) {
+                printf("Bad state[%d]: %d\n", i, r->state[i]);
             }
 
-            psmd[i] = r->state[i].norm;
+            psmd[i] = r->state[i];
         }
 
         auto pam = P_ActMask(r->actmask.size());

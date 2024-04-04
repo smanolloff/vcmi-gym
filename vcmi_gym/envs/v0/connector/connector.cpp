@@ -50,7 +50,7 @@ const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
     auto ps = P_State(r->state.size());
     auto psmd = ps.mutable_data();
     for (int i=0; i < r->state.size(); i++)
-        psmd[i] = r->state[i].norm;
+        psmd[i] = r->state[i];
 
     auto pam = P_ActMask(r->actmask.size());
     auto pammd = pam.mutable_data();

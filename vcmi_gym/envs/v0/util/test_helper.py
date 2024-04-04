@@ -17,7 +17,7 @@
 from .pyconnector import (
     N_NONHEX_ACTIONS,
     N_HEX_ACTIONS,
-    N_HEX_ATTRS,
+    STATE_SIZE_ONE_HEX,
 )
 
 
@@ -75,6 +75,7 @@ class TestHelper:
         #
         for y in range(11):
             for x in range(15):
+                raise Exception("Not implemented: after migration to one-hot obs")
                 i = x * N_HEX_ATTRS
                 hex = self.obs[0][y][i:i+N_HEX_ATTRS]
                 side = hex[12]

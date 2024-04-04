@@ -35,6 +35,8 @@ ARMY_N_STACKS_MAX = 3
 ARMY_VALUE_MIN = 20_000
 ARMY_VALUE_MAX = 20_000
 
+STACK_QTY_MAX = 1023
+
 # Round values for better descriptions
 ARMY_VALUE_ROUND = 1000
 
@@ -116,7 +118,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         number = int(per_stack / aivalue)
         if number == 0:
             continue
-        elif number > 5000:
+        elif number > STACK_QTY_MAX:
             raise StackTooBigError("Stack too big: %s: %d" % (name, number))
         credit -= number * aivalue
         army[i] = (vcminame, name, number)
@@ -127,7 +129,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
             number = int(min(credit, per_stack) / aivalue)
             if number == 0:
                 continue
-            elif number > 5000:
+            elif number > STACK_QTY_MAX:
                 raise StackTooBigError("Stack too big: %s: %d" % (name, number))
             credit -= number * aivalue
             assert army[i] is not None

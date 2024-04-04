@@ -22,13 +22,9 @@ from .util import log
 from .util.analyzer import Analyzer, ActionType
 from .util.pyconnector import (
     PyConnector,
-    STATE_SIZE_X,
-    STATE_SIZE_Y,
-    STATE_SIZE_Z,
-    N_HEX_ATTRS,
+    STATE_VALUE_NA,
+    STATE_SIZE_ONE_HEX,
     N_ACTIONS,
-    NV_MAX,
-    NV_MIN
 )
 
 
@@ -101,7 +97,6 @@ class VcmiEnv(gym.Env):
         user_timeout=0,  # seconds
         vcmi_timeout=5,  # seconds
         boot_timeout=0,  # seconds
-        hexattr_filter=None,
         reward_dmg_factor=5,
         reward_clip_tanh_army_frac=1,  # max action reward relative to starting army value
         reward_army_value_ref=0,  # scale rewards relative to starting army value (0=no scaling)
@@ -139,27 +134,12 @@ class VcmiEnv(gym.Env):
         #       => just start from 0, reduce max by 1, and manually add +1
         self.action_offset = 1
         self.action_space = gym.spaces.Discrete(N_ACTIONS - self.action_offset)
-
-        if hexattr_filter:
-            assert isinstance(hexattr_filter, list)
-            assert len(hexattr_filter) == len(list(set(hexattr_filter)))
-            assert len(hexattr_filter) <= STATE_SIZE_X
-            assert all(isinstance(x, int) and x < N_HEX_ATTRS for x in hexattr_filter)
-            self.observation_space = gym.spaces.Box(
-                # id, state, stack qty, side, type
-                shape=(STATE_SIZE_Z, STATE_SIZE_Y, 15 * len(hexattr_filter)),
-                low=NV_MIN,
-                high=NV_MAX,
-                dtype=DTYPE
-            )
-        else:
-            self.observation_space = gym.spaces.Box(
-                shape=(STATE_SIZE_Z, STATE_SIZE_Y, STATE_SIZE_X),
-                low=NV_MIN,
-                high=NV_MAX,
-                dtype=DTYPE
-            )
-
+        self.observation_space = gym.spaces.Box(
+            low=STATE_VALUE_NA,
+            high=1,
+            shape=(11, 15, STATE_SIZE_ONE_HEX),
+            dtype=np.int32
+        )
         self.actfile = None
 
         # <params>
@@ -174,7 +154,6 @@ class VcmiEnv(gym.Env):
         self.attacker_model = attacker_model
         self.defender_model = defender_model
         self.actions_log_file = actions_log_file
-        self.hexattr_filter = hexattr_filter
         self.reward_clip_tanh_army_frac = reward_clip_tanh_army_frac
         self.reward_army_value_ref = reward_army_value_ref
         self.reward_dmg_factor = reward_dmg_factor
@@ -207,7 +186,7 @@ class VcmiEnv(gym.Env):
         term = res.is_battle_over
         rew, rew_unclipped = self.calc_reward(analysis, res)
 
-        obs = VcmiEnv.maybe_filter_hexattrs(res.state, self.hexattr_filter)
+        obs = res.state
         trunc = self.analyzer.actions_count >= self.max_steps
 
         self._update_vars_after_step(res, rew, rew_unclipped, term, trunc, analysis)
@@ -240,8 +219,7 @@ class VcmiEnv(gym.Env):
                 self.actfile.close()
             self.actfile = open(self.actions_log_file, "w")
 
-        obs = VcmiEnv.maybe_filter_hexattrs(self.result.state, self.hexattr_filter)
-        return obs, {"side": self.result.side}
+        return self.result.state, {"side": self.result.side}
 
     @tracelog
     def render(self):
@@ -288,6 +266,7 @@ class VcmiEnv(gym.Env):
     # obs = env.step(589)[0]
     # env.hexreport(obs, 14, 3)
     def hexreport(self, obs, x, y):
+        raise Exception("Not implemented: hexreport after migration to one-hot obs")
         iy = y-1
         ix0 = (x-1) * N_HEX_ATTRS
         ix1 = (x) * N_HEX_ATTRS
@@ -419,14 +398,6 @@ class VcmiEnv(gym.Env):
     # (eg. some instance vars being used in calculations were not yet updated)
     # This approach is justified for training-critical methods only
     # (ie. no need to abstract out `render`, for example)
-
-    @staticmethod
-    def maybe_filter_hexattrs(state, hexattr_filter):
-        if not hexattr_filter:
-            return state
-
-        # original obs is (1, 11, 15*N_HEX_ATTRS)
-        return state.reshape(11, 15, N_HEX_ATTRS)[..., hexattr_filter].reshape(1, 11, 15 * len(hexattr_filter))
 
     #
     # NOTE:

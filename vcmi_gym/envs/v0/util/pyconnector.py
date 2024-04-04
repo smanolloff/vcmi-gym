@@ -29,25 +29,17 @@ N_NONHEX_ACTIONS = connexport.get_n_nonhex_actions()
 N_HEX_ACTIONS = connexport.get_n_hex_actions()
 N_ACTIONS = connexport.get_n_actions()
 
-_STATE_SIZE = connexport.get_state_size()
-N_STACK_ATTRS = connexport.get_n_stack_attrs()
-N_HEX_ATTRS = connexport.get_n_hex_attrs()
-
-NV_MIN = connexport.get_nv_min()
-NV_MAX = connexport.get_nv_max()
-
-STATE_SIZE_X = 15 * N_HEX_ATTRS
-STATE_SIZE_Y = 11
-STATE_SIZE_Z = 1  # used sb3's VecFrameStack (Z stacked observations)
-
-assert STATE_SIZE_X * STATE_SIZE_Y == _STATE_SIZE
+STATE_SIZE = connexport.get_state_size()
+STATE_SIZE_ONE_HEX = connexport.get_state_size_one_hex()
+STATE_VALUE_NA = connexport.get_state_value_na()
+OBS_SHAPE = (11, 15, STATE_SIZE_ONE_HEX)
 
 ERRMAP = connexport.get_error_mapping()
 ERRSIZE = len(ERRMAP)
 ERRNAMES = [errname for (errname, _) in ERRMAP.values()]
 ERRFLAGS = list(ERRMAP.keys())
 
-PyState = ctypes.c_float * _STATE_SIZE
+PyState = ctypes.c_int * STATE_SIZE
 PyAction = ctypes.c_int16
 PyActmask = ctypes.c_bool * N_ACTIONS
 
@@ -103,7 +95,7 @@ class PyRawResult(ctypes.Structure):
 # Same as connector's P_Result, but with values converted to ctypes
 class PyResult():
     def __init__(self, cres):
-        self.state = np.ctypeslib.as_array(cres.state).reshape(STATE_SIZE_Z, STATE_SIZE_Y, STATE_SIZE_X)
+        self.state = np.ctypeslib.as_array(cres.state).reshape(OBS_SHAPE)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
         self.errmask = cres.errmask
         self.side = cres.side
@@ -329,7 +321,6 @@ class PyConnector():
             case PyConnector.COMMAND_TYPE_RESET:
                 self.set_v_result_act(self.__connector.reset())
             case PyConnector.COMMAND_TYPE_RENDER_ANSI:
-                x = bytes(self.__connector.renderAnsi(), 'utf-8')
                 self.v_result_render_ansi.value = bytes(self.__connector.renderAnsi(), 'utf-8')
             case _:
                 raise Exception("Unknown command: %s" % self.v_command_type.value)
