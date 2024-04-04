@@ -173,10 +173,6 @@ class AgentNN(nn.Module):
         # 1 nonhex action (RETREAT) + 165 hexes*14 actions each
         assert action_space.n == 1 + (165*14)
 
-        assert observation_space.shape[0] == 1
-        assert observation_space.shape[1] == 11
-        assert observation_space.shape[2] / 56 == 15
-
         self.features_extractor = torch.nn.Sequential()
         for spec in network.features_extractor:
             layer = AgentNN.build_layer(spec)

@@ -29,3 +29,6 @@
 
 # Prevent evaluator from picking those up
 - no-eval
+
+# New observation scheme
+- OneHot

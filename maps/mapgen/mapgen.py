@@ -129,13 +129,13 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
             number = int(min(credit, per_stack) / aivalue)
             if number == 0:
                 continue
-            elif number > STACK_QTY_MAX:
-                raise StackTooBigError("Stack too big: %s: %d" % (name, number))
-            credit -= number * aivalue
             assert army[i] is not None
             (vcminame0, name0, number0) = army[i]
             assert vcminame0 == vcminame
             assert name0 == name
+            if number0 + number > STACK_QTY_MAX:
+                raise StackTooBigError("Stack too big: %s: %d" % (name, number))
+            credit -= number * aivalue
             army[i] = (vcminame, name, number0 + number)
 
     real_value = target_value - credit
@@ -151,13 +151,16 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         # Try adding 1 of the weakest creature to see if it gets us closer
         # (this will cause negative remaining credit => use abs)
         i, (vcminame, name, aivalue) = min(enumerate(creatures), key=lambda x: x[1][2])
+        newnumber = 1 + (army[i][2] if army[i] else 0)
         real_value += aivalue
-        real_value = real_value or 1  # fix zero div error theres no army
         error = 1 - target_value/real_value
-        print("Army value: %d of %d (%.2f%%)" % (real_value, target_value, error*100))
-
+        print("Added 1 '%s': army value: %d of %d (%.2f%%)" % (name, real_value, target_value, error*100))
         if abs(error) > err_frac_max:
             raise UnusedCreditError(f"Could not reach target value of {target_value}")
+        elif newnumber > STACK_QTY_MAX:
+            raise StackTooBigError("Stack too big: %s: %d" % (name, newnumber))
+
+        army[i] = (vcminame, name, newnumber)
 
     if any(s is None for s in army):
         raise NotEnoughStacksError("Not all stacks were filled")

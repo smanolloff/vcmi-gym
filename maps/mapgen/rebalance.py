@@ -208,6 +208,8 @@ if __name__ == "__main__":
         for (slot, (vcminame, _, number)) in enumerate(new_army):
             objects[hero_name]["options"]["army"][slot] = dict(amount=number, type=f"core:{vcminame}")
 
+        changed = True
+
     if not changed:
         print("Nothing to do.")
         sys.exit(1)

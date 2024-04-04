@@ -1,7 +1,7 @@
 ---
-group_id: stalled
-run_name: "[C] from edm5538z"
-tags: ["Classic", "Map-7stack-01", "StupidAI"]
+group_id: from-vou0cebq
+run_name: "g=0.8"
+tags: ["Map-7stack-01", "StupidAI", "OneHot"]
 
 wandb_project: vcmi-gym
 run_id: ~
@@ -11,8 +11,8 @@ overwrite: []
 
 notes: ""
 
-agent_load_file: ~
-# agent_load_file: "data/sweeps/utfvzqho/agent-1711826518.pt"
+# agent_load_file: ~
+agent_load_file: "data/sweeps/vou0cebq/agent-1712277867.pt"
 rollouts_total: 0
 timesteps_total: 0  # exp_decay requires timesteps_total
 timesteps_per_mapchange: 0
@@ -24,9 +24,9 @@ success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
-mapmask: "gym/generated/88/88-7stack-01.vmap"
+mapmask: "gym/generated/88/88-7stack-300K-01.vmap"
 randomize_maps: false
-save_every: 1200  # seconds
+save_every: 1800  # seconds
 permasave_every: 7200  # seconds
 max_saves: 3
 out_dir_template: "data/{group_id}/{run_id}"
@@ -42,10 +42,13 @@ num_envs: 1
 
 network:
   features_extractor:
-    # => (B, 1, 11, 840)
-    - {t: "Conv2d", in_channels: 1, out_channels: 16, kernel_size: [1, 56], stride: [1, 56], padding: 0}
+    # => (B, 11, 15, 574)
+    - {t: "Flatten", start_dim: 2}
+    # => (B, 11, 8610)
+    - {t: "Unflatten", dim: 1, unflattened_size: [1, 11]}
+    # => (B, 1, 11, 8610)
+    - {t: "Conv2d", in_channels: 1, out_channels: 16, kernel_size: [1, 574], stride: [1, 574], padding: 0}
     - {t: "LeakyReLU"}
-    - {t: "BatchNorm2d", num_features: 16}
     # => (B, 16, 11, 15)
     - {t: "Flatten"}
     # => (B, 2640)
@@ -59,18 +62,18 @@ network:
 # PPO Hyperparams
 #
 
-clip_coef: 0.191
+clip_coef: 0.4
 clip_vloss: false
 ent_coef: 0.01
-gae_lambda: 0.756
-gamma: 0.53
-lr_schedule: { mode: const, start: 0.00001578, end: 1.0e-5, rate: 10 }
-max_grad_norm: 5.88
+gae_lambda: 0.614
+gamma: 0.8
+lr_schedule: { mode: const, start: 6.0e-6, end: 1.0e-6, rate: 10 }
+max_grad_norm: 1
 norm_adv: true
-num_minibatches: 8   # minibatch_size = rollout_buffer/num_minibatches
-num_steps: 216       # rollout_buffer = num_steps*num_envs
-update_epochs: 42    # full passes of rollout_buffer
-vf_coef: 1.1
+num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches
+num_steps: 144       # rollout_buffer = num_steps*num_envs
+update_epochs: 32    # full passes of rollout_buffer
+vf_coef: 0.75
 weight_decay: 0
 
 env:
