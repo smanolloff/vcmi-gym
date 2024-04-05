@@ -1,6 +1,6 @@
 ---
 group_id: from-vou0cebq
-run_name: "g=0.8"
+run_name: "scratch (32/BN/1024)"
 tags: ["Map-7stack-01", "StupidAI", "OneHot"]
 
 wandb_project: vcmi-gym
@@ -11,8 +11,8 @@ overwrite: []
 
 notes: ""
 
-# agent_load_file: ~
-agent_load_file: "data/sweeps/vou0cebq/agent-1712277867.pt"
+agent_load_file: ~
+# agent_load_file: "data/sweeps/vou0cebq/agent-1712277867.pt"
 rollouts_total: 0
 timesteps_total: 0  # exp_decay requires timesteps_total
 timesteps_per_mapchange: 0
@@ -47,16 +47,15 @@ network:
     # => (B, 11, 8610)
     - {t: "Unflatten", dim: 1, unflattened_size: [1, 11]}
     # => (B, 1, 11, 8610)
-    - {t: "Conv2d", in_channels: 1, out_channels: 16, kernel_size: [1, 574], stride: [1, 574], padding: 0}
+    - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 574], stride: [1, 574], padding: 0}
     - {t: "LeakyReLU"}
-    # => (B, 16, 11, 15)
+    - {t: "BatchNorm2d", num_features: 32}
     - {t: "Flatten"}
-    # => (B, 2640)
-    - {t: "Linear", in_features: 2640, out_features: 64}
-    - {t: "LeakyReLU"}
+    # => (B, 5280)
+    - {t: "Linear", in_features: 5280, out_features: 1024}
     # => (B, 64)
-  actor: {t: "Linear", in_features: 64, out_features: 2311}
-  critic: {t: "Linear", in_features: 64, out_features: 1}
+  actor: {t: "Linear", in_features: 1024, out_features: 2311}
+  critic: {t: "Linear", in_features: 1024, out_features: 1}
 
 #
 # PPO Hyperparams
@@ -66,8 +65,8 @@ clip_coef: 0.4
 clip_vloss: false
 ent_coef: 0.01
 gae_lambda: 0.614
-gamma: 0.8
-lr_schedule: { mode: const, start: 6.0e-6, end: 1.0e-6, rate: 10 }
+gamma: 0.55
+lr_schedule: { mode: const, start: 0.0000062, end: 1.0e-6, rate: 10 }
 max_grad_norm: 1
 norm_adv: true
 num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches
