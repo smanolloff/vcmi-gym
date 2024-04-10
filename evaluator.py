@@ -70,8 +70,8 @@ def evaluate_policy(agent, venv, episodes_per_env):
     #
     while (counts < episodes_per_env).any():
         actions = agent.predict(
-            torch.as_tensor(observations),
-            torch.as_tensor(np.array(venv.unwrapped.call("action_masks")))
+            torch.as_tensor(observations).float(),
+            torch.as_tensor(np.array(venv.unwrapped.call("action_mask")))
         )
         observations, rewards, terms, truncs, infos = venv.step(actions)
 
@@ -181,9 +181,9 @@ if __name__ == "__main__":
     loghandler = logging.StreamHandler()
     loghandler.setLevel(logging.DEBUG)
     loghandler.setFormatter(formatter)
-    logging.basicConfig(level=logging.INFO, handlers=[loghandler])
+    logging.basicConfig(level=logging.DEBUG, handlers=[loghandler])
 
-    # prevent warnings for action_masks method
+    # prevent warnings for action_mask method
     env_cls = vcmi_gym.VcmiEnv
     evaluated = []
     venv = None

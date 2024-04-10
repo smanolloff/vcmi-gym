@@ -226,6 +226,9 @@ class Agent(nn.Module):
         self.optimizer = optimizer or torch.optim.AdamW(self.parameters(), eps=1e-5)
         self.state = state or State()
 
+        # NN must not be included here
+        self.save_attrs = ["args", "observation_space", "action_space", "optimizer", "state"]
+
 
 def main(args):
     assert isinstance(args, Args)
@@ -349,7 +352,7 @@ def main(args):
         next_obs, _ = envs.reset(seed=args.seed)
         next_obs = torch.Tensor(next_obs).to(device)
         next_done = torch.zeros(args.num_envs).to(device)
-        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
+        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
 
         start_rollout = agent.state.global_rollout + 1
 
@@ -389,7 +392,7 @@ def main(args):
                 next_done = np.logical_or(terminations, truncations)
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
-                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
+                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
 
                 # XXX SIMO: SB3 does bootstrapping for truncated episodes here
                 # https://github.com/DLR-RM/stable-baselines3/pull/658
@@ -563,7 +566,7 @@ def main(args):
                 next_obs, _ = envs.reset(seed=args.seed)
                 next_obs = torch.Tensor(next_obs).to(device)
                 next_done = torch.zeros(args.num_envs).to(device)
-                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_masks"))).to(device)
+                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
 
             if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
                 envs.episode_count = 0

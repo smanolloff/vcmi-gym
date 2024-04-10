@@ -232,8 +232,8 @@ class VcmiEnv(gym.Env):
             ) % (
                 self.connector.render_ansi(),
                 self.analyzer.actions_count,
-                self.reward,
-                self.reward_total,
+                round(self.reward, 2),
+                round(self.reward_total, 2),
                 self.net_value_last,
                 self.analyzer.net_value
             )
@@ -256,7 +256,7 @@ class VcmiEnv(gym.Env):
             handler.close()
 
     @tracelog
-    def action_masks(self):
+    def action_mask(self):
         return self.result.actmask[self.action_offset:]
 
     # Print all info about a hex

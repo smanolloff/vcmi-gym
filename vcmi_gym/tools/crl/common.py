@@ -375,15 +375,15 @@ def validate_tags(tags):
 
 
 def save(agent, agent_file, nn_file=None):
-    attrs = ["args", "observation_space", "action_space", "optimizer", "state"]
+    attrs = agent.save_attrs
     data = {k: agent.__dict__[k] for k in attrs}
     state_dict = agent.state_dict()
     # Re-create the entire agent to ensure it's "clean"
     clean_agent = agent.__class__(**data)
     clean_agent.load_state_dict(state_dict, strict=True)
     torch.save(clean_agent, agent_file)
-    print("Saved agent to %s" % agent_file)
 
+    print("Saved agent to %s" % agent_file)
     # Optionally, save the NN state separately
     # Useful as it is decoupled from the Agent module (which changes often)
     if nn_file:

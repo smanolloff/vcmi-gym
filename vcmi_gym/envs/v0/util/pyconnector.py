@@ -40,7 +40,7 @@ ERRNAMES = [errname for (errname, _) in ERRMAP.values()]
 ERRFLAGS = list(ERRMAP.keys())
 
 PyState = ctypes.c_int * STATE_SIZE
-PyAction = ctypes.c_int16
+PyAction = ctypes.c_int
 PyActmask = ctypes.c_bool * N_ACTIONS
 
 TRACE = True

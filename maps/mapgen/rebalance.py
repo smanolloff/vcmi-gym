@@ -119,16 +119,12 @@ if __name__ == "__main__":
         try:
             j = input()
             print("Got json: %s" % j)
-            j = json.loads(j)
         except EOFError:
             pass
     else:
-        j = json.loads(sys.argv[1])
+        j = sys.argv[1]
 
-    if j is None:
-        print("Failed to read stdin")
-        sys.exit(0)
-
+    j = json.loads(j)
     path, (header, objects, surface_terrain) = load(j["map"])
     creatures_dict = {vcminame: (name, value) for (vcminame, name, value) in get_all_creatures()}
 

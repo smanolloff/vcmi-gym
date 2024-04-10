@@ -29,8 +29,8 @@ MAP_ID_START = 2
 MAP_ID_END = 2
 
 ARMY_N_STACKS_SAME = True  # same for both sides
-ARMY_N_STACKS_MIN = 3
-ARMY_N_STACKS_MAX = 3
+ARMY_N_STACKS_MIN = 7
+ARMY_N_STACKS_MAX = 7
 
 ARMY_VALUE_MIN = 300_000
 ARMY_VALUE_MAX = 300_000
@@ -134,7 +134,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
             assert vcminame0 == vcminame
             assert name0 == name
             if number0 + number > STACK_QTY_MAX:
-                raise StackTooBigError("Stack too big: %s: %d" % (name, number))
+                raise StackTooBigError("Stack too big: %s: %d" % (name, number0 + number))
             credit -= number * aivalue
             army[i] = (vcminame, name, number0 + number)
 
