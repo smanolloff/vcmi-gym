@@ -1,0 +1,82 @@
+---
+group_id: qrdqn
+run_name: "test 1"
+tags: ["Map-3stack-01", "StupidAI", "OneHot"]
+
+wandb_project: vcmi-gym
+run_id: ~
+resume: False
+overwrite: []
+# overwrite: ["learning_rate", "weight_decay"]
+
+notes: ""
+
+# agent_load_file: ~
+agent_load_file: "data/qrdqn-from-h3qh72hg.pt"
+vsteps_total: 20000  # exp_decay requires vsteps_total
+vsteps_for_warmup: 1000
+random_warmup: true
+trains_per_log: 25
+opponent_load_file: ~
+success_rate_target: ~
+ep_rew_mean_target: ~
+quit_on_target: false
+mapside: "attacker"  # attacker/defender/both
+mapmask: "gym/generated/88/88-3stack-300K-01.vmap"
+randomize_maps: false
+save_every: 1800  # seconds
+permasave_every: 7200  # seconds
+max_saves: 3
+out_dir_template: "data/{group_id}/{run_id}"
+
+# SBM = StupidAI, BattleAI, MMAI_MODEL
+opponent_sbm_probs: [1, 0, 0]
+opponent_load_file: ~
+
+# XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
+#      To increase (current shell session only):
+#           ulimit -n 1024
+num_envs: 1
+
+n_quantiles: 100
+network:
+  # => (B, 11, 15, 574)
+  - {t: "Flatten", start_dim: 2}
+  # => (B, 11, 8610)
+  - {t: "Unflatten", dim: 1, unflattened_size: [1, 11]}
+  # => (B, 1, 11, 8610)
+  - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 574], stride: [1, 574], padding: 0}
+  - {t: "LeakyReLU"}
+  - {t: "Flatten"}
+  # => (B, 5280)
+  - {t: "Linear", in_features: 5280, out_features: 1024}
+  - {t: "LeakyReLU"}
+  # => (B, 64)
+
+
+#
+# QRDQN Hyperparams
+#
+
+lr_schedule: { mode: "lin_decay", start: 1.0e-5, end: 1.0e-6, rate: 4 }
+eps_schedule: { mode: "lin_decay", start: 0.1, end: 0.05, rate: 4 }
+buffer_size_vsteps: 5000
+batch_size: 64
+tau: 1.0
+vsteps_per_target_update: 4  # must be divisible by vsteps_per_train
+vsteps_per_train: 4
+train_iterations: 4
+gamma: 0.75
+max_grad_norm: 1
+
+env:
+  reward_dmg_factor: 5
+  step_reward_fixed: -100
+  step_reward_mult: 1
+  term_reward_mult: 0
+  reward_clip_tanh_army_frac: 1
+  reward_army_value_ref: 500
+  random_combat: 1
+
+env_wrappers: []
+logparams: {}
