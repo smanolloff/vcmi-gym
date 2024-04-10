@@ -138,7 +138,7 @@ class VcmiEnv(gym.Env):
             low=STATE_VALUE_NA,
             high=1,
             shape=(11, 15, STATE_SIZE_ONE_HEX),
-            dtype=np.int32
+            dtype=np.float32
         )
         self.actfile = None
 

@@ -36,7 +36,7 @@
 
 namespace py = pybind11;
 
-using P_State = py::array_t<int>;
+using P_State = py::array_t<float>;
 using P_ActMask = py::array_t<bool>;
 
 struct P_Result {
@@ -76,7 +76,7 @@ struct P_Result {
         ansiRender(ansiRender_) {}
 
     const MMAI::Export::ResultType type;
-    const py::array_t<int> state;
+    const py::array_t<float> state;
     const py::array_t<bool> actmask;
     const MMAI::Export::ErrMask errmask;
     const int side;
@@ -92,7 +92,7 @@ struct P_Result {
     const bool is_victorious;
     const std::string ansiRender;
 
-    const py::array_t<int> &get_state() const { return state; }
+    const py::array_t<float> &get_state() const { return state; }
     const py::array_t<bool> &get_actmask() const { return actmask; }
     const MMAI::Export::ErrMask &get_errmask() const { return errmask; }
     const int &get_side() const { return side; }
