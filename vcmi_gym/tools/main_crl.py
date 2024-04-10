@@ -66,13 +66,7 @@ def run(action, cfg, group_id, run_id, resume, cfgpath):
     args = mod.Args(**cfg)
     print("Starting run %s with seed %s" % (args.run_id, args.seed))
 
-    run_duration, run_values = common.measure(mod.main, dict(args=args))
-    common.save_run_metadata(
-        action=action,
-        cfg=vars(args),
-        duration=run_duration,
-        values=dict(run_values),
-    )
+    mod.main(args)
 
 
 def main():

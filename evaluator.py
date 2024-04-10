@@ -153,10 +153,17 @@ def wandb_init(run):
 
 
 def find_agents():
-    threshold = datetime.datetime.now() - datetime.timedelta(hours=3)
     files = glob.glob("data/*/*/agent-[0-9]*.pt")
     assert len(files) > 0, "No files found"
-    filtered = [f for f in files if datetime.datetime.fromtimestamp(os.path.getmtime(f)) > threshold]
+
+    def should_pick(f):
+        # saving large NNs may take a lot of time => wait 1min
+        threshold_max = datetime.datetime.now() - datetime.timedelta(minutes=1)
+        threshold_min = datetime.datetime.now() - datetime.timedelta(hours=3)
+        mtime = datetime.datetime.fromtimestamp(os.path.getmtime(f))
+        return mtime > threshold_min and mtime < threshold_max
+
+    filtered = [f for f in files if should_pick(f)]
     grouped = itertools.groupby(filtered, key=lambda x: x.split("/")[-2])
 
     # key=run_id, value=filepath (to latest save)

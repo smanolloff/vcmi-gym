@@ -375,7 +375,8 @@ def validate_tags(tags):
 
 
 def save(agent, agent_file, nn_file=None):
-    attrs = agent.save_attrs
+    print("Saving agent to %s ..." % agent_file)
+    attrs = agent.save_attrs()
     data = {k: agent.__dict__[k] for k in attrs}
     state_dict = agent.state_dict()
     # Re-create the entire agent to ensure it's "clean"

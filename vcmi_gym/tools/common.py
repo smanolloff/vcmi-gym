@@ -31,8 +31,8 @@ import gymnasium as gym
 import wandb
 
 import concurrent.futures
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv
+# from stable_baselines3.common.monitor import Monitor
+# from stable_baselines3.common.vec_env import DummyVecEnv
 
 from .. import VcmiEnv
 

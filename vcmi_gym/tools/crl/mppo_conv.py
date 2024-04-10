@@ -226,8 +226,10 @@ class Agent(nn.Module):
         self.optimizer = optimizer or torch.optim.AdamW(self.parameters(), eps=1e-5)
         self.state = state or State()
 
-        # NN must not be included here
-        self.save_attrs = ["args", "observation_space", "action_space", "optimizer", "state"]
+    # XXX: This is a method => it will work after pytorch.load if the saved model did not have it
+    # XXX: NN must not be included here
+    def save_attrs(self):
+        return ["args", "observation_space", "action_space", "optimizer", "state"]
 
 
 def main(args):

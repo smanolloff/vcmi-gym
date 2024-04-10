@@ -1,6 +1,6 @@
 ---
-group_id: qrdqn
-run_name: "test 1"
+group_id: qrdqn-from-h3qh72hg
+run_name: "Q=100 T=4 U=1000"
 tags: ["Map-3stack-01", "StupidAI", "OneHot"]
 
 wandb_project: vcmi-gym
@@ -12,10 +12,10 @@ overwrite: []
 notes: ""
 
 # agent_load_file: ~
-agent_load_file: "data/qrdqn-from-h3qh72hg.pt"
-vsteps_total: 20000  # exp_decay requires vsteps_total
-vsteps_for_warmup: 1000
-random_warmup: true
+agent_load_file: "data/qrdqn-from-h3qh72hg/80qqlepn/agent-1712755268.pt"
+vsteps_total: 0  # exp_decay requires vsteps_total
+vsteps_for_warmup: 5000
+random_warmup: false
 trains_per_log: 25
 opponent_load_file: ~
 success_rate_target: ~
@@ -24,9 +24,9 @@ quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
 mapmask: "gym/generated/88/88-3stack-300K-01.vmap"
 randomize_maps: false
-save_every: 1800  # seconds
-permasave_every: 7200  # seconds
-max_saves: 3
+save_every: 10800  # seconds
+permasave_every: 999999999  # seconds
+max_saves: 2
 out_dir_template: "data/{group_id}/{run_id}"
 
 # SBM = StupidAI, BattleAI, MMAI_MODEL
@@ -58,14 +58,15 @@ network:
 # QRDQN Hyperparams
 #
 
-lr_schedule: { mode: "lin_decay", start: 1.0e-5, end: 1.0e-6, rate: 4 }
-eps_schedule: { mode: "lin_decay", start: 0.1, end: 0.05, rate: 4 }
+# lr_schedule: { mode: "lin_decay", start: 1.0e-5, end: 1.0e-6, rate: 4 }
+lr_schedule: { mode: "const", start: 1.0e-5, end: 1.0e-6, rate: 4 }
+eps_schedule: { mode: "const", start: 0.1, end: 0.05, rate: 4 }
 buffer_size_vsteps: 5000
 batch_size: 64
 tau: 1.0
-vsteps_per_target_update: 4  # must be divisible by vsteps_per_train
 vsteps_per_train: 4
-train_iterations: 4
+train_iterations: 1
+trains_per_target_update: 1000
 gamma: 0.75
 max_grad_norm: 1
 

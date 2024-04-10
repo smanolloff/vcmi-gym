@@ -209,7 +209,7 @@ class Args:
     tau: int = 1.0
     train_iterations: int = 1
     vsteps_per_train: int = 4
-    vsteps_per_target_update: int = 100_000  # must be divisible by vsteps_per_train
+    trains_per_target_update: int = 1000
     gamma: float = 0.99
     max_grad_norm: float = 0.5
 
@@ -306,7 +306,7 @@ class AgentNN(nn.Module):
 
 
 class Agent(nn.Module):
-    def __init__(self, args, observation_space, action_space, optimizer=None, state=None):
+    def __init__(self, args, observation_space, action_space, optimizer=None, state=None, replay_buffer=None):
         super().__init__()
 
         self.args = args
@@ -317,15 +317,17 @@ class Agent(nn.Module):
         self.predict = self.NN.predict
         self.optimizer = optimizer or torch.optim.AdamW(self.NN.network.parameters(), eps=1e-5)
         self.state = state or State()
-        self.replay_buffer = ReplayBuffer(
+        self.replay_buffer = replay_buffer or ReplayBuffer(
             n_envs=args.num_envs,
             size_vsteps=args.buffer_size_vsteps,
             observation_space=observation_space,
             action_space=action_space
         )
 
-        # NN must not be included here
-        self.save_attrs = ["args", "observation_space", "action_space", "optimizer", "state", "replay_buffer"]
+    # XXX: This is a method => it will work after pytorch.load if the saved model did not have it
+    # XXX: NN must not be included here
+    def save_attrs(self):
+        return ["args", "observation_space", "action_space", "optimizer", "state", "replay_buffer"]
 
 
 def quantile_huber_loss(value, target, batch_size, n_quantiles):
@@ -405,7 +407,6 @@ def main(args):
                 shutil.copyfileobj(fsrc, fdst)
                 LOG.info("Wrote backup %s" % backup)
 
-    assert args.vsteps_per_target_update % args.vsteps_per_train == 0
     common.validate_tags(args.tags)
 
     try:
@@ -463,7 +464,7 @@ def main(args):
         warmup_progress_next_log = 0
         warming_up = False
         if agent.state.current_vstep < args.vsteps_for_warmup:
-            LOG.info("Warming up...")
+            LOG.info("Warming up... (mode: %s)" % ("random" if args.random_warmup else "non-random"))
             warming_up = True
 
         observations, _ = envs.reset(seed=args.seed)
@@ -569,8 +570,6 @@ def main(args):
                 b_q_value = torch.gather(b_q_logits, dim=2, index=b_q_action).squeeze(dim=2)
 
                 loss = quantile_huber_loss(b_q_value, b_q_target, args.batch_size, agent.NN.n_quantiles)
-                if loss.item() == torch.inf:
-                    breakpoint()
 
                 agent.optimizer.zero_grad()
                 loss.backward()
@@ -578,8 +577,9 @@ def main(args):
                 agent.optimizer.step()
 
             # update target network (polyak)
-            if agent.state.current_vstep % args.vsteps_per_target_update == 0:
+            if trains % args.trains_per_target_update == 0:
                 with torch.no_grad():
+                    LOG.info("Updating target network (tau=%.2f)" % args.tau)
                     for param, target_param in zip(agent.NN.network.parameters(), agent.NN.target_network.parameters()):
                         target_param.data.mul_(1 - args.tau)
                         torch.add(target_param.data, param.data, alpha=args.tau, out=target_param.data)
@@ -599,6 +599,7 @@ def main(args):
             rollout_is_success_queue_1000.append(ep_is_success_mean)
 
             wandb_log({"params/learning_rate": agent.optimizer.param_groups[0]["lr"]})
+            wandb_log({"params/exploration_rate": eps})
             wandb_log({"losses/loss": loss.item()})
             wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
             wandb_log({"rollout100/ep_rew_mean": common.safe_mean(rollout_rew_queue_100)})
@@ -721,7 +722,7 @@ def debug_args():
         tau=1.0,
         train_iterations=1,
         vsteps_per_train=2,
-        vsteps_per_target_update=4,
+        trains_per_target_update=10,
         gamma=0.99,
         max_grad_norm=0.5,
 
