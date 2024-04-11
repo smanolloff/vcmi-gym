@@ -306,7 +306,7 @@ class AgentNN(nn.Module):
 
 
 class Agent(nn.Module):
-    def __init__(self, args, observation_space, action_space, optimizer=None, state=None, replay_buffer=None):
+    def __init__(self, args, observation_space, action_space, optimizer=None, state=None):
         super().__init__()
 
         self.args = args
@@ -317,17 +317,11 @@ class Agent(nn.Module):
         self.predict = self.NN.predict
         self.optimizer = optimizer or torch.optim.AdamW(self.NN.network.parameters(), eps=1e-5)
         self.state = state or State()
-        self.replay_buffer = replay_buffer or ReplayBuffer(
-            n_envs=args.num_envs,
-            size_vsteps=args.buffer_size_vsteps,
-            observation_space=observation_space,
-            action_space=action_space
-        )
 
     # XXX: This is a method => it will work after pytorch.load if the saved model did not have it
     # XXX: NN must not be included here
     def save_attrs(self):
-        return ["args", "observation_space", "action_space", "optimizer", "state", "replay_buffer"]
+        return ["args", "observation_space", "action_space", "optimizer", "state"]
 
 
 def quantile_huber_loss(value, target, batch_size, n_quantiles):
@@ -418,6 +412,13 @@ def main(args):
 
         assert isinstance(act_space, gym.spaces.Discrete), "only discrete action space is supported"
 
+        replay_buffer = ReplayBuffer(
+            n_envs=args.num_envs,
+            size_vsteps=args.buffer_size_vsteps,
+            observation_space=obs_space,
+            action_space=act_space
+        )
+
         if agent is None:
             agent = Agent(args, obs_space, act_space)
 
@@ -490,6 +491,7 @@ def main(args):
                 actions = np.array([random.choice(np.where(m)[0]) for m in masks])
             else:
                 with torch.no_grad():
+                    # need original non-tensor observations for insertion in replay buffer
                     t_observations = torch.as_tensor(observations, device=device)
                     t_masks = torch.as_tensor(masks, device=device)
                     actions = agent.predict(t_observations, t_masks).cpu().numpy()
@@ -511,7 +513,7 @@ def main(args):
             # XXX SIMO: SB3 does bootstrapping for truncated episodes here
             # https://github.com/DLR-RM/stable-baselines3/pull/658
 
-            agent.replay_buffer.add(
+            replay_buffer.add(
                 b_obs=observations,
                 b_action=actions,
                 b_action_mask=masks,
@@ -544,7 +546,7 @@ def main(args):
             trains += 1
 
             for _ in range(0, args.train_iterations):
-                sample = agent.replay_buffer.sample(args.batch_size)
+                sample = replay_buffer.sample(args.batch_size)
 
                 with torch.no_grad():
                     b_q_target_logits = agent.NN.b_q_logits(sample.b_next_observation, sample.b_next_action_mask, use_target=True)

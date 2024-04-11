@@ -1,6 +1,6 @@
 ---
 group_id: qrdqn-from-h3qh72hg
-run_name: "Q=100 T=4 U=1000"
+run_name: "Q=100 T=4 U=10K lr=1e-7 buf=5K"
 tags: ["Map-3stack-01", "StupidAI", "OneHot"]
 
 wandb_project: vcmi-gym
@@ -12,9 +12,9 @@ overwrite: []
 notes: ""
 
 # agent_load_file: ~
-agent_load_file: "data/qrdqn-from-h3qh72hg/80qqlepn/agent-1712755268.pt"
+agent_load_file: "data/qrdqn-from-h3qh72hg/80qqlepn/agent-nobuf-1712755268.pt"
 vsteps_total: 0  # exp_decay requires vsteps_total
-vsteps_for_warmup: 5000
+vsteps_for_warmup: 10000
 random_warmup: false
 trains_per_log: 25
 opponent_load_file: ~
@@ -59,16 +59,16 @@ network:
 #
 
 # lr_schedule: { mode: "lin_decay", start: 1.0e-5, end: 1.0e-6, rate: 4 }
-lr_schedule: { mode: "const", start: 1.0e-5, end: 1.0e-6, rate: 4 }
-eps_schedule: { mode: "const", start: 0.1, end: 0.05, rate: 4 }
+lr_schedule: { mode: "const", start: 1.0e-7, end: 1.0e-7, rate: 4 }
+eps_schedule: { mode: "const", start: 0.1, end: 0.01, rate: 4 }
 buffer_size_vsteps: 5000
-batch_size: 64
+batch_size: 32
 tau: 1.0
 vsteps_per_train: 4
 train_iterations: 1
-trains_per_target_update: 1000
+trains_per_target_update: 10000
 gamma: 0.75
-max_grad_norm: 1
+max_grad_norm: 0.5
 
 env:
   reward_dmg_factor: 5
