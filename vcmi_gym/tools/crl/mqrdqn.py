@@ -281,29 +281,26 @@ class AgentNN(nn.Module):
 
         self.mask_value = torch.tensor(torch.finfo(torch.float32).min).float()
 
-    def b_q_logits(self, b_obs: torch.Tensor, b_mask: torch.Tensor, use_target=False):
+    def b_q_logits(self, b_obs: torch.Tensor, use_target=False):
         net = self.target_network if use_target else self.network
 
         b_logits = net(b_obs)
         # => (B, n_quantiles*n_actions)
         b_q_logits = b_logits.view(-1, self.n_quantiles, self.action_space.n)
         # => (B, n_quantiles, n_actions)
-        # XXX: MAYBE: return b_q_logits here and mask in b_action instead
-        # XXX: MAYBE: no_grad() while masking
-        # b_mask is (B, n_actions)
-        b_q_mask = b_mask.unsqueeze(1).expand(b_mask.shape[0], self.n_quantiles, b_mask.shape[1])
-        # => (B, n_quantiles, n_actions)
-        return b_q_logits.where(b_q_mask, self.mask_value)
+        return b_q_logits
 
-    def b_action(self, b_q_logits: torch.Tensor):
+    def b_action(self, b_q_logits: torch.Tensor, b_mask: torch.Tensor):
         # => (B, n_quantiles, n_actions)
         b_value = b_q_logits.mean(dim=1)
-        b_action = b_value.argmax(dim=1)
+        # => (B, n_actions)
+        b_action = b_value.where(b_mask, self.mask_value).argmax(dim=1)
+        # => (B)
         return b_action
 
     def predict(self, b_obs: torch.Tensor, b_mask: torch.Tensor):
-        b_q_logits = self.b_q_logits(b_obs, b_mask, use_target=False)
-        return self.b_action(b_q_logits)
+        b_q_logits = self.b_q_logits(b_obs, use_target=False)
+        return self.b_action(b_q_logits, b_mask)
 
 
 class Agent(nn.Module):
@@ -550,9 +547,9 @@ def main(args):
                 sample = replay_buffer.sample(args.batch_size)
 
                 with torch.no_grad():
-                    b_q_target_logits = agent.NN.b_q_logits(sample.b_next_observation, sample.b_next_action_mask, use_target=True)
+                    b_q_target_logits = agent.NN.b_q_logits(sample.b_next_observation, use_target=True)
                     # => (B, n_quantiles, n_actions)
-                    b_target_action = agent.NN.b_action(b_q_target_logits)
+                    b_target_action = agent.NN.b_action(b_q_target_logits, sample.b_next_action_mask)
                     # => (B)
                     # Broadcast action to required shape:
                     b_q_target_action = b_target_action.unsqueeze(-1).unsqueeze(-1).expand(args.batch_size, agent.NN.n_quantiles, 1)
@@ -567,7 +564,7 @@ def main(args):
                 # Same as target, except:
                 # 1. We extract logits from the current instead of the target network
                 # 2. We extract actions from the replay buffer instead of the logits
-                b_q_logits = agent.NN.b_q_logits(sample.b_observation, sample.b_action_mask, use_target=False)
+                b_q_logits = agent.NN.b_q_logits(sample.b_observation, use_target=False)
                 b_action = sample.b_action
                 b_q_action = b_action.unsqueeze(-1).unsqueeze(-1).expand(args.batch_size, agent.NN.n_quantiles, 1)
                 b_q_value = torch.gather(b_q_logits, dim=2, index=b_q_action).squeeze(dim=2)
