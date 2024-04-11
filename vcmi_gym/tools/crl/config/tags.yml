@@ -32,3 +32,6 @@
 
 # New observation scheme
 - OneHot
+
+# New algorithm
+- QRDQN

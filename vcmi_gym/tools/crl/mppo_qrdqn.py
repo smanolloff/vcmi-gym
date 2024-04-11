@@ -490,9 +490,9 @@ def main(args):
                 actions = np.array([random.choice(np.where(m)[0]) for m in masks])
             else:
                 with torch.no_grad():
-                    observations = torch.as_tensor(observations, device=device)
-                    masks = torch.as_tensor(masks, device=device)
-                    actions = agent.predict(observations, masks).cpu().numpy()
+                    t_observations = torch.as_tensor(observations, device=device)
+                    t_masks = torch.as_tensor(masks, device=device)
+                    actions = agent.predict(t_observations, t_masks).cpu().numpy()
 
             next_observations, rewards, terminations, truncations, infos = envs.step(actions)
 
