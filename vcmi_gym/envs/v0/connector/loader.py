@@ -17,13 +17,10 @@
 # from sb3_contrib import QRDQN
 import torch
 # import numpy as np
-import connexport
 import os
-
 
 # XXX: maybe import VcmiEnv and load offset from there?
 ACTION_OFFSET = 1
-OBS_SHAPE = (11, 15, connexport.get_state_size_one_hex())
 
 
 class Loader:
@@ -40,7 +37,7 @@ class Loader:
 
         # Obs is flattened here (shape is (9240))
         def predict(self, obs, mask):
-            action = self.model.predict(obs.reshape(OBS_SHAPE), mask[ACTION_OFFSET:])
+            action = self.model.predict(obs.reshape(11, 15, -1), mask[ACTION_OFFSET:])
             action += ACTION_OFFSET
             print("Agent prediction: %s" % action)
             return action

@@ -142,6 +142,7 @@ class ScheduleArgs:
 
 @dataclass
 class EnvArgs:
+    encoding_type: str = "default"
     max_steps: int = 500
     reward_dmg_factor: int = 5
     vcmi_loglevel_global: str = "error"
@@ -733,6 +734,7 @@ def debug_args():
         seed=42,
         skip_wandb_init=False,
         env=EnvArgs(
+            encoding_type="float",
             max_steps=500,
             reward_dmg_factor=5,
             vcmi_loglevel_global="error",

@@ -15,9 +15,12 @@
 // =============================================================================
 
 #include "connector.h"
+#include "mmai_export.h"
 #include "myclient.h"
+#include <stdexcept>
 
 Connector::Connector(
+    const std::string encoding_,
     const std::string gymdir_,
     const std::string mapname_,
     const int randomCombat_,
@@ -27,7 +30,8 @@ Connector::Connector(
     const std::string defender_,
     const std::string attackerModel_,
     const std::string defenderModel_
-) : gymdir(gymdir_),
+) : encoding(encoding_),
+    gymdir(gymdir_),
     mapname(mapname_),
     randomCombat(randomCombat_),
     loglevelGlobal(loglevelGlobal_),
@@ -47,10 +51,35 @@ MMAI::Export::Baggage Connector::initBaggage() {
 const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
     LOG("Convert Result -> P_Result");
 
-    auto ps = P_State(r->state.size());
-    auto psmd = ps.mutable_data();
-    for (int i=0; i < r->state.size(); i++)
-        psmd[i] = r->state[i];
+    P_State ps;
+
+    if (encoding == MMAI::Export::STATE_ENCODING_DEFAULT) {
+        auto vec = MMAI::Export::State{};
+        vec.reserve(MMAI::Export::STATE_SIZE_DEFAULT);
+
+        for (auto &u : r->stateUnencoded)
+            u.encode(vec);
+
+        if (vec.size() != MMAI::Export::STATE_SIZE_DEFAULT)
+            throw std::runtime_error("STATE_ENCODING_DEFAULT: Unexpected state size: " + std::to_string(vec.size()));
+
+        ps = P_State(MMAI::Export::STATE_SIZE_DEFAULT);
+        auto psmd = ps.mutable_data();
+
+        for (int i=0; i<MMAI::Export::STATE_SIZE_DEFAULT; i++)
+            psmd[i] = vec[i];
+    } else if (encoding == MMAI::Export::STATE_ENCODING_FLOAT) {
+        if (r->stateUnencoded.size() != MMAI::Export::STATE_SIZE_FLOAT)
+            throw std::runtime_error("STATE_ENCODING_FLOAT: Unexpected state size: " + std::to_string(r->stateUnencoded.size()));
+
+        ps = P_State(MMAI::Export::STATE_SIZE_FLOAT);
+        auto psmd = ps.mutable_data();
+
+        for (int i=0; i<MMAI::Export::STATE_SIZE_FLOAT; i++)
+            psmd[i] = r->stateUnencoded[i].encode2Floating();
+    } else {
+        throw std::runtime_error("Unexpected encoding: " + encoding);
+    };
 
     auto pam = P_ActMask(r->actmask.size());
     auto pammd = pam.mutable_data();
@@ -191,6 +220,7 @@ const P_Result Connector::start() {
     LOG("call init_vcmi(...)");
     init_vcmi(
         baggage.get(),
+        encoding,
         gymdir,
         mapname,
         randomCombat,
@@ -309,6 +339,7 @@ PYBIND11_MODULE(connector, m) {
 
     py::class_<Connector, std::unique_ptr<Connector>>(m, "Connector")
         .def(py::init<
+            const std::string &, // encoding
             const std::string &, // gymdir
             const std::string &, // mapname
             const int &,         // randomCombat

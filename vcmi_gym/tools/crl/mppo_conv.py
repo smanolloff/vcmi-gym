@@ -18,8 +18,8 @@
 import sys
 import os
 import random
-import time
 import shutil
+import logging
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -52,6 +52,7 @@ class ScheduleArgs:
 
 @dataclass
 class EnvArgs:
+    encoding_type: str = "default"
     max_steps: int = 500
     reward_dmg_factor: int = 5
     vcmi_loglevel_global: str = "error"
@@ -79,8 +80,10 @@ class NetworkArgs:
 class State:
     resumes: int = 0
     map_swaps: int = 0
-    global_step: int = 0
-    global_rollout: int = 0
+    global_timestep: int = 0
+    current_timestep: int = 0
+    current_vstep: int = 0
+    current_rollout: int = 0
 
 
 @dataclass
@@ -95,8 +98,8 @@ class Args:
     tags: Optional[list] = field(default_factory=list)
 
     agent_load_file: Optional[str] = None
-    timesteps_total: int = 0
-    timesteps_per_mapchange: int = 0
+    vsteps_total: int = 0
+    vsteps_per_mapchange: int = 0
     rollouts_total: int = 0
     rollouts_per_mapchange: int = 20
     rollouts_per_log: int = 1
@@ -233,32 +236,42 @@ class Agent(nn.Module):
 
 
 def main(args):
+    LOG = logging.getLogger("mppo_conv")
+    LOG.setLevel(logging.INFO)
+
     assert isinstance(args, Args)
 
     agent, args = common.maybe_resume(args)
 
-    timesteps_per_rollout = args.num_steps * args.num_envs
-
     if args.rollouts_total:
-        assert not args.timesteps_total, "cannot have both rollouts_total and timesteps_total"
+        assert not args.vsteps_total, "cannot have both rollouts_total and vsteps_total"
         rollouts_total = args.rollouts_total
     else:
-        rollouts_total = args.timesteps_total // timesteps_per_rollout
+        rollouts_total = args.vsteps_total // args.num_steps
 
     if args.rollouts_per_mapchange:
-        assert not args.timesteps_per_mapchange, "cannot have both rollouts_per_mapchange and timesteps_per_mapchange"
+        assert not args.vsteps_per_mapchange, "cannot have both rollouts_per_mapchange and vsteps_per_mapchange"
         rollouts_per_mapchange = args.rollouts_per_mapchange
     else:
-        rollouts_per_mapchange = args.timesteps_per_mapchange // timesteps_per_rollout
+        rollouts_per_mapchange = args.vsteps_per_mapchange // args.num_steps
 
     # Re-initialize to prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
     args = Args(**vars(args))
     printargs = asdict(args).copy()
-    print("Args: %s" % printargs)
+
+    # Logger
+    formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.run_id}] %(message)s")
+    formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
+    formatter.default_msec_format = None
+    loghandler = logging.StreamHandler()
+    loghandler.setFormatter(formatter)
+    LOG.addHandler(loghandler)
+
+    LOG.info("Args: %s" % printargs)
 
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
-    print("Out dir: %s" % out_dir)
+    LOG.info("Out dir: %s" % out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
     lr_schedule_fn = common.schedule_fn(args.lr_schedule)
@@ -280,18 +293,21 @@ def main(args):
 
     if args.agent_load_file:
         f = args.agent_load_file
-        print("Loading agent from %s" % f)
+        LOG.info("Loading agent from %s" % f)
         agent = torch.load(f)
         agent.args = args
         start_map_swaps = agent.state.map_swaps
-        if rollouts_total > 0:
-            rollouts_total += agent.state.global_rollout
+        agent.state.current_timestep = 0
+        agent.state.current_vstep = 0
+        agent.state.current_rollout = 0
 
         backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
         with open(f, 'rb') as fsrc:
             with open(backup, 'wb') as fdst:
                 shutil.copyfileobj(fsrc, fdst)
-                print("Wrote backup %s" % backup)
+                LOG.info("Wrote backup %s" % backup)
+
+    common.validate_tags(args.tags)
 
     try:
         envs, _ = common.create_venv(VcmiEnv, args, start_map_swaps)
@@ -307,8 +323,9 @@ def main(args):
 
         agent = agent.to(device)
 
-        assert args.rollouts_per_table_log % args.rollouts_per_log == 0
-        common.validate_tags(args.tags)
+        # XXX: the start=0 requirement is needed for SB3 compat
+        assert act_space.start == 0
+        assert act_space.shape == ()
 
         if args.wandb_project:
             import wandb
@@ -333,8 +350,12 @@ def main(args):
         ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
         ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
 
+        rollout_rew_queue_100 = deque(maxlen=100)
+        rollout_rew_queue_1000 = deque(maxlen=1000)
         rollout_net_value_queue_100 = deque(maxlen=100)
         rollout_net_value_queue_1000 = deque(maxlen=1000)
+        rollout_is_success_queue_100 = deque(maxlen=100)
+        rollout_is_success_queue_1000 = deque(maxlen=1000)
 
         assert act_space.shape == ()
 
@@ -356,28 +377,20 @@ def main(args):
         next_done = torch.zeros(args.num_envs).to(device)
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
 
-        start_rollout = agent.state.global_rollout + 1
-
-        end_rollout = rollouts_total or 10**9
-        assert start_rollout < end_rollout
+        end_vstep = args.vsteps_total or 10e9
         map_rollouts = 0
-        progress = 0
 
-        for rollout in range(start_rollout, end_rollout):
-            agent.state.global_rollout = rollout
-            rollout_start_time = time.time()
-            rollout_start_step = agent.state.global_step
-            map_rollouts += 1
+        while agent.state.current_vstep < end_vstep:
+            if args.vsteps_total:
+                progress = agent.state.current_vstep / args.vsteps_total
+            else:
+                progress = 0
 
             agent.optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
-
-            if rollouts_total:
-                progress = rollout / rollouts_total
 
             # XXX: eval during experience collection
             agent.eval()
             for step in range(0, args.num_steps):
-                agent.state.global_step += args.num_envs
                 obs[step] = next_obs
                 dones[step] = next_done
                 masks[step] = next_mask
@@ -406,6 +419,10 @@ def main(args):
                         assert final_info is not None, "has_final_info=True, but final_info=None"
                         ep_net_value_queue.append(final_info["net_value"])
                         ep_is_success_queue.append(final_info["is_success"])
+
+                agent.state.current_vstep += 1
+                agent.state.current_timestep += args.num_envs
+                agent.state.global_timestep += args.num_envs
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -499,12 +516,17 @@ def main(args):
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-            # TRY NOT TO MODIFY: record rewards for plotting purposes
-            gs = agent.state.global_step
             ep_rew_mean = common.safe_mean(envs.return_queue)
+            rollout_rew_queue_100.append(ep_rew_mean)
+            rollout_rew_queue_1000.append(ep_rew_mean)
+
             ep_value_mean = common.safe_mean(ep_net_value_queue)
             rollout_net_value_queue_100.append(ep_value_mean)
             rollout_net_value_queue_1000.append(ep_value_mean)
+
+            ep_is_success_mean = common.safe_mean(ep_is_success_queue)
+            rollout_is_success_queue_100.append(ep_is_success_mean)
+            rollout_is_success_queue_1000.append(ep_is_success_mean)
 
             wandb_log({"params/learning_rate": agent.optimizer.param_groups[0]["lr"]})
             wandb_log({"losses/total_loss": loss.item()})
@@ -515,30 +537,28 @@ def main(args):
             wandb_log({"losses/approx_kl": approx_kl.item()})
             wandb_log({"losses/clipfrac": np.mean(clipfracs)})
             wandb_log({"losses/explained_variance": explained_var})
-            wandb_log({"time/rollout_duration": time.time() - rollout_start_time})
-            wandb_log({"time/steps_per_second": (gs - rollout_start_step) / (time.time() - rollout_start_time)})  # noqa: E501
-            wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
-            wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
-            wandb_log({"rollout/ep_success_rate": common.safe_mean(ep_is_success_queue)})
             wandb_log({"rollout/ep_count": envs.episode_count})
+            wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
+            wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
+            wandb_log({"rollout100/ep_rew_mean": common.safe_mean(rollout_rew_queue_100)})
+            wandb_log({"rollout1000/ep_rew_mean": common.safe_mean(rollout_rew_queue_1000)})
             wandb_log({"rollout/ep_value_mean": ep_value_mean})
-            wandb_log({"rollout/value_mean_100": common.safe_mean(rollout_net_value_queue_100)})
-            wandb_log({"rollout/value_mean_1000": common.safe_mean(rollout_net_value_queue_1000)})
-            wandb_log({"global/num_rollouts": agent.state.global_rollout})
+            wandb_log({"rollout100/ep_value_mean": common.safe_mean(rollout_net_value_queue_100)})
+            wandb_log({"rollout1000/ep_value_mean": common.safe_mean(rollout_net_value_queue_1000)})
+            wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
+            wandb_log({"rollout100/ep_success_rate": common.safe_mean(rollout_is_success_queue_100)})
+            wandb_log({"rollout1000/ep_success_rate": common.safe_mean(rollout_is_success_queue_1000)})
+            wandb_log({"global/num_rollouts": agent.state.current_rollout})
+            wandb_log({"global/num_timesteps": agent.state.current_timestep})
+
+            envs.episode_count = 0
 
             if rollouts_total:
                 wandb_log({"global/progress": progress})
 
-            print("global_step=%d, rollout/ep_rew_mean=%.2f, loss=%.2f, variance=%.2f" % (
-                gs, ep_rew_mean, loss.item(), explained_var
-            ))
-
-            if args.success_rate_target and common.safe_mean(ep_is_success_queue) >= args.success_rate_target:
-                print("Early stopping after %d map rollouts due to: success rate > %.2f (%.2f)" % (
-                    map_rollouts,
-                    args.success_rate_target,
-                    common.safe_mean(ep_is_success_queue)
-                ))
+            # XXX: maybe use a less volatile metric here (eg. 100 or 1000-average)
+            if args.success_rate_target and ep_is_success_mean >= args.success_rate_target:
+                LOG.info("Early stopping due to: success rate > %.2f (%.2f)" % (args.success_rate_target, ep_is_success_mean))
 
                 if args.quit_on_target:
                     # XXX: break?
@@ -546,12 +566,9 @@ def main(args):
                 else:
                     raise Exception("Not implemented: map change on target")
 
+            # XXX: maybe use a less volatile metric here (eg. 100 or 1000-average)
             if args.ep_rew_mean_target and ep_rew_mean >= args.ep_rew_mean_target:
-                print("Early stopping after %d map rollouts due to: ep_rew_mean > %.2f (%.2f)" % (
-                    map_rollouts,
-                    args.ep_rew_mean_target,
-                    ep_rew_mean
-                ))
+                LOG.info("Early stopping due to: ep_rew_mean > %.2f (%.2f)" % (args.ep_rew_mean_target, ep_rew_mean))
 
                 if args.quit_on_target:
                     # XXX: break?
@@ -570,10 +587,18 @@ def main(args):
                 next_done = torch.zeros(args.num_envs).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
 
-            if rollout > start_rollout and rollout % args.rollouts_per_log == 0:
-                envs.episode_count = 0
-                wandb_log({"global/num_timesteps": gs}, commit=True)  # commit on final log line
+            if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
+                wandb_log({"global/global_num_timesteps": agent.state.global_timestep}, commit=True)  # commit on final log line
+                LOG.info("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f loss=%.2f" % (
+                    agent.state.current_rollout,
+                    agent.state.current_vstep,
+                    ep_rew_mean,
+                    ep_value_mean,
+                    ep_is_success_mean,
+                    loss.item()
+                ))
 
+            agent.state.current_rollout += 1
             save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
 
     finally:
@@ -597,8 +622,8 @@ def debug_args():
         notes=None,
         # agent_load_file="data/heads/heads-simple-A1/agent-1710806916.zip",
         agent_load_file=None,
-        timesteps_total=0,
-        timesteps_per_mapchange=0,
+        vsteps_total=0,
+        vsteps_per_mapchange=0,
         rollouts_total=0,
         rollouts_per_mapchange=0,
         rollouts_per_log=100000,
@@ -638,6 +663,7 @@ def debug_args():
         seed=42,
         skip_wandb_init=False,
         env=EnvArgs(
+            encoding_type="float",
             max_steps=500,
             reward_dmg_factor=5,
             vcmi_loglevel_global="error",

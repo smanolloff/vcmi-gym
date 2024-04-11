@@ -23,7 +23,10 @@ from .util.analyzer import Analyzer, ActionType
 from .util.pyconnector import (
     PyConnector,
     STATE_VALUE_NA,
-    STATE_SIZE_ONE_HEX,
+    STATE_SIZE_DEFAULT_ONE_HEX,
+    STATE_SIZE_FLOAT_ONE_HEX,
+    STATE_ENCODING_DEFAULT,
+    STATE_ENCODING_FLOAT,
     N_ACTIONS,
 )
 
@@ -86,6 +89,7 @@ class VcmiEnv(gym.Env):
         vcmi_loglevel_global="error",  # vcmi loglevel
         vcmi_loglevel_ai="error",  # vcmi loglevel
         vcmienv_loglevel="WARN",  # python loglevel
+        encoding_type="default",  # default / float
         consecutive_error_reward_factor=-1,  # unused
         attacker="MMAI_USER",  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
         defender="StupidAI",  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
@@ -109,13 +113,22 @@ class VcmiEnv(gym.Env):
         assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
         assert attacker in VcmiEnv.ROLES
         assert defender in VcmiEnv.ROLES
-
         assert attacker == "MMAI_USER" or defender == "MMAI_USER", "an MMAI_USER role is required"
+
+        if encoding_type == STATE_ENCODING_DEFAULT:
+            hex_size = STATE_SIZE_DEFAULT_ONE_HEX
+        elif encoding_type == STATE_ENCODING_FLOAT:
+            hex_size = STATE_SIZE_FLOAT_ONE_HEX
+        else:
+            raise Exception("Expected encoding_type: expected one of %s, got: %s" % (
+                [STATE_ENCODING_DEFAULT, STATE_ENCODING_FLOAT], encoding_type)
+            )
 
         self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
         self.connector = PyConnector(vcmienv_loglevel, user_timeout, vcmi_timeout, boot_timeout)
 
         result = self.connector.start(
+            encoding_type,
             os.getcwd(),
             mapname,
             random_combat,
@@ -137,9 +150,10 @@ class VcmiEnv(gym.Env):
         self.observation_space = gym.spaces.Box(
             low=STATE_VALUE_NA,
             high=1,
-            shape=(11, 15, STATE_SIZE_ONE_HEX),
+            shape=(11, 15, hex_size),
             dtype=np.float32
         )
+
         self.actfile = None
 
         # <params>

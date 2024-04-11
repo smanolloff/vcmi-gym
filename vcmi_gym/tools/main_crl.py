@@ -42,6 +42,10 @@ def run(action, cfg, group_id, run_id, resume, cfgpath):
         print("Unknown action: %s" % action)
         sys.exit(1)
 
+    if action == "benchmark":
+        mod.benchmark()
+        return
+
     cfg["cfg_file"] = cfgpath
 
     os.environ["WANDB_SILENT"] = "true"

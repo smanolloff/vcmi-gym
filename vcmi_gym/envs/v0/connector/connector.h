@@ -36,6 +36,7 @@ class Connector {
 
     ConnectorState state = ConnectorState::NEW;
 
+    const std::string encoding;
     const std::string gymdir;
     const std::string mapname;
     const int randomCombat;
@@ -58,6 +59,7 @@ class Connector {
     MMAI::Export::Baggage initBaggage();
 public:
     Connector(
+        const std::string encoding,
         const std::string gymdir,
         const std::string mapname,
         const int randomCombat,

@@ -29,17 +29,21 @@ N_NONHEX_ACTIONS = connexport.get_n_nonhex_actions()
 N_HEX_ACTIONS = connexport.get_n_hex_actions()
 N_ACTIONS = connexport.get_n_actions()
 
-STATE_SIZE = connexport.get_state_size()
-STATE_SIZE_ONE_HEX = connexport.get_state_size_one_hex()
+STATE_SIZE_DEFAULT = connexport.get_state_size_default()
+STATE_SIZE_DEFAULT_ONE_HEX = connexport.get_state_size_default_one_hex()
+STATE_SIZE_FLOAT = connexport.get_state_size_float()
+STATE_SIZE_FLOAT_ONE_HEX = connexport.get_state_size_float_one_hex()
 STATE_VALUE_NA = connexport.get_state_value_na()
-OBS_SHAPE = (11, 15, STATE_SIZE_ONE_HEX)
+STATE_ENCODING_DEFAULT = connexport.get_encoding_type_default()
+STATE_ENCODING_FLOAT = connexport.get_encoding_type_float()
 
 ERRMAP = connexport.get_error_mapping()
 ERRSIZE = len(ERRMAP)
 ERRNAMES = [errname for (errname, _) in ERRMAP.values()]
 ERRFLAGS = list(ERRMAP.keys())
 
-PyState = ctypes.c_float * STATE_SIZE
+PyStateDefault = ctypes.c_float * STATE_SIZE_DEFAULT
+PyStateFloat = ctypes.c_float * STATE_SIZE_FLOAT
 PyAction = ctypes.c_int
 PyActmask = ctypes.c_bool * N_ACTIONS
 
@@ -73,29 +77,35 @@ def tracelog(func, maxlen=MAXLEN):
     return wrapper
 
 
-class PyRawResult(ctypes.Structure):
-    _fields_ = [
-        ("state", PyState),
-        ("actmask", PyActmask),
-        ("errmask", ctypes.c_ushort),
-        ("side", ctypes.c_int),
-        ("dmg_dealt", ctypes.c_int),
-        ("dmg_received", ctypes.c_int),
-        ("units_lost", ctypes.c_int),
-        ("units_killed", ctypes.c_int),
-        ("value_lost", ctypes.c_int),
-        ("value_killed", ctypes.c_int),
-        ("side0_army_value", ctypes.c_int),
-        ("side1_army_value", ctypes.c_int),
-        ("is_battle_over", ctypes.c_bool),
-        ("is_victorious", ctypes.c_bool),
-    ]
+COMMON_FIELDS = [
+    ("actmask", PyActmask),
+    ("errmask", ctypes.c_ushort),
+    ("side", ctypes.c_int),
+    ("dmg_dealt", ctypes.c_int),
+    ("dmg_received", ctypes.c_int),
+    ("units_lost", ctypes.c_int),
+    ("units_killed", ctypes.c_int),
+    ("value_lost", ctypes.c_int),
+    ("value_killed", ctypes.c_int),
+    ("side0_army_value", ctypes.c_int),
+    ("side1_army_value", ctypes.c_int),
+    ("is_battle_over", ctypes.c_bool),
+    ("is_victorious", ctypes.c_bool),
+]
+
+
+class PyRawResultDefault(ctypes.Structure):
+    _fields_ = [("state", PyStateDefault)] + COMMON_FIELDS
+
+
+class PyRawResultFloat(ctypes.Structure):
+    _fields_ = [("state", PyStateFloat)] + COMMON_FIELDS
 
 
 # Same as connector's P_Result, but with values converted to ctypes
 class PyResult():
     def __init__(self, cres):
-        self.state = np.ctypeslib.as_array(cres.state).reshape(OBS_SHAPE)
+        self.state = np.ctypeslib.as_array(cres.state).reshape(11, 15, -1)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
         self.errmask = cres.errmask
         self.side = cres.side
@@ -127,21 +137,27 @@ class PyConnector():
         self.shutdown_complete = False
         self.logger = log.get_logger("PyConnector", self.loglevel)
         # use "or" to catch zeros
+
         self.user_timeout = user_timeout or 999999
         self.vcmi_timeout = vcmi_timeout or 999999
         self.boot_timeout = boot_timeout or 999999
 
     @tracelog
-    def start(self, *args):
+    def start(self, encoding, *args):
         assert not self.started, "Already started"
         self.started = True
 
         self.v_action = multiprocessing.Value(PyAction)
-        self.v_result_act = multiprocessing.Value(PyRawResult)
         self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 8192)
         self.v_command_type = multiprocessing.Value(ctypes.c_int)
-
         self.v_command_type.value = PyConnector.COMMAND_TYPE_UNSET
+
+        if encoding == STATE_ENCODING_DEFAULT:
+            self.v_result_act = multiprocessing.Value(PyRawResultDefault)
+        elif encoding == STATE_ENCODING_FLOAT:
+            self.v_result_act = multiprocessing.Value(PyRawResultFloat)
+        else:
+            raise Exception("Unexpected encoding: %s" % encoding)
 
         # Process synchronization:
         # cond.notify() will wake up the other proc (which immediately tries to acquire the lock)
@@ -149,7 +165,7 @@ class PyConnector():
         self.cond = multiprocessing.Condition()
         self.proc = multiprocessing.Process(
             target=self.start_connector,
-            args=args,
+            args=(encoding, *args),
             name="VCMI",
             daemon=True
         )

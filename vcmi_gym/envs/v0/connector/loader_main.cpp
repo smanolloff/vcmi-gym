@@ -54,24 +54,20 @@ int main() {
     printf("IN MAIN\n");
     auto gympath = "/Users/simo/Projects/vcmi-gym";
     auto modelpath = "data/M8-PBT-MPPO-20231204_191243/576e9_00000/checkpoint_000139/model.zip";
-    f_init(gympath, modelpath);
+    f_init(MMAI::Export::STATE_ENCODING_DEFAULT, gympath, modelpath);
 
-    auto stateUnencoded = MMAI::Export::StateUnencoded{};
-    auto state = MMAI::Export::State{};
+    auto state = MMAI::Export::StateUnencoded{};
 
     for (int i=0; i<165; i++)
         for (int i=0; i<static_cast<int>(MMAI::Export::Attribute::_count); i++)
-        stateUnencoded.at(i) = MMAI::Export::OneHot(MMAI::Export::Attribute(i));
-
-    for (int i=0; i<state.size(); i++)
-        state[i] = 0;
+        state.at(i) = MMAI::Export::OneHot(MMAI::Export::Attribute(i));
 
     auto actmask = MMAI::Export::ActMask{};
     for (int i=0; i < actmask.size(); i++) {
         actmask[i] = (i % 2 == 0);
     }
 
-    auto result = MMAI::Export::Result(stateUnencoded, state, actmask, MMAI::Export::Side(0), 0, 0, 0, 0, 0, 0, 0, 0);
+    auto result = MMAI::Export::Result(state, actmask, MMAI::Export::Side(0), 0, 0, 0, 0, 0, 0, 0, 0);
     printf("IN MAIN: GOT ACTION: %d\n", f_getAction(&result));
     return 0;
 }

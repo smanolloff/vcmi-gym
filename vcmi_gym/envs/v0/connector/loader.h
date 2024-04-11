@@ -30,18 +30,20 @@
 #endif
 
 // internal
-void init(MMAI::Export::Side side, std::string gymdir, std::string modelfile);
+void init(std::string encoding, MMAI::Export::Side side, std::string gymdir, std::string modelfile);
 MMAI::Export::Action getAction(MMAI::Export::Side &side, const MMAI::Export::Result* &r);
 
 // external
 // use long names to avoid symbol collisions
 
 extern "C" __attribute__((visibility("default"))) void ConnectorLoader_initAttacker(
+    std::string encoding,
     std::string gymdir,
     std::string modelfile
 );
 
 extern "C" __attribute__((visibility("default"))) void ConnectorLoader_initDefender(
+    std::string encoding,
     std::string gymdir,
     std::string modelfile
 );

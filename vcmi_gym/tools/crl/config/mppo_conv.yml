@@ -1,7 +1,7 @@
 ---
-group_id: float
-run_name: "float 3, 7-stack (NA=-1)"
-tags: ["Map-7stack-01", "StupidAI", "OneHot"]
+group_id: encodings
+run_name: "sp6iid0m, float"
+tags: ["Map-3stack-01", "StupidAI", "encoding-float"]
 
 wandb_project: vcmi-gym
 run_id: ~
@@ -14,8 +14,8 @@ notes: ""
 agent_load_file: ~
 #agent_load_file: "data/sweeps/vou0cebq/agent-1712277867.pt"
 rollouts_total: 0
-timesteps_total: 0  # exp_decay requires timesteps_total
-timesteps_per_mapchange: 0
+vsteps_total: 0  # exp_decay requires vsteps_total
+vsteps_per_mapchange: 0
 rollouts_per_mapchange: 0
 rollouts_per_log: 1
 rollouts_per_table_log: 0
@@ -24,10 +24,10 @@ success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
-mapmask: "gym/generated/88/88-7stack-300K-02.vmap"
+mapmask: "gym/generated/88/88-3stack-30K-01.vmap"
 randomize_maps: false
-save_every: 1800  # seconds
-permasave_every: 7200  # seconds
+save_every: 3600  # seconds
+permasave_every: 10800  # seconds
 max_saves: 3
 out_dir_template: "data/{group_id}/{run_id}"
 
@@ -35,35 +35,24 @@ out_dir_template: "data/{group_id}/{run_id}"
 opponent_sbm_probs: [1, 0, 0]
 opponent_load_file: ~
 
-# XXX: 21 envs require 256+ filehandles (and 256 is the limit by default)
-#      To increase (current shell session only):
-#           ulimit -n 1024
 num_envs: 1
 
 network:
   features_extractor:
-    # => (B, 11, 15, 86)
+    # => (B, 11, 15, 86|574)
     - {t: "Flatten", start_dim: 2}
-    # => (B, 11, 1290)
     - {t: "Unflatten", dim: 1, unflattened_size: [1, 11]}
-<<<<<<< HEAD
-    # => (B, 1, 11, 8610)
-    - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 574], stride: [1, 574], padding: 0}
-    - {t: "LeakyReLU"}
-    - {t: "Flatten"}
-    # => (B, 5280)
-    - {t: "Linear", in_features: 5280, out_features: 1024}
-=======
-    # => (B, 1, 11, 1290)
+    # => (B, 1, 11, 1290|8610)
     - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 86], stride: [1, 86], padding: 0}
+    # - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 574], stride: [1, 574], padding: 0}
     - {t: "LeakyReLU"}
     # => (B, 32, 11, 15)
     - {t: "Flatten"}
     # => (B, 5280)
     - {t: "Linear", in_features: 5280, out_features: 1024}
     - {t: "LeakyReLU"}
->>>>>>> 0067a98 (float encoding)
-    # => (B, 64)
+    # => (B, 1024)
+
   actor: {t: "Linear", in_features: 1024, out_features: 2311}
   critic: {t: "Linear", in_features: 1024, out_features: 1}
 
@@ -73,19 +62,20 @@ network:
 
 clip_coef: 0.4
 clip_vloss: false
-ent_coef: 0.01
-gae_lambda: 0.614
-gamma: 0.55
-lr_schedule: { mode: const, start: 0.0000062, end: 1.0e-6, rate: 10 }
-max_grad_norm: 1
+ent_coef: 0.007
+gae_lambda: 0.8
+gamma: 0.8425
+lr_schedule: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
+max_grad_norm: 0.5
 norm_adv: true
 num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches
-num_steps: 144       # rollout_buffer = num_steps*num_envs
-update_epochs: 32    # full passes of rollout_buffer
-vf_coef: 0.75
+num_steps: 128       # rollout_buffer = num_steps*num_envs
+update_epochs: 10    # full passes of rollout_buffer
+vf_coef: 1.2
 weight_decay: 0
 
 env:
+  encoding_type: "float"
   reward_dmg_factor: 5
   step_reward_fixed: -100
   step_reward_mult: 1

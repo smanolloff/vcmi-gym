@@ -17,7 +17,6 @@
 from .pyconnector import (
     N_NONHEX_ACTIONS,
     N_HEX_ACTIONS,
-    STATE_SIZE_ONE_HEX,
 )
 
 

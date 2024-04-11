@@ -33,20 +33,26 @@
 namespace py = pybind11;
 using namespace pybind11::literals;
 
-py::scoped_interpreter* guard;
-
-std::map<MMAI::Export::Side, py::object*> models;
-PyThreadState* _save;
+// TODO: namespace global vars
+py::scoped_interpreter* GUARD;
+std::string ENCODING;
+std::map<MMAI::Export::Side, py::object*> MODELS;
+PyThreadState* _SAVE;
 
 // low-level acquire/release
-#define GIL_LOW_ACQUIRE() { LOG("ACQUIRING GIL..."); assert(_save); PyEval_RestoreThread(_save); _save = nullptr; LOG("ACQUIRED GIL."); }
-#define GIL_LOW_RELEASE() { LOG("RELEASING GIL..."); assert(!_save); _save = PyEval_SaveThread(); LOG("RELEASED GIL."); }
+#define GIL_LOW_ACQUIRE() { LOG("ACQUIRING GIL..."); assert(_SAVE); PyEval_RestoreThread(_SAVE); _SAVE = nullptr; LOG("ACQUIRED GIL."); }
+#define GIL_LOW_RELEASE() { LOG("RELEASING GIL..."); assert(!_SAVE); _SAVE = PyEval_SaveThread(); LOG("RELEASED GIL."); }
 
 #define GIL_ACQUIRE() LOG("ACQUIRING GIL..."); auto gstate = PyGILState_Ensure(); LOG("ACQUIRED GIL.");
 #define GIL_RELEASE() LOG("RELEASING GIL..."); PyGILState_Release(gstate); LOG("ACQUIRED GIL.");
 
-void init(MMAI::Export::Side side, std::string gymdir, std::string modelpath) {
+void init(std::string encoding, MMAI::Export::Side side, std::string gymdir, std::string modelpath) {
     LOG("start");
+
+    if (!(encoding == MMAI::Export::STATE_ENCODING_DEFAULT || encoding == MMAI::Export::STATE_ENCODING_FLOAT))
+        throw std::runtime_error("Loader received an invalid encoding: " + encoding);
+
+    ENCODING = encoding;
 
     // This ptr will call the destructor once it goes out of scope
     std::unique_ptr<py::gil_scoped_acquire> acquire;
@@ -63,7 +69,7 @@ void init(MMAI::Export::Side side, std::string gymdir, std::string modelpath) {
         // start the interpreter and keep it alive until shutdown
         // (it will automatically acquire the GIL)
         LOG("!!! Starting embedded Python interpreter !!!");
-        guard = new py::scoped_interpreter();
+        GUARD = new py::scoped_interpreter();
     }
 
     // at this point, there must be a python interpreter
@@ -79,8 +85,8 @@ void init(MMAI::Export::Side side, std::string gymdir, std::string modelpath) {
         sys.attr("path").attr("insert")(1, "vcmi_gym/envs/v0/connector");
         py::eval_file(("vcmi_gym/envs/v0/connector/loader.py"));
         auto model_cls = py::object(py::eval("Loader.MPPO").cast<py::object>());
-        assert(models.count(side) == 0);
-        models[side] = new py::object(model_cls(modelpath).cast<py::object>());
+        assert(MODELS.count(side) == 0);
+        MODELS[side] = new py::object(model_cls(modelpath).cast<py::object>());
         std::filesystem::current_path(oldwd);
     }
 
@@ -92,16 +98,16 @@ void init(MMAI::Export::Side side, std::string gymdir, std::string modelpath) {
     LOG("return");
 }
 
-void ConnectorLoader_initAttacker(std::string gymdir, std::string modelpath) {
+void ConnectorLoader_initAttacker(std::string encoding, std::string gymdir, std::string modelpath) {
     auto side = MMAI::Export::Side::ATTACKER;
     LOG("Initializing model for ATTACKER (#" + std::to_string(static_cast<int>(side)) + ")");
-    init(side, gymdir, modelpath);
+    init(encoding, side, gymdir, modelpath);
 }
 
-void ConnectorLoader_initDefender(std::string gymdir, std::string modelpath) {
+void ConnectorLoader_initDefender(std::string encoding, std::string gymdir, std::string modelpath) {
     auto side = MMAI::Export::Side::DEFENDER;
     LOG("Initializing model for DEFENDER (#" + std::to_string(static_cast<int>(side)) + ")");
-    init(side, gymdir, modelpath);
+    init(encoding, side, gymdir, modelpath);
 }
 
 MMAI::Export::Action getAction(MMAI::Export::Side side, const MMAI::Export::Result* &r) {
@@ -119,16 +125,38 @@ MMAI::Export::Action getAction(MMAI::Export::Side side, const MMAI::Export::Resu
         // using higher-level PyGILState_Ensure + PyGILState_Release works (I think)
         // ...but py::gil_scoped_acquire also works and is the simplest approach
         py::gil_scoped_acquire acquire;
-        assert(models.count(side) == 1);
-        auto ps = P_State(r->state.size());
-        auto psmd = ps.mutable_data();
-        for (int i=0; i < r->state.size(); i++) {
-            if (r->state[i] != 0 || r->state[i] != 1 && r->state[i] != MMAI::Export::STATE_VALUE_NA) {
-                printf("Bad state[%d]: %d\n", i, r->state[i]);
-            }
+        assert(MODELS.count(side) == 1);
 
-            psmd[i] = r->state[i];
-        }
+        P_State ps;
+
+        if (ENCODING == MMAI::Export::STATE_ENCODING_DEFAULT) {
+            auto vec = MMAI::Export::State{};
+            vec.reserve(MMAI::Export::STATE_SIZE_DEFAULT);
+
+            for (auto &u : r->stateUnencoded)
+                u.encode(vec);
+
+            if (vec.size() != MMAI::Export::STATE_SIZE_DEFAULT)
+                throw std::runtime_error("Unexpected state size: " + std::to_string(vec.size()));
+
+            ps = P_State(MMAI::Export::STATE_SIZE_DEFAULT);
+            auto psmd = ps.mutable_data();
+
+            for (int i=0; i<MMAI::Export::STATE_SIZE_DEFAULT; i++)
+                psmd[i] = vec[i];
+
+        } else if (ENCODING == MMAI::Export::STATE_ENCODING_FLOAT) {
+            if (r->stateUnencoded.size() != MMAI::Export::STATE_SIZE_FLOAT)
+                throw std::runtime_error("Unexpected state size: " + std::to_string(r->stateUnencoded.size()));
+
+            ps = P_State(MMAI::Export::STATE_SIZE_FLOAT);
+            auto psmd = ps.mutable_data();
+
+            for (int i=0; i<MMAI::Export::STATE_SIZE_FLOAT; i++)
+                psmd[i] = r->stateUnencoded[i].encode2Floating();
+        } else {
+            throw std::runtime_error("Unexpected encoding: " + ENCODING);
+        };
 
         auto pam = P_ActMask(r->actmask.size());
         auto pammd = pam.mutable_data();
@@ -138,7 +166,7 @@ MMAI::Export::Action getAction(MMAI::Export::Side side, const MMAI::Export::Resu
         if (r->ended) {
             result = MMAI::Export::ACTION_RESET;
         } else {
-            auto predict = models[side]->attr("predict");
+            auto predict = MODELS[side]->attr("predict");
             result = predict(ps, pam).cast<MMAI::Export::Action>();
         }
     }

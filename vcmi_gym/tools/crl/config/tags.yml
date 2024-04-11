@@ -1,24 +1,6 @@
 ---
 # Prevent bloating wandb UI with mistyped tags
 
-# The classic net arch - 1xConv2d + 1xFC
-# Variants of this arch (e.g. ResNet variant) should include both tags
-- Classic
-
-# The 3-head net arch - 3xConv2d + 1xFC + 3x1xConv2d
-# Variants of this arch (e.g. ResNet variant) should include both tags
-- Heads
-
-# Simplest net arch - FC only (any number of layers).
-- FC
-
-# Some mixtures of the above. Eventually, everything may become "Hybrid"...
-- Hybrid
-
-# Variants where each Conv2d layer is replaced by 2 or 3 Conv3d layers with
-# residual connections
-- ResNet
-
 # Results can't really be compared across different maps
 - Map-3stack-01
 - Map-7stack-01
@@ -30,8 +12,9 @@
 # Prevent evaluator from picking those up
 - no-eval
 
-# New observation scheme
-- OneHot
+# New observation scheme with two types of encoding
+- encoding-default
+- encoding-float
 
 # New algorithm
 - QRDQN
