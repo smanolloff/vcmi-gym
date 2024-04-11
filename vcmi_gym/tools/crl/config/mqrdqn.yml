@@ -1,7 +1,7 @@
 ---
-group_id: qrdqn-from-h3qh72hg
-run_name: "Q=100 T=4 U=10K lr=1e-7 buf=5K"
-tags: ["Map-3stack-01", "StupidAI", "OneHot"]
+group_id: MQRDQN
+run_name: "float g0.98 lr1e-5 Q100 buf5K U1K"
+tags: ["Map-3stack-01", "StupidAI", "QRDQN", "encoding-float"]
 
 wandb_project: vcmi-gym
 run_id: ~
@@ -11,11 +11,11 @@ overwrite: []
 
 notes: ""
 
-# agent_load_file: ~
-agent_load_file: "data/qrdqn-from-h3qh72hg/80qqlepn/agent-nobuf-1712755268.pt"
+agent_load_file: ~
+#agent_load_file: "data/qrdqn-from-h3qh72hg/80qqlepn/agent-nobuf-1712755268.pt"
 vsteps_total: 0  # exp_decay requires vsteps_total
-vsteps_for_warmup: 10000
-random_warmup: false
+vsteps_for_warmup: 1000
+random_warmup: true
 trains_per_log: 25
 opponent_load_file: ~
 success_rate_target: ~
@@ -44,12 +44,12 @@ network:
   - {t: "Flatten", start_dim: 2}
   - {t: "Unflatten", dim: 1, unflattened_size: [1, 11]}
   # => (B, 1, 11, 1290|8610)
-  - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 86], stride: [1, 86], padding: 0}
+  - {t: "Conv2d", in_channels: 1, out_channels: 16, kernel_size: [1, 86], stride: [1, 86], padding: 0}
   # - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 574], stride: [1, 574], padding: 0}
   - {t: "LeakyReLU"}
   - {t: "Flatten"}
-  # => (B, 5280)
-  - {t: "Linear", in_features: 5280, out_features: 1024}
+  # => (B, 2640)
+  - {t: "Linear", in_features: 2640, out_features: 64}
   - {t: "LeakyReLU"}
   # => (B, 64)
 
@@ -59,15 +59,15 @@ network:
 #
 
 # lr_schedule: { mode: "lin_decay", start: 1.0e-5, end: 1.0e-6, rate: 4 }
-lr_schedule: { mode: "const", start: 1.0e-7, end: 1.0e-7, rate: 4 }
+lr_schedule: { mode: "const", start: 1.0e-5, end: 1.0e-7, rate: 4 }
 eps_schedule: { mode: "const", start: 0.1, end: 0.01, rate: 4 }
-buffer_size_vsteps: 5000
+buffer_size_vsteps: 3000
 batch_size: 32
 tau: 1.0
 vsteps_per_train: 4
 train_iterations: 1
-trains_per_target_update: 10000
-gamma: 0.75
+trains_per_target_update: 1000
+gamma: 0.98
 max_grad_norm: 0.5
 
 env:

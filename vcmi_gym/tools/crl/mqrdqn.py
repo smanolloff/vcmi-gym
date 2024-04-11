@@ -345,7 +345,7 @@ def quantile_huber_loss(value, target, batch_size, n_quantiles):
 
 
 def main(args):
-    LOG = logging.getLogger("mppo_qrdqn")
+    LOG = logging.getLogger("mqrdqn")
     LOG.setLevel(logging.INFO)
 
     assert isinstance(args, Args)
