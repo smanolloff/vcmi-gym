@@ -17,6 +17,8 @@
 import time
 import random
 
+from vcmi_gym import VcmiEnv
+
 
 def random_valid_action(mask):
     valid_action_indexes = [i for i, v in enumerate(mask) if v]
@@ -29,7 +31,9 @@ def first_valid_action(mask):
             return i
 
 
-def benchmark(env, total_steps):
+def main():
+    total_steps = 1000
+    env = VcmiEnv("gym/generated/88/88-7stack-01.vmap", random_combat=1, encoding_type="float")
     obs, info = env.reset()
     term = False
     trunc = False
@@ -78,7 +82,7 @@ def benchmark(env, total_steps):
                     tmpresets += 1
                 obs, info = env.reset()
             else:
-                act = random_valid_action(ew.action_masks())
+                act = random_valid_action(ew.action_mask())
                 obs, _, term, trunc, info = env.step(act)
 
             # reset is also a "step" (aka. a round-trip to VCMI)
@@ -107,3 +111,7 @@ def benchmark(env, total_steps):
         print("* Total resets: %d" % resets)
     finally:
         env.close()
+
+
+if __name__ == "__main__":
+    main()

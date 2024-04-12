@@ -45,17 +45,10 @@ There's a ton of other things I tried, but I don't feel like sharing all of my
 failures here :) If this project gains enough traction, someone will eventually
 find the right formula. 
 
-There are also the limitations of the environment itself (e.g. having to
-restart the entire game in order to switch army compositions) are negatively
-impacting the training performance. Hopefully they will one day be dealt
-with -- the full [list of features](https://github.com/smanolloff/vcmi) I'd
-like to see implemented in VCMI shows there's still much work to be done
-and your help would be greatly appreciated in this regard :)
-
-My messy and unannotated W&B project with some of my older training runs can be
-found [here](https://wandb.ai/s-manolloff/vcmi). Recent training runs will not
-appear there, as I have created a separate W&B project (not public yet), with
-the hope to keep it more organized and suitable and then share it.
+My W&B project with some of my recent training runs can be
+found [here](https://wandb.ai/s-manolloff/vcmi-gym).
+Older training runs will not appear there, as they were in another (quite
+messy) W&B project.
 
 ## Loading AI models into VCMI directly
 

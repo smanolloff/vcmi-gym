@@ -34,7 +34,7 @@
 				"pip-sb3",
 
 				// NOTE: also hides config/wandb :( but I dont use it anyway
-				"wandb/",
+				"/wandb/",
 			],
 			"binary_file_patterns": [
 				"testing/maps/*.vmap",
