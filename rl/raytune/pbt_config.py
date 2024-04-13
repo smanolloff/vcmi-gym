@@ -6,7 +6,7 @@ config = {
     "target_ep_rew_mean": 3_000_000,  # impossible target
     "wandb_project": "vcmi-gym",
     "perturbation_interval": 1,  # target metric will be averaged
-    "population_size": 1,
+    "population_size": 5,
 
     # """
     # Parameters are transferred from the top quantile_fraction
@@ -31,10 +31,7 @@ config = {
     #    the prev or next element will be used for perturbation.
     # """
     "hyperparam_mutations": {
-        "lr_schedule": {
-            "mode": "const",
-            "start": explist(1e-7, 1e-4, n=20)
-        },
+        "lr_schedule": {"start": explist(1e-7, 1e-4, n=20)},
         "ent_coef": linlist(0, 0.2, n=10),
         "gae_lambda": linlist(0.5, 0.99, n=20),
         "gamma": linlist(0.6, 0.99, n=20),
@@ -51,7 +48,7 @@ config = {
         #   = 1171 rollouts
         #   = 6K episodes (good for 1K avg metric)
         #   = ~30..60 min (Mac)
-        "vsteps_total": 1000,
+        "vsteps_total": 150_000,
 
         # Initial checkpoint to start from
         "agent_load_file": None,
@@ -115,7 +112,7 @@ config = {
         },
 
         # Static
-        "loglevel": logging.DEBUG,
+        "loglevel": logging.INFO,
         "skip_wandb_init": True,
         "skip_wandb_log_code": False,  # overwritten to True after 1st iteration
         "resume": False,
