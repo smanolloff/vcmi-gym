@@ -41,8 +41,8 @@ config = {
         "gae_lambda": linlist(0.5, 0.99, n=20),
         "gamma": linlist(0.6, 0.99, n=20),
         "max_grad_norm": linlist(0.2, 10, n=20),
-        "num_minibatches": [2, 4, 8],
-        "update_epochs": tune.choice(linlist(2, 20, n=10, dtype=int)),
+        # "num_minibatches": [2, 4, 8],
+        # "update_epochs": tune.choice(linlist(2, 20, n=10, dtype=int)),
         "vf_coef": linlist(0.1, 2, n=10),
     },
     "all_params": {

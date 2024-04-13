@@ -56,11 +56,6 @@ class TrainableMPPO(ray.tune.Trainable):
 
     @debuglog
     def reset_config(self, cfg):
-        import traceback
-        for trace, _ in traceback.walk_stack(None):
-            print(trace)
-            print(trace.f_locals)
-
         self.cfg = common.deepmerge(copy.deepcopy(self.cfg), cfg)
 
         for k in common.flattened_dict_keys(cfg, "."):

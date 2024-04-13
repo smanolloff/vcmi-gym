@@ -21,7 +21,6 @@ import random
 import shutil
 import logging
 import signal
-import dataclasses
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -33,7 +32,6 @@ import torch.nn as nn
 # import tyro
 
 from vcmi_gym import VcmiEnv
-
 from . import common
 
 ENVS = []  # debug
@@ -271,12 +269,13 @@ def main(args):
     printargs = asdict(args).copy()
 
     # Logger
-    formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.run_id}] %(message)s")
-    formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
-    formatter.default_msec_format = None
-    loghandler = logging.StreamHandler()
-    loghandler.setFormatter(formatter)
-    LOG.addHandler(loghandler)
+    if not any(LOG.handlers):
+        formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.run_id}] %(message)s")
+        formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
+        formatter.default_msec_format = None
+        loghandler = logging.StreamHandler()
+        loghandler.setFormatter(formatter)
+        LOG.addHandler(loghandler)
 
     LOG.info("Args: %s" % printargs)
 
