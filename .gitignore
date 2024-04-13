@@ -2,7 +2,7 @@
 .venv
 build
 rel
-/rl/data/
+/data
 /wandb
 *.egg-info
 CMakeUserPresets.json

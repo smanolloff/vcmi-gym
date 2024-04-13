@@ -57,6 +57,11 @@ class TrainableMPPO(ray.tune.Trainable):
     @debuglog
     def reset_config(self, cfg):
         self.cfg = common.deepmerge(copy.deepcopy(self.cfg), cfg)
+
+        # for k in common.flattened_dict_keys(cfg, "."):
+        #     assert "/" not in k
+        #     self.cfg["logparams"][f"params/{k}"] = k
+
         return True
 
     @debuglog
@@ -83,7 +88,7 @@ class TrainableMPPO(ray.tune.Trainable):
     @debuglog
     def step(self):
         wandb.log({"trial/iteration": self.iteration}, commit=False)
+        self.cfg["skip_wandb_log_code"] = (self.iteration > 0)
         args = mppo.Args(wandb.run.id, wandb.run.group, **self.cfg)
         self.agent, rew_mean = mppo.main(args)
-        self.cfg["skip_wandb_log_code"] = True
         return {"rew_mean": rew_mean}

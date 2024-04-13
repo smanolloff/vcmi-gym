@@ -113,7 +113,7 @@ class Args:
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
     max_saves: int = 3
-    out_dir_template: str = "rl/data/{group_id}/{run_id}"
+    out_dir_template: str = "data/{group_id}/{run_id}"
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
@@ -634,7 +634,7 @@ def debug_args():
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=0,
-        out_dir_template="rl/data/debug-crl/debug-crl",
+        out_dir_template="data/debug-crl/debug-crl",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,

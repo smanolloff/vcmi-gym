@@ -5,6 +5,7 @@ config = {
     "wandb_project": "test",
     "results_dir": "data",
     "perturbation_interval": 1,
+    "synch": True,
     "population_size": 1,
 
     # """
@@ -117,7 +118,7 @@ config = {
         "save_every": 0,        # no effect (NO_SAVE=true)
         "permasave_every": 0,   # no effect (NO_SAVE=true)
         "max_saves": 3,         # no effect (NO_SAVE=true)
-        "out_dir_template": "rl/data/{group_id}/{run_id}",  # relative to cwd
+        "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
         "num_envs": 1,
         "env": {
             "encoding_type": "float",

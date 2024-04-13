@@ -10,7 +10,7 @@ os.environ["RAY_DEDUP_LOGS"] = "0"
 
 # this makes the "storage" arg redundant. By default, TUNE_RESULT_DIR
 # is $HOME/ray_results and "storage" just *copies* everything into data
-os.environ["TUNE_RESULT_DIR"] = os.path.join(os.path.dirname(__file__), "..", "data")
+os.environ["TUNE_RESULT_DIR"] = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
 # chdir seems redundant. Initially tried to disable wandb's warning
 # for requirements.txt, but it persists. However, it's better without
@@ -48,7 +48,7 @@ def main():
         quantile_fraction=config["quantile_fraction"],
         log_config=False,  # used for reconstructing the config schedule
         require_attrs=True,
-        synch=True,
+        synch=config["synch"],
     )
 
     checkpoint_config = train.CheckpointConfig(

@@ -6,7 +6,8 @@ config = {
     "target_ep_rew_mean": 3_000_000,  # impossible target
     "wandb_project": "vcmi-gym",
     "perturbation_interval": 1,  # target metric will be averaged
-    "population_size": 5,
+    "synch": True,
+    "population_size": 1,
 
     # """
     # Parameters are transferred from the top quantile_fraction
@@ -48,7 +49,7 @@ config = {
         #   = 1171 rollouts
         #   = 6K episodes (good for 1K avg metric)
         #   = ~30..60 min (Mac)
-        "vsteps_total": 150_000,
+        "vsteps_total": 100_0,
 
         # Initial checkpoint to start from
         "agent_load_file": None,
@@ -95,24 +96,10 @@ config = {
             "critic": {"t": "Linear", "in_features": 1024, "out_features": 1}
         },
 
-        "logparams": {
-            "params/clip_coef": "clip_coef",
-            "params/clip_vloss": "clip_vloss",
-            "params/ent_coef": "ent_coef",
-            "params/gae_lambda": "gae_lambda",
-            "params/gamma": "gamma",
-            # "params/lr_schedule": "lr_schedule",  # learning_rate is logged periodically
-            "params/max_grad_norm": "max_grad_norm",
-            "params/norm_adv": "norm_adv",
-            "params/num_minibatches": "num_minibatches",
-            "params/num_steps": "num_steps",
-            "params/update_epochs": "update_epochs",
-            "params/vf_coef": "vf_coef",
-            "params/weight_decay": "weight_decay",
-        },
 
         # Static
         "loglevel": logging.INFO,
+        "logparams": {},  # overwritten based on "hyperparam_mutations"
         "skip_wandb_init": True,
         "skip_wandb_log_code": False,  # overwritten to True after 1st iteration
         "resume": False,
@@ -129,7 +116,7 @@ config = {
         "save_every": 0,        # no effect (NO_SAVE=true)
         "permasave_every": 0,   # no effect (NO_SAVE=true)
         "max_saves": 3,         # no effect (NO_SAVE=true)
-        "out_dir_template": "rl/data/{group_id}/{run_id}",  # relative to cwd
+        "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
         "num_envs": 1,
         "env": {
             "encoding_type": "float",

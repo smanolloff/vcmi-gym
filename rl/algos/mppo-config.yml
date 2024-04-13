@@ -27,7 +27,7 @@ randomize_maps: false
 save_every: 3600  # seconds
 permasave_every: 10800  # seconds
 max_saves: 3
-out_dir_template: "rl/data/{group_id}/{run_id}"  # XXX: relative to cwd()
+out_dir_template: "data/{group_id}/{run_id}"  # XXX: relative to cwd()
 
 # SBM = StupidAI, BattleAI, MMAI_MODEL
 opponent_sbm_probs: [1, 0, 0]

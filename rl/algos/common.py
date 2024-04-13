@@ -23,8 +23,8 @@ import gymnasium as gym
 import os
 import time
 import re
-import shutil
 import importlib
+import pathlib
 import numpy as np
 import yaml
 
@@ -325,23 +325,29 @@ def setup_wandb(args, agent, src_file):
         )
 
     # https://docs.wandb.ai/ref/python/run#log_code
-    # XXX: "path" is relative to THIS dir
+    # XXX: "path" is relative to `root`
     #      but args.cfg_file is relative to vcmi-gym ROOT dir
-    # noqa: W504
+    src_file = pathlib.Path(src_file)
+    this_file = pathlib.Path(__file__)
+    rl_root = this_file.parent.parent
+    cfg_file = pathlib.Path(args.cfg_file) if args.cfg_file else None
+
     def code_include_fn(path):
+        p = pathlib.Path(path).absolute()
+
         res = (
-            (os.path.basename(path) == os.path.basename(__file__))
-            or path.endswith(os.path.basename(src_file))
-            or path.endswith(os.path.basename(args.cfg_file or "\u0255"))
-            or path.endswith("requirements.txt")
-            or path.endswith("requirements.lock")
+            p.samefile(this_file)
+            or p.samefile(src_file)
+            or p.samefile(rl_root / "wandb" / "requirements.txt")
+            or p.samefile(rl_root / "wandb" / "requirements.lock")
+            or (cfg_file and p.samefile(cfg_file))
         )
 
-        # print("Should include %s: %s" % (path, res))
+        print("Should include %s: %s" % (path, res))
         return res
 
     if not args.skip_wandb_log_code:
-        wandb.run.log_code(root=os.path.dirname(src_file), include_fn=code_include_fn)
+        wandb.run.log_code(root=rl_root, include_fn=code_include_fn)
 
     return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
 
@@ -367,7 +373,7 @@ def schedule_fn(schedule):
 
 
 def validate_tags(tags):
-    all_tags_file = os.path.join(os.path.dirname(__file__), "..", "config", "tags.yml")
+    all_tags_file = os.path.join(os.path.dirname(__file__), "..", "wandb", "tags.yml")
     with open(all_tags_file, "r") as f:
         all_tags = yaml.safe_load(f)
     for tag in tags:

@@ -45,6 +45,19 @@ def linlist(low, high, n=100, dtype=float):
     return list(map(lambda i: dtype(low + x*i), range(n)))
 
 
+# Flatten dict keys: {"a": {"b": 1, "c": 2"}} => ["a.b", "a.c"]
+def flattened_dict_keys(d, sep, parent_key=None):
+    keys = []
+    for k, v in d.items():
+        assert sep not in k, "original dict's keys must not contain '%s'" % sep
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            keys.extend(flattened_dict_keys(v, sep, new_key))
+        else:
+            keys.append(new_key)
+    return keys
+
+
 def deepmerge(a: dict, b: dict, path=[]):
     for key in b:
         if key in a:
