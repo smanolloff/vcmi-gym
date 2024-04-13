@@ -1,5 +1,6 @@
 import logging
 from .common import linlist, explist
+from ray import tune
 
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
@@ -7,7 +8,7 @@ config = {
     "wandb_project": "vcmi-gym",
     "perturbation_interval": 1,  # target metric will be averaged
     "synch": True,
-    "population_size": 1,
+    "population_size": 6,
 
     # """
     # Parameters are transferred from the top quantile_fraction
@@ -30,6 +31,9 @@ config = {
     #
     # => just use *lists* with appropriately distributed elements, so
     #    the prev or next element will be used for perturbation.
+    #
+    # XXX: ray always converts these numbers to floats. Special care
+    #       must be taken to manually convert them back to integers afterwards.
     # """
     "hyperparam_mutations": {
         "lr_schedule": {"start": explist(1e-7, 1e-4, n=20)},
@@ -38,7 +42,7 @@ config = {
         "gamma": linlist(0.6, 0.99, n=20),
         "max_grad_norm": linlist(0.2, 10, n=20),
         "num_minibatches": [2, 4, 8],
-        "update_epochs": linlist(2, 20, n=10, dtype=int),
+        "update_epochs": tune.choice(linlist(2, 20, n=10, dtype=int)),
         "vf_coef": linlist(0.1, 2, n=10),
     },
     "all_params": {
@@ -49,7 +53,7 @@ config = {
         #   = 1171 rollouts
         #   = 6K episodes (good for 1K avg metric)
         #   = ~30..60 min (Mac)
-        "vsteps_total": 100_0,
+        "vsteps_total": 150_000,
 
         # Initial checkpoint to start from
         "agent_load_file": None,

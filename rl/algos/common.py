@@ -28,7 +28,7 @@ import pathlib
 import numpy as np
 import yaml
 
-from dataclasses import asdict
+import dataclasses
 from torch.distributions.categorical import Categorical
 
 
@@ -113,7 +113,7 @@ def create_venv(env_cls, args, map_swaps):
                 assert args.opponent_load_file, "opponent_load_file is required for MMAI_MODEL"
 
             env_kwargs = dict(
-                asdict(args.env),
+                dataclasses.asdict(args.env),
                 mapname=mapname,
                 attacker=opponent,
                 defender=opponent,
@@ -317,7 +317,7 @@ def setup_wandb(args, agent, src_file):
             tags=args.tags,
             resume="must" if args.resume else "never",
             # resume="allow",  # XXX: reuse id for insta-failed runs
-            config=asdict(args),
+            config=dataclasses.asdict(args),
             sync_tensorboard=False,
             save_code=False,  # code saved manually below
             allow_val_change=args.resume,
@@ -343,7 +343,7 @@ def setup_wandb(args, agent, src_file):
             or (cfg_file and p.samefile(cfg_file))
         )
 
-        print("Should include %s: %s" % (path, res))
+        # print("Should include %s: %s" % (path, res))
         return res
 
     if not args.skip_wandb_log_code:
@@ -395,3 +395,11 @@ def save(agent, agent_file, nn_file=None):
     if nn_file:
         print("Saving NN state to %s" % nn_file)
         torch.save(agent.NN.state_dict(), nn_file)
+
+
+def coerce_dataclass_ints(dataclass_obj):
+    for f in dataclasses.fields(dataclass_obj):
+        v = getattr(dataclass_obj, f.name)
+        if f.type == int and v is not None and not isinstance(v, int):
+            assert isinstance(v, float)
+            setattr(dataclass_obj, f.name, round(v))

@@ -21,6 +21,7 @@ import random
 import shutil
 import logging
 import signal
+import dataclasses
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -69,6 +70,9 @@ class EnvArgs:
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
 
+    def __post_init__(self):
+        common.coerce_dataclass_ints(self)
+
 
 @dataclass
 class NetworkArgs:
@@ -85,6 +89,9 @@ class State:
     current_timestep: int = 0
     current_vstep: int = 0
     current_rollout: int = 0
+
+    def __post_init__(self):
+        common.coerce_dataclass_ints(self)
 
 
 @dataclass
@@ -151,6 +158,8 @@ class Args:
             self.lr_schedule = ScheduleArgs(**self.lr_schedule)
         if not isinstance(self.network, NetworkArgs):
             self.network = NetworkArgs(**self.network)
+
+        common.coerce_dataclass_ints(self)
 
 
 class SelfAttention(nn.MultiheadAttention):
@@ -589,7 +598,7 @@ def main(args):
 
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
                 wandb_log({"global/global_num_timesteps": agent.state.global_timestep}, commit=True)  # commit on final log line
-                LOG.info("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f loss=%.2f" % (
+                LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f loss=%.2f" % (
                     agent.state.current_rollout,
                     agent.state.current_vstep,
                     ep_rew_mean,

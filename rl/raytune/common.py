@@ -17,7 +17,7 @@
 import wandb
 from ray.tune.logger import TBXLoggerCallback
 
-DEBUG = True
+DEBUG = False
 
 
 def debuglog(func):

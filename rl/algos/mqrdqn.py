@@ -158,6 +158,9 @@ class EnvArgs:
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
 
+    def __post_init__(self):
+        common.coerce_dataclass_ints(self)
+
 
 @dataclass
 class State:
@@ -166,6 +169,9 @@ class State:
     global_timestep: int = 0
     current_timestep: int = 0
     current_vstep: int = 0
+
+    def __post_init__(self):
+        common.coerce_dataclass_ints(self)
 
 
 @dataclass
@@ -231,6 +237,8 @@ class Args:
             self.lr_schedule = ScheduleArgs(**self.lr_schedule)
         if not isinstance(self.eps_schedule, ScheduleArgs):
             self.eps_schedule = ScheduleArgs(**self.eps_schedule)
+
+        common.coerce_dataclass_ints(self)
 
 
 class SelfAttention(nn.MultiheadAttention):
