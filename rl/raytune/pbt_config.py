@@ -1,6 +1,5 @@
 import logging
 from .common import linlist, explist
-from ray import tune
 
 # https://docs.ray.io/en/latest/tune/api/search_space.html
 config = {
@@ -20,20 +19,23 @@ config = {
 
     # """
     # Perturbations will then be made based on the values here
-    # Initial values are sampled from here even if present in "all_params"
     #
-    # XXX:
-    # Using tune distributions (e.g. tune.uniform()) is bad, as
-    # the perturbation logic simply multiplies the value by 0.8 or 1.2
-    # Example why this is bad:
-    #  * range 0.95-0.99, old=0.96 => new=0.96*1.2 = 1.152
-    #  * range 1..100, old=1 => new=1*1.2 = 1.2
+    # XXX: according to the docs, initial values should be sampled only if not
+    #       present in "all_params". However, it seems tune always samples the
+    #       initial values regardless.
     #
-    # => just use *lists* with appropriately distributed elements, so
-    #    the prev or next element will be used for perturbation.
+    # XXX: Do NOT use tune distributions here (e.g. tune.uniform()).
+    #      Reasons why this is bad:
+    #   > tune will perturb by simply multiplying the value by 0.8 or 1.2
+    #       e.g. range 0.95-0.99, old=0.96 means new value of 0.96*1.2 = 1.152
+    #   > tune will ignore the value bounds which can lead to errors
+    #   > tune will treat everything as a continuous distribution
+    #       e.g. tune.choice([1, 2]), perturbation will still perturb as above
     #
-    # XXX: ray always converts these numbers to floats. Special care
-    #       must be taken to manually convert them back to integers afterwards.
+    # Workaround: use *plain lists* with appropriately distributed elements:
+    #   > tune will perturb by choosing the next or prev value in the list
+    #   > tune will not honor the data type (values are converted to floats)
+    #       e.g. [1, 2] will pass in 1.0 or 2.0 -- this must be accounted for
     # """
     "hyperparam_mutations": {
         "lr_schedule": {"start": explist(1e-7, 1e-4, n=20)},

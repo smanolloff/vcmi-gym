@@ -381,20 +381,40 @@ def validate_tags(tags):
 
 
 def save(agent, agent_file, nn_file=None):
-    print("Saving agent to %s ..." % agent_file)
+    print("Saving agent to %s" % agent_file)
     attrs = agent.save_attrs()
     data = {k: agent.__dict__[k] for k in attrs}
-    state_dict = agent.state_dict()
+    nn_state_dict = agent.NN.state_dict()
+    opt_state_dict = agent.optimizer.state_dict()
+
     # Re-create the entire agent to ensure it's "clean"
     clean_agent = agent.__class__(**data)
-    clean_agent.load_state_dict(state_dict, strict=True)
+    clean_agent.NN.load_state_dict(nn_state_dict, strict=True)
+
+    # Saving the entire optimizer saves a duplicate of NN.parameters()
+    # => save only the state dict
+    # Using a "hidden" variable to avoid having to store it separately
+    # (e.g. pytorch.save({"agent": ..., "optimizer_state": ...}, save_file)
+    # This enables a simple `agent = torch.load(...)` for non-training purposes
+    # while retaining all data needed for training purposes
+    clean_agent.optimizer = None
+    clean_agent._optimizer_state = opt_state_dict
     torch.save(clean_agent, agent_file)
 
     # Optionally, save the NN state separately
     # Useful as it is decoupled from the Agent module (which changes often)
     if nn_file:
         print("Saving NN state to %s" % nn_file)
-        torch.save(agent.NN.state_dict(), nn_file)
+        torch.save(nn_state_dict, nn_file)
+
+
+def load(agent_file):
+    print("Loading agent from %s" % agent_file)
+    agent = torch.load(agent_file)
+    agent.init_optimizer()
+    agent.optimizer.load_state_dict(agent._optimizer_state)
+    agent._optimizer_state = None
+    return agent
 
 
 def coerce_dataclass_ints(dataclass_obj):

@@ -225,26 +225,35 @@ class AgentNN(nn.Module):
 
 
 class Agent(nn.Module):
-    def __init__(self, args, observation_space, action_space, optimizer=None, state=None):
+    def __init__(self, args, observation_space, action_space, state=None):
         super().__init__()
 
         self.args = args
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
+        self._optimizer_state = None  # needed for save/load
 
         self.NN = AgentNN(args.network, action_space, observation_space)
+        self.init_optimizer()
         self.predict = self.NN.predict
-        self.optimizer = optimizer or torch.optim.AdamW(self.parameters(), eps=1e-5)
         self.state = state or State()
 
     # XXX: This is a method => it will work after pytorch.load if the saved model did not have it
-    # XXX: NN must not be included here
+    # XXX: `NN` and `optimizer` need special handling and must not be included here
     def save_attrs(self):
-        return ["args", "observation_space", "action_space", "optimizer", "state"]
+        return ["args", "observation_space", "action_space", "state"]
 
-    # Needed by PBT to avoid importing algos.common
-    def save(self, save_file):
-        common.save(self, save_file)
+    # Separate method as it's explicitly called during .load()
+    def init_optimizer(self):
+        self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
+
+
+def save(agent, save_file):
+    return common.save(agent, save_file)
+
+
+def load(load_file):
+    return common.load(load_file)
 
 
 def handle_signal(signum, frame):
@@ -301,19 +310,18 @@ def main(args):
 
     if args.agent_load_file:
         f = args.agent_load_file
-        LOG.info("Loading agent from %s" % f)
-        agent = torch.load(f)
+        agent = load(f)
         agent.args = args
         start_map_swaps = agent.state.map_swaps
         agent.state.current_timestep = 0
         agent.state.current_vstep = 0
         agent.state.current_rollout = 0
 
-        backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
-        with open(f, 'rb') as fsrc:
-            with open(backup, 'wb') as fdst:
-                shutil.copyfileobj(fsrc, fdst)
-                LOG.info("Wrote backup %s" % backup)
+        # backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
+        # with open(f, 'rb') as fsrc:
+        #     with open(backup, 'wb') as fdst:
+        #         shutil.copyfileobj(fsrc, fdst)
+        #         LOG.info("Wrote backup %s" % backup)
 
     common.validate_tags(args.tags)
 
