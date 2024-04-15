@@ -10,7 +10,7 @@ to be desired :)
 I've mostly been using PPO with action masking as the RL algorithm and am
 experimenting with numerous neural network architectures. So far I have
 achieved best results with a simple 1-layer 2D convolutional layer, followed
-by a FC-1024 layer with batch normalization an LeakyReLU activations and it's
+by a FC-1024 layer with batch normalization and LeakyReLU activations which is
 basically showing a 60+% winrate vs VCMI's Neutral AI (StupidAI) and
 is struggling at around 50% vs. VCMI's Player AI (BattleAI):
 
@@ -24,31 +24,27 @@ I've historically used PPO implementations from
 difficult to modify/customize, so I recently switched to a modified version of
 [cleanrl](https://github.com/vwxyzjn/cleanrl).
 
-I also attempted to implement masking for SB3-contrib's QRDQN implementation,
-but that algorithm is too heavy and learning was too slow/non-existent (might
-also be a problem with my modification), so I abandoned that.
-Self-attention layers, parameterized multi-head action networks and LSTMs did
-not yield good results for me, but there's so much tweaks that could be done
-there (which I do not have time for) that my efforts there were mostly
-inconclusive.
+I have also implemented a maskable variant of the QRDQN algorithm in hopes of
+surpassing MPPO's performance, but the training results are not promising.
+Other approaches such as self-attention layers, parameterized multi-head action
+networks and LSTMs did not yield good results for me, but there's so much
+tweaks that could be done there (which I do not have time for) that my efforts
+are inconclusive.
 
-I also applied a
+I occasionally apply a
 [Population-based training](https://deepmind.google/discover/blog/population-based-training-of-neural-networks/)
-approach at the beginning (using
-[ray-project](https://github.com/ray-project/ray)'s PBT implementation) and it
-did provide some good results, however I have currently abandoned due to issues
-with the run controller (on some occations it kills the environments without
-waiting for proper cleanup which is *essential* in this case). I ended up
-coding my own quick-and-dirty "watchdog" script which takes off a lot of the
-burden related to dealing with ray's services for simple cases like mine.
-There's a ton of other things I tried, but I don't feel like sharing all of my
-failures here :) If this project gains enough traction, someone will eventually
-find the right formula. 
+approach (using
+[ray-project](https://github.com/ray-project/ray)'s PBT implementation)
+provides nice results despite some implementation issues there (e.g. improper
+worker cleanup). I also experimented with
+[Population-based Bandits](https://www.anyscale.com/blog/population-based-bandits)
+(a reportedly better alternative of PBT for small population sizes), but it did
+not yield good results due to issues such as slow hyperparameter calculation
+timesm, unproductive value "swings" (min->max->min->max..), etc. so I will
+stick to PBT for now.
 
 My W&B project with some of my recent training runs can be
 found [here](https://wandb.ai/s-manolloff/vcmi-gym).
-Older training runs will not appear there, as they were in another (quite
-messy) W&B project.
 
 ## Loading AI models into VCMI directly
 

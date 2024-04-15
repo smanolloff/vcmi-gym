@@ -32,10 +32,8 @@ class Loader:
             except Exception as e:
                 print("MPPO Load Error: %s" % repr(e))
                 raise
-            # self.obs = np.ndarray((2310,), dtype=np.float32)
-            # self.actmasks = np.ndarray((1652,), dtype=np.bool)
 
-        # Obs is flattened here (shape is (9240))
+        # Obs is a flat numpy float32 array here (py::array_t<float>)
         def predict(self, obs, mask):
             action = self.model.predict(obs.reshape(11, 15, -1), mask[ACTION_OFFSET:])
             action += ACTION_OFFSET
