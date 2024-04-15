@@ -88,7 +88,7 @@ def main():
     parser.epilog = """
 action:
   mppo              train using Maskable Proximal Policy Optimization (MPPO)
-  mppo_heads        train using MPPO with a multi-head policy
+  qrdqn             train using Maskable Quantile-Regression DQN (QRDQN)
   help              print this help message
 
 examples:

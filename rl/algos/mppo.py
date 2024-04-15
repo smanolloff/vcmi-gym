@@ -16,11 +16,8 @@
 # This file contains a modified version of CleanRL's PPO implementation:
 # https://github.com/vwxyzjn/cleanrl/blob/e421c2e50b81febf639fced51a69e2602593d50d/cleanrl/ppo.py
 import sys
-import os
 import random
-import shutil
 import logging
-import signal
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -256,13 +253,7 @@ def load(load_file):
     return common.load(load_file)
 
 
-def handle_signal(signum, frame):
-    print("*** [main.py] received signal %s ***" % signum)
-    sys.exit(0)
-
-
 def main(args):
-    signal.signal(signal.SIGTERM, handle_signal)
     LOG = logging.getLogger("mppo_conv")
     LOG.setLevel(args.loglevel)
 

@@ -15,7 +15,11 @@
 # =============================================================================
 
 import wandb
-from ray.tune.logger import TBXLoggerCallback
+import re
+import importlib
+import copy
+import ray.train
+import ray.tune
 
 DEBUG = False
 
@@ -90,7 +94,7 @@ def wandb_init(trial_id, trial_name, experiment_name, config):
     # print("[%s] DONE WITH INITWANDB" % time.time())
 
 
-class TBXDummyCallback(TBXLoggerCallback):
+class TBXDummyCallback(ray.tune.logger.TBXLoggerCallback):
     """ A dummy class to be passed to ray Tuner at init.
 
     This will trick ray into believing it has a TBX logger already
@@ -109,3 +113,69 @@ class TBXDummyCallback(TBXLoggerCallback):
 
     def log_trial_end(self, *args, **kwargs):
         pass
+
+
+def new_tuner(alg, experiment_name, config, scheduler):
+    assert alg in ["mppo"], "Only mppo is supported for PBT"
+    assert re.match(r"^[0-9A-Za-z_-].+$", experiment_name)
+    trainable_mod = importlib.import_module("rl.raytune.trainable_%s" % alg)
+    trainable_cls = getattr(trainable_mod, "Trainable%s" % alg.upper())
+    orig_config = copy.deepcopy(config)
+
+    checkpoint_config = ray.train.CheckpointConfig(
+        num_to_keep=10,
+        # XXX: can't use score as it may delete the *latest* checkpoint
+        #      and then fail when attempting to load it after perturb...
+        # checkpoint_score_order="max",
+        # checkpoint_score_attribute="rew_mean",
+    )
+
+    # https://docs.ray.io/en/latest/train/api/doc/ray.train.RunConfig.html#ray-train-runconfig
+    run_config = ray.train.RunConfig(
+        name=experiment_name,
+        verbose=False,
+        failure_config=ray.train.FailureConfig(max_failures=-1),
+        checkpoint_config=checkpoint_config,
+        stop={"rew_mean": config["target_ep_rew_mean"]},
+        callbacks=[TBXDummyCallback()],
+        # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
+    )
+
+    tune_config = ray.tune.TuneConfig(
+        trial_name_creator=lambda t: t.trial_id,
+        trial_dirname_creator=lambda t: t.trial_id,
+        scheduler=scheduler,
+        reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
+        num_samples=config["population_size"],
+    )
+
+    initargs = {
+        "config": orig_config,
+        "experiment_name": experiment_name,
+    }
+
+    tuner = ray.tune.Tuner(
+        trainable=ray.tune.with_parameters(trainable_cls, initargs=initargs),
+        run_config=run_config,
+        tune_config=tune_config,
+        # NOT working - params are always randomly sampled for the 1st run?
+        # param_space=initial_params
+    )
+
+    return tuner
+
+
+def resume_tuner(alg, resume_path, config):
+    trainable_mod = importlib.import_module("rl.raytune.trainable_%s" % alg)
+    trainable_cls = getattr(trainable_mod, "Trainable%s" % alg.upper())
+    initargs = {
+        "config": copy.deepcopy(config),
+        "experiment_name": resume_path.split("/")[-1],
+    }
+
+    tuner = ray.tune.Tuner.restore(
+        trainable=ray.tune.with_parameters(trainable_cls, initargs=initargs),
+        path=resume_path,
+    )
+
+    return tuner
