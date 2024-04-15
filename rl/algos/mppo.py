@@ -406,7 +406,6 @@ def main(args):
             else:
                 progress = 0
 
-            print("%f%%" % progress)
             agent.optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
 
             # XXX: eval during experience collection

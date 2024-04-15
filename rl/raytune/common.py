@@ -74,26 +74,6 @@ def deepmerge(a: dict, b: dict, path=[]):
     return a
 
 
-def wandb_init(trial_id, trial_name, experiment_name, config):
-    # print("[%s] INITWANDB: PID: %s, trial_id: %s" % (time.time(), os.getpid(), trial_id))
-
-    # https://github.com/ray-project/ray/blob/ray-2.8.0/python/ray/air/integrations/wandb.py#L601-L607
-    wandb.init(
-        id=trial_id,
-        name="T%d" % int(trial_name.split("_")[-1]),
-        resume="allow",
-        reinit=True,
-        allow_val_change=True,
-        # To disable System/ stats:
-        settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
-        group=experiment_name,
-        project=config["wandb_project"],
-        config=config,
-        sync_tensorboard=False,
-    )
-    # print("[%s] DONE WITH INITWANDB" % time.time())
-
-
 class TBXDummyCallback(ray.tune.logger.TBXLoggerCallback):
     """ A dummy class to be passed to ray Tuner at init.
 
@@ -120,7 +100,6 @@ def new_tuner(alg, experiment_name, config, scheduler):
     assert re.match(r"^[0-9A-Za-z_-].+$", experiment_name)
     trainable_mod = importlib.import_module("rl.raytune.trainable_%s" % alg)
     trainable_cls = getattr(trainable_mod, "Trainable%s" % alg.upper())
-    orig_config = copy.deepcopy(config)
 
     checkpoint_config = ray.train.CheckpointConfig(
         num_to_keep=10,
@@ -136,7 +115,7 @@ def new_tuner(alg, experiment_name, config, scheduler):
         verbose=False,
         failure_config=ray.train.FailureConfig(max_failures=-1),
         checkpoint_config=checkpoint_config,
-        stop={"rew_mean": config["target_ep_rew_mean"]},
+        stop={"rew_mean": config["_raytune"]["target_ep_rew_mean"]},
         callbacks=[TBXDummyCallback()],
         # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
     )
@@ -147,14 +126,12 @@ def new_tuner(alg, experiment_name, config, scheduler):
         trial_dirname_creator=lambda t: t.trial_id,
         scheduler=scheduler,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
-        num_samples=config["population_size"],
-        max_concurrent_trials=config["max_concurrency"]
+        num_samples=config["_raytune"]["population_size"],
+        max_concurrent_trials=config["_raytune"]["max_concurrency"]
     )
 
-    initargs = {
-        "config": orig_config,
-        "experiment_name": experiment_name,
-    }
+    initargs = copy.deepcopy(config)
+    initargs["_raytune"]["experiment_name"] = experiment_name
 
     tuner = ray.tune.Tuner(
         trainable=ray.tune.with_parameters(trainable_cls, initargs=initargs),

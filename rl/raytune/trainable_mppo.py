@@ -43,15 +43,28 @@ class TrainableMPPO(ray.tune.Trainable):
 
     @debuglog
     def setup(self, cfg, initargs):
-        self.agent = None
-        self.experiment_name = initargs["experiment_name"]
-
         os.environ["NO_SAVE"] = "true"
-        common.wandb_init(self.trial_id, self.trial_name, self.experiment_name, initargs["config"])
+        self.agent = None
+        self.experiment_name = initargs["_raytune"]["experiment_name"]
+
+        wandb.init(
+            project=initargs["_raytune"]["wandb_project"],
+            group=self.experiment_name,
+            id=self.trial_id,
+            name="T%d" % int(self.trial_name.split("_")[-1]),
+            resume="allow",
+            reinit=True,
+            allow_val_change=True,
+            settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
+            config=initargs,
+            sync_tensorboard=False,
+        )
+
         wandb.log({"trial/checkpoint_origin": int(self.trial_id.split("_")[1])}, commit=False)  # at init, we are the origin
 
-        self.cfg = copy.deepcopy(initargs["config"]["all_params"])
-        self.cfg["wandb_project"] = wandb.run.project
+        self.cfg = copy.deepcopy(initargs)
+        self.cfg["wandb_project"] = initargs["_raytune"]["wandb_project"]  # needed by algo
+        del self.cfg["_raytune"]  # rejected by algo
         self.reset_config(cfg)
 
     @debuglog
