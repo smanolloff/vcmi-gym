@@ -1,0 +1,266 @@
+{
+  "town_0" : {
+    "l" : 0,
+    "options" : {
+      "buildings" : {
+        "allOf" : [
+          "core:tavern"
+        ]
+      },
+      "owner" : "red",
+      "tightFormation" : "wide"
+    },
+    "subtype" : "castle",
+    "template" : {
+      "animation" : "AVCCAST0.DEF",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVVVVV",
+        "VVVVVV",
+        "VVVVVV",
+        "VVBBBV",
+        "VBBBBB",
+        "VBBABB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "town",
+    "x" : 3,
+    "y" : 34
+  },
+  "town_1" : {
+    "l" : 0,
+    "options" : {
+      "buildings" : {
+        "allOf" : [
+          "core:tavern"
+        ]
+      },
+      "owner" : "blue",
+      "tightFormation" : "wide"
+    },
+    "subtype" : "rampart",
+    "template" : {
+      "animation" : "AVCRAMP0.DEF",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVVVVV",
+        "VVVVVV",
+        "VVVVVV",
+        "VVBBBV",
+        "VBBBBB",
+        "VBBABB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "town",
+    "x" : 7,
+    "y" : 34
+  },
+  "town_2" : {
+    "l" : 0,
+    "options" : {
+      "buildings" : {
+        "allOf" : [
+          "core:tavern"
+        ]
+      },
+      "owner" : "tan",
+      "tightFormation" : "wide"
+    },
+    "subtype" : "tower",
+    "template" : {
+      "animation" : "AVCTOWR0.DEF",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVVVVV",
+        "VVVVVV",
+        "VVVVVV",
+        "VVBBBV",
+        "VBBBBB",
+        "VBBABB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "town",
+    "x" : 11,
+    "y" : 34
+  },
+  "town_3" : {
+    "l" : 0,
+    "options" : {
+      "buildings" : {
+        "allOf" : [
+          "core:tavern"
+        ]
+      },
+      "owner" : "green",
+      "tightFormation" : "wide"
+    },
+    "subtype" : "inferno",
+    "template" : {
+      "animation" : "AVCINFT0.DEF",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVVVVV",
+        "VVVVVV",
+        "VVVVVV",
+        "VVBBBV",
+        "VBBBBB",
+        "VBBABB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "town",
+    "x" : 15,
+    "y" : 34
+  },
+  "town_4" : {
+    "l" : 0,
+    "options" : {
+      "buildings" : {
+        "allOf" : [
+          "core:tavern"
+        ]
+      },
+      "owner" : "orange",
+      "tightFormation" : "wide"
+    },
+    "subtype" : "necropolis",
+    "template" : {
+      "animation" : "AVCNECR0.DEF",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVVVVV",
+        "VVVVVV",
+        "VVVVVV",
+        "VVBBBV",
+        "VBBBBB",
+        "VBBABB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "town",
+    "x" : 19,
+    "y" : 34
+  },
+  "town_5" : {
+    "l" : 0,
+    "options" : {
+      "buildings" : {
+        "allOf" : [
+          "core:tavern"
+        ]
+      },
+      "owner" : "purple",
+      "tightFormation" : "wide"
+    },
+    "subtype" : "dungeon",
+    "template" : {
+      "animation" : "AVCDUNG0.DEF",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVVVVV",
+        "VVVVVV",
+        "VVVVVV",
+        "VVBBBV",
+        "VBBBBB",
+        "VBBABB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "town",
+    "x" : 23,
+    "y" : 34
+  },
+  "town_6" : {
+    "l" : 0,
+    "options" : {
+      "buildings" : {
+        "allOf" : [
+          "core:tavern"
+        ]
+      },
+      "owner" : "teal",
+      "tightFormation" : "wide"
+    },
+    "subtype" : "stronghold",
+    "template" : {
+      "animation" : "AVCSTRO0.DEF",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVVVVV",
+        "VVVVVV",
+        "VVVVVV",
+        "VVBBBV",
+        "VBBBBB",
+        "VBBABB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "town",
+    "x" : 27,
+    "y" : 34
+  },
+  "town_7" : {
+    "l" : 0,
+    "options" : {
+      "buildings" : {
+        "allOf" : [
+          "core:tavern"
+        ]
+      },
+      "owner" : "pink",
+      "tightFormation" : "wide"
+    },
+    "subtype" : "fortress",
+    "template" : {
+      "animation" : "AVCFTRT0.DEF",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVVVVV",
+        "VVVVVV",
+        "VVVVVV",
+        "VVBBBV",
+        "VBBBBB",
+        "VBBABB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "town",
+    "x" : 31,
+    "y" : 34
+  }
+}

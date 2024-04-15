@@ -10,7 +10,7 @@ config = {
 
         # Mac
         "synch": True,
-        "time_attr": "time_attr",
+        "time_attr": "training_iteration",  # "training_iteration" | "time_total_s"
         "population_size": 6,
         "max_concurrency": 6,
         # PC

@@ -210,5 +210,5 @@ if __name__ == "__main__":
         print("Nothing to do.")
         sys.exit(1)
     else:
-        backup(path)
+        # backup(path)
         save(path, header, objects, surface_terrain)
