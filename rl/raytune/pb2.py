@@ -1,3 +1,4 @@
+import copy
 import ray.tune
 from . import common
 from .pbt_config import config
@@ -8,7 +9,7 @@ def main(alg, exp_name, resume_path):
         tuner = common.resume_tuner(alg, resume_path, config)
     else:
         # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.pb2.PB2.html#ray-tune-schedulers-pb2-pb2
-        pb2 = ray.tune.schedulers.pb2.PB2(
+        scheduler = ray.tune.schedulers.pb2.PB2(
             time_attr=config["_raytune"]["time_attr"],
             metric="rew_mean",
             mode="max",
@@ -20,6 +21,8 @@ def main(alg, exp_name, resume_path):
             synch=config["_raytune"]["synch"],
         )
 
-        tuner = common.new_tuner(alg, exp_name, config, pb2)
+        initial_cfg = common.common_dict(copy.deepcopy(config["_raytune"]["hyperparam_bounds"]), config)
+        searcher = ray.tune.search.BasicVariantGenerator(points_to_evaluate=[initial_cfg])
+        tuner = common.new_tuner(alg, exp_name, config, scheduler, searcher)
 
     tuner.fit()

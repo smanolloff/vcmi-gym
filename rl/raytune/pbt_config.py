@@ -7,10 +7,17 @@ config = {
         "target_ep_rew_mean": 3_000_000,  # impossible target
         "wandb_project": "vcmi-gym",
         "perturbation_interval": 1,
+
+        # Mac
         "synch": True,
-        "time_attr": "time_total_s",  # "training_iteration" | "time_total_s"
-        "population_size": 16,
-        "max_concurrency": 4,
+        "time_attr": "time_attr",
+        "population_size": 6,
+        "max_concurrency": 6,
+        # PC
+        # "synch": False,
+        # "time_attr": "time_total_s",  # "training_iteration" | "time_total_s"
+        # "population_size": 4,
+        # "max_concurrency": 4,
 
         # """
         # Parameters are transferred from the top quantile_fraction
@@ -22,10 +29,6 @@ config = {
 
         # """
         # Perturbations will then be made based on the values here
-        #
-        # XXX: according to the docs, initial values should be sampled only if not
-        #       present in "all_params". However, it seems tune always samples the
-        #       initial values regardless.
         #
         # XXX: Do NOT use tune distributions here (e.g. tune.uniform()).
         #      Reasons why this is bad:
@@ -44,13 +47,31 @@ config = {
             "lr_schedule": {"start": explist(1e-7, 1e-4, n=20)},
             "ent_coef": linlist(0, 0.2, n=10),
             "gae_lambda": linlist(0.5, 0.99, n=20),
-            "gamma": linlist(0.6, 0.99, n=20),
+            "gamma": linlist(0.6, 0.999, n=20),
             "max_grad_norm": linlist(0.2, 10, n=20),
-            "num_minibatches": [2, 4],
-            "num_steps": [128, 256],
-            "update_epochs": linlist(2, 20, n=5, dtype=int),
+            # "num_minibatches": [2, 4],
+            # "num_steps": [128, 256],
+            # "update_epochs": linlist(2, 20, n=5, dtype=int),
             "vf_coef": linlist(0.1, 2, n=10),
         },
+
+        #
+        # XXX: The values will be used once again when RESUMING an experiment:
+        #       Trials will first be resumed with the values they had during
+        #       the interruption, but the first trial to finish will get
+        #       a set of "initial" values for its next iteration.
+        #
+        "initial_hyperparams": {
+            "lr_schedule": {"mode": "const", "start": 1.1e-5},
+            "ent_coef": 0.02,
+            # "gae_lambda": 0.95,
+            "gamma": 0.99,
+            # "max_grad_norm": 6,
+            # "num_minibatches": 2,
+            # "num_steps": 128,
+            # "update_epochs": 10,
+            # "vf_coef": 1.2,
+        }
     },
 
     #
@@ -64,11 +85,11 @@ config = {
     #   = 1171 rollouts
     #   = 6K episodes (good for 1K avg metric)
     #   = ~30..60 min (Mac)
-    "vsteps_total": 0,
-    "seconds_total": 1800,
+    "vsteps_total": 150_000,
+    # "seconds_total": 10,
 
     # Initial checkpoint to start from
-    "agent_load_file": None,
+    "agent_load_file": "data/PBT-sync-mac-20240414_141602/62a33_00000/checkpoint_000028/agent.pt",
 
     "tags": ["Map-3stack-01", "StupidAI", "encoding-float"],
     "mapside": "attacker",  # attacker/defender/both
@@ -76,7 +97,12 @@ config = {
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
 
+    #
     # PPO hyperparams
+    #
+    # XXX: values here are used only if the param is NOT present
+    #       in "hyperparam_mutations". For initial mutation values,
+    #       use the "initial_hyperparams" dict.
     "clip_coef": 0.4,
     "clip_vloss": False,
     "ent_coef": 0.007,

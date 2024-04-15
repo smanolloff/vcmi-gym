@@ -65,16 +65,17 @@ class TrainableMPPO(ray.tune.Trainable):
         self.cfg = copy.deepcopy(initargs)
         self.cfg["wandb_project"] = initargs["_raytune"]["wandb_project"]  # needed by algo
         del self.cfg["_raytune"]  # rejected by algo
-        self.reset_config(cfg)
 
-    @debuglog
-    def reset_config(self, cfg):
-        self.cfg = common.deepmerge(copy.deepcopy(self.cfg), cfg)
-
+        # Define param name mapping for algo's wandb logging
         for k in common.flattened_dict_keys(cfg, "."):
             assert "/" not in k
             self.cfg["logparams"][f"params/{k}"] = k
 
+        self.reset_config(cfg)
+
+    @debuglog
+    def reset_config(self, cfg):
+        self.cfg = common.deepmerge(copy.deepcopy(self.cfg), cfg, allow_new=False, update_existing=True)
         return True
 
     @debuglog

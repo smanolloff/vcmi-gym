@@ -49,5 +49,5 @@ examples:
             sys.exit(1)
         raise
 
-    experiment_name = args.n.format(datetime=datetime.datetime.now())
+    experiment_name = args.n.format(datetime=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     mod.main("mppo", experiment_name, args.R)

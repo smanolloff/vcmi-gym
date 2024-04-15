@@ -14,14 +14,13 @@
 # limitations under the License.
 # =============================================================================
 
-import wandb
 import re
 import importlib
 import copy
 import ray.train
 import ray.tune
 
-DEBUG = False
+DEBUG = True
 
 
 def debuglog(func):
@@ -62,16 +61,30 @@ def flattened_dict_keys(d, sep, parent_key=None):
     return keys
 
 
-def deepmerge(a: dict, b: dict, path=[]):
+def deepmerge(a: dict, b: dict, allow_new=True, update_existing=True, path=[]):
     for key in b:
         if key in a:
             if isinstance(a[key], dict) and isinstance(b[key], dict):
-                deepmerge(a[key], b[key], path + [str(key)])
-            elif a[key] != b[key]:
+                deepmerge(a[key], b[key], allow_new, update_existing, path + [str(key)])
+            elif update_existing and a[key] != b[key]:
                 a[key] = b[key]
+        elif allow_new:
+            a[key] = b[key]
         else:
             raise Exception("Key not found: %s" % key)
     return a
+
+
+# Create a dict with A's keys and B's values (if such are present)
+def common_dict(a, b):
+    res = {}
+    for key, value in a.items():
+        if key in b:
+            if isinstance(value, dict) and isinstance(b[key], dict):
+                res[key] = common_dict(a[key], b[key])
+            else:
+                res[key] = b[key]
+    return res
 
 
 class TBXDummyCallback(ray.tune.logger.TBXLoggerCallback):
@@ -95,7 +108,7 @@ class TBXDummyCallback(ray.tune.logger.TBXLoggerCallback):
         pass
 
 
-def new_tuner(alg, experiment_name, config, scheduler):
+def new_tuner(alg, experiment_name, config, scheduler, searcher=None, param_space=None):
     assert alg in ["mppo"], "Only mppo is supported for PBT"
     assert re.match(r"^[0-9A-Za-z_-].+$", experiment_name)
     trainable_mod = importlib.import_module("rl.raytune.trainable_%s" % alg)
@@ -127,7 +140,8 @@ def new_tuner(alg, experiment_name, config, scheduler):
         scheduler=scheduler,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
         num_samples=config["_raytune"]["population_size"],
-        max_concurrent_trials=config["_raytune"]["max_concurrency"]
+        max_concurrent_trials=config["_raytune"]["max_concurrency"],
+        search_alg=searcher
     )
 
     initargs = copy.deepcopy(config)
@@ -137,8 +151,7 @@ def new_tuner(alg, experiment_name, config, scheduler):
         trainable=ray.tune.with_parameters(trainable_cls, initargs=initargs),
         run_config=run_config,
         tune_config=tune_config,
-        # NOT working - params are always randomly sampled for the 1st run?
-        # param_space=initial_params
+        param_space=param_space,
     )
 
     return tuner
@@ -147,10 +160,9 @@ def new_tuner(alg, experiment_name, config, scheduler):
 def resume_tuner(alg, resume_path, config):
     trainable_mod = importlib.import_module("rl.raytune.trainable_%s" % alg)
     trainable_cls = getattr(trainable_mod, "Trainable%s" % alg.upper())
-    initargs = {
-        "config": copy.deepcopy(config),
-        "experiment_name": resume_path.split("/")[-1],
-    }
+
+    initargs = copy.deepcopy(config)
+    initargs["_raytune"]["experiment_name"] = resume_path.split("/")[-1]
 
     tuner = ray.tune.Tuner.restore(
         trainable=ray.tune.with_parameters(trainable_cls, initargs=initargs),
