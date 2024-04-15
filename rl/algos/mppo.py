@@ -18,6 +18,7 @@
 import sys
 import random
 import logging
+import time
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -84,6 +85,8 @@ class State:
     current_timestep: int = 0
     current_vstep: int = 0
     current_rollout: int = 0
+    global_second: int = 0
+    current_second: int = 0
 
     def __post_init__(self):
         common.coerce_dataclass_ints(self)
@@ -103,7 +106,8 @@ class Args:
 
     agent_load_file: Optional[str] = None
     vsteps_total: int = 0
-    rollouts_per_mapchange: int = 20
+    seconds_total: int = 0
+    rollouts_per_mapchange: int = 0
     rollouts_per_log: int = 1
     rollouts_per_table_log: int = 10
     success_rate_target: Optional[float] = None
@@ -261,7 +265,11 @@ def main(args):
 
     agent, args = common.maybe_resume(args)
 
-    rollouts_total = args.vsteps_total // args.num_steps
+    if args.seconds_total:
+        assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
+        rollouts_total = 0
+    else:
+        rollouts_total = args.vsteps_total // args.num_steps
 
     # Re-initialize to prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
@@ -307,6 +315,7 @@ def main(args):
         agent.state.current_timestep = 0
         agent.state.current_vstep = 0
         agent.state.current_rollout = 0
+        agent.state.current_second = 0
 
         # backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
         # with open(f, 'rb') as fsrc:
@@ -384,15 +393,20 @@ def main(args):
         next_done = torch.zeros(args.num_envs).to(device)
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
 
-        end_vstep = args.vsteps_total or 10e9
+        progress = 0
         map_rollouts = 0
+        start_time = time.time()
+        global_start_second = agent.state.global_second
 
-        while agent.state.current_vstep < end_vstep:
+        while progress < 1:
             if args.vsteps_total:
                 progress = agent.state.current_vstep / args.vsteps_total
+            elif args.seconds_total:
+                progress = agent.state.current_second / args.seconds_total
             else:
                 progress = 0
 
+            print("%f%%" % progress)
             agent.optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
 
             # XXX: eval during experience collection
@@ -430,6 +444,8 @@ def main(args):
                 agent.state.current_vstep += 1
                 agent.state.current_timestep += args.num_envs
                 agent.state.global_timestep += args.num_envs
+                agent.state.current_second = int(time.time() - start_time)
+                agent.state.global_second = global_start_second + agent.state.current_second
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -557,6 +573,7 @@ def main(args):
             wandb_log({"rollout1000/ep_success_rate": common.safe_mean(rollout_is_success_queue_1000)})
             wandb_log({"global/num_rollouts": agent.state.current_rollout})
             wandb_log({"global/num_timesteps": agent.state.current_timestep})
+            wandb_log({"global/num_seconds": agent.state.current_second})
 
             envs.episode_count = 0
 
@@ -595,7 +612,11 @@ def main(args):
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
 
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
-                wandb_log({"global/global_num_timesteps": agent.state.global_timestep}, commit=True)  # commit on final log line
+                wandb_log({
+                    "global/global_num_timesteps": agent.state.global_timestep,
+                    "global/global_num_seconds": agent.state.global_second
+                }, commit=True)  # commit on final log line
+
                 LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f loss=%.2f" % (
                     agent.state.current_rollout,
                     agent.state.current_vstep,
@@ -629,7 +650,8 @@ def debug_args():
         # agent_load_file="data/heads/heads-simple-A1/agent-1710806916.zip",
         agent_load_file=None,
         vsteps_total=0,
-        vsteps_per_mapchange=0,
+        seconds_total=0,
+        rollouts_per_mapchange=0,
         rollouts_per_log=1,
         rollouts_per_table_log=100000,
         success_rate_target=None,

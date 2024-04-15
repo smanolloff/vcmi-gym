@@ -141,12 +141,14 @@ def new_tuner(alg, experiment_name, config, scheduler):
         # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
     )
 
+    # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.TuneConfig.html#ray.tune.TuneConfig
     tune_config = ray.tune.TuneConfig(
         trial_name_creator=lambda t: t.trial_id,
         trial_dirname_creator=lambda t: t.trial_id,
         scheduler=scheduler,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
         num_samples=config["population_size"],
+        max_concurrent_trials=config["max_concurrency"]
     )
 
     initargs = {

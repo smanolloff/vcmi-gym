@@ -13,7 +13,8 @@ notes: ""
 
 agent_load_file: ~
 #agent_load_file: "data/sweeps/vou0cebq/agent-1712277867.pt"
-vsteps_total: 0  # exp_decay requires vsteps_total
+vsteps_total: 0  # exp_decay requires vsteps_total or seconds_total
+seconds_total: 0  # mutually-exclusive with vsteps_total
 rollouts_per_mapchange: 0
 rollouts_per_log: 1
 rollouts_per_table_log: 0

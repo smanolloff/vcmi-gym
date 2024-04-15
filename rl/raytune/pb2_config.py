@@ -6,7 +6,8 @@ config = {
     "results_dir": "data",
     "perturbation_interval": 1,
     "synch": True,
-    "population_size": 1,
+    "population_size": 6,
+    "max_concurrency": 6,
 
     # """
     # Parameters are transferred from the top quantile_fraction
