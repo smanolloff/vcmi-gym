@@ -62,10 +62,10 @@ config = {
         #       a set of "initial" values for its next iteration.
         #
         "initial_hyperparams": {
-            "lr_schedule": {"mode": "const", "start": 1.1e-5},
-            "ent_coef": 0.02,
+            # "lr_schedule": {"mode": "const", "start": 1.1e-5},
+            # "ent_coef": 0.02,
             # "gae_lambda": 0.95,
-            "gamma": 0.99,
+            # "gamma": 0.99,
             # "max_grad_norm": 6,
             # "num_minibatches": 2,
             # "num_steps": 128,
@@ -89,11 +89,12 @@ config = {
     # "seconds_total": 10,
 
     # Initial checkpoint to start from
-    "agent_load_file": "data/PBT-sync-mac-20240414_141602/62a33_00000/checkpoint_000028/agent.pt",
+    # "agent_load_file": "data/PBT-sync-mac-20240414_141602/62a33_00000/checkpoint_000028/agent.pt",
+    "agent_load_file": None,
 
     "tags": ["Map-3stack-01", "StupidAI", "encoding-float"],
     "mapside": "attacker",  # attacker/defender/both
-    "mapmask": "gym/generated/88/88-3stack-30K-01.vmap",
+    "mapmask": "gym/generated/896/896-3stack-30K-01.vmap",
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
 

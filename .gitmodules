@@ -1,3 +1,9 @@
 [submodule "vcmi_gym/envs/v0/vcmi"]
 	path = vcmi_gym/envs/v0/vcmi
 	url = git@github.com:smanolloff/vcmi.git
+[submodule "rl/muzero"]
+	path = rl/muzero
+	url = git@github.com:smanolloff/muzero-general.git
+[submodule "rl/algos/muzero"]
+	path = rl/algos/muzero
+	url = git@github.com:smanolloff/muzero-general.git

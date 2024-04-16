@@ -37,7 +37,7 @@ from typing import NamedTuple
 
 from vcmi_gym import VcmiEnv
 
-from . import common
+from .. import common
 
 ENVS = []  # debug
 LOG = None

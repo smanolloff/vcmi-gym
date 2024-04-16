@@ -30,7 +30,7 @@ import torch.nn as nn
 # import tyro
 
 from vcmi_gym import VcmiEnv
-from . import common
+from .. import common
 
 ENVS = []  # debug
 
@@ -114,7 +114,7 @@ class Args:
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
     mapside: str = "both"
-    mapmask: str = "ai/generated/B*.vmap"
+    mapmask: str = "gym/A1.vmap"
     randomize_maps: bool = False
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
@@ -125,7 +125,7 @@ class Args:
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
     lr_schedule: ScheduleArgs = ScheduleArgs()
     weight_decay: float = 0.0
-    num_envs: int = 4
+    num_envs: int = 1
     num_steps: int = 128
     gamma: float = 0.99
     stats_buffer_size: int = 100

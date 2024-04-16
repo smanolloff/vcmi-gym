@@ -13,3 +13,4 @@ test.out
 *.so
 *.dylib
 *.vmap.*
+*.log

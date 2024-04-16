@@ -42,7 +42,7 @@ def gen_id():
 def run(action, cfg, group_id, run_id, resume, cfgpath):
     try:
         # XXX: can't use relative imports here
-        mod = importlib.import_module(f"rl.algos.{action}")
+        mod = importlib.import_module(f"rl.algos.{action}.{action}")
     except ModuleNotFoundError as e:
         if e.name == action:
             print("Unknown action: %s" % action)

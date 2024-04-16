@@ -56,6 +56,7 @@ def create_venv(env_cls, args, map_swaps):
     all_maps = glob.glob("maps/%s" % args.mapmask)
     all_maps = [m.removeprefix("maps/") for m in all_maps]
     all_maps.sort()
+    print("allmaps: maps/%s: %s" % (args.mapmask, all_maps))
     map_offset = None
 
     assert args.mapside in ["attacker", "defender", "both"]
@@ -191,7 +192,7 @@ def maybe_save(t_save, t_permasave, args, agent, out_dir):
 
 
 def find_latest_save(group_id, run_id):
-    datadir = os.path.join(os.path.dirname(__file__), "..", "data")
+    datadir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
     pattern = f"{datadir}/{group_id}/{run_id}/agent-[0-9]*.pt"
     files = glob.glob(pattern)
     assert len(files) > 0, f"No files found for: {pattern}"

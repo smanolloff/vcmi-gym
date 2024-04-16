@@ -23,7 +23,7 @@ import wandb
 from datetime import datetime
 from .common import debuglog
 from . import common
-from ..algos import mppo
+from ..algos.mppo import mppo
 
 
 # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.Trainable.html
@@ -46,6 +46,12 @@ class TrainableMPPO(ray.tune.Trainable):
         os.environ["NO_SAVE"] = "true"
         self.agent = None
         self.experiment_name = initargs["_raytune"]["experiment_name"]
+
+        print("WANDB INIT: project: %s, group: %s, id: %s" % (
+            initargs["_raytune"]["wandb_project"],
+            self.experiment_name,
+            self.trial_id
+        ))
 
         wandb.init(
             project=initargs["_raytune"]["wandb_project"],

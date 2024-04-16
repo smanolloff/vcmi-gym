@@ -18,3 +18,8 @@ json5
 wandb == 0.16.1
 gymnasium
 tyro
+torch==1.10.0
+
+# muzero
+nevergrad
+seaborn

@@ -51,6 +51,7 @@ import json
 import sys
 import shutil
 import random
+import datetime
 import numpy as np
 from math import log
 
@@ -132,7 +133,7 @@ if __name__ == "__main__":
     mean_wins = np.mean(winlist)
     stddev = np.std(winlist)
     stddev_frac = stddev / mean_wins
-    clip = ARMY_VALUE_CORRECTION_CLIP or (stddev_frac / 5)
+    clip = ARMY_VALUE_CORRECTION_CLIP or (stddev_frac / 7)
 
     print("Stats:\nmean_wins: %d\nstddev: %d (%.2f%%)\nCorrection clip: %.2f" % (
         mean_wins,
@@ -210,5 +211,8 @@ if __name__ == "__main__":
         print("Nothing to do.")
         sys.exit(1)
     else:
-        # backup(path)
+        with open(os.path.join(os.path.dirname(path), "rebalance.log"), "a") as f:
+            t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write("[%s] Rebalanced %s (stddev was %.2f %%)" % (t, path, stddev_frac * 100))
+        backup(path)
         save(path, header, objects, surface_terrain)
