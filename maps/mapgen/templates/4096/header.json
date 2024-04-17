@@ -1,0 +1,115 @@
+{
+  "allowedArtifacts" : {
+    "anyOf" : [
+      "core:pendantOfFreeWill"
+    ]
+  },
+  "defeatIconIndex" : 3,
+  "description" : "72x72",
+  "difficulty" : "NORMAL",
+  "mapLevels" : {
+    "surface" : {
+      "height" : 72,
+      "index" : 0,
+      "width" : 72
+    }
+  },
+  "mods" : null,
+  "name" : "72x72",
+  "players" : {
+    "blue" : {
+      "canPlay" : "PlayerOrAI",
+      "heroes" : {}
+    },
+    "green" : {
+      "canPlay" : "PlayerOrAI",
+      "heroes" : {}
+    },
+    "orange" : {
+      "canPlay" : "PlayerOrAI",
+      "heroes" : {}
+    },
+    "pink" : {
+      "canPlay" : "PlayerOrAI",
+      "heroes" : {}
+    },
+    "purple" : {
+      "canPlay" : "PlayerOrAI",
+      "heroes" : {}
+    },
+    "red" : {
+      "canPlay" : "PlayerOrAI",
+      "heroes" : {}
+    },
+    "tan" : {
+      "canPlay" : "PlayerOrAI",
+      "heroes" : {}
+    },
+    "teal" : {
+      "canPlay" : "PlayerOrAI",
+      "heroes" : {}
+    }
+  },
+  "rumors" : [
+  ],
+  "triggeredEvents" : {
+    "standardDefeat" : {
+      "condition" : [
+        "daysWithoutTown",
+        {
+          "value" : 7
+        }
+      ],
+      "effect" : {
+        "messageToSend" : {
+          "exactStrings" : null,
+          "localStrings" : null,
+          "message" : null,
+          "numbers" : null,
+          "stringsTextID" : null
+        },
+        "type" : "defeat"
+      },
+      "message" : {
+        "exactStrings" : null,
+        "localStrings" : null,
+        "message" : [
+          2
+        ],
+        "numbers" : null,
+        "stringsTextID" : [
+          "core.genrltxt.7"
+        ]
+      }
+    },
+    "standardVictory" : {
+      "condition" : [
+        "standardWin"
+      ],
+      "effect" : {
+        "messageToSend" : {
+          "exactStrings" : null,
+          "localStrings" : null,
+          "message" : null,
+          "numbers" : null,
+          "stringsTextID" : null
+        },
+        "type" : "victory"
+      },
+      "message" : {
+        "exactStrings" : null,
+        "localStrings" : null,
+        "message" : [
+          2
+        ],
+        "numbers" : null,
+        "stringsTextID" : [
+          "core.genrltxt.659"
+        ]
+      }
+    }
+  },
+  "versionMajor" : 1,
+  "versionMinor" : 1,
+  "victoryIconIndex" : 11
+}

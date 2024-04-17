@@ -27,6 +27,8 @@ import torch
 import logging
 import traceback
 
+from dataclasses import asdict
+
 
 def evaluate_policy(agent, venv, episodes_per_env):
     n_envs = venv.num_envs
@@ -115,22 +117,23 @@ def load_agent(agent_file, run_id):
     return agent
 
 
-def create_venv(env_cls, mapname, role, opponent):
+def create_venv(env_cls, env_kwargs, mapname, role, opponent):
     mappath = f"maps/{mapname}"
     assert os.path.isfile(mappath), "Map not found at: %s" % mappath
     assert role in ["attacker", "defender"]
 
     def env_creator():
-        env_kwargs = dict(
+        env_kwargs2 = dict(
+            env_kwargs,
             random_combat=1,
             mapname=mapname,
             attacker=opponent,
             defender=opponent
         )
 
-        env_kwargs[role] = "MMAI_USER"
-        # logging.debug("Env kwargs: %s" % env_kwargs)
-        return env_cls(**env_kwargs)
+        env_kwargs2[role] = "MMAI_USER"
+        # logging.debug("Env kwargs: %s" % env_kwargs2)
+        return env_cls(**env_kwargs2)
 
     vec_env = gym.vector.SyncVectorEnv([env_creator])
     return gym.wrappers.RecordEpisodeStatistics(vec_env)
@@ -141,7 +144,7 @@ def wandb_init(run):
         project="vcmi-gym",
         group="evaluator",
         name=f"(E) {run.name}",
-        id=f"eval-{run_id}",
+        id=f"eval-{run.id}",
         resume="allow",
         reinit=True,
         sync_tensorboard=False,  # no tensorboard during eval
@@ -152,6 +155,7 @@ def wandb_init(run):
 
 def find_agents():
     files = glob.glob("data/*/*/agent-[0-9]*.pt")
+    # files += glob.glob("data/PBT-*/*_00000/*/agent.pt")
     assert len(files) > 0, "No files found"
 
     def should_pick(f):
@@ -167,13 +171,6 @@ def find_agents():
     # key=run_id, value=filepath (to latest save)
     # {'attrchan-test-2-1708258565': 'data/sparse-rewards/attrchan-test-2-1708258565/model.zip', ...etc}
     return {k: max(v, key=os.path.getmtime) for k, v in grouped}
-
-
-# For wandb.log, commit=True by default
-# for wandb_log, commit=False by default
-def wandb_log(*args, **kwargs):
-    # logging.debug("wandb.log: %s %s" % (args, kwargs))
-    wandb.log(*args, **dict({"commit": False}, **kwargs))
 
 
 def main():
@@ -239,11 +236,21 @@ def main():
                     continue
 
                 agent = load_agent(agent_file=agent_load_file, run_id=run_id)
-                wandb_init(run)
+
+                if os.environ["NO_WANDB"] == "true":
+                    def wandb_log(*args, **kwargs):
+                        pass
+                else:
+                    # For wandb.log, commit=True by default
+                    # for wandb_log, commit=False by default
+                    def wandb_log(*args, **kwargs):
+                        # logging.debug("wandb.log: %s %s" % (args, kwargs))
+                        wandb.log(*args, **dict({"commit": False}, **kwargs))
+                    wandb_init(run)
 
                 wandb_log({"evaluator/busy": 0}, commit=True)
-                wandb_log({"agent/num_timesteps": agent.state.global_step})
-                wandb_log({"agent/num_rollouts": agent.state.global_rollout})
+                wandb_log({"agent/num_timesteps": agent.state.global_timestep})
+                wandb_log({"agent/num_seconds": agent.state.global_second})
                 wandb_log({"evaluator/busy": 1}, commit=True)
 
                 rewards = {"StupidAI": [], "BattleAI": []}
@@ -259,7 +266,7 @@ def main():
 
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
-                        venv = create_venv(env_cls, f"gym/generated/evaluation/{vmap}", "attacker", opponent)
+                        venv = create_venv(env_cls, asdict(agent.args.env), f"gym/generated/evaluation/{vmap}", "attacker", opponent)
                         ep_results = evaluate_policy(agent, venv, episodes_per_env=50)
 
                         rewards[opponent].append(np.mean(ep_results["rewards"]))
@@ -338,7 +345,6 @@ def main():
     finally:
         if venv:
             venv.close()
-        wandb.finish(quiet=True)
 
 
 if __name__ == "__main__":
