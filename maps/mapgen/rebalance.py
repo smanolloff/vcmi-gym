@@ -107,7 +107,7 @@ def save(path, header, objects, surface_terrain):
 
 
 def backup(path):
-    for i in reversed(range(1, 3)):
+    for i in reversed(range(1, 9)):
         if os.path.exists(f"{path}.{i}"):
             shutil.move(f"{path}.{i}", f"{path}.{i+1}")
     shutil.move(path, f"{path}.1")
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     changed = False
 
     for (hero_name, hero_wins) in j["wins"].items():
-        correction_factor = (log(mean_wins) / log(hero_wins or 2))**1
+        correction_factor = (log(mean_wins) / log(2 if hero_wins < 2 else hero_wins))**1
         correction_factor = np.clip(correction_factor, 1-clip, 1+clip)
 
         if abs(1 - correction_factor) <= ARMY_VALUE_ERROR_MAX:
@@ -213,6 +213,6 @@ if __name__ == "__main__":
     else:
         with open(os.path.join(os.path.dirname(path), "rebalance.log"), "a") as f:
             t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            f.write("[%s] Rebalanced %s (stddev was %.2f %%)" % (t, path, stddev_frac * 100))
+            f.write("[%s] Rebalanced %s (stddev was %.2f %%)\n" % (t, path, stddev_frac * 100))
         backup(path)
         save(path, header, objects, surface_terrain)

@@ -4,9 +4,6 @@
 [submodule "rl/muzero"]
 	path = rl/muzero
 	url = git@github.com:smanolloff/muzero-general.git
-[submodule "rl/algos/muzero"]
-	path = rl/algos/muzero
-	url = git@github.com:smanolloff/muzero-general.git
 [submodule "rl/algos/lightzero"]
 	path = rl/algos/lightzero
 	url = git@github.com:opendilab/LightZero.git

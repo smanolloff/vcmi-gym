@@ -539,16 +539,19 @@ def main(args):
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
             ep_rew_mean = common.safe_mean(envs.return_queue)
-            rollout_rew_queue_100.append(ep_rew_mean)
-            rollout_rew_queue_1000.append(ep_rew_mean)
-
             ep_value_mean = common.safe_mean(ep_net_value_queue)
-            rollout_net_value_queue_100.append(ep_value_mean)
-            rollout_net_value_queue_1000.append(ep_value_mean)
-
             ep_is_success_mean = common.safe_mean(ep_is_success_queue)
-            rollout_is_success_queue_100.append(ep_is_success_mean)
-            rollout_is_success_queue_1000.append(ep_is_success_mean)
+
+            if envs.episode_count > 0:
+                assert ep_rew_mean is not np.nan
+                assert ep_value_mean is not np.nan
+                assert ep_is_success_mean is not np.nan
+                rollout_rew_queue_100.append(ep_rew_mean)
+                rollout_rew_queue_1000.append(ep_rew_mean)
+                rollout_net_value_queue_100.append(ep_value_mean)
+                rollout_net_value_queue_1000.append(ep_value_mean)
+                rollout_is_success_queue_100.append(ep_is_success_mean)
+                rollout_is_success_queue_1000.append(ep_is_success_mean)
 
             wandb_log({"params/learning_rate": agent.optimizer.param_groups[0]["lr"]})
             wandb_log({"losses/total_loss": loss.item()})
@@ -561,13 +564,16 @@ def main(args):
             wandb_log({"losses/explained_variance": explained_var})
             wandb_log({"rollout/ep_count": envs.episode_count})
             wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
-            wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
-            wandb_log({"rollout100/ep_rew_mean": common.safe_mean(rollout_rew_queue_100)})
-            wandb_log({"rollout1000/ep_rew_mean": common.safe_mean(rollout_rew_queue_1000)})
-            wandb_log({"rollout/ep_value_mean": ep_value_mean})
+
+            if envs.episode_count > 0:
+                wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
+                wandb_log({"rollout/ep_value_mean": ep_value_mean})
+                wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
+
             wandb_log({"rollout100/ep_value_mean": common.safe_mean(rollout_net_value_queue_100)})
             wandb_log({"rollout1000/ep_value_mean": common.safe_mean(rollout_net_value_queue_1000)})
-            wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
+            wandb_log({"rollout100/ep_rew_mean": common.safe_mean(rollout_rew_queue_100)})
+            wandb_log({"rollout1000/ep_rew_mean": common.safe_mean(rollout_rew_queue_1000)})
             wandb_log({"rollout100/ep_success_rate": common.safe_mean(rollout_is_success_queue_100)})
             wandb_log({"rollout1000/ep_success_rate": common.safe_mean(rollout_is_success_queue_1000)})
             wandb_log({"global/num_rollouts": agent.state.current_rollout})

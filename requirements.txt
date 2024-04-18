@@ -20,6 +20,3 @@ gymnasium
 tyro
 torch==1.10.0
 
-# muzero
-#nevergrad
-#seaborn

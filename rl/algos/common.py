@@ -39,7 +39,6 @@ class CategoricalMasked(Categorical):
     def __init__(self, logits: torch.Tensor, mask: torch.Tensor):
         assert mask is not None
         self.mask = mask
-        self.batch, self.nb_action = logits.size()
         self.mask_value = torch.tensor(torch.finfo(logits.dtype).min, dtype=logits.dtype)
         logits = torch.where(self.mask, logits, self.mask_value)
         super().__init__(logits=logits)

@@ -1,7 +1,7 @@
 ---
 group_id: mppg
-run_name: "mppo baseline"
-tags: ["Map-3stack-01", "StupidAI", "encoding-float"]
+run_name: "test deeper Conv&FC"
+tags: ["Map-3stack-01", "StupidAI", "encoding-float", "MPPG"]
 
 wandb_project: vcmi-gym
 run_id: ~
@@ -23,7 +23,7 @@ success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
-mapmask: "gym/generated/88/88-3stack-30K-01.vmap"
+mapmask: "maps/gym/generated/896/896-3stack-30K-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 permasave_every: 10800  # seconds
@@ -43,12 +43,18 @@ network:
     - {t: "Unflatten", dim: 1, unflattened_size: [1, 11]}
     # => (B, 1, 11, 1290|8610)
     - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 86], stride: [1, 86], padding: 0}
-    # - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 574], stride: [1, 574], padding: 0}
     - {t: "LeakyReLU"}
     # => (B, 32, 11, 15)
+    - {t: "Conv2d", in_channels: 32, out_channels: 64, kernel_size: 1, stride: 1, padding: 0}
+    - {t: "LeakyReLU"}
+    # => (B, 64, 11, 15)
+    - {t: "LeakyReLU"}
     - {t: "Flatten"}
-    # => (B, 5280)
-    - {t: "Linear", in_features: 5280, out_features: 1024}
+    # => (B, 10560)
+    - {t: "Linear", in_features: 10560, out_features: 1024}
+    - {t: "LeakyReLU"}
+    # => (B, 1024)
+    - {t: "Linear", in_features: 1024, out_features: 1024}
     - {t: "LeakyReLU"}
     # => (B, 1024)
 
@@ -56,7 +62,7 @@ network:
   critic: {t: "Linear", in_features: 1024, out_features: 1}
 
 #
-# PPO Hyperparams
+# PPG Hyperparams
 #
 
 clip_coef: 0.4
@@ -66,12 +72,18 @@ gae_lambda: 0.8
 gamma: 0.8425
 lr_schedule: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
 max_grad_norm: 0.5
-norm_adv: true
+norm_adv: "batch"
 num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches
 num_steps: 128       # rollout_buffer = num_steps*num_envs
-update_epochs: 10    # full passes of rollout_buffer
+e_policy: 10         # this is PPO's "update_epochs"
 vf_coef: 1.2
 weight_decay: 0
+
+rollouts_per_phase: 32      # orig name is "n_iteration"
+e_auxiliary: 6              # think PPG's "aux_update_epochs"
+beta_clone: 1.0
+num_aux_rollouts: 4
+n_aux_grad_accum: 1
 
 env:
   encoding_type: "float"

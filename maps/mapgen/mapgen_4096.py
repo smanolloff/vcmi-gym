@@ -25,17 +25,17 @@ import zipfile
 # relative to script dir
 MAP_DIR = "../gym/generated/4096"
 # name template containing a single {id} token to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "4096-3stack-30K-{id:02d}"
+MAP_NAME_TEMPLATE = "4096-mixstack-100K-{id:02d}"
 # id of maps to generate (inclusive)
 MAP_ID_START = 1
 MAP_ID_END = 1
 
 ARMY_N_STACKS_SAME = True  # same for both sides
 ARMY_N_STACKS_MIN = 3
-ARMY_N_STACKS_MAX = 3
+ARMY_N_STACKS_MAX = 7
 
-ARMY_VALUE_MIN = 30_000
-ARMY_VALUE_MAX = 30_000
+ARMY_VALUE_MIN = 100_000
+ARMY_VALUE_MAX = 100_000
 
 STACK_QTY_MAX = 1023
 
