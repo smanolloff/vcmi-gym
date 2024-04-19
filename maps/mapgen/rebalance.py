@@ -41,7 +41,7 @@
 # end
 #
 # Note VCMI terminates rather abruptly (exit(0) from a non-main thread), so
-# there will be occasional error messages, but a loop here takes care for that.
+# this method is not very good.
 
 
 import os
@@ -52,6 +52,7 @@ import sys
 import shutil
 import random
 import datetime
+import argparse
 import numpy as np
 from math import log
 
@@ -62,7 +63,8 @@ from mapgen import (
 )
 
 # Max value for (unused_credits / target_value)
-ARMY_VALUE_ERROR_MAX = 0.03
+# (None = auto)
+ARMY_VALUE_ERROR_MAX = None
 
 # Limit corrections to (1-clip, 1+clip) to avoid destructive updates
 # (None = auto)
@@ -114,69 +116,120 @@ def backup(path):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-f', help="read input json from file", metavar="FILE")
+    parser.add_argument('-a', help="analyze input and exit", action='store_true')
+    parser.add_argument('--change', help="allow army comp change", action='store_true')
+    parser.add_argument('--dry-run', help="don't save anything", action='store_true')
+    args = parser.parse_args()
+
     j = None
-    if (sys.argv[1] == "-"):
+    if (args.f):
+        with open(args.f, "r") as file:
+            j = file.read()
+    else:
         print("Waiting for stdin...")
         try:
             j = input()
             print("Got json: %s" % j)
         except EOFError:
             pass
-    else:
-        j = sys.argv[1]
 
     j = json.loads(j)
     path, (header, objects, surface_terrain) = load(j["map"])
     creatures_dict = {vcminame: (name, value) for (vcminame, name, value) in get_all_creatures()}
 
+    # analyze map
+    heroes_data = {}
+
+    for (k, v) in objects.items():
+        if not k.startswith("hero_"):
+            continue
+
+        heroes_data[k] = {"old_army": [], "army_value": 0, "army_creatures": []}
+        for stack in v["options"]["army"]:
+            if not stack:
+                continue
+            cr_vcminame = stack["type"].removeprefix("core:")
+            cr_name, cr_value = creatures_dict[cr_vcminame]
+            cr_amount = stack["amount"]
+            heroes_data[k]["army_value"] += cr_amount * cr_value
+            heroes_data[k]["army_creatures"].append((cr_vcminame, cr_name, cr_value))
+            heroes_data[k]["old_army"].append((cr_vcminame, None, cr_amount))
+
+    army_value_list = [k["army_value"] for k in heroes_data.values()]
+    mean_army_value = np.mean(army_value_list)
+    stddev_army_value = np.std(army_value_list)
+    stddev_army_value_frac = stddev_army_value / mean_army_value
+
     winlist = list(j["wins"].values())
     mean_wins = np.mean(winlist)
-    stddev = np.std(winlist)
-    stddev_frac = stddev / mean_wins
-    clip = ARMY_VALUE_CORRECTION_CLIP or (stddev_frac / 7)
+    stddev_wins = np.std(winlist)
+    stddev_wins_frac = stddev_wins / mean_wins
 
-    print("Stats:\nmean_wins: %d\nstddev: %d (%.2f%%)\nCorrection clip: %.2f" % (
-        mean_wins,
-        stddev,
-        stddev_frac * 100,
-        clip
-    ))
+    clip = ARMY_VALUE_CORRECTION_CLIP
+    if clip is None:
+        """
+        A 0.1 (10%) correction limit is good. Example:
 
-    if len(sys.argv) > 2:
-        for arg in sys.argv[2:]:
-            if arg in ["-a", "--analyze"]:
-                sys.exit(0)
-            elif arg in ["-c", "--change"]:
-                ALLOW_ARMY_COMP_CHANGE = True
-            else:
-                print("Unrecognized argument: %s" % arg)
-                sys.exit(1)
+            mean_wins = 30
+            examples = [1, 5, 10, 20, 25, 30, 35, 50, 100]
+            corrections = ["%d => %.2f" % (w, log(mean_wins/w)/30) for w in examples]
+            print("corrections (mean_wins=%d):\n%s" % (mean_wins, "\n".join(corrections)))
+
+        corrections (mean_wins=30):
+        1 => 0.11
+        5 => 0.06
+        10 => 0.04
+        20 => 0.01
+        25 => 0.01
+        30 => 0.00
+        35 => -0.01
+        50 => -0.02
+        100 => -0.04
+        """
+        clip = 0.1
+
+    errmax = ARMY_VALUE_ERROR_MAX
+    if errmax is None:
+        """
+        Maximum allowed error when generating the army value is ~1000
+        (given peasant=15, imp=50, ogre=416, minotaur=835, etc.)
+        For 100K armies, this is 0.01
+        """
+        errmax = 1000 / mean_army_value
+
+    print("Stats:")
+    print("  mean_wins: %d" % mean_wins)
+    print("  stddev_wins: %d (%.2f%%)" % (stddev_wins, stddev_wins_frac * 100))
+    print("  mean_army_value: %d" % mean_army_value)
+    print("  stddev_army_value: %d (%.2f%%)" % (stddev_army_value, stddev_army_value_frac * 100))
+
+    if args.a:
+        sys.exit(0)
+
+    if args.change:
+        ALLOW_ARMY_COMP_CHANGE = True
 
     changed = False
 
-    for (hero_name, hero_wins) in j["wins"].items():
-        correction_factor = (log(mean_wins) / log(2 if hero_wins < 2 else hero_wins))**1
-        correction_factor = np.clip(correction_factor, 1-clip, 1+clip)
-
-        if abs(1 - correction_factor) <= ARMY_VALUE_ERROR_MAX:
+    for hero_name, hero_data in heroes_data.items():
+        hero_wins = j["wins"].get(hero_name, 0)
+        correction_factor = log(mean_wins/(hero_wins or 1)) / 30
+        correction_factor = np.clip(correction_factor, -clip, clip)
+        if abs(correction_factor) <= errmax:
             # nothing to correct
             continue
 
-        army = [a for a in objects[hero_name]["options"]["army"] if a]
-        army_value = 0
-        army_creatures = []
-        old_army = []
+        army_value = hero_data["army_value"]
+        army_creatures = hero_data["army_creatures"]
+        old_army = hero_data["old_army"]
 
-        for stack in army:
-            cr_vcminame = stack["type"].removeprefix("core:")
-            cr_name, cr_value = creatures_dict[cr_vcminame]
-            army_value += stack["amount"] * cr_value
-            army_creatures.append((cr_vcminame, cr_name, cr_value))
-            old_army.append((cr_vcminame, None, stack["amount"]))
-
-        new_value = int(army_value * correction_factor)
-        print("Adjusting army value of %s: %d -> %d (%.2f%%)" % (
+        new_value = int(army_value * (1 + correction_factor))
+        print("Hero %s wins=%s (mean=%d): army value adjustment %d -> %d (%.2f%%)" % (
             hero_name,
+            hero_wins,
+            mean_wins,
             army_value,
             new_value,
             correction_factor * 100,
@@ -185,7 +238,7 @@ if __name__ == "__main__":
         new_army = None
         for r in range(1, 10):
             try:
-                new_army = build_army_with_retry(new_value, ARMY_VALUE_ERROR_MAX, creatures=army_creatures)
+                new_army = build_army_with_retry(new_value, errmax, creatures=army_creatures)
                 break
             except MaxAttemptsExceeded:
                 if not ALLOW_ARMY_COMP_CHANGE:
@@ -210,9 +263,20 @@ if __name__ == "__main__":
     if not changed:
         print("Nothing to do.")
         sys.exit(1)
+    elif args.dry_run:
+        print("Nothing to do (--dry-run)")
     else:
         with open(os.path.join(os.path.dirname(path), "rebalance.log"), "a") as f:
             t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            f.write("[%s] Rebalanced %s (stddev was %.2f %%)\n" % (t, path, stddev_frac * 100))
-        backup(path)
-        save(path, header, objects, surface_terrain)
+            report = (
+                f"[{t}] Rebalanced {path} with stats: "
+                f"mean_wins={mean_wins}, stddev_wins={stddev_wins}, "
+                f"mean_army_value={mean_army_value}, stddev_army_value={stddev_army_value}, "
+                f"max_correction={clip:.2f}\n"
+            )
+
+            f.write(report)
+            print(report)
+
+        # backup(path)
+        # save(path, header, objects, surface_terrain)

@@ -134,7 +134,8 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
             assert vcminame0 == vcminame
             assert name0 == name
             if number0 + number > STACK_QTY_MAX:
-                raise StackTooBigError("Stack too big: %s: %d" % (name, number0 + number))
+                # raise StackTooBigError("Stack too big: %s: %d" % (name, number0 + number))
+                continue
             credit -= number * aivalue
             army[i] = (vcminame, name, number0 + number)
 
