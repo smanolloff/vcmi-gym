@@ -81,7 +81,7 @@ def main():
     parser.add_argument("action", help=argparse.SUPPRESS)
     parser.add_argument("-g", metavar="GROUP_ID", help="group_id")
     parser.add_argument("-r", metavar="RUN_ID", help="run_id")
-    parser.add_argument("-R", help="resume training", action=argparse.BooleanOptionalAction)
+    parser.add_argument("-R", help="resume training", action='store_true')
     parser.add_argument("-c", metavar="FILE", type=argparse.FileType("r"), help="config file")
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.usage = "%(prog)s [options] <action> [<value>]"

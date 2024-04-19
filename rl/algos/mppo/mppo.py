@@ -161,11 +161,29 @@ class Args:
         common.coerce_dataclass_ints(self)
 
 
+class ChanFirst(nn.Module):
+    def forward(self, x):
+        return x.permute(0, 3, 1, 2)
+
+
 class SelfAttention(nn.MultiheadAttention):
     def forward(self, x):
         # TODO: attn_mask
         res, _weights = super().forward(x, x, x, need_weights=False, attn_mask=None)
         return res
+
+
+class ResBlock(nn.Module):
+    def __init__(self, channels, activation="LeakyReLU"):
+        super().__init__()
+        self.block = nn.Sequential(
+            common.layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1)),
+            getattr(nn, activation)(),
+            common.layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
+        )
+
+    def forward(self, x):
+        return x + self.block(x)
 
 
 class AgentNN(nn.Module):
@@ -226,35 +244,35 @@ class AgentNN(nn.Module):
 
 
 class Agent(nn.Module):
+    """
+    Store a "clean" version of the agent: create a fresh one and copy the attrs
+    manually (for nn's and optimizers - copy their states).
+    This prevents issues if the agent contains wandb hooks at save time.
+    """
+    @staticmethod
+    def save(agent, agent_file, nn_file=None):
+        print("Saving agent to %s" % agent_file)
+        attrs = ["args", "observation_space", "action_space", "state"]
+        data = {k: agent.__dict__[k] for k in attrs}
+        clean_agent = agent.__class__(**data)
+        clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
+        clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
+        torch.save(clean_agent, agent_file)
+
+    @staticmethod
+    def load(agent_file):
+        print("Loading agent from %s" % agent_file)
+        return torch.load(agent_file)
+
     def __init__(self, args, observation_space, action_space, state=None):
         super().__init__()
-
         self.args = args
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
-        self._optimizer_state = None  # needed for save/load
-
         self.NN = AgentNN(args.network, action_space, observation_space)
-        self.init_optimizer()
+        self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
         self.predict = self.NN.predict
         self.state = state or State()
-
-    # XXX: This is a method => it will work after pytorch.load if the saved model did not have it
-    # XXX: `NN` and `optimizer` need special handling and must not be included here
-    def save_attrs(self):
-        return ["args", "observation_space", "action_space", "state"]
-
-    # Separate method as it's explicitly called during .load()
-    def init_optimizer(self):
-        self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
-
-
-def save(agent, save_file):
-    return common.save(agent, save_file)
-
-
-def load(load_file):
-    return common.load(load_file)
 
 
 def main(args):
@@ -263,7 +281,7 @@ def main(args):
 
     assert isinstance(args, Args)
 
-    agent, args = common.maybe_resume(args)
+    agent, args = common.maybe_resume(Agent, args)
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
@@ -309,7 +327,7 @@ def main(args):
 
     if args.agent_load_file:
         f = args.agent_load_file
-        agent = load(f)
+        agent = Agent.load(f)
         agent.args = args
         start_map_swaps = agent.state.map_swaps
         agent.state.current_timestep = 0
@@ -652,7 +670,7 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="data/heads/heads-simple-A1/agent-1710806916.zip",
+        # agent_load_file="data/debug-crl/debug-crl/agent-permasave-1713526737.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,

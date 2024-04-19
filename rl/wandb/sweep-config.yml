@@ -9,14 +9,16 @@ metric:
 parameters:
   script:
     parameters:
-      module: { value: "mppo_conv" }
+      module: { value: "rl.algos.mppo.mppo" }
 
-  tags: { value: ["OneHot", "Map-7stack-01", "StupidAI"] }
+  tags: { value: ["Map-7stack-01", "StupidAI"] }
+
+  # XXX: some script config args have changed
+  #     (e.g. )
 
   agent_load_file: { value: ~ }
-  timesteps_total: { value: 1_000_000 }  # mandatory for sweep!
-  timesteps_per_mapchange: { value: 0 }
-  rollouts_total: { value: 0 }
+  vsteps_total: { value: 1_000_000 }  # mandatory for sweep!
+  seconds_total: { value: 0 }
   rollouts_per_mapchange: { value: 0 }
   rollouts_per_log: { value: 1 }
   rollouts_per_table_log: { value: 0 }

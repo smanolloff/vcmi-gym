@@ -19,3 +19,6 @@
 # New algorithm
 - QRDQN
 - MPPG
+
+# NN Arch
+- ResNet

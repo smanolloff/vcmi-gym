@@ -201,21 +201,6 @@ def layer_init_normed(layer, norm_dim, scale=1.0):
     return layer
 
 
-def flatten01(arr):
-    return arr.reshape((-1, *arr.shape[2:]))
-
-
-def unflatten01(arr, targetshape):
-    return arr.reshape((*targetshape, *arr.shape[1:]))
-
-
-def flatten_unflatten_test():
-    a = torch.rand(400, 30, 100, 100, 5)
-    b = flatten01(a)
-    c = unflatten01(b, a.shape[:2])
-    assert torch.equal(a, c)
-
-
 class AgentNN(nn.Module):
     @staticmethod
     def build_layer(spec):
@@ -296,35 +281,35 @@ class AgentNN(nn.Module):
 
 
 class Agent(nn.Module):
+    """
+    Store a "clean" version of the agent: create a fresh one and copy the attrs
+    manually (for nn's and optimizers - copy their states).
+    This prevents issues if the agent contains wandb hooks at save time.
+    """
+    @staticmethod
+    def save(agent, agent_file, nn_file=None):
+        print("Saving agent to %s" % agent_file)
+        attrs = ["args", "observation_space", "action_space", "state"]
+        data = {k: agent.__dict__[k] for k in attrs}
+        clean_agent = agent.__class__(**data)
+        clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
+        clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
+        torch.save(clean_agent, agent_file)
+
+    @staticmethod
+    def load(agent_file):
+        print("Loading agent from %s" % agent_file)
+        return torch.load(agent_file)
+
     def __init__(self, args, observation_space, action_space, state=None):
         super().__init__()
-
         self.args = args
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
-        self._optimizer_state = None  # needed for save/load
-
         self.NN = AgentNN(args.network, action_space, observation_space)
-        self.init_optimizer()
+        self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
         self.predict = self.NN.predict
         self.state = state or State()
-
-    # XXX: This is a method => it will work after pytorch.load if the saved model did not have it
-    # XXX: `NN` and `optimizer` need special handling and must not be included here
-    def save_attrs(self):
-        return ["args", "observation_space", "action_space", "state"]
-
-    # Separate method as it's explicitly called during .load()
-    def init_optimizer(self):
-        self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
-
-
-def save(agent, save_file):
-    return common.save(agent, save_file)
-
-
-def load(load_file):
-    return common.load(load_file)
 
 
 def main(args):
@@ -333,7 +318,7 @@ def main(args):
 
     assert isinstance(args, Args)
 
-    agent, args = common.maybe_resume(args)
+    agent, args = common.maybe_resume(Agent, args)
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
@@ -369,8 +354,6 @@ def main(args):
     assert (args.rollouts_per_phase * args.num_envs) % args.num_aux_rollouts == 0, \
         "(%d * %d) %% %d != 0" % (args.rollouts_per_phase, args.num_envs, args.num_aux_rollouts)
 
-    flatten_unflatten_test()
-
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -385,7 +368,7 @@ def main(args):
 
     if args.agent_load_file:
         f = args.agent_load_file
-        agent = load(f)
+        agent = Agent.load(f)
         agent.args = args
         start_map_swaps = agent.state.map_swaps
         agent.state.current_timestep = 0
@@ -464,14 +447,9 @@ def main(args):
         assert act_space.start == 0
         masks = torch.zeros((args.num_steps, args.num_envs, act_space.n), dtype=torch.bool).to(device)
 
-        # XXX: cleanrl PPG uses uint8 here for saving memory (pixel values are 0..255)
-        aux_obs = torch.zeros((args.num_steps, aux_batch_rollouts_size) + obs_space.shape)
-        aux_masks = torch.zeros((args.num_steps, aux_batch_rollouts_size, act_space.n), dtype=torch.bool)
-        aux_returns = torch.zeros((args.num_steps, aux_batch_rollouts_size))
-
-        aux_obs = torch.zeros((args.rollouts_per_phase, args.num_envs, args.num_steps) + obs_space.shape)
-        aux_masks = torch.zeros((args.rollouts_per_phase, args.num_envs, args.num_steps, act_space.n), dtype=torch.bool)
-        aux_returns = torch.zeros((args.rollouts_per_phase, args.num_envs, args.num_steps))
+        aux_obs = torch.zeros((args.rollouts_per_phase, args.num_steps, args.num_envs) + obs_space.shape)
+        aux_masks = torch.zeros((args.rollouts_per_phase, args.num_steps, args.num_envs, act_space.n), dtype=torch.bool)
+        aux_returns = torch.zeros((args.rollouts_per_phase, args.num_steps, args.num_envs))
 
         # TRY NOT TO MODIFY: start the game
         next_obs, _ = envs.reset(seed=args.seed)
@@ -728,9 +706,9 @@ def main(args):
                         loss.item()
                     ))
 
-                aux_obs[p_rollout] = obs.swapaxes(0, 1).cpu().clone()
-                aux_masks[p_rollout] = masks.swapaxes(0, 1).cpu().clone()
-                aux_returns[p_rollout] = returns.swapaxes(0, 1).cpu().clone()
+                aux_obs[p_rollout] = obs.cpu().clone()
+                aux_masks[p_rollout] = masks.cpu().clone()
+                aux_returns[p_rollout] = returns.cpu().clone()
 
                 agent.state.current_rollout += 1
                 save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
@@ -739,17 +717,17 @@ def main(args):
             # AUXILIARY PHASE
             #
 
-            # (args.rollouts_per_phase, num_envs, args.num_steps, obs_shape)
-            # => (args.rollouts_per_phase * num_envs, args.num_steps, obs_shape)
-            b_aux_obs = aux_obs.flatten(end_dim=1)
-            b_aux_masks = aux_masks.flatten(end_dim=1)
-            b_aux_returns = aux_returns.flatten(end_dim=1)
+            # (args.rollouts_per_phase, args.num_steps, num_envs, *)
+            # => (args.rollouts_per_phase * num_envs, args.num_steps, *)
+            b_aux_obs = aux_obs.swapaxes(0, 1).flatten(end_dim=1)
+            b_aux_masks = aux_masks.swapaxes(0, 1).flatten(end_dim=1)
+            b_aux_returns = aux_returns.swapaxes(0, 1).flatten(end_dim=1)
 
             with torch.no_grad():
                 b_aux_pidist_logits = agent.NN.get_pidist(
                     b_aux_obs.flatten(end_dim=1).to(device),
                     b_aux_masks.flatten(end_dim=1).to(device)
-                ).logits.cpu().clone().unflatten(dim=0, sizes=(args.rollouts_per_phase, -1))
+                ).logits.unflatten(dim=0, sizes=(args.rollouts_per_phase, -1).cpu().clone())
 
             aux_inds = np.arange(aux_batch_rollouts_size)
             for auxiliary_update in range(1, args.e_auxiliary + 1):
@@ -758,8 +736,8 @@ def main(args):
                 for i, start in enumerate(range(0, aux_batch_rollouts_size, args.num_aux_rollouts)):
                     mb_aux_ind = aux_inds[start:start + args.num_aux_rollouts]
                     try:
-                        mb_aux_obs = b_aux_obs[mb_aux_ind].to(device).flatten(end_dim=1)
-                        mb_aux_masks = b_aux_masks[mb_aux_ind].to(device).flatten(end_dim=1)
+                        mb_aux_obs = b_aux_obs[mb_aux_ind].flatten(end_dim=1).to(device)
+                        mb_aux_masks = b_aux_masks[mb_aux_ind].flatten(end_dim=1).to(device)
                         mb_aux_returns = b_aux_returns[mb_aux_ind].flatten(end_dim=1).to(torch.float32).to(device)
 
                         mb_new_pi, mb_new_values, mb_new_aux_values = agent.NN.get_pidist_value_and_aux_value(mb_aux_obs, mb_aux_masks)

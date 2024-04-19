@@ -88,7 +88,7 @@ class TrainableMPPO(ray.tune.Trainable):
     def save_checkpoint(self, checkpoint_dir):
         assert self.agent, "save_checkpoint called but self.agent is None"
         f = os.path.join(checkpoint_dir, "agent.pt")
-        mppo.save(self.agent, f)
+        mppo.Agent.save(self.agent, f)
         return checkpoint_dir
 
     @debuglog

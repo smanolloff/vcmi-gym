@@ -237,7 +237,7 @@ def main():
 
                 agent = load_agent(agent_file=agent_load_file, run_id=run_id)
 
-                if os.environ["NO_WANDB"] == "true":
+                if os.environ.get("NO_WANDB", None) == "true":
                     def wandb_log(*args, **kwargs):
                         pass
                 else:

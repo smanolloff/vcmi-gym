@@ -1,6 +1,6 @@
 ---
-group_id: mppg
-run_name: "mppo baseline"
+group_id: mppo-arches
+run_name: "baseline (tanh)"
 tags: ["Map-3stack-01", "StupidAI", "encoding-float"]
 
 wandb_project: vcmi-gym
@@ -23,7 +23,7 @@ success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
-mapmask: "gym/generated/88/88-3stack-30K-01.vmap"
+mapmask: "gym/generated/896/896-3stack-30K-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 permasave_every: 10800  # seconds
@@ -44,12 +44,12 @@ network:
     # => (B, 1, 11, 1290|8610)
     - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 86], stride: [1, 86], padding: 0}
     # - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 574], stride: [1, 574], padding: 0}
-    - {t: "LeakyReLU"}
+    - {t: "Tanh"}
     # => (B, 32, 11, 15)
     - {t: "Flatten"}
     # => (B, 5280)
     - {t: "Linear", in_features: 5280, out_features: 1024}
-    - {t: "LeakyReLU"}
+    - {t: "Tanh"}
     # => (B, 1024)
 
   actor: {t: "Linear", in_features: 1024, out_features: 2311}

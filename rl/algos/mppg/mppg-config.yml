@@ -1,6 +1,6 @@
 ---
 group_id: mppg
-run_name: "mppg post-refactor"
+run_name: "mppg resnet"
 tags: ["Map-3stack-01", "StupidAI", "encoding-float", "MPPG"]
 
 wandb_project: vcmi-gym
@@ -39,22 +39,21 @@ num_envs: 1
 network:
   features_extractor:
     # => (B, 11, 15, 86|574)
-    - {t: "Flatten", start_dim: 2}
-    - {t: "Unflatten", dim: 1, unflattened_size: [1, 11]}
-    # => (B, 1, 11, 1290|8610)
-    - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 86], stride: [1, 86], padding: 0}
+    - {t: "ChanFirst"}
+    # => (B, 86|574, 11, 15)
+      - {t: "Conv2d", in_channels: 86, out_channels: 32, kernel_size: 3, padding: 1}
     - {t: "LeakyReLU"}
     # => (B, 32, 11, 15)
-    - {t: "Conv2d", in_channels: 32, out_channels: 64, kernel_size: 1, stride: 1, padding: 0}
+    - {t: "ResBlock", channels: 32}
     - {t: "LeakyReLU"}
-    # => (B, 64, 11, 15)
+    - {t: "ResBlock", channels: 32}
     - {t: "LeakyReLU"}
+    - {t: "ResBlock", channels: 32}
+    - {t: "LeakyReLU"}
+    # => (B, 32, 11, 15)
     - {t: "Flatten"}
-    # => (B, 10560)
-    - {t: "Linear", in_features: 10560, out_features: 1024}
-    - {t: "LeakyReLU"}
-    # => (B, 1024)
-    - {t: "Linear", in_features: 1024, out_features: 1024}
+    # => (B, 5280)
+    - {t: "Linear", in_features: 5280, out_features: 1024}
     - {t: "LeakyReLU"}
     # => (B, 1024)
 

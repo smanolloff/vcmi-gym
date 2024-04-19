@@ -167,12 +167,12 @@ def maybe_save(t_save, t_permasave, args, agent, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     agent_file = os.path.join(out_dir, "agent-%d.pt" % now)
     nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
-    save(agent, agent_file, nn_file=nn_file)
+    agent.__class__.save(agent, agent_file, nn_file=nn_file)
     t_save = now
 
     if t_permasave + args.permasave_every <= now:
         permasave_file = os.path.join(out_dir, "agent-permasave-%d.pt" % now)
-        save(agent, permasave_file)
+        agent.__class__.save(agent, permasave_file)
         t_permasave = now
 
     # save file retention (keep latest N saves)
@@ -237,7 +237,7 @@ def log_params(args, wandb_log):
     print("Params: %s" % logged)
 
 
-def maybe_resume(args):
+def maybe_resume(agent_cls, args):
     if not args.resume:
         print("Starting new run %s/%s" % (args.group_id, args.run_id))
         return None, args
@@ -246,8 +246,7 @@ def maybe_resume(args):
 
     # XXX: resume will overwrite all input args except run_id & group_id
     file = find_latest_save(args.group_id, args.run_id)
-    agent = torch.load(file)
-    print("Loaded agent from %s" % file)
+    agent = agent_cls.load(file)
 
     assert agent.args.group_id == args.group_id
     assert agent.args.run_id == args.run_id
@@ -378,43 +377,6 @@ def validate_tags(tags):
         all_tags = yaml.safe_load(f)
     for tag in tags:
         assert tag in all_tags, f"Invalid tag: {tag}"
-
-
-def save(agent, agent_file, nn_file=None):
-    print("Saving agent to %s" % agent_file)
-    attrs = agent.save_attrs()
-    data = {k: agent.__dict__[k] for k in attrs}
-    nn_state_dict = agent.NN.state_dict()
-    opt_state_dict = agent.optimizer.state_dict()
-
-    # Re-create the entire agent to ensure it's "clean"
-    clean_agent = agent.__class__(**data)
-    clean_agent.NN.load_state_dict(nn_state_dict, strict=True)
-
-    # Saving the entire optimizer saves a duplicate of NN.parameters()
-    # => save only the state dict
-    # Using a "hidden" variable to avoid having to store it separately
-    # (e.g. pytorch.save({"agent": ..., "optimizer_state": ...}, save_file)
-    # This enables a simple `agent = torch.load(...)` for non-training purposes
-    # while retaining all data needed for training purposes
-    clean_agent.optimizer = None
-    clean_agent._optimizer_state = opt_state_dict
-    torch.save(clean_agent, agent_file)
-
-    # Optionally, save the NN state separately
-    # Useful as it is decoupled from the Agent module (which changes often)
-    if nn_file:
-        print("Saving NN state to %s" % nn_file)
-        torch.save(nn_state_dict, nn_file)
-
-
-def load(agent_file):
-    print("Loading agent from %s" % agent_file)
-    agent = torch.load(agent_file)
-    agent.init_optimizer()
-    agent.optimizer.load_state_dict(agent._optimizer_state)
-    agent._optimizer_state = None
-    return agent
 
 
 def coerce_dataclass_ints(dataclass_obj):
