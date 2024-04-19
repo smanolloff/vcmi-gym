@@ -66,17 +66,18 @@ ent_coef: 0.007
 gae_lambda_policy: 0.8
 gae_lambda_value: 0.95
 gamma: 0.8425
-lr_schedule: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
+lr_schedule_value: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
+lr_schedule_policy: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
+lr_schedule_distill: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
 max_grad_norm: 0.5
 norm_adv: true
-num_minibatches_distill: 2    #
-num_minibatches_policy: 8     #
 num_minibatches_value: 8      # minibatch_size = rollout_buffer/num_minibatches
+num_minibatches_policy: 8     #
+num_minibatches_distill: 2    #
 num_steps: 128                # rollout_buffer = num_steps*num_envs
-update_epochs_distill: 10     # full passes of rollout_buffer
-update_epochs_policy: 10      #
 update_epochs_value: 5        #
-vf_coef: 1.2
+update_epochs_policy: 10      #
+update_epochs_distill: 10     # full passes of rollout_buffer
 switch_train_eval: true
 weight_decay: 0
 

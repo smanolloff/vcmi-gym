@@ -13,8 +13,8 @@ def handle_signal(signum, frame):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--strategy", metavar="<strategy>", default="pbt", help="strategy (pbt, pb2)")
-    parser.add_argument("-a", "--algo", metavar="<algo>", default="mppo", help="rl algo module (mppo, mppo_dna, mppg, mqrdqn, ...)")
+    parser.add_argument("-s", metavar="<strategy>", default="pbt", help="strategy (pbt, pb2)")
+    parser.add_argument("-a", metavar="<algo>", default="mppo", help="rl algo module (mppo, mppo_dna, mppg, mqrdqn, ...)")
     parser.add_argument("-n", metavar="<name>", default="PBT-{datetime}", help="experiment name")
     parser.add_argument("-R", metavar="<path>", help="resume experiment from path")
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
@@ -32,9 +32,9 @@ Available algos:
   mqrdqn        Maskable Quantile-Regression DQN (QRDQN)
 
 Examples:
-  %(prog)s "PBT-experiment1-{datetime}"
-  %(prog)s -R "/path/to/PBT-experiment1-20240414_141602"
-  %(prog)s -s pb2 -a mppg "..."
+  python -m rl.raytune.main "PBT-experiment1-{datetime}"
+  python -m rl.raytune.main -R "/path/to/PBT-experiment1-20240414_141602"
+  python -m rl.raytune.main -s pb2 -a mppg "..."
 """
     # XXX: env vars must be set *before* importing ray/wandb modules
 
@@ -50,12 +50,12 @@ Examples:
 
     try:
         # XXX: can't use relative imports here
-        mod = importlib.import_module(f"rl.raytune.{args.strategy}")
+        mod = importlib.import_module(f"rl.raytune.{args.s}")
     except ModuleNotFoundError as e:
-        if e.name == args.strategy:
-            print("Unknown strategy: %s" % args.strategy)
+        if e.name == args.s:
+            print("Unknown strategy: %s" % args.s)
             sys.exit(1)
         raise
 
     experiment_name = args.n.format(datetime=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
-    mod.main("mppo", experiment_name, args.R)
+    mod.main(args.a, experiment_name, args.R)
