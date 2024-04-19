@@ -19,6 +19,7 @@
 # New algorithm
 - QRDQN
 - MPPG
+- MPPO_DNA
 
 # NN Arch
 - ResNet

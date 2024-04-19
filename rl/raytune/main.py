@@ -13,20 +13,28 @@ def handle_signal(signum, frame):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-a", metavar="<action>", default="pbt", help="action (pbt, pb2)")
+    parser.add_argument("-s", "--strategy", metavar="<strategy>", default="pbt", help="strategy (pbt, pb2)")
+    parser.add_argument("-a", "--algo", metavar="<algo>", default="mppo", help="rl algo module (mppo, mppo_dna, mppg, mqrdqn, ...)")
     parser.add_argument("-n", metavar="<name>", default="PBT-{datetime}", help="experiment name")
     parser.add_argument("-R", metavar="<path>", help="resume experiment from path")
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
-    parser.usage = "%(prog)s [options] <action> <experiment_name>"
+    parser.usage = "%(prog)s [options] <algo> <experiment_name>"
     parser.epilog = """
-actions:
-  pbt          population-based training (PBT) with MPPO
-  pb2          population-based bandits (PB2) with MPPO
-  help         print this help message
 
-examples:
-  %(prog)s -a pbt -n "PBT-experiment1-{datetime}"
-  %(prog)s -a pbt -R "/path/to/PBT-experiment1-20240414_141602"
+Available strategies:
+  pbt           (default) Population-based training (PBT)
+  pb2           Population-based bandits (PB2)
+
+Available algos:
+  mppo          Maskable Proximal Policy Optimization (MPPO)
+  mppo_dna      MPPO with Dual Network Arch (MPPO-DNA)
+  mppg          Maskable Phasic Policy Gradient (PPG)
+  mqrdqn        Maskable Quantile-Regression DQN (QRDQN)
+
+Examples:
+  %(prog)s "PBT-experiment1-{datetime}"
+  %(prog)s -R "/path/to/PBT-experiment1-20240414_141602"
+  %(prog)s -s pb2 -a mppg "..."
 """
     # XXX: env vars must be set *before* importing ray/wandb modules
 
@@ -42,10 +50,10 @@ examples:
 
     try:
         # XXX: can't use relative imports here
-        mod = importlib.import_module(f"rl.raytune.{args.a}")
+        mod = importlib.import_module(f"rl.raytune.{args.strategy}")
     except ModuleNotFoundError as e:
-        if e.name == args.a:
-            print("Unknown action: %s" % args.a)
+        if e.name == args.strategy:
+            print("Unknown strategy: %s" % args.strategy)
             sys.exit(1)
         raise
 

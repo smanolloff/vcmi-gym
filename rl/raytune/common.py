@@ -108,11 +108,11 @@ class TBXDummyCallback(ray.tune.logger.TBXLoggerCallback):
         pass
 
 
-def new_tuner(alg, experiment_name, config, scheduler, searcher=None, param_space=None):
-    assert alg in ["mppo"], "Only mppo is supported for PBT"
+def new_tuner(algo, experiment_name, config, scheduler, searcher=None, param_space=None):
+    assert algo in ["mppo", "mppo_dna", "mppg"], f"Unsupported algo: {algo}"
     assert re.match(r"^[0-9A-Za-z_-].+$", experiment_name)
-    trainable_mod = importlib.import_module("rl.raytune.trainable_%s" % alg)
-    trainable_cls = getattr(trainable_mod, "Trainable%s" % alg.upper())
+    trainable_mod = importlib.import_module("rl.raytune.trainable")
+    trainable_cls = getattr(trainable_mod, "Trainable")
 
     checkpoint_config = ray.train.CheckpointConfig(
         num_to_keep=10,
@@ -146,6 +146,7 @@ def new_tuner(alg, experiment_name, config, scheduler, searcher=None, param_spac
 
     initargs = copy.deepcopy(config)
     initargs["_raytune"]["experiment_name"] = experiment_name
+    initargs["_raytune"]["algo"] = algo
 
     tuner = ray.tune.Tuner(
         trainable=ray.tune.with_parameters(trainable_cls, initargs=initargs),

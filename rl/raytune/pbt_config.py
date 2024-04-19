@@ -11,8 +11,8 @@ config = {
         # Mac
         "synch": True,
         "time_attr": "training_iteration",  # "training_iteration" | "time_total_s"
-        "population_size": 6,
-        "max_concurrency": 6,
+        "population_size": 1,
+        "max_concurrency": 1,
         # PC
         # "synch": False,
         # "time_attr": "time_total_s",  # "training_iteration" | "time_total_s"

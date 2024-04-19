@@ -20,14 +20,14 @@ import re
 import ray.tune
 import ray.train
 import wandb
+import importlib
 from datetime import datetime
 from .common import debuglog
 from . import common
-from ..algos.mppo import mppo
 
 
 # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.Trainable.html
-class TrainableMPPO(ray.tune.Trainable):
+class Trainable(ray.tune.Trainable):
     def log(self, msg):
         print("-- %s [%s I=%d] %s" % (datetime.now().isoformat(), self.trial_name, self.iteration, msg))
 
@@ -46,6 +46,9 @@ class TrainableMPPO(ray.tune.Trainable):
         os.environ["NO_SAVE"] = "true"
         self.agent = None
         self.experiment_name = initargs["_raytune"]["experiment_name"]
+
+        if not hasattr(self, "algo"):
+            self.algo = importlib.import_module("rl.algos.{a}.{a}".format(a=initargs["_raytune"]["algo"]))
 
         print("WANDB INIT: project: %s, group: %s, id: %s" % (
             initargs["_raytune"]["wandb_project"],
@@ -88,7 +91,7 @@ class TrainableMPPO(ray.tune.Trainable):
     def save_checkpoint(self, checkpoint_dir):
         assert self.agent, "save_checkpoint called but self.agent is None"
         f = os.path.join(checkpoint_dir, "agent.pt")
-        mppo.Agent.save(self.agent, f)
+        self.algo.Agent.save(self.agent, f)
         return checkpoint_dir
 
     @debuglog
@@ -109,6 +112,6 @@ class TrainableMPPO(ray.tune.Trainable):
     def step(self):
         wandb.log({"trial/iteration": self.iteration}, commit=False)
         self.cfg["skip_wandb_log_code"] = (self.iteration > 0)
-        args = mppo.Args(wandb.run.id, wandb.run.group, **self.cfg)
-        self.agent, rew_mean = mppo.main(args)
+        args = self.algo.Args(wandb.run.id, wandb.run.group, **self.cfg)
+        self.agent, rew_mean = self.algo.main(args)
         return {"rew_mean": rew_mean}
