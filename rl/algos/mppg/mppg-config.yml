@@ -1,6 +1,6 @@
 ---
 group_id: mppg
-run_name: "test deeper Conv&FC"
+run_name: "mppg post-refactor"
 tags: ["Map-3stack-01", "StupidAI", "encoding-float", "MPPG"]
 
 wandb_project: vcmi-gym
@@ -23,7 +23,7 @@ success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
-mapmask: "maps/gym/generated/896/896-3stack-30K-01.vmap"
+mapmask: "gym/generated/88/88-3stack-30K-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 permasave_every: 10800  # seconds

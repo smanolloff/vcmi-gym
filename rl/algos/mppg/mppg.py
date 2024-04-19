@@ -175,6 +175,25 @@ class ChanFirst(nn.Module):
         return x.permute(0, 3, 1, 2)
 
 
+class ResBlock(nn.Module):
+    def __init__(self, channels, scale):
+        super().__init__()
+        # scale = (1/3**0.5 * 1/2**0.5)**0.5 # For default IMPALA CNN this is the final scale value in the PPG code
+        scale = np.sqrt(scale)
+        conv0 = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1)
+        self.conv0 = layer_init_normed(conv0, norm_dim=(1, 2, 3), scale=scale)
+        conv1 = nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1)
+        self.conv1 = layer_init_normed(conv1, norm_dim=(1, 2, 3), scale=scale)
+
+    def forward(self, x):
+        inputs = x
+        x = nn.functional.relu(x)
+        x = self.conv0(x)
+        x = nn.functional.relu(x)
+        x = self.conv1(x)
+        return x + inputs
+
+
 def layer_init_normed(layer, norm_dim, scale=1.0):
     with torch.no_grad():
         layer.weight.data *= scale / layer.weight.norm(dim=norm_dim, p=2, keepdim=True)
@@ -347,6 +366,9 @@ def main(args):
     minibatch_size = int(batch_size // args.num_minibatches)
     aux_batch_rollouts_size = int(args.num_envs * args.rollouts_per_phase)
 
+    assert (args.rollouts_per_phase * args.num_envs) % args.num_aux_rollouts == 0, \
+        "(%d * %d) %% %d != 0" % (args.rollouts_per_phase, args.num_envs, args.num_aux_rollouts)
+
     flatten_unflatten_test()
 
     # TRY NOT TO MODIFY: seeding
@@ -446,6 +468,10 @@ def main(args):
         aux_obs = torch.zeros((args.num_steps, aux_batch_rollouts_size) + obs_space.shape)
         aux_masks = torch.zeros((args.num_steps, aux_batch_rollouts_size, act_space.n), dtype=torch.bool)
         aux_returns = torch.zeros((args.num_steps, aux_batch_rollouts_size))
+
+        aux_obs = torch.zeros((args.rollouts_per_phase, args.num_envs, args.num_steps) + obs_space.shape)
+        aux_masks = torch.zeros((args.rollouts_per_phase, args.num_envs, args.num_steps, act_space.n), dtype=torch.bool)
+        aux_returns = torch.zeros((args.rollouts_per_phase, args.num_envs, args.num_steps))
 
         # TRY NOT TO MODIFY: start the game
         next_obs, _ = envs.reset(seed=args.seed)
@@ -702,11 +728,9 @@ def main(args):
                         loss.item()
                     ))
 
-                # PPG Storage - Rollouts are saved without flattening for sampling full rollouts later:
-                storage_slice = slice(args.num_envs * p_rollout, args.num_envs * (p_rollout + 1))
-                aux_obs[:, storage_slice] = obs.cpu().clone()
-                aux_masks[:, storage_slice] = masks.cpu().clone()
-                aux_returns[:, storage_slice] = returns.cpu().clone()
+                aux_obs[p_rollout] = obs.swapaxes(0, 1).cpu().clone()
+                aux_masks[p_rollout] = masks.swapaxes(0, 1).cpu().clone()
+                aux_returns[p_rollout] = returns.swapaxes(0, 1).cpu().clone()
 
                 agent.state.current_rollout += 1
                 save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
@@ -715,85 +739,37 @@ def main(args):
             # AUXILIARY PHASE
             #
 
+            # (args.rollouts_per_phase, num_envs, args.num_steps, obs_shape)
+            # => (args.rollouts_per_phase * num_envs, args.num_steps, obs_shape)
+            b_aux_obs = aux_obs.flatten(end_dim=1)
+            b_aux_masks = aux_masks.flatten(end_dim=1)
+            b_aux_returns = aux_returns.flatten(end_dim=1)
+
+            with torch.no_grad():
+                b_aux_pidist_logits = agent.NN.get_pidist(
+                    b_aux_obs.flatten(end_dim=1).to(device),
+                    b_aux_masks.flatten(end_dim=1).to(device)
+                ).logits.cpu().clone().unflatten(dim=0, sizes=(args.rollouts_per_phase, -1))
+
             aux_inds = np.arange(aux_batch_rollouts_size)
-
-            # TODO: see if I can simplify the weird buffer shapes:
-            #
-            #    aux_obs = torch.zeros((steps_per_rollout, rollouts_per_phase, *obs_shape))
-            #    aux_obs[:, rollout_ind] = ...
-            #
-            # looks very weird. Instead, why is it not:
-            #
-            #    aux_obs = torch.zeros((rollouts_per_phase, steps_per_rollout, *obs_shape))
-            #    aux_obs[rollout_ind] = ...
-            #
-            # ???
-            # n_iteration=32            rollouts per phase
-            # aux_batch_rollouts=32     num_envs*n_iteration
-            # num_aux_rollouts=4        hyperparam
-            # aux_obs=(128, 32)         (num_steps, aux_batch_rollouts)
-            # aux_ints = np.arange(32)
-            # # for i, start in enumerate(range(0, aux_batch_rollouts_size, args.num_aux_rollouts)):
-            # for i, start in enumerate(range(0, 32, 4)):
-            #   end = 4
-            #   aux_minibatch_ind = aux_inds[0:4]
-            #   m_aux_obs = aux_obs[:, aux_minibatch_ind]
-            # # TEST
-            # # obs shape is [2]  (2 numbers in obs)
-            # # num_envs is 1     (but adds additional dimension for obs)
-            # # num_steps is 5    (5 obs in rollout)
-            # # n_iteration is 2  (2 rollouts for aux phase)
-            # aux_obs = torch.zeros((5, 2) + (2,))
-            # rollout1 = torch.tensor([[[10,11]],[[20,21]],[[30,31]],[[40,41]],[[50,51]]])
-            # rollout2 = rollout1 * -1
-            # storage_slice = slice(0, 1)
-            # aux_obs[:, storage_slice] = rollout1.cpu().clone()
-            # storage_slice = slice(1, 2)
-            # aux_obs[:, storage_slice] = rollout2.cpu().clone()
-            # m_aux_obs = aux_obs[:, [0]]
-
-            # Build the old policy on the aux buffer before distilling to the network
-            aux_pidist_logits = torch.zeros((args.num_steps, aux_batch_rollouts_size, act_space.n))
-            for i, start in enumerate(range(0, aux_batch_rollouts_size, args.num_aux_rollouts)):
-                end = start + args.num_aux_rollouts
-                aux_minibatch_ind = aux_inds[start:end]
-                m_aux_obs = aux_obs[:, aux_minibatch_ind].to(device)
-                m_obs_shape = m_aux_obs.shape
-                m_aux_obs = flatten01(m_aux_obs)
-                m_aux_masks = aux_masks[:, aux_minibatch_ind].to(device)
-                m_aux_masks = flatten01(m_aux_masks)
-
-                with torch.no_grad():
-                    pidist_logits = agent.NN.get_pidist(m_aux_obs, m_aux_masks).logits.cpu().clone()
-                aux_pidist_logits[:, aux_minibatch_ind] = unflatten01(pidist_logits, m_obs_shape[:2])
-                del m_aux_obs
-                del m_aux_masks
-
             for auxiliary_update in range(1, args.e_auxiliary + 1):
                 LOG.debug("aux epoch=%d" % auxiliary_update)
                 np.random.shuffle(aux_inds)
                 for i, start in enumerate(range(0, aux_batch_rollouts_size, args.num_aux_rollouts)):
-                    end = start + args.num_aux_rollouts
-                    aux_minibatch_ind = aux_inds[start:end]
+                    mb_aux_ind = aux_inds[start:start + args.num_aux_rollouts]
                     try:
-                        m_aux_obs = aux_obs[:, aux_minibatch_ind].to(device)
-                        m_obs_shape = m_aux_obs.shape
-                        m_aux_obs = flatten01(m_aux_obs)  # Sample full rollouts for PPG instead of random indexes
-                        m_aux_masks = aux_masks[:, aux_minibatch_ind].to(device)
-                        m_aux_masks = flatten01(m_aux_masks)
-                        m_aux_returns = aux_returns[:, aux_minibatch_ind].to(torch.float32).to(device)
-                        m_aux_returns = flatten01(m_aux_returns)
+                        mb_aux_obs = b_aux_obs[mb_aux_ind].to(device).flatten(end_dim=1)
+                        mb_aux_masks = b_aux_masks[mb_aux_ind].to(device).flatten(end_dim=1)
+                        mb_aux_returns = b_aux_returns[mb_aux_ind].flatten(end_dim=1).to(torch.float32).to(device)
 
-                        new_pi, new_values, new_aux_values = agent.NN.get_pidist_value_and_aux_value(m_aux_obs, m_aux_masks)
+                        mb_new_pi, mb_new_values, mb_new_aux_values = agent.NN.get_pidist_value_and_aux_value(mb_aux_obs, mb_aux_masks)
 
-                        new_values = new_values.view(-1)
-                        new_aux_values = new_aux_values.view(-1)
-                        old_pidist_logits = flatten01(aux_pidist_logits[:, aux_minibatch_ind]).to(device)
-                        old_pidist = common.CategoricalMasked(logits=old_pidist_logits, mask=m_aux_masks)
-                        kl_loss = torch.distributions.kl_divergence(old_pidist, new_pi).mean()
+                        mb_old_pidist_logits = b_aux_pidist_logits[mb_aux_ind].flatten(end_dim=1).to(device)
+                        mb_old_pidist = common.CategoricalMasked(logits=mb_old_pidist_logits, mask=mb_aux_masks)
+                        kl_loss = torch.distributions.kl_divergence(mb_old_pidist, mb_new_pi).mean()
 
-                        real_value_loss = 0.5 * ((new_values - m_aux_returns) ** 2).mean()
-                        aux_value_loss = 0.5 * ((new_aux_values - m_aux_returns) ** 2).mean()
+                        real_value_loss = 0.5 * ((mb_new_values - mb_aux_returns) ** 2).mean()
+                        aux_value_loss = 0.5 * ((mb_new_aux_values - mb_aux_returns) ** 2).mean()
                         joint_loss = aux_value_loss + args.beta_clone * kl_loss
 
                         loss = (joint_loss + real_value_loss) / args.n_aux_grad_accum
@@ -809,7 +785,7 @@ def main(args):
                             "if running out of CUDA memory, try a higher --n-aux-grad-accum, which trades more time for less gpu memory"
                         ) from e
 
-                    del m_aux_obs, m_aux_returns
+                    del mb_aux_obs
 
             wandb_log({"losses/aux_kl_loss": kl_loss.mean().item()})
             wandb_log({"losses/aux_aux_value_loss": aux_value_loss.item()})
@@ -845,7 +821,7 @@ def debug_args():
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
-        mapside="both",
+        mapside="attacker",
         mapmask="gym/A1.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
