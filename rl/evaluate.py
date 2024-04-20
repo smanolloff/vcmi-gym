@@ -145,6 +145,11 @@ def wandb_init(run):
         group="evaluator",
         name=f"(E) {run.name}",
         id=f"eval-{run.id}",
+        tags=(run.tags + ["eval"]),
+        config=dict(
+            orig_group=run.group,
+            orig_sweep=getattr(run.sweep, "id", None),
+        ),
         resume="allow",
         reinit=True,
         sync_tensorboard=False,  # no tensorboard during eval

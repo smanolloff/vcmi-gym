@@ -270,13 +270,13 @@ if __name__ == "__main__":
             t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             report = (
                 f"[{t}] Rebalanced {path} with stats: "
-                f"mean_wins={mean_wins}, stddev_wins={stddev_wins}, "
-                f"mean_army_value={mean_army_value}, stddev_army_value={stddev_army_value}, "
+                f"mean_wins={mean_wins:.2f}, stddev_wins={stddev_wins:.2f} ({stddev_wins_frac*100:.2f}%), "
+                f"mean_army_value={mean_army_value:.2f}, stddev_army_value={stddev_army_value:.2f} ({stddev_army_value_frac*100:.2f}%), "
                 f"max_correction={clip:.2f}\n"
             )
 
             f.write(report)
             print(report)
 
-        # backup(path)
-        # save(path, header, objects, surface_terrain)
+        backup(path)
+        save(path, header, objects, surface_terrain)
