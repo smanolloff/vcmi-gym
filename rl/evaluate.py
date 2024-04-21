@@ -15,6 +15,7 @@
 # =============================================================================
 
 import glob
+import re
 import gymnasium as gym
 import wandb
 import datetime
@@ -113,7 +114,7 @@ def evaluate_policy(agent, venv, episodes_per_env):
 def load_agent(agent_file, run_id):
     # logging.debug("Loading agent from %s" % agent_file)
     agent = torch.load(agent_file)
-    assert agent.args.run_id == run_id
+    assert agent.args.run_id == run_id, "%s != %s" % (agent.args.run_id, run_id)
     return agent
 
 
@@ -140,10 +141,15 @@ def create_venv(env_cls, env_kwargs, mapname, role, opponent):
 
 
 def wandb_init(run):
+    if re.match(r"^T\d+$", run.name):
+        name = f"(E) {run.name} ({run.id.removesuffix('_00000')})"
+    else:
+        name = f"(E) {run.name}"
+
     wandb.init(
         project="vcmi-gym",
         group="evaluator",
-        name=f"(E) {run.name}",
+        name=name,
         id=f"eval-{run.id}",
         tags=(run.tags + ["eval"]),
         config=dict(
@@ -159,9 +165,7 @@ def wandb_init(run):
 
 
 def find_agents():
-    files = glob.glob("data/*/*/agent-[0-9]*.pt")
-    # files += glob.glob("data/PBT-*/*_00000/*/agent.pt")
-    assert len(files) > 0, "No files found"
+    files = glob.glob("data/*/*/agent[0-9]*.pt")
 
     def should_pick(f):
         # saving large NNs may take a lot of time => wait 1min
@@ -172,10 +176,19 @@ def find_agents():
 
     filtered = [f for f in files if should_pick(f)]
     grouped = itertools.groupby(filtered, key=lambda x: x.split("/")[-2])
+    grouped = {key: list(group) for key, group in grouped}
+
+    # Eval only one PBT worker (the _00000 one)
+    files2 = glob.glob("data/PBT-*/*_00000/*/agent.pt")
+    filtered2 = [f for f in files2 if should_pick(f)]
+    grouped2 = itertools.groupby(filtered2, key=lambda x: x.split("/")[-3])
+    grouped2 = {key: list(group) for key, group in grouped2}
+
+    grouped_all = dict(grouped, **grouped2)
 
     # key=run_id, value=filepath (to latest save)
     # {'attrchan-test-2-1708258565': 'data/sparse-rewards/attrchan-test-2-1708258565/model.zip', ...etc}
-    return {k: max(v, key=os.path.getmtime) for k, v in grouped}
+    return {k: max(v, key=os.path.getmtime) for k, v in grouped_all.items()}
 
 
 def main():
@@ -227,120 +240,121 @@ def main():
 
                 try:
                     run = api.run(f"s-manolloff/vcmi-gym/{run_id}")
+
+                    assert run.id == run_id
+
+                    if "no-eval" in run.tags:
+                        logging.debug('Skip %s' % (agent_load_file))
+                        continue
+
+                    agent = load_agent(agent_file=agent_load_file, run_id=run_id)
+                    agent.eval()
+
+                    if os.environ.get("NO_WANDB", None) == "true":
+                        def wandb_log(*args, **kwargs):
+                            pass
+                    else:
+                        # For wandb.log, commit=True by default
+                        # for wandb_log, commit=False by default
+                        def wandb_log(*args, **kwargs):
+                            # logging.debug("wandb.log: %s %s" % (args, kwargs))
+                            wandb.log(*args, **dict({"commit": False}, **kwargs))
+                        wandb_init(run)
+
+                    wandb_log({"evaluator/busy": 0}, commit=True)
+                    wandb_log({"agent/num_timesteps": agent.state.global_timestep})
+                    wandb_log({"agent/num_seconds": agent.state.global_second})
+                    wandb_log({"evaluator/busy": 1}, commit=True)
+
+                    rewards = {"StupidAI": [], "BattleAI": []}
+                    lengths = {"StupidAI": [], "BattleAI": []}
+                    net_values = {"StupidAI": [], "BattleAI": []}
+                    is_successes = {"StupidAI": [], "BattleAI": []}
+
+                    for vmap in ["88-3stack-300K.vmap", "88-3stack-20K.vmap", "88-7stack-300K.vmap"]:
+                        rewards[vmap] = []
+                        lengths[vmap] = []
+                        net_values[vmap] = []
+                        is_successes[vmap] = []
+
+                        for opponent in ["StupidAI", "BattleAI"]:
+                            tstart = time.time()
+                            venv = create_venv(env_cls, asdict(agent.args.env), f"gym/generated/evaluation/{vmap}", "attacker", opponent)
+                            ep_results = evaluate_policy(agent, venv, episodes_per_env=50)
+
+                            rewards[opponent].append(np.mean(ep_results["rewards"]))
+                            lengths[opponent].append(np.mean(ep_results["lengths"]))
+                            net_values[opponent].append(np.mean(ep_results["net_values"]))
+                            is_successes[opponent].append(np.mean(ep_results["is_successes"]))
+
+                            rewards[vmap].append(np.mean(ep_results["rewards"]))
+                            lengths[vmap].append(np.mean(ep_results["lengths"]))
+                            net_values[vmap].append(np.mean(ep_results["net_values"]))
+                            is_successes[vmap].append(np.mean(ep_results["is_successes"]))
+
+                            venv.close()
+
+                            print("%-25s %-10s %-8s reward=%-6d net_value=%-6d is_success=%-6.2f length=%-3d (%.2fs)" % (
+                                run.name,
+                                vmap,
+                                opponent,
+                                np.mean(ep_results["rewards"]),
+                                np.mean(ep_results["net_values"]),
+                                np.mean(ep_results["is_successes"]),
+                                np.mean(ep_results["lengths"]),
+                                time.time() - tstart
+                            ))
+
+                        wandb_log({f"map/{vmap}/reward": np.mean(rewards[vmap])})
+                        wandb_log({f"map/{vmap}/length": np.mean(lengths[vmap])})
+                        wandb_log({f"map/{vmap}/net_value": np.mean(net_values[vmap])})
+                        wandb_log({f"map/{vmap}/is_success": np.mean(is_successes[vmap])})
+
+                        # print("%-20s %-20s reward=%-6d net_value=%-6d is_success=%-6.2f length=%-3d" % (
+                        #     vmap,
+                        #     np.mean(rewards[vmap]),
+                        #     np.mean(net_values[vmap]),
+                        #     np.mean(is_successes[vmap]),
+                        #     np.mean(lengths[vmap]),
+                        # ))
+
+                    # no need to flatten lists, they are all the same lengths so np.mean just works
+                    wandb_log({"opponent/StupidAI/reward": np.mean(rewards["StupidAI"])})
+                    wandb_log({"opponent/StupidAI/length": np.mean(lengths["StupidAI"])})
+                    wandb_log({"opponent/StupidAI/net_value": np.mean(net_values["StupidAI"])})
+                    wandb_log({"opponent/StupidAI/is_success": np.mean(is_successes["StupidAI"])})
+
+                    wandb_log({"opponent/BattleAI/reward": np.mean(rewards["BattleAI"])})
+                    wandb_log({"opponent/BattleAI/length": np.mean(lengths["BattleAI"])})
+                    wandb_log({"opponent/BattleAI/net_value": np.mean(net_values["BattleAI"])})
+                    wandb_log({"opponent/BattleAI/is_success": np.mean(is_successes["BattleAI"])})
+
+                    wandb_log({"all/reward": np.mean(rewards["StupidAI"] + rewards["BattleAI"])})
+                    wandb_log({"all/length": np.mean(lengths["StupidAI"] + lengths["BattleAI"])})
+                    wandb_log({"all/net_value": np.mean(net_values["StupidAI"] + net_values["BattleAI"])})
+                    wandb_log({"all/is_success": np.mean(is_successes["StupidAI"] + is_successes["BattleAI"])}, commit=True)
+                    # ^^^^^^^ commit here
+
+                    # logging.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
+                    #     run_id,
+                    #     np.mean(rewards["StupidAI"] + rewards["BattleAI"]),
+                    #     np.mean(lengths["StupidAI"] + lengths["BattleAI"]),
+                    #     np.mean(net_values["StupidAI"] + net_values["BattleAI"]),
+                    #     np.mean(is_successes["StupidAI"] + is_successes["BattleAI"]),
+                    # ))
+
+                    evaluated.append(agent_load_file)
+
+                    # XXX: evaluator/busy is only for THIS model
+                    # XXX: force "square" angles in wandb with Wall Clock axis
+                    wandb_log({"evaluator/busy": 1})  # commit here as well
+                    wandb_log({"evaluator/busy": 0})  # commit here as well
                 except Exception as e:
                     logging.warning("Error while evaluating %s: %s", (
                         agent_load_file,
                         "\n".join(traceback.format_exception_only(e))
                     ))
                     continue
-
-                assert run.id == run_id
-
-                if "no-eval" in run.tags:
-                    logging.debug('Skip %s' % (agent_load_file))
-                    continue
-
-                agent = load_agent(agent_file=agent_load_file, run_id=run_id)
-
-                if os.environ.get("NO_WANDB", None) == "true":
-                    def wandb_log(*args, **kwargs):
-                        pass
-                else:
-                    # For wandb.log, commit=True by default
-                    # for wandb_log, commit=False by default
-                    def wandb_log(*args, **kwargs):
-                        # logging.debug("wandb.log: %s %s" % (args, kwargs))
-                        wandb.log(*args, **dict({"commit": False}, **kwargs))
-                    wandb_init(run)
-
-                wandb_log({"evaluator/busy": 0}, commit=True)
-                wandb_log({"agent/num_timesteps": agent.state.global_timestep})
-                wandb_log({"agent/num_seconds": agent.state.global_second})
-                wandb_log({"evaluator/busy": 1}, commit=True)
-
-                rewards = {"StupidAI": [], "BattleAI": []}
-                lengths = {"StupidAI": [], "BattleAI": []}
-                net_values = {"StupidAI": [], "BattleAI": []}
-                is_successes = {"StupidAI": [], "BattleAI": []}
-
-                for vmap in ["88-3stack-300K.vmap", "88-3stack-20K.vmap", "88-7stack-300K.vmap"]:
-                    rewards[vmap] = []
-                    lengths[vmap] = []
-                    net_values[vmap] = []
-                    is_successes[vmap] = []
-
-                    for opponent in ["StupidAI", "BattleAI"]:
-                        tstart = time.time()
-                        venv = create_venv(env_cls, asdict(agent.args.env), f"gym/generated/evaluation/{vmap}", "attacker", opponent)
-                        ep_results = evaluate_policy(agent, venv, episodes_per_env=50)
-
-                        rewards[opponent].append(np.mean(ep_results["rewards"]))
-                        lengths[opponent].append(np.mean(ep_results["lengths"]))
-                        net_values[opponent].append(np.mean(ep_results["net_values"]))
-                        is_successes[opponent].append(np.mean(ep_results["is_successes"]))
-
-                        rewards[vmap].append(np.mean(ep_results["rewards"]))
-                        lengths[vmap].append(np.mean(ep_results["lengths"]))
-                        net_values[vmap].append(np.mean(ep_results["net_values"]))
-                        is_successes[vmap].append(np.mean(ep_results["is_successes"]))
-
-                        venv.close()
-
-                        print("%-25s %-10s %-8s reward=%-6d net_value=%-6d is_success=%-6.2f length=%-3d (%.2fs)" % (
-                            run.name,
-                            vmap,
-                            opponent,
-                            np.mean(rewards[vmap]),
-                            np.mean(net_values[vmap]),
-                            np.mean(is_successes[vmap]),
-                            np.mean(lengths[vmap]),
-                            time.time() - tstart
-                        ))
-
-                    wandb_log({f"map/{vmap}/reward": np.mean(rewards[vmap])})
-                    wandb_log({f"map/{vmap}/length": np.mean(lengths[vmap])})
-                    wandb_log({f"map/{vmap}/net_value": np.mean(net_values[vmap])})
-                    wandb_log({f"map/{vmap}/is_success": np.mean(is_successes[vmap])})
-
-                    # print("%-20s %-20s reward=%-6d net_value=%-6d is_success=%-6.2f length=%-3d" % (
-                    #     vmap,
-                    #     np.mean(rewards[vmap]),
-                    #     np.mean(net_values[vmap]),
-                    #     np.mean(is_successes[vmap]),
-                    #     np.mean(lengths[vmap]),
-                    # ))
-
-                # no need to flatten lists, they are all the same lengths so np.mean just works
-                wandb_log({"opponent/StupidAI/reward": np.mean(rewards["StupidAI"])})
-                wandb_log({"opponent/StupidAI/length": np.mean(lengths["StupidAI"])})
-                wandb_log({"opponent/StupidAI/net_value": np.mean(net_values["StupidAI"])})
-                wandb_log({"opponent/StupidAI/is_success": np.mean(is_successes["StupidAI"])})
-
-                wandb_log({"opponent/BattleAI/reward": np.mean(rewards["BattleAI"])})
-                wandb_log({"opponent/BattleAI/length": np.mean(lengths["BattleAI"])})
-                wandb_log({"opponent/BattleAI/net_value": np.mean(net_values["BattleAI"])})
-                wandb_log({"opponent/BattleAI/is_success": np.mean(is_successes["BattleAI"])})
-
-                wandb_log({"all/reward": np.mean(rewards["StupidAI"] + rewards["BattleAI"])})
-                wandb_log({"all/length": np.mean(lengths["StupidAI"] + lengths["BattleAI"])})
-                wandb_log({"all/net_value": np.mean(net_values["StupidAI"] + net_values["BattleAI"])})
-                wandb_log({"all/is_success": np.mean(is_successes["StupidAI"] + is_successes["BattleAI"])}, commit=True)
-                # ^^^^^^^ commit here
-
-                # logging.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
-                #     run_id,
-                #     np.mean(rewards["StupidAI"] + rewards["BattleAI"]),
-                #     np.mean(lengths["StupidAI"] + lengths["BattleAI"]),
-                #     np.mean(net_values["StupidAI"] + net_values["BattleAI"]),
-                #     np.mean(is_successes["StupidAI"] + is_successes["BattleAI"]),
-                # ))
-
-                evaluated.append(agent_load_file)
-
-                # XXX: evaluator/busy is only for THIS model
-                # XXX: force "square" angles in wandb with Wall Clock axis
-                wandb_log({"evaluator/busy": 1})  # commit here as well
-                wandb_log({"evaluator/busy": 0})  # commit here as well
 
             if once:
                 break
