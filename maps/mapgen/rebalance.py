@@ -32,7 +32,7 @@ import argparse
 import numpy as np
 from math import log
 
-from mapgen import (
+from mapgen_4096 import (
     get_all_creatures,
     build_army_with_retry,
     MaxAttemptsExceeded
@@ -150,10 +150,11 @@ if __name__ == "__main__":
 
             mean_wins = 30
             examples = [1, 5, 10, 20, 25, 30, 35, 50, 100]
-            corrections = ["%d => %.2f" % (w, log(mean_wins/w)/30) for w in examples]
-            print("corrections (mean_wins=%d):\n%s" % (mean_wins, "\n".join(corrections)))
+            damp = 30
+            corrections = ["%d => %.2f" % (w, log(mean_wins/w)/damp) for w in examples]
+            print("corrections (mean_wins=%d, damp=%d):\n%s" % (mean_wins, damp, "\n".join(corrections)))
 
-        corrections (mean_wins=30):
+        corrections (mean_wins=30, damp=30):
         1 => 0.11
         5 => 0.06
         10 => 0.04
@@ -191,7 +192,8 @@ if __name__ == "__main__":
 
     for hero_name, hero_data in heroes_data.items():
         hero_wins = j["wins"].get(hero_name, 0)
-        correction_factor = log(mean_wins/(hero_wins or 1)) / 30
+        damp = 20
+        correction_factor = log(mean_wins/(hero_wins or 1)) / damp
         correction_factor = np.clip(correction_factor, -clip, clip)
         if abs(correction_factor) <= errmax:
             # nothing to correct
@@ -202,12 +204,13 @@ if __name__ == "__main__":
         old_army = hero_data["old_army"]
 
         new_value = int(army_value * (1 + correction_factor))
-        print("Hero %s wins=%s (mean=%d): army value adjustment %d -> %d (%.2f%%)" % (
+        print("=== %s ===\n  wins:\t\t\t%s (mean=%d)\n  value (current):\t%d\n  value (target):\t%d (%s%.2f%%)" % (
             hero_name,
             hero_wins,
             mean_wins,
             army_value,
             new_value,
+            "+" if correction_factor > 0 else "",
             correction_factor * 100,
         ))
 

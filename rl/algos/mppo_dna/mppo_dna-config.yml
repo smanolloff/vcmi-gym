@@ -1,7 +1,7 @@
 ---
 group_id: mppo_dna
-run_name: "initial test"
-tags: ["Map-3stack-01", "StupidAI", "encoding-float"]
+run_name: "mactest"
+tags: ["Map-6stack-01", "StupidAI"]
 
 wandb_project: vcmi-gym
 run_id: ~
@@ -23,7 +23,7 @@ success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
 mapside: "attacker"  # attacker/defender/both
-mapmask: "gym/generated/896/896-3stack-30K-01.vmap"
+mapmask: "gym/generated/4096/4096-6stack-100K-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
 permasave_every: 10800  # seconds
@@ -44,12 +44,12 @@ network:
     # => (B, 1, 11, 1290|8610)
     - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 86], stride: [1, 86], padding: 0}
     # - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 574], stride: [1, 574], padding: 0}
-    - {t: "Tanh"}
+    - {t: "LeakyReLU"}
     # => (B, 32, 11, 15)
     - {t: "Flatten"}
     # => (B, 5280)
     - {t: "Linear", in_features: 5280, out_features: 1024}
-    - {t: "Tanh"}
+    - {t: "LeakyReLU"}
     # => (B, 1024)
 
   actor: {t: "Linear", in_features: 1024, out_features: 2311}
@@ -61,23 +61,23 @@ network:
 
 clip_coef: 0.4
 clip_vloss: false
-distill_beta: 1.0
+distill_beta: 0.9
 ent_coef: 0.007
 gae_lambda_policy: 0.8
-gae_lambda_value: 0.95
+gae_lambda_value: 0.6
 gamma: 0.8425
 lr_schedule_value: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
 lr_schedule_policy: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
 lr_schedule_distill: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
 max_grad_norm: 0.5
 norm_adv: true
-num_minibatches_value: 8      # minibatch_size = rollout_buffer/num_minibatches
-num_minibatches_policy: 8     #
+num_minibatches_value: 4      # minibatch_size = rollout_buffer/num_minibatches
+num_minibatches_policy: 4     #
 num_minibatches_distill: 2    #
-num_steps: 128                # rollout_buffer = num_steps*num_envs
-update_epochs_value: 5        #
-update_epochs_policy: 10      #
-update_epochs_distill: 10     # full passes of rollout_buffer
+num_steps: 256                # rollout_buffer = num_steps*num_envs
+update_epochs_value: 2        #
+update_epochs_policy: 4       #
+update_epochs_distill: 8      # full passes of rollout_buffer
 switch_train_eval: true
 weight_decay: 0
 

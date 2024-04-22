@@ -133,7 +133,8 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         if number == 0:
             continue
         elif number > STACK_QTY_MAX:
-            raise StackTooBigError("Stack too big: %s: %d" % (name, number))
+            # raise StackTooBigError("Stack too big: %s: %d" % (name, number))
+            number = STACK_QTY_MAX
         credit -= number * aivalue
         army[i] = (vcminame, name, number)
         weakest = min(weakest, aivalue)
@@ -148,10 +149,16 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
             (vcminame0, name0, number0) = army[i]
             assert vcminame0 == vcminame
             assert name0 == name
-            if number0 + number > STACK_QTY_MAX:
-                raise StackTooBigError("Stack too big: %s: %d" % (name, number0 + number))
-            credit -= number * aivalue
-            army[i] = (vcminame, name, number0 + number)
+
+            to_add = min(number, STACK_QTY_MAX - number0)
+            if to_add == 0:
+                # raise StackTooBigError("Stack too big: %s: %d" % (name, number0 + number))
+                continue
+
+            assert to_add > 0
+
+            credit -= to_add * aivalue
+            army[i] = (vcminame, name, number0 + to_add)
             weakest = min(weakest, aivalue)
 
     if weakest > ARMY_WEAKEST_CREATURE_VALUE_MAX:
@@ -161,8 +168,12 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
     real_value = real_value or 1  # fix zero div error theres no army
     error = 1 - target_value/real_value
 
-    print("Army value %d stacks: %d of %d (%.2f%%), weakest: %d" % (
-        len(creatures), real_value, target_value, error*100, weakest
+    print("  value (new):\t\t%d (%s%.2f%%)\n  max allowed error:\t%.2f%%\n  stacks:\t\t%d" % (
+        real_value,
+        "+" if error > 0 else "",
+        error*100,
+        err_frac_max*100,
+        len(creatures),
     ))
 
     if abs(error) > err_frac_max:
@@ -175,7 +186,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         newnumber = 1 + (army[i][2] if army[i] else 0)
         real_value += aivalue
         error = 1 - target_value/real_value
-        print("Added 1 '%s': army value: %d of %d (%.2f%%)" % (name, real_value, target_value, error*100))
+        print("  * added 1 '%s': army value: %d of %d (%.2f%%)" % (name, real_value, target_value, error*100))
         if abs(error) > err_frac_max:
             raise UnusedCreditError(f"Could not reach target value of {target_value}")
         elif newnumber > STACK_QTY_MAX:

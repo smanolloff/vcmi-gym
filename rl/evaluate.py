@@ -165,7 +165,7 @@ def wandb_init(run):
 
 
 def find_agents():
-    files = glob.glob("data/*/*/agent[0-9]*.pt")
+    files = glob.glob("data/*/*/agent-[0-9]*.pt")
 
     def should_pick(f):
         # saving large NNs may take a lot of time => wait 1min
@@ -353,7 +353,7 @@ def main():
                     print("SIGINT received. Exiting gracefully.")
                     sys.exit(0)
                 except Exception as e:
-                    logging.warning("Error while evaluating %s: %s", (
+                    logging.warning("Error while evaluating %s: %s" % (
                         agent_load_file,
                         "\n".join(traceback.format_exception_only(e))
                     ))
