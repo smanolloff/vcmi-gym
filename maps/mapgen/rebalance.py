@@ -14,35 +14,11 @@
 # limitations under the License.
 # =============================================================================
 
-# Given the script is invoked with the following JSON:
 #
-#   {
-#     "map": "gym/generated/88/88-1stack-01.vmap",
-#     "battles": 43000,
-#     "wins": {"hero_3": 1039, "hero_4":1242, "hero_5":975, ...}
-#   }
+# Usage: python maps/mapgen/rebalance.py -h
 #
-# ("map" is absolute or relative to "<script_dir>/..")
-# rebalance the value of each hero's army with respect to the winrate.
+# See also: `eval-rebalance.fish` script for automated usage
 #
-# Script also supports STDIN, can be used to continuously rebalance a map
-# like so (fish shell):
-#
-# for i in (seq 5)
-#   $VCMI/rel/bin/myclient-headless --gymdir $VCMIGYM \
-#       --map gym/generated/88/88-7stack-300K-00.vmap --loglevel-ai error \
-#       --loglevel-global error --attacker-ai StupidAI --defender-ai StupidAI \
-#       --random-combat 1 --map-eval 10000 | python maps/mapgen/rebalance.py -
-#
-#   if test $status -ne 0
-#       # means no more optimization to do or a script error
-#       break
-#   end
-# end
-#
-# Note VCMI terminates rather abruptly (exit(0) from a non-main thread), so
-# this method is not very good.
-
 
 import os
 import zipfile

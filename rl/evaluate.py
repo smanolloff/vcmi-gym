@@ -349,6 +349,9 @@ def main():
                     # XXX: force "square" angles in wandb with Wall Clock axis
                     wandb_log({"evaluator/busy": 1})  # commit here as well
                     wandb_log({"evaluator/busy": 0})  # commit here as well
+                except KeyboardInterrupt:
+                    print("SIGINT received. Exiting gracefully.")
+                    sys.exit(0)
                 except Exception as e:
                     logging.warning("Error while evaluating %s: %s", (
                         agent_load_file,

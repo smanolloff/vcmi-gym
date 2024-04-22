@@ -27,11 +27,11 @@ MAP_DIR = "../gym/generated/4096"
 # name template containing a single {id} token to be replaced with MAP_ID
 MAP_NAME_TEMPLATE = "4096-mixstack-100K-{id:02d}"
 # id of maps to generate (inclusive)
-MAP_ID_START = 1
-MAP_ID_END = 1
+MAP_ID_START = 2
+MAP_ID_END = 2
 
-ARMY_N_STACKS_SAME = True  # same for both sides
-ARMY_N_STACKS_MIN = 3
+# ARMY_N_STACKS_SAME = False  # same for both sides
+ARMY_N_STACKS_MIN = 2
 ARMY_N_STACKS_MAX = 7
 
 ARMY_VALUE_MIN = 100_000
@@ -44,6 +44,10 @@ ARMY_VALUE_ROUND = 1000
 
 # Max value for abs(1 - army_value/target_value)
 ARMY_VALUE_ERROR_MAX = 0.1
+
+# Max value for a single unit of the weakest creature type in the army
+# (this to allow rebalancing, i.e. avoid armies with 6+ tier units only)
+ARMY_WEAKEST_CREATURE_VALUE_MAX = 2000
 
 # Hero IDs are re-mapped when game starts
 # => use hero experience as a reference
@@ -59,6 +63,10 @@ class UnusedCreditError(Exception):
 
 
 class NotEnoughStacksError(Exception):
+    pass
+
+
+class WeakestCreatureTooStrongError(Exception):
     pass
 
 
@@ -100,7 +108,7 @@ def build_army_with_retry(*args, **kwargs):
     for r in range(1, max_attempts):
         try:
             return build_army(*args, **kwargs)
-        except (StackTooBigError, UnusedCreditError, NotEnoughStacksError) as e:
+        except (StackTooBigError, UnusedCreditError, NotEnoughStacksError, WeakestCreatureTooStrongError) as e:
             print("[%d] Rebuilding army due to: %s" % (r, str(e)))
 
     raise MaxAttemptsExceeded("Max attempts (%d) exceeded" % max_attempts)
@@ -118,6 +126,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
     army = [None] * len(creatures)
     per_stack = target_value / len(creatures)
     credit = target_value
+    weakest = 100_000  # azure dragon is 80k
 
     for (i, (vcminame, name, aivalue)) in enumerate(creatures):
         number = int(per_stack / aivalue)
@@ -127,6 +136,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
             raise StackTooBigError("Stack too big: %s: %d" % (name, number))
         credit -= number * aivalue
         army[i] = (vcminame, name, number)
+        weakest = min(weakest, aivalue)
 
     # repeat with remaining credit
     for _ in range(10):
@@ -142,12 +152,18 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
                 raise StackTooBigError("Stack too big: %s: %d" % (name, number0 + number))
             credit -= number * aivalue
             army[i] = (vcminame, name, number0 + number)
+            weakest = min(weakest, aivalue)
+
+    if weakest > ARMY_WEAKEST_CREATURE_VALUE_MAX:
+        raise WeakestCreatureTooStrongError("Weakest creature has value %d > %d" % (weakest, ARMY_WEAKEST_CREATURE_VALUE_MAX))
 
     real_value = target_value - credit
     real_value = real_value or 1  # fix zero div error theres no army
     error = 1 - target_value/real_value
 
-    print("Army value: %d of %d (%.2f%%)" % (real_value, target_value, error*100))
+    print("Army value %d stacks: %d of %d (%.2f%%), weakest: %d" % (
+        len(creatures), real_value, target_value, error*100, weakest
+    ))
 
     if abs(error) > err_frac_max:
         # raise UnusedCreditError("Too much unused credit: %d (target value: %d)" % (credit, value))
@@ -205,16 +221,19 @@ if __name__ == "__main__":
         print(f"*** Generating map #{mapid}")
         header, objects, surface_terrain0, hero_mapping = get_templates()
         value = random.choice(all_values)
-        n_stacks = random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
 
         header["name"] = MAP_NAME_TEMPLATE.format(id=mapid)
-        header["description"] = "AI test map %s\nTarget army values: %d" % (header["name"], value)
+        header["description"] = (
+            f"AI test map {header['name']}\n"
+            f"Target army values: {value}\n"
+            f"Stack count min/max: {ARMY_N_STACKS_MIN}/{ARMY_N_STACKS_MAX}\n"
+        )
         oid = 0
 
         for y in range(2, 66):  # 64 rows
             for x in range(5, 69):  # 64 columns (heroes are 2 tiles for some reason)
                 print(f"* Generating army for hero #{oid}")
-                n_stacks = n_stacks if ARMY_N_STACKS_SAME else random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
+                n_stacks = random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
                 army = build_army_with_retry(value, ARMY_VALUE_ERROR_MAX, n_stacks=n_stacks, all_creatures=all_creatures)
                 hero_army = [{} for i in range(7)]
                 for (slot, (vcminame, _, number)) in enumerate(army):

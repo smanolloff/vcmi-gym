@@ -296,7 +296,7 @@ def main(args):
 
     # Logger
     if not any(LOG.handlers):
-        formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.run_id}] %(message)s")
+        formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.group_id}/{args.run_id}] %(message)s")
         formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
         formatter.default_msec_format = None
         loghandler = logging.StreamHandler()

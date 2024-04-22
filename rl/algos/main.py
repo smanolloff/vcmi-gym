@@ -93,6 +93,7 @@ action:
 
 examples:
   %(prog)s -c path/to/config.yml mppo
+  %(prog)s -g mygroup -r myrun -R mppo
 """
 
     args = parser.parse_args()

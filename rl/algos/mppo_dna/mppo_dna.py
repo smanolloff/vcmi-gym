@@ -253,7 +253,7 @@ class AgentNN(nn.Module):
                 b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
                 return b_env_action[0].cpu().item()
             else:
-                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
                 return b_env_action.cpu().numpy()
 
 
