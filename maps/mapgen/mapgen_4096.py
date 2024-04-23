@@ -25,17 +25,18 @@ import zipfile
 # relative to script dir
 MAP_DIR = "../gym/generated/4096"
 # name template containing a single {id} token to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "4096-mixstack-100K-{id:02d}"
+MAP_NAME_TEMPLATE = "4096-mixstack-20K-{id:02d}"
 # id of maps to generate (inclusive)
-MAP_ID_START = 2
-MAP_ID_END = 2
+MAP_ID_START = 1
+MAP_ID_END = 1
 
 # ARMY_N_STACKS_SAME = False  # same for both sides
 ARMY_N_STACKS_MIN = 2
 ARMY_N_STACKS_MAX = 7
+ARMY_N_STACKS_ENFORCE = False  # whether to fail if not all stacks are filled
 
-ARMY_VALUE_MIN = 100_000
-ARMY_VALUE_MAX = 100_000
+ARMY_VALUE_MIN = 20_000
+ARMY_VALUE_MAX = 20_000
 
 STACK_QTY_MAX = 1023
 
@@ -47,7 +48,7 @@ ARMY_VALUE_ERROR_MAX = 0.1
 
 # Max value for a single unit of the weakest creature type in the army
 # (this to allow rebalancing, i.e. avoid armies with 6+ tier units only)
-ARMY_WEAKEST_CREATURE_VALUE_MAX = 2000
+ARMY_WEAKEST_CREATURE_VALUE_MAX = 1000
 
 # Hero IDs are re-mapped when game starts
 # => use hero experience as a reference
@@ -62,7 +63,7 @@ class UnusedCreditError(Exception):
     pass
 
 
-class NotEnoughStacksError(Exception):
+class NotAllStacksFilled(Exception):
     pass
 
 
@@ -103,18 +104,18 @@ def get_templates():
 
 
 def build_army_with_retry(*args, **kwargs):
-    max_attempts = 10
+    max_attempts = 100
 
     for r in range(1, max_attempts):
         try:
             return build_army(*args, **kwargs)
-        except (StackTooBigError, UnusedCreditError, NotEnoughStacksError, WeakestCreatureTooStrongError) as e:
+        except (StackTooBigError, UnusedCreditError, NotAllStacksFilled, WeakestCreatureTooStrongError) as e:
             print("[%d] Rebuilding army due to: %s" % (r, str(e)))
 
     raise MaxAttemptsExceeded("Max attempts (%d) exceeded" % max_attempts)
 
 
-def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_creatures=None):
+def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_creatures=None, print_creatures=True):
     if creatures is None:
         assert all_creatures, "when creatures is None, all_creatures is required"
         assert n_stacks, "when creatures is None, n_stacks is required"
@@ -127,6 +128,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
     per_stack = target_value / len(creatures)
     credit = target_value
     weakest = 100_000  # azure dragon is 80k
+    filled_creatures = {name: 0 for (_, name, _) in creatures}
 
     for (i, (vcminame, name, aivalue)) in enumerate(creatures):
         number = int(per_stack / aivalue)
@@ -138,6 +140,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         credit -= number * aivalue
         army[i] = (vcminame, name, number)
         weakest = min(weakest, aivalue)
+        filled_creatures[name] = number
 
     # repeat with remaining credit
     for _ in range(10):
@@ -160,6 +163,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
             credit -= to_add * aivalue
             army[i] = (vcminame, name, number0 + to_add)
             weakest = min(weakest, aivalue)
+            filled_creatures[name] = number0 + to_add
 
     if weakest > ARMY_WEAKEST_CREATURE_VALUE_MAX:
         raise WeakestCreatureTooStrongError("Weakest creature has value %d > %d" % (weakest, ARMY_WEAKEST_CREATURE_VALUE_MAX))
@@ -173,8 +177,11 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         "+" if error > 0 else "",
         error*100,
         err_frac_max*100,
-        len(creatures),
+        len(creatures)
     ))
+
+    if print_creatures:
+        print("  creatures:\t\t%s") % ", ".join([f"{number} \"{name}\"" for (name, number) in sorted(filled_creatures.items(), key=lambda x: x[0])])
 
     if abs(error) > err_frac_max:
         # raise UnusedCreditError("Too much unused credit: %d (target value: %d)" % (credit, value))
@@ -195,7 +202,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         army[i] = (vcminame, name, newnumber)
 
     if any(s is None for s in army):
-        raise NotEnoughStacksError("Not all stacks were filled")
+        raise NotAllStacksFilled("Not all stacks were filled")
 
     # list of (vcminame, name, number) tuples
     return army

@@ -131,7 +131,7 @@ if __name__ == "__main__":
             cr_amount = stack["amount"]
             heroes_data[k]["army_value"] += cr_amount * cr_value
             heroes_data[k]["army_creatures"].append((cr_vcminame, cr_name, cr_value))
-            heroes_data[k]["old_army"].append((cr_vcminame, None, cr_amount))
+            heroes_data[k]["old_army"].append((cr_vcminame, cr_name, cr_amount))
 
     army_value_list = [k["army_value"] for k in heroes_data.values()]
     mean_army_value = np.mean(army_value_list)
@@ -221,7 +221,9 @@ if __name__ == "__main__":
         new_army = None
         for r in range(1, 10):
             try:
-                new_army = build_army_with_retry(new_value, errmax, creatures=army_creatures)
+                new_army = build_army_with_retry(new_value, errmax, creatures=army_creatures, print_creatures=False)
+                print("  creatures (old):\t%s" % ", ".join([f"{number} \"{name}\"" for (_, name, number) in sorted(old_army, key=lambda x: x[1])]))
+                print("  creatures (new):\t%s" % ", ".join([f"{number} \"{name}\"" for (_, name, number) in sorted(new_army, key=lambda x: x[1])]))
                 break
             except MaxAttemptsExceeded:
                 if not ALLOW_ARMY_COMP_CHANGE:
