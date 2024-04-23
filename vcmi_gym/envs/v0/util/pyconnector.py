@@ -16,10 +16,12 @@
 
 import multiprocessing
 import ctypes
+import types
 import numpy as np
 import os
 import signal
 import atexit
+from collections import OrderedDict
 
 from . import log
 
@@ -36,6 +38,9 @@ STATE_SIZE_FLOAT_ONE_HEX = connexport.get_state_size_float_one_hex()
 STATE_VALUE_NA = connexport.get_state_value_na()
 STATE_ENCODING_DEFAULT = connexport.get_encoding_type_default()
 STATE_ENCODING_FLOAT = connexport.get_encoding_type_float()
+
+ATTRMAP_DEFAULT = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in connexport.get_attribute_mapping(STATE_ENCODING_DEFAULT)]))
+ATTRMAP_FLOAT = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in connexport.get_attribute_mapping(STATE_ENCODING_FLOAT)]))
 
 ERRMAP = connexport.get_error_mapping()
 ERRSIZE = len(ERRMAP)

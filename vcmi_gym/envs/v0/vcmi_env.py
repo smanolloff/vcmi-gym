@@ -16,6 +16,7 @@
 
 import numpy as np
 import gymnasium as gym
+from collections import namedtuple
 import os
 
 from .util import log
@@ -27,6 +28,8 @@ from .util.pyconnector import (
     STATE_SIZE_FLOAT_ONE_HEX,
     STATE_ENCODING_DEFAULT,
     STATE_ENCODING_FLOAT,
+    ATTRMAP_DEFAULT,
+    ATTRMAP_FLOAT,
     N_ACTIONS,
 )
 
@@ -73,6 +76,11 @@ class InfoDict(dict):
         super().__setitem__(k, v)
 
 
+class Hex(namedtuple("Hex", ATTRMAP_DEFAULT.keys())):
+    def __repr__(self):
+        return f'Hex(y={self.HEX_Y_COORD} x={self.HEX_X_COORD})'
+
+
 class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
@@ -117,8 +125,10 @@ class VcmiEnv(gym.Env):
 
         if encoding_type == STATE_ENCODING_DEFAULT:
             hex_size = STATE_SIZE_DEFAULT_ONE_HEX
+            self.attribute_mapping = ATTRMAP_DEFAULT
         elif encoding_type == STATE_ENCODING_FLOAT:
             hex_size = STATE_SIZE_FLOAT_ONE_HEX
+            self.attribute_mapping = ATTRMAP_FLOAT
         else:
             raise Exception("Expected encoding_type: expected one of %s, got: %s" % (
                 [STATE_ENCODING_DEFAULT, STATE_ENCODING_FLOAT], encoding_type)
@@ -126,6 +136,7 @@ class VcmiEnv(gym.Env):
 
         self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
         self.connector = PyConnector(vcmienv_loglevel, user_timeout, vcmi_timeout, boot_timeout)
+        self.encoding_type = encoding_type
 
         result = self.connector.start(
             encoding_type,
@@ -272,6 +283,62 @@ class VcmiEnv(gym.Env):
     @tracelog
     def action_mask(self):
         return self.result.actmask[self.action_offset:]
+
+    def decode(self):
+        return VcmiEnv.decode_obs(self.result.state)
+
+    @staticmethod
+    def decode_obs(obs):
+        assert len(obs.shape) == 3
+        assert obs.shape[0] == 11
+        assert obs.shape[1] == 15
+        assert obs.shape[2] in [STATE_SIZE_DEFAULT_ONE_HEX, STATE_SIZE_FLOAT_ONE_HEX]
+
+        attrmap = ATTRMAP_FLOAT if obs.shape[2] == STATE_SIZE_FLOAT_ONE_HEX else ATTRMAP_DEFAULT
+
+        res = []
+        for y in range(11):
+            row = []
+            for x in range(15):
+                row.append(VcmiEnv.decode_hex(obs[y][x], attrmap))
+            res.append(row)
+
+        return res
+
+    @staticmethod
+    def decode_hex(hexdata, attrmap):
+        res = {}
+
+        for attr, (enctype, offset, n, vmax) in attrmap.items():
+            attrdata = hexdata[offset:][:n]
+
+            if attrdata[0] == STATE_VALUE_NA:
+                res[attr] = None
+                continue
+
+            match enctype:
+                case "NUMERIC":
+                    res[attr] = attrdata.argmin()
+                case "NUMERIC_SQRT":
+                    value_sqrt = attrdata.argmin()
+                    value_min = round(value_sqrt ** 2)
+                    value_max = round((value_sqrt+1) ** 2)
+                    assert value_max <= vmax, f"internal error: {value_max} > {vmax}"
+                    res[attr] = value_min, value_max
+                case "BINARY":
+                    bits = attrdata
+                    res[attr] = round(''.join(map(str, reversed(bits))), 2)
+                case "CATEGORICAL":
+                    res[attr] = attrdata.argmax()
+                case "FLOATING":
+                    assert n == 1, f"internal error: {n} != 1"
+                    res[attr] = round(attrdata[0] * vmax)
+                case "CATEGORICAL":
+                    res[attr] = attrdata.argmax()
+                case _:
+                    raise Exception(f"Unexpected encoding type: {enctype}")
+
+        return Hex(**res)
 
     # Print all info about a hex
     # To test:

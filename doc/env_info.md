@@ -123,36 +123,35 @@ neighbouring hex. The 3 values are "none" (can't reach), "half dmg" and
 
 > [!NOTE]
 > The above table is only a snapshot of the observation as of the time of this
-> writing. For an up-to-date info, please refer to `HexEncoding`
-> [here](https://github.com/smanolloff/vcmi/blob/mmai/AI/MMAI/export.h).
+> writing. For an up-to-date info, you can call `env.attribute_mapping`
+> which returns a `name: (encoding, offset, size, max_value)` mapping.
 
 ```python
-import vcmi_gym
-import math
-env = vcmi_gym.VcmiEnv("gym/generated/B001.vmap")
-obs, _info = env.reset()
+from vcmi_gym import VcmiEnv
 
-# Get hex 14 (Y=0, X=14)
-hex = obs[0][14]
+env = VcmiEnv("gym/A3.vmap")
+obs0, _info = env.reset()
 
-# Get encoded value of HEX_STATE (size=3, offset 11+15=26)
-# Decode with `argmax`, because it's a CATEGORICAL type:
-state_enc = hex[26:][:3]
-state = hex_state_enc.argmax()
-print("HEX_STATE is %d" % hex_state)
+""" Decoded observation data is a neste dpython Hex objects:
+    simple namedtuples with fields as per the `HexEncoding` attributes here:
+    https://github.com/smanolloff/vcmi/blob/mmai/AI/MMAI/export.h """
+obs = VcmiEnv.decode_obs(obs0)  # equivalent to `obs = env.decode()`
 
-# Get encoded value of STACK_QUANTITY (size=23, offset 301)
-# Decode it with argmin, because it's a NUMERIC type:
-speed = hex[301:][:23].argmin()
-print("STACK_SPEED is %d" % speed)
+""" Get the speed of the stack on Y=2, X=14 (hex 44). """
+obs[2][14].STACK_SPEED
+# => 4
 
-# Get encoded value of STACK_SPEED (size=31, offset 179)
-# Decode it with argmin then square it, because it's a NUMERIC_SQRT type,
-# but since this is a lossy encoding, it can only give us the min/max value:
-qty_sqrt = hex[179:][:31].argmin()
-qty_min = math.pow(qty_sqrt, 2)
-qty_max = math.pow(qty_sqrt + 1, 2)
-print("STACK_QUANTITY is in the range [%d, %d]" % (qty_min, qty_max))
+""" Get the quantity of the stack on Y=2, X=14.
+    STACK_QUANTITY is encoded via a NUMERIC_SQRT encoding.
+    It is a lossy encoding which can only give us a value range. """
+obs[2][14].STACK_QUANTITY
+# => (64, 81)
+
+""" Check if the stack on Y=5, X=5 can fly.
+    In this case, a None value is returned (i.e. no stack on this hex).
+    Values 0 or 1 are returned only if there is a stack there. """
+obs[5][5].STACK_FLYING
+
 ```
 
 ## Action space

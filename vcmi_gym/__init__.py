@@ -15,11 +15,12 @@
 # =============================================================================
 
 import gymnasium
-from .envs.v0.vcmi_env import VcmiEnv, InfoDict
+from .envs.v0.vcmi_env import VcmiEnv, Hex, InfoDict
 from .envs.v0.util.test_helper import TestHelper
 
 all = [
     VcmiEnv,
+    Hex,
     InfoDict,
     TestHelper,
 ]
