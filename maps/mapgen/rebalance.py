@@ -146,26 +146,30 @@ if __name__ == "__main__":
     clip = ARMY_VALUE_CORRECTION_CLIP
     if clip is None:
         """
-        A 0.1 (10%) correction limit is good. Example:
+        A 0.2 (20%) correction limit is good. Example:
 
             mean_wins = 30
+            stddev_wins_frac = 0.4
             examples = [1, 5, 10, 20, 25, 30, 35, 50, 100]
-            damp = 30
+            damp = 50 - 100*max(min(stddev_wins_frac, 0.4), 0.1)
             corrections = ["%d => %.2f" % (w, log(mean_wins/w)/damp) for w in examples]
-            print("corrections (mean_wins=%d, damp=%d):\n%s" % (mean_wins, damp, "\n".join(corrections)))
+            print("corrections (mean_wins=%d, stddev_wins_frac=%.2f, damp=%d):\n%s" % (
+              mean_wins, stddev_wins_frac, damp, "\n".join(corrections)
+            ))
 
-        corrections (mean_wins=30, damp=30):
-        1 => 0.11
-        5 => 0.06
-        10 => 0.04
-        20 => 0.01
-        25 => 0.01
+
+        corrections (mean_wins=30, stddev_wins_frac=0.40, damp=10):
+        1 => 0.34
+        5 => 0.18
+        10 => 0.11
+        20 => 0.04
+        25 => 0.02
         30 => 0.00
-        35 => -0.01
-        50 => -0.02
-        100 => -0.04
+        35 => -0.02
+        50 => -0.05
+        100 => -0.12
         """
-        clip = 0.1
+        clip = 0.2
 
     errmax = ARMY_VALUE_ERROR_MAX
     if errmax is None:
@@ -192,7 +196,7 @@ if __name__ == "__main__":
 
     for hero_name, hero_data in heroes_data.items():
         hero_wins = j["wins"].get(hero_name, 0)
-        damp = 20
+        damp = 50 - 100*max(min(stddev_wins_frac, 0.4), 0.1)
         correction_factor = log(mean_wins/(hero_wins or 1)) / damp
         correction_factor = np.clip(correction_factor, -clip, clip)
         if abs(correction_factor) <= errmax:

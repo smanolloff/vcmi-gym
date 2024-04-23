@@ -50,12 +50,6 @@ class Trainable(ray.tune.Trainable):
         if not hasattr(self, "algo"):
             self.algo = importlib.import_module("rl.algos.{a}.{a}".format(a=initargs["_raytune"]["algo"]))
 
-        print("WANDB INIT: project: %s, group: %s, id: %s" % (
-            initargs["_raytune"]["wandb_project"],
-            self.experiment_name,
-            self.trial_id
-        ))
-
         wandb.init(
             project=initargs["_raytune"]["wandb_project"],
             group=self.experiment_name,

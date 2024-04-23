@@ -32,9 +32,9 @@ Available algos:
   mqrdqn        Maskable Quantile-Regression DQN (QRDQN)
 
 Examples:
-  python -m rl.raytune.main "PBT-experiment1-{datetime}"
+  python -m rl.raytune.main -n "PBT-experiment1-{datetime}"
   python -m rl.raytune.main -R "/path/to/PBT-experiment1-20240414_141602"
-  python -m rl.raytune.main -s pb2 -a mppg "..."
+  python -m rl.raytune.main -s pb2 -a mppg -n "..."
 """
     # XXX: env vars must be set *before* importing ray/wandb modules
 

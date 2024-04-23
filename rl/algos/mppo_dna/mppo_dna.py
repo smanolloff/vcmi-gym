@@ -250,7 +250,7 @@ class AgentNN(nn.Module):
             if b_obs.shape == self.observation_space.shape:
                 b_obs = b_obs.unsqueeze(dim=0)
                 b_mask = b_mask.unsqueeze(dim=0)
-                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
                 return b_env_action[0].cpu().item()
             else:
                 b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)

@@ -158,12 +158,14 @@ def new_tuner(algo, experiment_name, config, scheduler, searcher=None, param_spa
     return tuner
 
 
-def resume_tuner(alg, resume_path, config):
-    trainable_mod = importlib.import_module("rl.raytune.trainable_%s" % alg)
-    trainable_cls = getattr(trainable_mod, "Trainable%s" % alg.upper())
+def resume_tuner(algo, resume_path, config):
+    assert algo in ["mppo", "mppo_dna", "mppg"], f"Unsupported algo: {algo}"
+    trainable_mod = importlib.import_module("rl.raytune.trainable")
+    trainable_cls = getattr(trainable_mod, "Trainable")
 
     initargs = copy.deepcopy(config)
     initargs["_raytune"]["experiment_name"] = resume_path.split("/")[-1]
+    initargs["_raytune"]["algo"] = algo
 
     tuner = ray.tune.Tuner.restore(
         trainable=ray.tune.with_parameters(trainable_cls, initargs=initargs),
