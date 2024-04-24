@@ -89,6 +89,20 @@ class State:
     global_second: int = 0
     current_second: int = 0
 
+    ep_length_queue: deque = field(default_factory=lambda: deque(maxlen=100))
+
+    ep_rew_queue: deque = field(default_factory=lambda: deque(maxlen=100))
+    rollout_rew_queue_100: deque = field(default_factory=lambda: deque(maxlen=100))
+    rollout_rew_queue_1000: deque = field(default_factory=lambda: deque(maxlen=1000))
+
+    ep_net_value_queue: deque = field(default_factory=lambda: deque(maxlen=100))
+    rollout_net_value_queue_100: deque = field(default_factory=lambda: deque(maxlen=100))
+    rollout_net_value_queue_1000: deque = field(default_factory=lambda: deque(maxlen=1000))
+
+    ep_is_success_queue: deque = field(default_factory=lambda: deque(maxlen=100))
+    rollout_is_success_queue_100: deque = field(default_factory=lambda: deque(maxlen=100))
+    rollout_is_success_queue_1000: deque = field(default_factory=lambda: deque(maxlen=1000))
+
     def __post_init__(self):
         common.coerce_dataclass_ints(self)
 
@@ -369,7 +383,7 @@ def main(args):
     agent = None
     start_map_swaps = 0
 
-    if args.agent_load_file:
+    if args.agent_load_file and not agent:
         f = args.agent_load_file
         agent = Agent.load(f)
         agent.args = args
@@ -401,6 +415,10 @@ def main(args):
 
         agent = agent.to(device)
 
+        # these are used by gym's RecordEpisodeStatistics wrapper
+        envs.return_queue = agent.state.ep_rew_queue
+        envs.length_queue = agent.state.ep_length_queue
+
         # XXX: the start=0 requirement is needed for SB3 compat
         assert act_space.start == 0
         assert act_space.shape == ()
@@ -424,16 +442,6 @@ def main(args):
             wandb_log({"global/resumes": agent.state.resumes})
 
         # print("Agent state: %s" % asdict(agent.state))
-
-        ep_net_value_queue = deque(maxlen=envs.return_queue.maxlen)
-        ep_is_success_queue = deque(maxlen=envs.return_queue.maxlen)
-
-        rollout_rew_queue_100 = deque(maxlen=100)
-        rollout_rew_queue_1000 = deque(maxlen=1000)
-        rollout_net_value_queue_100 = deque(maxlen=100)
-        rollout_net_value_queue_1000 = deque(maxlen=1000)
-        rollout_is_success_queue_100 = deque(maxlen=100)
-        rollout_is_success_queue_1000 = deque(maxlen=1000)
 
         assert act_space.shape == ()
 
@@ -503,8 +511,8 @@ def main(args):
                     # "final_info" must be None if "has_final_info" is False
                     if has_final_info:
                         assert final_info is not None, "has_final_info=True, but final_info=None"
-                        ep_net_value_queue.append(final_info["net_value"])
-                        ep_is_success_queue.append(final_info["is_success"])
+                        agent.state.ep_net_value_queue.append(final_info["net_value"])
+                        agent.state.ep_is_success_queue.append(final_info["is_success"])
 
                 agent.state.current_vstep += 1
                 agent.state.current_timestep += args.num_envs
@@ -625,20 +633,20 @@ def main(args):
             var_y = np.var(y_true)
             explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
-            ep_rew_mean = common.safe_mean(envs.return_queue)
-            ep_value_mean = common.safe_mean(ep_net_value_queue)
-            ep_is_success_mean = common.safe_mean(ep_is_success_queue)
+            ep_rew_mean = common.safe_mean(agent.state.ep_rew_queue)
+            ep_value_mean = common.safe_mean(agent.state.ep_net_value_queue)
+            ep_is_success_mean = common.safe_mean(agent.state.ep_is_success_queue)
 
             if envs.episode_count > 0:
                 assert ep_rew_mean is not np.nan
                 assert ep_value_mean is not np.nan
                 assert ep_is_success_mean is not np.nan
-                rollout_rew_queue_100.append(ep_rew_mean)
-                rollout_rew_queue_1000.append(ep_rew_mean)
-                rollout_net_value_queue_100.append(ep_value_mean)
-                rollout_net_value_queue_1000.append(ep_value_mean)
-                rollout_is_success_queue_100.append(ep_is_success_mean)
-                rollout_is_success_queue_1000.append(ep_is_success_mean)
+                agent.state.rollout_rew_queue_100.append(ep_rew_mean)
+                agent.state.rollout_rew_queue_1000.append(ep_rew_mean)
+                agent.state.rollout_net_value_queue_100.append(ep_value_mean)
+                agent.state.rollout_net_value_queue_1000.append(ep_value_mean)
+                agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
+                agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
             wandb_log({"params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"]})
             wandb_log({"params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"]})
@@ -660,12 +668,12 @@ def main(args):
                 wandb_log({"rollout/ep_value_mean": ep_value_mean})
                 wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
 
-            wandb_log({"rollout100/ep_value_mean": common.safe_mean(rollout_net_value_queue_100)})
-            wandb_log({"rollout1000/ep_value_mean": common.safe_mean(rollout_net_value_queue_1000)})
-            wandb_log({"rollout100/ep_rew_mean": common.safe_mean(rollout_rew_queue_100)})
-            wandb_log({"rollout1000/ep_rew_mean": common.safe_mean(rollout_rew_queue_1000)})
-            wandb_log({"rollout100/ep_success_rate": common.safe_mean(rollout_is_success_queue_100)})
-            wandb_log({"rollout1000/ep_success_rate": common.safe_mean(rollout_is_success_queue_1000)})
+            wandb_log({"rollout100/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_100)})
+            wandb_log({"rollout1000/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_1000)})
+            wandb_log({"rollout100/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_100)})
+            wandb_log({"rollout1000/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_1000)})
+            wandb_log({"rollout100/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_100)})
+            wandb_log({"rollout1000/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_1000)})
             wandb_log({"global/num_rollouts": agent.state.current_rollout})
             wandb_log({"global/num_timesteps": agent.state.current_timestep})
             wandb_log({"global/num_seconds": agent.state.current_second})
@@ -731,7 +739,7 @@ def main(args):
         envs.close()
 
     # Needed by PBT to save model after iteration ends
-    return agent, common.safe_mean(rollout_rew_queue_1000)
+    return agent, common.safe_mean(agent.state.rollout_rew_queue_1000)
 
 
 def debug_args():

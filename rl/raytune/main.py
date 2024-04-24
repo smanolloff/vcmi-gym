@@ -18,7 +18,6 @@ if __name__ == "__main__":
     parser.add_argument("-n", metavar="<name>", default="PBT-{datetime}", help="experiment name")
     parser.add_argument("-R", metavar="<path>", help="resume experiment from path")
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
-    parser.usage = "%(prog)s [options] <algo> <experiment_name>"
     parser.epilog = """
 
 Available strategies:

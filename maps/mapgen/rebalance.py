@@ -151,7 +151,7 @@ if __name__ == "__main__":
             mean_wins = 30
             stddev_wins_frac = 0.4
             examples = [1, 5, 10, 20, 25, 30, 35, 50, 100]
-            damp = 50 - 100*max(min(stddev_wins_frac, 0.4), 0.1)
+            damp = 40 - 100*max(min(stddev_wins_frac, 0.35), 0.1)
             corrections = ["%d => %.2f" % (w, log(mean_wins/w)/damp) for w in examples]
             print("corrections (mean_wins=%d, stddev_wins_frac=%.2f, damp=%d):\n%s" % (
               mean_wins, stddev_wins_frac, damp, "\n".join(corrections)
@@ -196,7 +196,7 @@ if __name__ == "__main__":
 
     for hero_name, hero_data in heroes_data.items():
         hero_wins = j["wins"].get(hero_name, 0)
-        damp = 50 - 100*max(min(stddev_wins_frac, 0.4), 0.1)
+        damp = 40 - 100*max(min(stddev_wins_frac, 0.4), 0.1)
         correction_factor = log(mean_wins/(hero_wins or 1)) / damp
         correction_factor = np.clip(correction_factor, -clip, clip)
         if abs(correction_factor) <= errmax:

@@ -82,7 +82,8 @@ def main():
     parser.add_argument("-g", metavar="GROUP_ID", help="group_id")
     parser.add_argument("-r", metavar="RUN_ID", help="run_id")
     parser.add_argument("-R", help="resume training", action='store_true')
-    parser.add_argument("-c", metavar="FILE", type=argparse.FileType("r"), help="config file")
+    parser.add_argument("-f", metavar="FILE", help="config file")
+
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.usage = "%(prog)s [options] <action> [<value>]"
     parser.epilog = """
@@ -92,7 +93,7 @@ action:
   help              print this help message
 
 examples:
-  %(prog)s -c path/to/config.yml mppo
+  %(prog)s -f path/to/config.yml mppo
   %(prog)s -g mygroup -r myrun -R mppo
 """
 
@@ -101,15 +102,15 @@ examples:
     signal.signal(signal.SIGTERM, handle_signal)
     cfg = {}
 
-    if args.c is not None:
-        print("Loading configuration from %s" % args.c.name)
-        cfg = yaml.safe_load(args.c)
-        args.c.close()
+    if args.f is not None:
+        print("Loading configuration from %s" % args.f)
+        with open(args.f, "rb") as f:
+            cfg = yaml.safe_load(f)
 
-    run(args.action, cfg, args.g, args.r, args.R, cfgpath=getattr(args.c, "name", None))
+    run(args.action, cfg, args.g, args.r, args.R, cfgpath=args.f)
 
 
 if __name__ == "__main__":
     # Run from vcmi-gym root:
-    # $ python -m rl.algos.train -c rl/algos/mppo-config.yml mppo
+    # $ python -m rl.algos.main -f rl/algos/mppo/mppo-config.yml mppo
     main()
