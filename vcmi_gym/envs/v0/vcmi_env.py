@@ -17,6 +17,7 @@
 import numpy as np
 import gymnasium as gym
 from collections import namedtuple
+from types import SimpleNamespace
 import os
 
 from .util import log
@@ -30,6 +31,13 @@ from .util.pyconnector import (
     STATE_ENCODING_FLOAT,
     ATTRMAP_DEFAULT,
     ATTRMAP_FLOAT,
+    HEXACTMAP,
+    HEXSTATEMAP,
+    MELEEDISTMAP,
+    SHOOTDISTMAP,
+    DMGMODMAP,
+    N_NONHEX_ACTIONS,
+    N_HEX_ACTIONS,
     N_ACTIONS,
 )
 
@@ -41,6 +49,14 @@ ONE = DTYPE(1)
 
 TRACE = True
 MAXLEN = 80
+
+
+# NOTE: removing action=0 (retreat) which is used for resetting.
+#       => start from 1 and reduce total actions by 1
+#          XXX: there seems to be a bug as start=1 causes this error with SB3:
+#          index 1322 is out of bounds for dimension 2 with size 1322
+#       => just start from 0, reduce max by 1, and manually add +1
+ACTION_OFFSET = 1
 
 
 def tracelog(func, maxlen=MAXLEN):
@@ -79,6 +95,68 @@ class InfoDict(dict):
 class Hex(namedtuple("Hex", ATTRMAP_DEFAULT.keys())):
     def __repr__(self):
         return f'Hex(y={self.HEX_Y_COORD} x={self.HEX_X_COORD})'
+
+    def dump(self, compact=True):
+        maxlen = 0
+        lines = []
+        for field in self._fields:
+            value = getattr(self, field)
+            maxlen = max(maxlen, len(field))
+
+            if field.startswith("HEX_ACTION_MASK_FOR_"):
+                names = list(HEXACTMAP.keys())
+                indexes = np.where(value)[0]
+                value = None if not indexes else ", ".join([names[i] for i in indexes])
+            elif field.startswith("HEX_STATE"):
+                value = None if not value else list(HEXSTATEMAP.keys())[value]
+            elif field.startswith("HEX_MELEE_DISTANCE_FROM"):
+                value = None if not value else list(MELEEDISTMAP.keys())[value]
+            elif field.startswith("HEX_SHOOT_DISTANCE_FROM"):
+                value = None if not value else list(SHOOTDISTMAP.keys())[value]
+            elif field.startswith("HEX_MELEEABLE_BY"):
+                value = None if not value else list(DMGMODMAP.keys())[value]
+
+            if value is None and compact:
+                continue
+            lines.append((field, value))
+        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))
+
+    def action(self, hexaction):
+        if isinstance(hexaction, str):
+            hexaction = HEXACTMAP.get(hexaction, None)
+
+        if hexaction not in HEXACTMAP.values():
+            return None
+
+        if not self.HEX_ACTION_MASK_FOR_ACT_STACK[hexaction]:
+            print("Action not possible for this hex")
+            return None
+
+        n = 15*self.HEX_Y_COORD + self.HEX_X_COORD
+        return N_NONHEX_ACTIONS - ACTION_OFFSET + n*N_HEX_ACTIONS + hexaction
+
+    def actions(self):
+        return [k for k, v in Action.__dict__.items() if self.HEX_ACTION_MASK_FOR_ACT_STACK[v]]
+
+
+Action = SimpleNamespace(**HEXACTMAP)
+
+
+class Battlefield(list):
+    def __repr__(self):
+        return "Battlefield(11x15)"
+
+    def get(self, y_or_n, x=None):
+        if x:
+            y = y_or_n
+        else:
+            y = y_or_n // 15
+            x = y_or_n % 15
+
+        if y >= 0 and y < len(self) and x >= 0 and x < len(self[y]):
+            return self[y][x]
+        else:
+            print("Invalid hex (y=%s x=%s)" % (y, x))
 
 
 class VcmiEnv(gym.Env):
@@ -151,13 +229,7 @@ class VcmiEnv(gym.Env):
             defender_model or ""
         )
 
-        # NOTE: removing action=0 (retreat) which is used for resetting...
-        #       => start from 1 and reduce total actions by 1
-        #          XXX: there seems to be a bug as start=1 causes this error:
-        #          index 1322 is out of bounds for dimension 2 with size 1322
-        #       => just start from 0, reduce max by 1, and manually add +1
-        self.action_offset = 1
-        self.action_space = gym.spaces.Discrete(N_ACTIONS - self.action_offset)
+        self.action_space = gym.spaces.Discrete(N_ACTIONS - ACTION_OFFSET)
         self.observation_space = gym.spaces.Box(
             low=STATE_VALUE_NA,
             high=1,
@@ -237,7 +309,7 @@ class VcmiEnv(gym.Env):
         self._reset_vars(result)
 
         if self.render_each_step:
-            print(self.render())
+            self.render()
 
         if self.actions_log_file:
             if self.actfile:
@@ -249,7 +321,7 @@ class VcmiEnv(gym.Env):
     @tracelog
     def render(self):
         if self.render_mode == "ansi":
-            return (
+            print((
                 "%s\n"
                 "Step:      %-5s\n"
                 "Reward:    %-5s (total: %s)\n"
@@ -261,10 +333,10 @@ class VcmiEnv(gym.Env):
                 round(self.reward_total, 2),
                 self.net_value_last,
                 self.analyzer.net_value
-            )
+            ))
 
         elif self.render_mode == "rgb_array":
-            gym.logger.warn("Rendering RGB arrays not yet implemented for VcmiEnv")
+            gym.logger.warn("Rendering RGB arrays is not implemented")
         elif self.render_mode is None:
             gym.logger.warn("Cannot render with no render mode set")
 
@@ -282,7 +354,7 @@ class VcmiEnv(gym.Env):
 
     @tracelog
     def action_mask(self):
-        return self.result.actmask[self.action_offset:]
+        return self.result.actmask[ACTION_OFFSET:]
 
     def decode(self):
         return VcmiEnv.decode_obs(self.result.state)
@@ -296,7 +368,7 @@ class VcmiEnv(gym.Env):
 
         attrmap = ATTRMAP_FLOAT if obs.shape[2] == STATE_SIZE_FLOAT_ONE_HEX else ATTRMAP_DEFAULT
 
-        res = []
+        res = Battlefield()
         for y in range(11):
             row = []
             for x in range(15):
@@ -327,9 +399,10 @@ class VcmiEnv(gym.Env):
                     res[attr] = value_min, value_max
                 case "BINARY":
                     bits = attrdata
-                    res[attr] = round(''.join(map(str, reversed(bits))), 2)
+                    res[attr] = bits.astype(int)
                 case "CATEGORICAL":
                     res[attr] = attrdata.argmax()
+
                 case "FLOATING":
                     assert n == 1, f"internal error: {n} != 1"
                     res[attr] = round(attrdata[0] * vmax)
@@ -339,67 +412,6 @@ class VcmiEnv(gym.Env):
                     raise Exception(f"Unexpected encoding type: {enctype}")
 
         return Hex(**res)
-
-    # Print all info about a hex
-    # To test:
-    # import vcmi_gym
-    # env = vcmi_gym.VcmiEnv("ai/generated/A03.vmap")
-    # obs = env.step(589)[0]
-    # env.hexreport(obs, 14, 3)
-    def hexreport(self, obs, x, y):
-        raise Exception("Not implemented: hexreport after migration to one-hot obs")
-        iy = y-1
-        ix0 = (x-1) * N_HEX_ATTRS
-        ix1 = (x) * N_HEX_ATTRS
-
-        print("Obs range: [%d][%d:%d]" % (iy, ix0, ix1))
-        part = obs[0][iy][ix0:ix1]
-
-        def round_and_strip(number, decimals=2):
-            rounded_number = round(number, decimals)
-            return str(rounded_number).rstrip('0').rstrip('.') if '.' in str(rounded_number) else str(rounded_number)
-
-        def vreport(i, name, vmin, vmax, voffset=0):
-            norm = part[i]
-            unnorm = round_and_strip(norm * (vmax - vmin) + vmin, 3)
-            print("[%d] %s: %s" % (i, name, unnorm))
-
-        def vstackreport(i, name, vmin, vmax, voffset=0):
-            vreport(i, f"{name} #1", 0, 1)
-            vreport(i+1, f"{name} #2", 0, 1)
-            vreport(i+2, f"{name} #3", 0, 1)
-            vreport(i+3, f"{name} #4", 0, 1)
-            vreport(i+4, f"{name} #5", 0, 1)
-            vreport(i+5, f"{name} #6", 0, 1)
-            vreport(i+6, f"{name} #7", 0, 1)
-
-        vreport(0, "y (0-based)", 0, 10)
-        vreport(1, "x (0-based)", 0, 14)
-        vreport(2, "state", 1, 4)
-        vreport(3, "StackAttr::Quantity", -1, 5000, 1)
-        vreport(4, "StackAttr::Attack", -1, 100, 1)
-        vreport(5, "StackAttr::Defense", -1, 100, 1)
-        vreport(6, "StackAttr::Shots", -1, 32, 1)
-        vreport(7, "StackAttr::DmgMin", -1, 100, 1)
-        vreport(8, "StackAttr::DmgMax", -1, 100, 1)
-        vreport(9, "StackAttr::HP", -1, 1500, 1)
-        vreport(10, "StackAttr::HPLeft", -1, 1500, 1)
-        vreport(11, "StackAttr::Speed", -1, 30, 1)
-        vreport(12, "StackAttr::Waited", -1, 1, 1)
-        vreport(13, "StackAttr::QueuePos", -1, 14, 1)
-        vreport(14, "StackAttr::RetaliationsLeft", -1, 3, 1)
-        vreport(15, "StackAttr::Side", -1, 1, 1)
-        vreport(16, "StackAttr::Slot", -1, 6, 1)
-        vreport(17, "StackAttr::CreatureType", -1, 150, 1)
-        vreport(18, "StackAttr::AIValue", -1, 40000, 1)
-        vreport(19, "StackAttr::IsActive", -1, 1, 1)
-        vreport(20, "rangedDmgModifier", 0, 1)
-        vstackreport(21, "Reachability by friendly stack", 0, 1)
-        vstackreport(28, "Reachability by enemy stack", 0, 1)
-        vstackreport(35, "Neighbouring friendly stack", 0, 1)
-        vstackreport(42, "Neighbouring enemy stack", 0, 1)
-        vstackreport(49, "Potential enemy attacking stack", 0, 1)
-        assert N_HEX_ATTRS == 56
 
     # just play a pre-recorded actions from vcmi actions.txt
     # useful when "resuming" battle after reproducing & fixing a bug
@@ -411,10 +423,10 @@ class VcmiEnv(gym.Env):
             print("Replaying %s" % a)
             obs, rew, term, trunc, info = self.step(int(a) - 1)
             if rew < 0:
-                print(self.render())
+                self.render()
                 raise Exception("error replaying: %s" % a)
 
-        print(self.render())
+        self.render()
 
     #
     # private
@@ -460,17 +472,17 @@ class VcmiEnv(gym.Env):
             self.reward_scaling_factor = 1
 
         # Vars updated after other events
-        self.analyzer = Analyzer(N_ACTIONS - self.action_offset)
+        self.analyzer = Analyzer(N_ACTIONS - ACTION_OFFSET)
 
     def _maybe_render(self, analysis):
         if self.render_each_step:
-            print(self.render())
+            self.render()
 
     def _transform_action(self, action):
         # see note for action_space
-        max_action = self.action_space.n - self.action_offset
+        max_action = self.action_space.n - ACTION_OFFSET
         assert action >= 0 and action <= max_action
-        return action + self.action_offset
+        return action + ACTION_OFFSET
 
     #
     # A note on the static methods

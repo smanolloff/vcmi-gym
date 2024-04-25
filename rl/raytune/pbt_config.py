@@ -10,9 +10,9 @@ config = {
 
         # Mac
         "synch": True,
-        "time_attr": "time_total_s",  # "training_iteration" | "time_total_s"
-        "population_size": 6,
-        "max_concurrency": 6,
+        "time_attr": "training_iteration",  # XXX: don't use time_total_s
+        "population_size": 4,
+        "max_concurrency": 4,
         # PC
         # "synch": False,
         # "time_attr": "time_total_s",  # "training_iteration" | "time_total_s"
@@ -44,31 +44,31 @@ config = {
         #       e.g. [1, 2] will pass in 1.0 or 2.0 -- this must be accounted for
         # """
         "hyperparam_mutations": {
-            # "ent_coef": linlist(0, 0.2, n=10),
-            # "gamma": linlist(0.6, 0.999, n=20),
-            # "max_grad_norm": linlist(0.2, 10, n=20),
+            "ent_coef": linlist(0, 0.1, n=11),
+            "gamma": linlist(0.6, 0.999, n=13),
+            "max_grad_norm": linlist(0.5, 10, n=11),
             "num_steps": [128, 256, 512],
 
             # PPO-vanilla specific
-            # "lr_schedule": {"start": explist(1e-7, 1e-4, n=20)},
-            # "gae_lambda": linlist(0.5, 0.99, n=20),
-            # "num_minibatches": [2, 4],
-            # "update_epochs": linlist(2, 20, n=5, dtype=int),
-            # "vf_coef": linlist(0.1, 2, n=10),
+            "lr_schedule": {"start": explist(1e-7, 1e-4, n=20)},
+            "gae_lambda": linlist(0.5, 0.99, n=20),
+            "num_minibatches": [2, 4, 8],
+            "update_epochs": linlist(2, 20, n=5, dtype=int),
+            "vf_coef": linlist(0.1, 2, n=9),
 
             # PPO-DNA specific
             # "lr_schedule_value": {"start": explist(1e-7, 1e-4, n=20)},
             # "lr_schedule_policy": {"start": explist(1e-7, 1e-4, n=20)},
             # "lr_schedule_distill": {"start": explist(1e-7, 1e-4, n=20)},
-            "num_minibatches_distill": [2, 4, 8],
-            "num_minibatches_policy": [2, 4, 8],
-            "num_minibatches_value": [2, 4, 8],
-            "update_epochs_distill": linlist(2, 10, n=5, dtype=int),
-            "update_epochs_policy": linlist(2, 10, n=5, dtype=int),
-            "update_epochs_value": linlist(2, 10, n=5, dtype=int),
-            "gae_lambda_policy": linlist(0.59, 0.99, n=9),
-            "gae_lambda_value": linlist(0.59, 0.99, n=9),
-            "distill_beta": linlist(0.5, 1.0, n=6),
+            # "num_minibatches_distill": [2, 4, 8],
+            # "num_minibatches_policy": [2, 4, 8],
+            # "num_minibatches_value": [2, 4, 8],
+            # "update_epochs_distill": linlist(2, 10, n=5, dtype=int),
+            # "update_epochs_policy": linlist(2, 10, n=5, dtype=int),
+            # "update_epochs_value": linlist(2, 10, n=5, dtype=int),
+            # "gae_lambda_policy": linlist(0.59, 0.99, n=9),
+            # "gae_lambda_value": linlist(0.59, 0.99, n=9),
+            # "distill_beta": linlist(0.5, 1.0, n=6),
         },
 
         #
@@ -102,7 +102,7 @@ config = {
     #   = 6K episodes (good for 1K avg metric)
     #   = ~30..60 min (Mac)
     # "vsteps_total": 150_000,
-    "seconds_total": 3600,
+    "seconds_total": 1800,
 
     # Initial checkpoint to start from
     # "agent_load_file": "data/PBT-mppo_dna-pc-3s30K-20240419_161858/62a7c_00002/checkpoint_000013/agent.pt",
@@ -110,7 +110,7 @@ config = {
 
     "tags": ["Map-4096-mixstack", "StupidAI", "MPPO_DNA"],
     "mapside": "attacker",  # attacker/defender/both
-    "mapmask": "gym/generated/4096/4096-6stack-100K-01.vmap",
+    "mapmask": "gym/generated/4096/4096-mixstack-100K-01.vmap",
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
 
@@ -130,35 +130,35 @@ config = {
     "weight_decay": 0,
 
     # Vanilla PPO specific
-    # "lr_schedule": {"mode": "const", "start": 0.00001},
-    # "num_minibatches": 2,   # minibatch_size = rollout_buffer/num_minibatches,
-    # "update_epochs": 10,    # full passes of rollout_buffer,
-    # "gae_lambda": 0.8,
-    # "vf_coef": 1.2,
+    "lr_schedule": {"mode": "const", "start": 0.00001},
+    "num_minibatches": 2,   # minibatch_size = rollout_buffer/num_minibatches,
+    "update_epochs": 10,    # full passes of rollout_buffer,
+    "gae_lambda": 0.8,
+    "vf_coef": 1.2,
 
     # PPO-DNA specific
-    "lr_schedule_value": {"mode": "const", "start": 0.00001},
-    "lr_schedule_policy": {"mode": "const", "start": 0.00001},
-    "lr_schedule_distill": {"mode": "const", "start": 0.00001},
-    "num_minibatches_distill": 2,
-    "num_minibatches_policy": 2,
-    "num_minibatches_value": 2,
-    "update_epochs_distill": 5,
-    "update_epochs_policy": 5,
-    "update_epochs_value": 10,
-    "gae_lambda_policy": 0.95,
-    "gae_lambda_value": 0.95,
-    "distill_beta": 1.0,
+    # "lr_schedule_value": {"mode": "const", "start": 0.00001},
+    # "lr_schedule_policy": {"mode": "const", "start": 0.00001},
+    # "lr_schedule_distill": {"mode": "const", "start": 0.00001},
+    # "num_minibatches_distill": 4,
+    # "num_minibatches_policy": 4,
+    # "num_minibatches_value": 4,
+    # "update_epochs_distill": 4,
+    # "update_epochs_policy": 2,
+    # "update_epochs_value": 4,
+    # "gae_lambda_policy": 0.7,
+    # "gae_lambda_value": 0.8,
+    # "distill_beta": 1.0,
 
     # NN arch
     "network": {
         "features_extractor": [
-            # => (B, 11, 15, 86|574)
+            # => (B, 11, 15, 86|769)
             {"t": "Flatten", "start_dim": 2},
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 11]},
-            # => (B, 1, 11, 1290|8610)
-            {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 86], "stride": [1, 86], "padding": 0},
-            # {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 574], "stride": [1, 574], "padding": 0},
+            # => (B, 1, 11, 1290|11535)
+            # {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 86], "stride": [1, 86], "padding": 0},
+            {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 769], "stride": [1, 769], "padding": 0},
             {"t": "Tanh"},
             # => (B, 32, 11, 15)
             {"t": "Flatten"},
@@ -194,7 +194,8 @@ config = {
     "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
     "num_envs": 1,
     "env": {
-        "encoding_type": "float",
+        # "encoding_type": "float",
+        "encoding_type": "default",
         "reward_dmg_factor": 5,
         "step_reward_fixed": -100,
         "step_reward_mult": 1,

@@ -42,6 +42,12 @@ STATE_ENCODING_FLOAT = connexport.get_encoding_type_float()
 ATTRMAP_DEFAULT = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in connexport.get_attribute_mapping(STATE_ENCODING_DEFAULT)]))
 ATTRMAP_FLOAT = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in connexport.get_attribute_mapping(STATE_ENCODING_FLOAT)]))
 
+HEXACTMAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(connexport.get_hexactions())]))
+HEXSTATEMAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(connexport.get_hexstates())]))
+DMGMODMAP = types.MappingProxyType(OrderedDict([(mod, i) for i, mod in enumerate(connexport.get_dmgmods())]))
+SHOOTDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(connexport.get_shootdistances())]))
+MELEEDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(connexport.get_meleedistances())]))
+
 ERRMAP = connexport.get_error_mapping()
 ERRSIZE = len(ERRMAP)
 ERRNAMES = [errname for (errname, _) in ERRMAP.values()]

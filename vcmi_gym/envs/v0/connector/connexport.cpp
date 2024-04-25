@@ -42,6 +42,112 @@ static const std::map<ErrMask, std::tuple<std::string, std::string>> get_error_m
     return res;
 }
 
+static const std::vector<std::string> get_dmgmods() {
+    auto mods = std::vector<std::string> {};
+    std::string modname;
+
+    for (int i=0; i < static_cast<int>(MMAI::Export::DmgMod::_count); i++) {
+        switch (MMAI::Export::DmgMod(i)) {
+        break; case DmgMod::ZERO: modname = "ZERO";
+        break; case DmgMod::HALF: modname = "HALF";
+        break; case DmgMod::FULL: modname = "FULL";
+        break; default:
+            throw std::runtime_error("Unexpected DmgMod: " + std::to_string(i));
+        }
+
+        mods.push_back(modname);
+    }
+
+    return mods;
+}
+
+static const std::vector<std::string> get_shootdistances() {
+    auto dists = std::vector<std::string> {};
+    std::string dist;
+
+    for (int i=0; i < static_cast<int>(MMAI::Export::ShootDistance::_count); i++) {
+        switch (MMAI::Export::ShootDistance(i)) {
+        break; case ShootDistance::NA: dist = "NA";
+        break; case ShootDistance::FAR: dist = "FAR";
+        break; case ShootDistance::NEAR: dist = "NEAR";
+        break; default:
+            throw std::runtime_error("Unexpected ShootDistance: " + std::to_string(i));
+        }
+
+        dists.push_back(dist);
+    }
+
+    return dists;
+}
+
+static const std::vector<std::string> get_meleedistances() {
+    auto dists = std::vector<std::string> {};
+    std::string dist;
+
+    for (int i=0; i < static_cast<int>(MMAI::Export::MeleeDistance::_count); i++) {
+        switch (MMAI::Export::MeleeDistance(i)) {
+        break; case MeleeDistance::NA: dist = "NA";
+        break; case MeleeDistance::FAR: dist = "FAR";
+        break; case MeleeDistance::NEAR: dist = "NEAR";
+        break; default:
+            throw std::runtime_error("Unexpected MeleeDistance: " + std::to_string(i));
+        }
+
+        dists.push_back(dist);
+    }
+
+    return dists;
+}
+
+static const std::vector<std::string> get_hexactions() {
+    auto actions = std::vector<std::string> {};
+    std::string actname;
+
+    for (int i=0; i < static_cast<int>(MMAI::Export::HexAction::_count); i++) {
+        switch (MMAI::Export::HexAction(i)) {
+        break; case HexAction::AMOVE_TR: actname = "AMOVE_TR";
+        break; case HexAction::AMOVE_R: actname = "AMOVE_R";
+        break; case HexAction::AMOVE_BR: actname = "AMOVE_BR";
+        break; case HexAction::AMOVE_BL: actname = "AMOVE_BL";
+        break; case HexAction::AMOVE_L: actname = "AMOVE_L";
+        break; case HexAction::AMOVE_TL: actname = "AMOVE_TL";
+        break; case HexAction::AMOVE_2TR: actname = "AMOVE_2TR";
+        break; case HexAction::AMOVE_2R: actname = "AMOVE_2R";
+        break; case HexAction::AMOVE_2BR: actname = "AMOVE_2BR";
+        break; case HexAction::AMOVE_2BL: actname = "AMOVE_2BL";
+        break; case HexAction::AMOVE_2L: actname = "AMOVE_2L";
+        break; case HexAction::AMOVE_2TL: actname = "AMOVE_2TL";
+        break; case HexAction::MOVE: actname = "MOVE";
+        break; case HexAction::SHOOT: actname = "SHOOT";
+        break; default:
+            throw std::runtime_error("Unexpected HexAction: " + std::to_string(i));
+        }
+
+        actions.push_back(actname);
+    }
+
+    return actions;
+}
+
+static const std::vector<std::string> get_hexstates() {
+    auto states = std::vector<std::string> {};
+    std::string statename;
+
+    for (int i=0; i < static_cast<int>(MMAI::Export::HexState::_count); i++) {
+        switch (MMAI::Export::HexState(i)) {
+        break; case HexState::OBSTACLE: statename = "OBSTACLE";
+        break; case HexState::OCCUPIED: statename = "OCCUPIED";
+        break; case HexState::FREE: statename = "FREE";
+        break; default:
+            throw std::runtime_error("Unexpected HexState: " + std::to_string(i));
+        }
+
+        states.push_back(statename);
+    }
+
+    return states;
+}
+
 static const std::vector<std::tuple<std::string, std::string, int, int, int>> get_attribute_mapping(std::string global_encoding) {
     // attrname => (encname, offset, n, vmax)
     auto res = std::vector<std::tuple<std::string, std::string, int, int, int>> {};
@@ -58,70 +164,70 @@ static const std::vector<std::tuple<std::string, std::string, int, int, int>> ge
 
         std::string attrname;
 
-        switch(a) {
+        switch (a) {
         break; case Attribute::HEX_Y_COORD: attrname = "HEX_Y_COORD";
         break; case Attribute::HEX_X_COORD: attrname = "HEX_X_COORD";
         break; case Attribute::HEX_STATE: attrname = "HEX_STATE";
-        break; case Attribute::HEX_REACHABLE_BY_ACTIVE_STACK: attrname = "HEX_REACHABLE_BY_ACTIVE_STACK";
-        break; case Attribute::HEX_REACHABLE_BY_FRIENDLY_STACK_0: attrname = "HEX_REACHABLE_BY_FRIENDLY_STACK_0";
-        break; case Attribute::HEX_REACHABLE_BY_FRIENDLY_STACK_1: attrname = "HEX_REACHABLE_BY_FRIENDLY_STACK_1";
-        break; case Attribute::HEX_REACHABLE_BY_FRIENDLY_STACK_2: attrname = "HEX_REACHABLE_BY_FRIENDLY_STACK_2";
-        break; case Attribute::HEX_REACHABLE_BY_FRIENDLY_STACK_3: attrname = "HEX_REACHABLE_BY_FRIENDLY_STACK_3";
-        break; case Attribute::HEX_REACHABLE_BY_FRIENDLY_STACK_4: attrname = "HEX_REACHABLE_BY_FRIENDLY_STACK_4";
-        break; case Attribute::HEX_REACHABLE_BY_FRIENDLY_STACK_5: attrname = "HEX_REACHABLE_BY_FRIENDLY_STACK_5";
-        break; case Attribute::HEX_REACHABLE_BY_FRIENDLY_STACK_6: attrname = "HEX_REACHABLE_BY_FRIENDLY_STACK_6";
-        break; case Attribute::HEX_REACHABLE_BY_ENEMY_STACK_0: attrname = "HEX_REACHABLE_BY_ENEMY_STACK_0";
-        break; case Attribute::HEX_REACHABLE_BY_ENEMY_STACK_1: attrname = "HEX_REACHABLE_BY_ENEMY_STACK_1";
-        break; case Attribute::HEX_REACHABLE_BY_ENEMY_STACK_2: attrname = "HEX_REACHABLE_BY_ENEMY_STACK_2";
-        break; case Attribute::HEX_REACHABLE_BY_ENEMY_STACK_3: attrname = "HEX_REACHABLE_BY_ENEMY_STACK_3";
-        break; case Attribute::HEX_REACHABLE_BY_ENEMY_STACK_4: attrname = "HEX_REACHABLE_BY_ENEMY_STACK_4";
-        break; case Attribute::HEX_REACHABLE_BY_ENEMY_STACK_5: attrname = "HEX_REACHABLE_BY_ENEMY_STACK_5";
-        break; case Attribute::HEX_REACHABLE_BY_ENEMY_STACK_6: attrname = "HEX_REACHABLE_BY_ENEMY_STACK_6";
-        break; case Attribute::HEX_MELEEABLE_BY_ACTIVE_STACK: attrname = "HEX_MELEEABLE_BY_ACTIVE_STACK";
-        break; case Attribute::HEX_MELEEABLE_BY_FRIENDLY_STACK_0: attrname = "HEX_MELEEABLE_BY_FRIENDLY_STACK_0";
-        break; case Attribute::HEX_MELEEABLE_BY_FRIENDLY_STACK_1: attrname = "HEX_MELEEABLE_BY_FRIENDLY_STACK_1";
-        break; case Attribute::HEX_MELEEABLE_BY_FRIENDLY_STACK_2: attrname = "HEX_MELEEABLE_BY_FRIENDLY_STACK_2";
-        break; case Attribute::HEX_MELEEABLE_BY_FRIENDLY_STACK_3: attrname = "HEX_MELEEABLE_BY_FRIENDLY_STACK_3";
-        break; case Attribute::HEX_MELEEABLE_BY_FRIENDLY_STACK_4: attrname = "HEX_MELEEABLE_BY_FRIENDLY_STACK_4";
-        break; case Attribute::HEX_MELEEABLE_BY_FRIENDLY_STACK_5: attrname = "HEX_MELEEABLE_BY_FRIENDLY_STACK_5";
-        break; case Attribute::HEX_MELEEABLE_BY_FRIENDLY_STACK_6: attrname = "HEX_MELEEABLE_BY_FRIENDLY_STACK_6";
-        break; case Attribute::HEX_MELEEABLE_BY_ENEMY_STACK_0: attrname = "HEX_MELEEABLE_BY_ENEMY_STACK_0";
-        break; case Attribute::HEX_MELEEABLE_BY_ENEMY_STACK_1: attrname = "HEX_MELEEABLE_BY_ENEMY_STACK_1";
-        break; case Attribute::HEX_MELEEABLE_BY_ENEMY_STACK_2: attrname = "HEX_MELEEABLE_BY_ENEMY_STACK_2";
-        break; case Attribute::HEX_MELEEABLE_BY_ENEMY_STACK_3: attrname = "HEX_MELEEABLE_BY_ENEMY_STACK_3";
-        break; case Attribute::HEX_MELEEABLE_BY_ENEMY_STACK_4: attrname = "HEX_MELEEABLE_BY_ENEMY_STACK_4";
-        break; case Attribute::HEX_MELEEABLE_BY_ENEMY_STACK_5: attrname = "HEX_MELEEABLE_BY_ENEMY_STACK_5";
-        break; case Attribute::HEX_MELEEABLE_BY_ENEMY_STACK_6: attrname = "HEX_MELEEABLE_BY_ENEMY_STACK_6";
-        break; case Attribute::HEX_SHOOTABLE_BY_ACTIVE_STACK: attrname = "HEX_SHOOTABLE_BY_ACTIVE_STACK";
-        break; case Attribute::HEX_SHOOTABLE_BY_FRIENDLY_STACK_0: attrname = "HEX_SHOOTABLE_BY_FRIENDLY_STACK_0";
-        break; case Attribute::HEX_SHOOTABLE_BY_FRIENDLY_STACK_1: attrname = "HEX_SHOOTABLE_BY_FRIENDLY_STACK_1";
-        break; case Attribute::HEX_SHOOTABLE_BY_FRIENDLY_STACK_2: attrname = "HEX_SHOOTABLE_BY_FRIENDLY_STACK_2";
-        break; case Attribute::HEX_SHOOTABLE_BY_FRIENDLY_STACK_3: attrname = "HEX_SHOOTABLE_BY_FRIENDLY_STACK_3";
-        break; case Attribute::HEX_SHOOTABLE_BY_FRIENDLY_STACK_4: attrname = "HEX_SHOOTABLE_BY_FRIENDLY_STACK_4";
-        break; case Attribute::HEX_SHOOTABLE_BY_FRIENDLY_STACK_5: attrname = "HEX_SHOOTABLE_BY_FRIENDLY_STACK_5";
-        break; case Attribute::HEX_SHOOTABLE_BY_FRIENDLY_STACK_6: attrname = "HEX_SHOOTABLE_BY_FRIENDLY_STACK_6";
-        break; case Attribute::HEX_SHOOTABLE_BY_ENEMY_STACK_0: attrname = "HEX_SHOOTABLE_BY_ENEMY_STACK_0";
-        break; case Attribute::HEX_SHOOTABLE_BY_ENEMY_STACK_1: attrname = "HEX_SHOOTABLE_BY_ENEMY_STACK_1";
-        break; case Attribute::HEX_SHOOTABLE_BY_ENEMY_STACK_2: attrname = "HEX_SHOOTABLE_BY_ENEMY_STACK_2";
-        break; case Attribute::HEX_SHOOTABLE_BY_ENEMY_STACK_3: attrname = "HEX_SHOOTABLE_BY_ENEMY_STACK_3";
-        break; case Attribute::HEX_SHOOTABLE_BY_ENEMY_STACK_4: attrname = "HEX_SHOOTABLE_BY_ENEMY_STACK_4";
-        break; case Attribute::HEX_SHOOTABLE_BY_ENEMY_STACK_5: attrname = "HEX_SHOOTABLE_BY_ENEMY_STACK_5";
-        break; case Attribute::HEX_SHOOTABLE_BY_ENEMY_STACK_6: attrname = "HEX_SHOOTABLE_BY_ENEMY_STACK_6";
-        break; case Attribute::HEX_NEXT_TO_ACTIVE_STACK: attrname = "HEX_NEXT_TO_ACTIVE_STACK";
-        break; case Attribute::HEX_NEXT_TO_FRIENDLY_STACK_0: attrname = "HEX_NEXT_TO_FRIENDLY_STACK_0";
-        break; case Attribute::HEX_NEXT_TO_FRIENDLY_STACK_1: attrname = "HEX_NEXT_TO_FRIENDLY_STACK_1";
-        break; case Attribute::HEX_NEXT_TO_FRIENDLY_STACK_2: attrname = "HEX_NEXT_TO_FRIENDLY_STACK_2";
-        break; case Attribute::HEX_NEXT_TO_FRIENDLY_STACK_3: attrname = "HEX_NEXT_TO_FRIENDLY_STACK_3";
-        break; case Attribute::HEX_NEXT_TO_FRIENDLY_STACK_4: attrname = "HEX_NEXT_TO_FRIENDLY_STACK_4";
-        break; case Attribute::HEX_NEXT_TO_FRIENDLY_STACK_5: attrname = "HEX_NEXT_TO_FRIENDLY_STACK_5";
-        break; case Attribute::HEX_NEXT_TO_FRIENDLY_STACK_6: attrname = "HEX_NEXT_TO_FRIENDLY_STACK_6";
-        break; case Attribute::HEX_NEXT_TO_ENEMY_STACK_0: attrname = "HEX_NEXT_TO_ENEMY_STACK_0";
-        break; case Attribute::HEX_NEXT_TO_ENEMY_STACK_1: attrname = "HEX_NEXT_TO_ENEMY_STACK_1";
-        break; case Attribute::HEX_NEXT_TO_ENEMY_STACK_2: attrname = "HEX_NEXT_TO_ENEMY_STACK_2";
-        break; case Attribute::HEX_NEXT_TO_ENEMY_STACK_3: attrname = "HEX_NEXT_TO_ENEMY_STACK_3";
-        break; case Attribute::HEX_NEXT_TO_ENEMY_STACK_4: attrname = "HEX_NEXT_TO_ENEMY_STACK_4";
-        break; case Attribute::HEX_NEXT_TO_ENEMY_STACK_5: attrname = "HEX_NEXT_TO_ENEMY_STACK_5";
-        break; case Attribute::HEX_NEXT_TO_ENEMY_STACK_6: attrname = "HEX_NEXT_TO_ENEMY_STACK_6";
+        break; case Attribute::HEX_ACTION_MASK_FOR_ACT_STACK: attrname = "HEX_ACTION_MASK_FOR_ACT_STACK";
+        break; case Attribute::HEX_ACTION_MASK_FOR_L_STACK_0: attrname = "HEX_ACTION_MASK_FOR_L_STACK_0";
+        break; case Attribute::HEX_ACTION_MASK_FOR_L_STACK_1: attrname = "HEX_ACTION_MASK_FOR_L_STACK_1";
+        break; case Attribute::HEX_ACTION_MASK_FOR_L_STACK_2: attrname = "HEX_ACTION_MASK_FOR_L_STACK_2";
+        break; case Attribute::HEX_ACTION_MASK_FOR_L_STACK_3: attrname = "HEX_ACTION_MASK_FOR_L_STACK_3";
+        break; case Attribute::HEX_ACTION_MASK_FOR_L_STACK_4: attrname = "HEX_ACTION_MASK_FOR_L_STACK_4";
+        break; case Attribute::HEX_ACTION_MASK_FOR_L_STACK_5: attrname = "HEX_ACTION_MASK_FOR_L_STACK_5";
+        break; case Attribute::HEX_ACTION_MASK_FOR_L_STACK_6: attrname = "HEX_ACTION_MASK_FOR_L_STACK_6";
+        break; case Attribute::HEX_ACTION_MASK_FOR_R_STACK_0: attrname = "HEX_ACTION_MASK_FOR_R_STACK_0";
+        break; case Attribute::HEX_ACTION_MASK_FOR_R_STACK_1: attrname = "HEX_ACTION_MASK_FOR_R_STACK_1";
+        break; case Attribute::HEX_ACTION_MASK_FOR_R_STACK_2: attrname = "HEX_ACTION_MASK_FOR_R_STACK_2";
+        break; case Attribute::HEX_ACTION_MASK_FOR_R_STACK_3: attrname = "HEX_ACTION_MASK_FOR_R_STACK_3";
+        break; case Attribute::HEX_ACTION_MASK_FOR_R_STACK_4: attrname = "HEX_ACTION_MASK_FOR_R_STACK_4";
+        break; case Attribute::HEX_ACTION_MASK_FOR_R_STACK_5: attrname = "HEX_ACTION_MASK_FOR_R_STACK_5";
+        break; case Attribute::HEX_ACTION_MASK_FOR_R_STACK_6: attrname = "HEX_ACTION_MASK_FOR_R_STACK_6";
+        break; case Attribute::HEX_MELEEABLE_BY_ACT_STACK: attrname = "HEX_MELEEABLE_BY_ACT_STACK";
+        break; case Attribute::HEX_MELEEABLE_BY_L_STACK_0: attrname = "HEX_MELEEABLE_BY_L_STACK_0";
+        break; case Attribute::HEX_MELEEABLE_BY_L_STACK_1: attrname = "HEX_MELEEABLE_BY_L_STACK_1";
+        break; case Attribute::HEX_MELEEABLE_BY_L_STACK_2: attrname = "HEX_MELEEABLE_BY_L_STACK_2";
+        break; case Attribute::HEX_MELEEABLE_BY_L_STACK_3: attrname = "HEX_MELEEABLE_BY_L_STACK_3";
+        break; case Attribute::HEX_MELEEABLE_BY_L_STACK_4: attrname = "HEX_MELEEABLE_BY_L_STACK_4";
+        break; case Attribute::HEX_MELEEABLE_BY_L_STACK_5: attrname = "HEX_MELEEABLE_BY_L_STACK_5";
+        break; case Attribute::HEX_MELEEABLE_BY_L_STACK_6: attrname = "HEX_MELEEABLE_BY_L_STACK_6";
+        break; case Attribute::HEX_MELEEABLE_BY_R_STACK_0: attrname = "HEX_MELEEABLE_BY_R_STACK_0";
+        break; case Attribute::HEX_MELEEABLE_BY_R_STACK_1: attrname = "HEX_MELEEABLE_BY_R_STACK_1";
+        break; case Attribute::HEX_MELEEABLE_BY_R_STACK_2: attrname = "HEX_MELEEABLE_BY_R_STACK_2";
+        break; case Attribute::HEX_MELEEABLE_BY_R_STACK_3: attrname = "HEX_MELEEABLE_BY_R_STACK_3";
+        break; case Attribute::HEX_MELEEABLE_BY_R_STACK_4: attrname = "HEX_MELEEABLE_BY_R_STACK_4";
+        break; case Attribute::HEX_MELEEABLE_BY_R_STACK_5: attrname = "HEX_MELEEABLE_BY_R_STACK_5";
+        break; case Attribute::HEX_MELEEABLE_BY_R_STACK_6: attrname = "HEX_MELEEABLE_BY_R_STACK_6";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_ACT_STACK: attrname = "HEX_SHOOT_DISTANCE_FROM_ACT_STACK";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_L_STACK_0: attrname = "HEX_SHOOT_DISTANCE_FROM_L_STACK_0";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_L_STACK_1: attrname = "HEX_SHOOT_DISTANCE_FROM_L_STACK_1";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_L_STACK_2: attrname = "HEX_SHOOT_DISTANCE_FROM_L_STACK_2";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_L_STACK_3: attrname = "HEX_SHOOT_DISTANCE_FROM_L_STACK_3";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_L_STACK_4: attrname = "HEX_SHOOT_DISTANCE_FROM_L_STACK_4";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_L_STACK_5: attrname = "HEX_SHOOT_DISTANCE_FROM_L_STACK_5";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_L_STACK_6: attrname = "HEX_SHOOT_DISTANCE_FROM_L_STACK_6";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_R_STACK_0: attrname = "HEX_SHOOT_DISTANCE_FROM_R_STACK_0";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_R_STACK_1: attrname = "HEX_SHOOT_DISTANCE_FROM_R_STACK_1";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_R_STACK_2: attrname = "HEX_SHOOT_DISTANCE_FROM_R_STACK_2";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_R_STACK_3: attrname = "HEX_SHOOT_DISTANCE_FROM_R_STACK_3";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_R_STACK_4: attrname = "HEX_SHOOT_DISTANCE_FROM_R_STACK_4";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_R_STACK_5: attrname = "HEX_SHOOT_DISTANCE_FROM_R_STACK_5";
+        break; case Attribute::HEX_SHOOT_DISTANCE_FROM_R_STACK_6: attrname = "HEX_SHOOT_DISTANCE_FROM_R_STACK_6";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_ACT_STACK: attrname = "HEX_MELEE_DISTANCE_FROM_ACT_STACK";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_L_STACK_0: attrname = "HEX_MELEE_DISTANCE_FROM_L_STACK_0";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_L_STACK_1: attrname = "HEX_MELEE_DISTANCE_FROM_L_STACK_1";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_L_STACK_2: attrname = "HEX_MELEE_DISTANCE_FROM_L_STACK_2";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_L_STACK_3: attrname = "HEX_MELEE_DISTANCE_FROM_L_STACK_3";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_L_STACK_4: attrname = "HEX_MELEE_DISTANCE_FROM_L_STACK_4";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_L_STACK_5: attrname = "HEX_MELEE_DISTANCE_FROM_L_STACK_5";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_L_STACK_6: attrname = "HEX_MELEE_DISTANCE_FROM_L_STACK_6";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_R_STACK_0: attrname = "HEX_MELEE_DISTANCE_FROM_R_STACK_0";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_R_STACK_1: attrname = "HEX_MELEE_DISTANCE_FROM_R_STACK_1";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_R_STACK_2: attrname = "HEX_MELEE_DISTANCE_FROM_R_STACK_2";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_R_STACK_3: attrname = "HEX_MELEE_DISTANCE_FROM_R_STACK_3";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_R_STACK_4: attrname = "HEX_MELEE_DISTANCE_FROM_R_STACK_4";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_R_STACK_5: attrname = "HEX_MELEE_DISTANCE_FROM_R_STACK_5";
+        break; case Attribute::HEX_MELEE_DISTANCE_FROM_R_STACK_6: attrname = "HEX_MELEE_DISTANCE_FROM_R_STACK_6";
         break; case Attribute::STACK_QUANTITY: attrname = "STACK_QUANTITY";
         break; case Attribute::STACK_ATTACK: attrname = "STACK_ATTACK";
         break; case Attribute::STACK_DEFENSE: attrname = "STACK_DEFENSE";
@@ -182,5 +288,10 @@ PYBIND11_MODULE(connexport, m) {
         m.def("get_encoding_type_default", &get_encoding_type_default);
         m.def("get_encoding_type_float", &get_encoding_type_float);
         m.def("get_error_mapping", &get_error_mapping, "Get available error names and flags");
-        m.def("get_attribute_mapping", &get_attribute_mapping, "Get available error names and flags");
+        m.def("get_dmgmods", &get_dmgmods, "Get a list of the DmgMod enum value names");
+        m.def("get_shootdistances", &get_shootdistances, "Get a list of the ShootDistance enum value names");
+        m.def("get_meleedistances", &get_meleedistances, "Get a list of the MeleeDistance enum value names");
+        m.def("get_hexactions", &get_hexactions, "Get a list of the HexAction enum value names");
+        m.def("get_hexstates", &get_hexstates, "Get a list of the HexState enum value names");
+        m.def("get_attribute_mapping", &get_attribute_mapping, "Get a attrname => (encname, offset, n, vmax)");
 }

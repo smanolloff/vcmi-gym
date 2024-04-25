@@ -196,7 +196,7 @@ if __name__ == "__main__":
 
     for hero_name, hero_data in heroes_data.items():
         hero_wins = j["wins"].get(hero_name, 0)
-        damp = 40 - 100*max(min(stddev_wins_frac, 0.4), 0.1)
+        damp = 40 - 100*max(min(stddev_wins_frac, 0.35), 0.1)
         correction_factor = log(mean_wins/(hero_wins or 1)) / damp
         correction_factor = np.clip(correction_factor, -clip, clip)
         if abs(correction_factor) <= errmax:

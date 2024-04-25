@@ -112,7 +112,7 @@ def evaluate_policy(agent, venv, episodes_per_env):
 
 
 def load_agent(agent_file, run_id):
-    # logging.debug("Loading agent from %s" % agent_file)
+    # LOG.debug("Loading agent from %s" % agent_file)
     agent = torch.load(agent_file)
     assert agent.args.run_id == run_id, "%s != %s" % (agent.args.run_id, run_id)
     return agent
@@ -133,7 +133,7 @@ def create_venv(env_cls, env_kwargs, mapname, role, opponent):
         )
 
         env_kwargs2[role] = "MMAI_USER"
-        # logging.debug("Env kwargs: %s" % env_kwargs2)
+        # LOG.debug("Env kwargs: %s" % env_kwargs2)
         return env_cls(**env_kwargs2)
 
     vec_env = gym.vector.SyncVectorEnv([env_creator])
@@ -195,14 +195,15 @@ def main():
     import vcmi_gym
     os.environ["WANDB_SILENT"] = "true"
 
-    # Logger
+    LOG = logging.getLogger("evaluator")
+    LOG.setLevel(logging.DEBUG)
+
     formatter = logging.Formatter("-- %(asctime)s %(levelname)s: %(message)s")
     formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
     formatter.default_msec_format = None
     loghandler = logging.StreamHandler()
-    loghandler.setLevel(logging.DEBUG)
     loghandler.setFormatter(formatter)
-    logging.basicConfig(level=logging.DEBUG, handlers=[loghandler])
+    LOG.addHandler(loghandler)
 
     # prevent warnings for action_mask method
     env_cls = vcmi_gym.VcmiEnv
@@ -229,14 +230,14 @@ def main():
             # Discard "evaluated" agents which are no longer candidates
             evaluated = [x for x in evaluated if x in agents.values()]
 
-            logging.debug("Agents: %s\nEvaluated: %s" % (agents, evaluated))
+            LOG.debug("Agents: %s\nEvaluated: %s" % (agents, evaluated))
 
             for run_id, agent_load_file in agents.items():
                 if agent_load_file in evaluated:
-                    logging.debug("Skip agent: %s (already evaluated)" % (agent_load_file))
+                    LOG.debug("Skip agent: %s (already evaluated)" % (agent_load_file))
                     continue
 
-                logging.debug('Evaluating %s' % (agent_load_file))
+                LOG.debug('Evaluating %s' % (agent_load_file))
 
                 try:
                     run = api.run(f"s-manolloff/vcmi-gym/{run_id}")
@@ -244,7 +245,7 @@ def main():
                     assert run.id == run_id
 
                     if "no-eval" in run.tags:
-                        logging.debug('Skip %s' % (agent_load_file))
+                        LOG.debug('Skip %s' % (agent_load_file))
                         continue
 
                     agent = load_agent(agent_file=agent_load_file, run_id=run_id)
@@ -257,7 +258,7 @@ def main():
                         # For wandb.log, commit=True by default
                         # for wandb_log, commit=False by default
                         def wandb_log(*args, **kwargs):
-                            # logging.debug("wandb.log: %s %s" % (args, kwargs))
+                            # LOG.debug("wandb.log: %s %s" % (args, kwargs))
                             wandb.log(*args, **dict({"commit": False}, **kwargs))
                         wandb_init(run)
 
@@ -335,7 +336,7 @@ def main():
                     wandb_log({"all/is_success": np.mean(is_successes["StupidAI"] + is_successes["BattleAI"])}, commit=True)
                     # ^^^^^^^ commit here
 
-                    # logging.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
+                    # LOG.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
                     #     run_id,
                     #     np.mean(rewards["StupidAI"] + rewards["BattleAI"]),
                     #     np.mean(lengths["StupidAI"] + lengths["BattleAI"]),
@@ -353,16 +354,16 @@ def main():
                     print("SIGINT received. Exiting gracefully.")
                     sys.exit(0)
                 except Exception as e:
-                    logging.warning("Error while evaluating %s: %s" % (
+                    LOG.warning("Error while evaluating %s: %s" % (
                         agent_load_file,
                         "\n".join(traceback.format_exception_only(e))
                     ))
                     continue
 
-            if once:
+            if once or os.environ.get("EVALUATE_ONCE", None) == "true":
                 break
 
-            logging.debug("Sleeping 300s...")
+            LOG.debug("Sleeping 300s...")
             time.sleep(30)
     finally:
         if venv:
