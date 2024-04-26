@@ -25,18 +25,18 @@ import zipfile
 # relative to script dir
 MAP_DIR = "../gym/generated/4096"
 # name template containing a single {id} token to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "4096-mixstack-300K-{id:02d}"
+MAP_NAME_TEMPLATE = "4096-mixstack-100K-{id:02d}"
 # id of maps to generate (inclusive)
-MAP_ID_START = 1
-MAP_ID_END = 1
+MAP_ID_START = 2
+MAP_ID_END = 2
 
 # ARMY_N_STACKS_SAME = False  # same for both sides
 ARMY_N_STACKS_MIN = 2
 ARMY_N_STACKS_MAX = 7
 ARMY_N_STACKS_ENFORCE = False  # whether to fail if not all stacks are filled
 
-ARMY_VALUE_MIN = 300_000
-ARMY_VALUE_MAX = 300_000
+ARMY_VALUE_MIN = 100_000
+ARMY_VALUE_MAX = 100_000
 
 STACK_QTY_MAX = 1023
 
@@ -48,7 +48,7 @@ ARMY_VALUE_ERROR_MAX = 0.1
 
 # Max value for a single unit of the weakest creature type in the army
 # (this to allow rebalancing, i.e. avoid armies with 6+ tier units only)
-ARMY_WEAKEST_CREATURE_VALUE_MAX = 3000
+ARMY_WEAKEST_CREATURE_VALUE_MAX = 1000
 
 # Hero IDs are re-mapped when game starts
 # => use hero experience as a reference

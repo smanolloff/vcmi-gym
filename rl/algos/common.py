@@ -348,7 +348,11 @@ def setup_wandb(args, agent, src_file):
     if not args.skip_wandb_log_code:
         wandb.run.log_code(root=rl_root, include_fn=code_include_fn)
 
-    return wandb.watch(agent, log="all", log_graph=True, log_freq=1000)
+    # XXX: this will blow up with algos like MPPO-DNA which have many NNs
+    #      However, no model is logged at all if using just `agent`
+    #      => proper fix would be to accept a list of NNs and call wandb.watch
+    #         on each of them
+    return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
 
 
 def schedule_fn(schedule):

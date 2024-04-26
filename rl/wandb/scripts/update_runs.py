@@ -7,7 +7,7 @@ import wandb
 api = wandb.Api()
 eval_runs = api.runs(
     path="s-manolloff/vcmi-gym",
-    filters={"group": {"$regex": "evaluator"}}
+    filters={"group": {"$regex": "4096-mixstack"}}
 )
 
 for eval_run in eval_runs:
@@ -16,9 +16,7 @@ for eval_run in eval_runs:
     orig_run = api.run(f"s-manolloff/vcmi-gym/{orig_id}")
 
     # eval_run.tags = orig_run.tags + ["eval"]
-    eval_run.config = {
-        "orig_group": orig_run.group,
-        "orig_sweep": getattr(orig_run.sweep, "id", None)
-    }
+    eval_run.group = "4096-6stack"
+    eval_run.tags = ["Map-6stack-01", "StupidAI"]
 
     eval_run.save()

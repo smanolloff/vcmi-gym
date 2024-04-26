@@ -153,12 +153,12 @@ config = {
     # NN arch
     "network": {
         "features_extractor": [
-            # => (B, 11, 15, 86|769)
+            # => (B, 11, 15, 86|547)
             {"t": "Flatten", "start_dim": 2},
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 11]},
-            # => (B, 1, 11, 1290|11535)
+            # => (B, 1, 11, 1290|8205)
             # {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 86], "stride": [1, 86], "padding": 0},
-            {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 769], "stride": [1, 769], "padding": 0},
+            {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 547], "stride": [1, 547], "padding": 0},
             {"t": "Tanh"},
             # => (B, 32, 11, 15)
             {"t": "Flatten"},
@@ -194,7 +194,6 @@ config = {
     "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
     "num_envs": 1,
     "env": {
-        # "encoding_type": "float",
         "encoding_type": "default",
         "reward_dmg_factor": 5,
         "step_reward_fixed": -100,

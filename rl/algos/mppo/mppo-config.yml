@@ -1,12 +1,12 @@
 ---
 group_id: obs-mask
-run_name: "mppo float (baseline)"
+run_name: "mppo (baseline)"
 tags: ["Map-4096-mixstack", "StupidAI"]
 
 wandb_project: vcmi-gym
 run_id: ~
-resume: False
-overwrite: []
+resume: True
+overwrite: ["lr_schedule.start"]
 # overwrite: ["learning_rate", "weight_decay"]
 
 notes: ""
@@ -38,12 +38,12 @@ num_envs: 1
 
 network:
   features_extractor:
-    # => (B, 11, 15, 86|769)
+    # => (B, 11, 15, 86|547)
     - {t: "Flatten", start_dim: 2}
     - {t: "Unflatten", dim: 1, unflattened_size: [1, 11]}
-    # => (B, 1, 11, 1290|11535)
-    - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 86], stride: [1, 86], padding: 0}
-    # - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 769], stride: [1, 769], padding: 0}
+    # => (B, 1, 11, 1290|8205)
+    - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 547], stride: [1, 547], padding: 0}
+    # - {t: "Conv2d", in_channels: 1, out_channels: 32, kernel_size: [1, 547], stride: [1, 547], padding: 0}
     - {t: "Tanh"}
     # => (B, 32, 11, 15)
     - {t: "Flatten"}
@@ -64,7 +64,7 @@ clip_vloss: false
 ent_coef: 0.007
 gae_lambda: 0.8
 gamma: 0.8425
-lr_schedule: { mode: const, start: 0.00001, end: 1.0e-6, rate: 10 }
+lr_schedule: { mode: const, start: 5.0e-6, end: 1.0e-6, rate: 10 }
 max_grad_norm: 0.5
 norm_adv: true
 num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches
@@ -74,8 +74,7 @@ vf_coef: 1.2
 weight_decay: 0
 
 env:
-  encoding_type: "float"
-  # encoding_type: "default"
+  encoding_type: "default"
   reward_dmg_factor: 5
   step_reward_fixed: -100
   step_reward_mult: 1
