@@ -4,19 +4,7 @@
 #     pip3 freeze -r requirements.txt > requirements.lock
 #
 numpy==1.26.3
-stable_baselines3 ~= 2.1.0
-sb3-contrib ~= 2.1.0
-tensorboard
-tensorflow
-tqdm
-rich
 pyyaml
 ray == 2.9.0
-GPy
-scikit-learn
-json5
 wandb == 0.16.1
 gymnasium
-tyro
-torch==1.10.0
-
