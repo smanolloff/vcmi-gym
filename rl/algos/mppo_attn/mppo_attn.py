@@ -16,7 +16,7 @@
 # This file contains a modified version of CleanRL's PPO implementation:
 # https://github.com/vwxyzjn/cleanrl/blob/e421c2e50b81febf639fced51a69e2602593d50d/cleanrl/ppo.py
 
-from . import mppo
+from ..mppo import mppo
 
 from vcmi_gym.envs.v0.vcmi_env import (
     VcmiEnv,
