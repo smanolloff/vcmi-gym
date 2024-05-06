@@ -204,10 +204,10 @@ e.g. Moving to hex with ID=2 (X=2, Y=0) is described by the action `41`.
 bf = env.decode()
 
 # the numeric action for "move to hex 2":
-bf.get(2).action(Action.MOVE)
+bf.get(2).action(HexAction.MOVE)
 
 # the numeric action for "move to Y=8, X=12 and attack right"
-action = env.decode().get(8, 12).action(Action.AMOVE_R)
+action = env.decode().get(8, 12).action(HexAction.AMOVE_R)
 
 # execute the action
 env.step(action)
@@ -242,7 +242,7 @@ It is intended to be rendered in terminals with ANSI color code support,
 unicode support and monospaced font:
 
 ```python
-from vcmi_gym import VcmiEnv, Action
+from vcmi_gym import VcmiEnv
 
 env = VcmiEnv("gym/A2.vmap")
 env.reset()
@@ -260,13 +260,13 @@ env.render()
 If you want to test the env by playing manually, a convenient helper is provided:
 
 ```python
-from vcmi_gym import VcmiEnv, Action, TestHelper
+from vcmi_gym import VcmiEnv, HexAction, TestHelper
 
 env = VcmiEnv("gym/A2.vmap");
 h = TestHelper(env)
 
 h.wait()
-h.amove(2, 1, Action.AMOVE_R)
+h.amove(2, 1, HexAction.AMOVE_R)
 h.defend()
 # ... etc
 ```

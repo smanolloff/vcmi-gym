@@ -20,7 +20,7 @@
 #      in VcmiEnv's observation space
 #
 
-from .. import Action
+from .. import HexAction
 
 
 class TestHelper:
@@ -53,16 +53,16 @@ class TestHelper:
     # x: 1..15
     # y: 1..11
     def move(self, y, x):
-        a = self.battlefield.get(y, x).action(Action.MOVE)
+        a = self.battlefield.get(y, x).action(HexAction.MOVE)
         self._maybe_render(a)
 
     def shoot(self, y, x):
-        a = self.battlefield.get(y, x).action(Action.SHOOT)
+        a = self.battlefield.get(y, x).action(HexAction.SHOOT)
         self._maybe_render(a)
 
     def melee(self, y, x, direction):
         if isinstance(direction, str):
-            amove = getattr(Action, f"AMOVE_{direction}")
+            amove = getattr(HexAction, f"AMOVE_{direction}")
         else:
             amove = direction
 
@@ -78,5 +78,5 @@ class TestHelper:
                 if x.STACK_IS_ACTIVE:
                     if x.STACK_IS_WIDE and x.STACK_SIDE == 0:
                         x = self.battlefield.get(x.HEX_Y_COORD, x.HEX_X_COORD + 1)
-                    self._maybe_render(x.action(Action.MOVE))
+                    self._maybe_render(x.action(HexAction.MOVE))
                     return

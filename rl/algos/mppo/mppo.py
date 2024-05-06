@@ -29,7 +29,13 @@ import torch
 import torch.nn as nn
 # import tyro
 
-from vcmi_gym import VcmiEnv
+from vcmi_gym.envs.v0.vcmi_env import (
+    VcmiEnv,
+    Hex,
+    HexState,
+    Side,
+)
+
 from .. import common
 
 ENVS = []  # debug
@@ -191,6 +197,50 @@ class ResBlock(nn.Module):
 
     def forward(self, x):
         return x + self.block(x)
+
+
+class SelfAttention(nn.Module):
+    def __init__(self, edim):
+        super().__init__()
+        self.edim = edim
+        self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=1, batch_first=True)
+
+    def forward(self, b_obs):
+        assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
+
+        b_mask = torch.zeros((b_obs.shape[0], 165, 165), dtype=bool)
+        # => (B, 165, 165)
+
+        for b, obs in enumerate(b_obs):
+            # obs is (11, 15, e)
+            decoded_obs = [hex for row in VcmiEnv.decode_obs(obs.numpy()) for hex in row]
+
+            for iq, q in enumerate(decoded_obs):
+                for ik, k in enumerate(decoded_obs):
+                    b_mask[b][iq][ik] = self._qk_mask(q, k)
+
+        b_obs = b_obs.flatten(start_dim=1, end_dim=2)
+        # => (B, 165, e)
+
+        res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_mask, need_weights=False)
+        return res
+
+    """
+    q is the decoded Hex we are standing at (the POV)
+    k is the decoded Hex we are looking at
+
+    We (as `q`) must determine how much attention to pay to `k`
+
+    XXX: initial version returns a bool instead of a number
+    """
+    def _qk_mask(self, q: Hex, k: Hex):
+        if q.HEX_STATE != HexState.OCCUPIED:
+            return False
+
+        if q.STACK_SIDE == Side.LEFT:
+            return any(getattr(k, f"HEX_ACTION_MASK_FOR_L_STACK_{q.STACK_SLOT}") > 0)
+        else:
+            return any(getattr(k, f"HEX_ACTION_MASK_FOR_R_STACK_{q.STACK_SLOT}") > 0)
 
 
 class AgentNN(nn.Module):
@@ -713,7 +763,7 @@ def debug_args():
         skip_wandb_init=False,
         skip_wandb_log_code=False,
         env=EnvArgs(
-            encoding_type="float",
+            encoding_type="default",
             max_steps=500,
             reward_dmg_factor=5,
             vcmi_loglevel_global="error",
@@ -733,9 +783,13 @@ def debug_args():
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
             features_extractor=[
-                dict(t="Flatten", start_dim=2),
-                dict(t="Unflatten", dim=1, unflattened_size=[1, 11]),
-                dict(t="Conv2d", in_channels=1, out_channels=32, kernel_size=[1, 86], stride=[1, 86], padding=0),
+                # dict(t="Flatten", start_dim=2),
+                # dict(t="Unflatten", dim=1, unflattened_size=[1, 11]),
+                # dict(t="Conv2d", in_channels=1, out_channels=32, kernel_size=[1, 86], stride=[1, 86], padding=0),
+                dict(t="SelfAttention", edim=547),
+                dict(t="Flatten"),
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 165*547]),
+                dict(t="Conv1d", in_channels=1, out_channels=32, kernel_size=547, stride=547, padding=0),
                 dict(t="LeakyReLU"),
                 dict(t="Flatten"),
                 dict(t="Linear", in_features=5280, out_features=1024),

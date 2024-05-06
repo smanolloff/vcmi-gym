@@ -137,11 +137,11 @@ class Hex(namedtuple("Hex", ATTRMAP_DEFAULT.keys())):
         return N_NONHEX_ACTIONS - ACTION_OFFSET + n*N_HEX_ACTIONS + hexaction
 
     def actions(self):
-        return [k for k, v in Action.__dict__.items() if self.HEX_ACTION_MASK_FOR_ACT_STACK[v]]
+        return [k for k, v in HexAction.__dict__.items() if self.HEX_ACTION_MASK_FOR_ACT_STACK[v]]
 
 
-Action = SimpleNamespace(**HEXACTMAP)
-State = SimpleNamespace(**HEXSTATEMAP)
+HexAction = SimpleNamespace(**HEXACTMAP)
+HexState = SimpleNamespace(**HEXSTATEMAP)
 MeleeDistance = SimpleNamespace(**MELEEDISTMAP)
 ShootDistance = SimpleNamespace(**SHOOTDISTMAP)
 DmgMod = SimpleNamespace(**DMGMODMAP)

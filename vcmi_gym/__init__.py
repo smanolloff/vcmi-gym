@@ -15,14 +15,14 @@
 # =============================================================================
 
 import gymnasium
-from .envs.v0.vcmi_env import VcmiEnv, Hex, State, Action, ShootDistance, MeleeDistance, DmgMod, Side, InfoDict
+from .envs.v0.vcmi_env import VcmiEnv, Hex, HexState, HexAction, ShootDistance, MeleeDistance, DmgMod, Side, InfoDict
 from .tools.test_helper import TestHelper
 
 all = [
     VcmiEnv,
     Hex,
-    State,
-    Action,
+    HexState,
+    HexAction,
     MeleeDistance,
     ShootDistance,
     DmgMod,
