@@ -99,14 +99,14 @@ void init(std::string encoding, MMAI::Export::Side side, std::string gymdir, std
 }
 
 void ConnectorLoader_initAttacker(std::string encoding, std::string gymdir, std::string modelpath) {
-    auto side = MMAI::Export::Side::ATTACKER;
-    LOG("Initializing model for ATTACKER (#" + std::to_string(static_cast<int>(side)) + ")");
+    auto side = MMAI::Export::Side::LEFT;
+    LOG("Initializing model for LEFT (#" + std::to_string(static_cast<int>(side)) + ")");
     init(encoding, side, gymdir, modelpath);
 }
 
 void ConnectorLoader_initDefender(std::string encoding, std::string gymdir, std::string modelpath) {
-    auto side = MMAI::Export::Side::DEFENDER;
-    LOG("Initializing model for DEFENDER (#" + std::to_string(static_cast<int>(side)) + ")");
+    auto side = MMAI::Export::Side::RIGHT;
+    LOG("Initializing model for RIGHT (#" + std::to_string(static_cast<int>(side)) + ")");
     init(encoding, side, gymdir, modelpath);
 }
 
@@ -177,9 +177,9 @@ MMAI::Export::Action getAction(MMAI::Export::Side side, const MMAI::Export::Resu
 
 
 MMAI::Export::Action ConnectorLoader_getActionDefender(const MMAI::Export::Result* r) {
-    return getAction(MMAI::Export::Side::DEFENDER, r);
+    return getAction(MMAI::Export::Side::RIGHT, r);
 }
 
 MMAI::Export::Action ConnectorLoader_getActionAttacker(const MMAI::Export::Result* r) {
-    return getAction(MMAI::Export::Side::ATTACKER, r);
+    return getAction(MMAI::Export::Side::LEFT, r);
 }

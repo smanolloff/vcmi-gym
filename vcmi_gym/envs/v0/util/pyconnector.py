@@ -47,6 +47,7 @@ HEXSTATEMAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enu
 DMGMODMAP = types.MappingProxyType(OrderedDict([(mod, i) for i, mod in enumerate(connexport.get_dmgmods())]))
 SHOOTDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(connexport.get_shootdistances())]))
 MELEEDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(connexport.get_meleedistances())]))
+SIDEMAP = types.MappingProxyType(OrderedDict([("LEFT", connexport.get_side_left()), ("RIGHT", connexport.get_side_right())]))
 
 ERRMAP = connexport.get_error_mapping()
 ERRSIZE = len(ERRMAP)

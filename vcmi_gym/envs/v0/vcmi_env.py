@@ -36,6 +36,7 @@ from .util.pyconnector import (
     MELEEDISTMAP,
     SHOOTDISTMAP,
     DMGMODMAP,
+    SIDEMAP,
     N_NONHEX_ACTIONS,
     N_HEX_ACTIONS,
     N_ACTIONS,
@@ -140,6 +141,11 @@ class Hex(namedtuple("Hex", ATTRMAP_DEFAULT.keys())):
 
 
 Action = SimpleNamespace(**HEXACTMAP)
+State = SimpleNamespace(**HEXSTATEMAP)
+MeleeDistance = SimpleNamespace(**MELEEDISTMAP)
+ShootDistance = SimpleNamespace(**SHOOTDISTMAP)
+DmgMod = SimpleNamespace(**DMGMODMAP)
+Side = SimpleNamespace(**SIDEMAP)
 
 
 class Battlefield(list):

@@ -29,6 +29,8 @@ constexpr int get_state_size_default_one_hex() { return STATE_SIZE_DEFAULT_ONE_H
 constexpr int get_state_size_float() { return STATE_SIZE_FLOAT; }
 constexpr int get_state_size_float_one_hex() { return STATE_SIZE_FLOAT_ONE_HEX; }
 constexpr int get_state_value_na() { return STATE_VALUE_NA; }
+constexpr int get_side_left() { return static_cast<int>(Side::LEFT); }
+constexpr int get_side_right() { return static_cast<int>(Side::RIGHT); }
 constexpr auto get_encoding_type_default() { return STATE_ENCODING_DEFAULT; }
 constexpr auto get_encoding_type_float() { return STATE_ENCODING_FLOAT; }
 
@@ -287,6 +289,8 @@ PYBIND11_MODULE(connexport, m) {
         m.def("get_state_value_na", &get_state_value_na);
         m.def("get_encoding_type_default", &get_encoding_type_default);
         m.def("get_encoding_type_float", &get_encoding_type_float);
+        m.def("get_side_left", &get_side_left);
+        m.def("get_side_right", &get_side_right);
         m.def("get_error_mapping", &get_error_mapping, "Get available error names and flags");
         m.def("get_dmgmods", &get_dmgmods, "Get a list of the DmgMod enum value names");
         m.def("get_shootdistances", &get_shootdistances, "Get a list of the ShootDistance enum value names");

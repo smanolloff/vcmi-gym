@@ -8,3 +8,4 @@ pyyaml
 ray == 2.9.0
 wandb == 0.16.1
 gymnasium
+torch == 2.1.2

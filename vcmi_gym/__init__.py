@@ -8,20 +8,25 @@
 #    http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
+# distanceributed under the License is distanceributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =============================================================================
 
 import gymnasium
-from .envs.v0.vcmi_env import VcmiEnv, Hex, Action, InfoDict
+from .envs.v0.vcmi_env import VcmiEnv, Hex, State, Action, ShootDistance, MeleeDistance, DmgMod, Side, InfoDict
 from .tools.test_helper import TestHelper
 
 all = [
     VcmiEnv,
     Hex,
+    State,
     Action,
+    MeleeDistance,
+    ShootDistance,
+    DmgMod,
+    Side,
     InfoDict,
     TestHelper,
 ]
