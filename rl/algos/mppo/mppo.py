@@ -31,9 +31,8 @@ import torch.nn as nn
 
 from vcmi_gym.envs.v0.vcmi_env import (
     VcmiEnv,
-    Hex,
-    HexState,
-    Side,
+    ATTRMAP_DEFAULT,
+    STATE_VALUE_NA
 )
 
 from .. import common
@@ -208,32 +207,40 @@ class SelfAttention(nn.Module):
     def forward(self, b_obs):
         assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
 
-        b_mask = torch.zeros((b_obs.shape[0], 165, 165), dtype=bool)
+        b_mask = torch.ones((b_obs.shape[0], 165, 165), dtype=bool, device=b_obs.device)
         # => (B, 165, 165)
-
-        for b, obs in enumerate(b_obs):
-            # obs is (11, 15, e)
-            decoded_obs = [hex for row in VcmiEnv.decode_obs(obs.numpy()) for hex in row]
-
-            for iq, q in enumerate(decoded_obs):
-                for ik, k in enumerate(decoded_obs):
-                    b_mask[b][iq][ik] = self._qk_mask(q, k)
 
         b_obs = b_obs.flatten(start_dim=1, end_dim=2)
         # => (B, 165, e)
 
+        _, stackside_offset, stackside_n, _ = ATTRMAP_DEFAULT["STACK_SIDE"]
+        stackslot_enctype, stackslot_offset, stackslot_n, _ = ATTRMAP_DEFAULT["STACK_SLOT"]
+
+        for b, obs in enumerate(b_obs):
+            # obs is (165, e)
+            for iq, q in enumerate(obs):
+                # no need to decode STACK_SIDE: it is either NA, =0 (L) or >0 (R)
+                q_side = q[stackside_offset:][:stackside_n]
+
+                if q_side == STATE_VALUE_NA:
+                    continue
+
+                # assert stackslot_enctype == "CATEGORICAL"
+                q_slot = q[stackslot_offset:][:stackslot_n].argmax()
+
+                if q_side == 0:
+                    _, mask_offset, mask_n, _ = ATTRMAP_DEFAULT[f"HEX_ACTION_MASK_FOR_L_STACK_{q_slot}"]
+                else:
+                    _, mask_offset, mask_n, _ = ATTRMAP_DEFAULT[f"HEX_ACTION_MASK_FOR_R_STACK_{q_slot}"]
+
+                for ik, k in enumerate(obs):
+                    b_mask[b][iq][ik] = np.any(k[mask_offset:][:mask_n] <= 0)
+
+
         res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_mask, need_weights=False)
         return res
 
-    """
-    q is the decoded Hex we are standing at (the POV)
-    k is the decoded Hex we are looking at
-
-    We (as `q`) must determine how much attention to pay to `k`
-
-    XXX: initial version returns a bool instead of a number
-    """
-    def _qk_mask(self, q: Hex, k: Hex):
+    def _qk_mask(self, q, k):
         if q.HEX_STATE != HexState.OCCUPIED:
             return False
 
