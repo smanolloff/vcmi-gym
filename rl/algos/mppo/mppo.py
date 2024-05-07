@@ -207,7 +207,7 @@ class SelfAttention(nn.Module):
     def forward(self, b_obs):
         assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
 
-        b_mask = torch.ones((b_obs.shape[0], 165, 165), dtype=bool, device=b_obs.device)
+        b_mask = torch.full((b_obs.shape[0], 165, 165), -1e9, device=b_obs.device)
         # => (B, 165, 165)
 
         b_obs = b_obs.flatten(start_dim=1, end_dim=2)
@@ -234,8 +234,8 @@ class SelfAttention(nn.Module):
                     _, mask_offset, mask_n, _ = ATTRMAP_DEFAULT[f"HEX_ACTION_MASK_FOR_R_STACK_{q_slot}"]
 
                 for ik, k in enumerate(obs):
-                    b_mask[b][iq][ik] = np.any(k[mask_offset:][:mask_n] <= 0)
-
+                    if torch.any(k[mask_offset:][:mask_n] > 0):
+                        b_mask[b][iq][ik] = 0
 
         res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_mask, need_weights=False)
         return res
