@@ -67,7 +67,9 @@ int main() {
         actmask[i] = (i % 2 == 0);
     }
 
-    auto result = MMAI::Export::Result(state, actmask, MMAI::Export::Side(0), 0, 0, 0, 0, 0, 0, 0, 0);
+    auto attnmasks = MMAI::Export::AttnMasks{};
+
+    auto result = MMAI::Export::Result(state, actmask, attnmasks, MMAI::Export::Side(0), 0, 0, 0, 0, 0, 0, 0, 0);
     printf("IN MAIN: GOT ACTION: %d\n", f_getAction(&result));
     return 0;
 }

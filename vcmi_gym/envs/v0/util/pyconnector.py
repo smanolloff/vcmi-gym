@@ -58,6 +58,7 @@ PyStateDefault = ctypes.c_float * STATE_SIZE_DEFAULT
 PyStateFloat = ctypes.c_float * STATE_SIZE_FLOAT
 PyAction = ctypes.c_int
 PyActmask = ctypes.c_bool * N_ACTIONS
+PyAttnmasks = ctypes.c_float * (165*165)
 
 TRACE = True
 MAXLEN = 80
@@ -91,6 +92,7 @@ def tracelog(func, maxlen=MAXLEN):
 
 COMMON_FIELDS = [
     ("actmask", PyActmask),
+    ("attnmasks", PyAttnmasks),
     ("errmask", ctypes.c_ushort),
     ("side", ctypes.c_int),
     ("dmg_dealt", ctypes.c_int),
@@ -119,6 +121,7 @@ class PyResult():
     def __init__(self, cres):
         self.state = np.ctypeslib.as_array(cres.state).reshape(11, 15, -1)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
+        self.attnmasks = np.ctypeslib.as_array(cres.attnmasks)
         self.errmask = cres.errmask
         self.side = cres.side
         self.dmg_dealt = cres.dmg_dealt
@@ -329,6 +332,7 @@ class PyConnector():
     def set_v_result_act(self, result):
         self.v_result_act.state = np.ctypeslib.as_ctypes(result.get_state())
         self.v_result_act.actmask = np.ctypeslib.as_ctypes(result.get_actmask())
+        self.v_result_act.attnmasks = np.ctypeslib.as_ctypes(result.get_attnmasks())
         self.v_result_act.errmask = ctypes.c_ushort(result.get_errmask())
         self.v_result_act.side = ctypes.c_int(result.get_side())
         self.v_result_act.dmg_dealt = ctypes.c_int(result.get_dmg_dealt())

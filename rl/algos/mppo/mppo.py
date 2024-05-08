@@ -207,7 +207,7 @@ class SelfAttention(nn.Module):
     def forward(self, b_obs):
         assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
 
-        b_mask = torch.full((b_obs.shape[0], 165, 165), -1e9, device=b_obs.device)
+        b_mask = torch.full((b_obs.shape[0], 165, 165), torch.finfo(torch.float32).min, device=b_obs.device)
         # => (B, 165, 165)
 
         b_obs = b_obs.flatten(start_dim=1, end_dim=2)

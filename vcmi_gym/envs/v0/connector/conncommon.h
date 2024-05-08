@@ -38,12 +38,14 @@ namespace py = pybind11;
 
 using P_State = py::array_t<float>;
 using P_ActMask = py::array_t<bool>;
+using P_AttnMasks = py::array_t<float>;
 
 struct P_Result {
     P_Result(
         MMAI::Export::ResultType type_,
         P_State state_,
         P_ActMask actmask_,
+        P_AttnMasks attnmasks_,
         MMAI::Export::ErrMask errmask_,
         MMAI::Export::Side side_,
         int dmg_dealt_,
@@ -61,6 +63,7 @@ struct P_Result {
     : type(type_),
         errmask(errmask_),
         actmask(actmask_),
+        attnmasks(attnmasks_),
         state(state_),
         side(static_cast<int>(side_)),
         dmg_dealt(dmg_dealt_),
@@ -78,6 +81,7 @@ struct P_Result {
     const MMAI::Export::ResultType type;
     const py::array_t<float> state;
     const py::array_t<bool> actmask;
+    const py::array_t<float> attnmasks;
     const MMAI::Export::ErrMask errmask;
     const int side;
     const int dmg_dealt;
@@ -94,6 +98,7 @@ struct P_Result {
 
     const py::array_t<float> &get_state() const { return state; }
     const py::array_t<bool> &get_actmask() const { return actmask; }
+    const py::array_t<float> &get_attnmasks() const { return attnmasks; }
     const MMAI::Export::ErrMask &get_errmask() const { return errmask; }
     const int &get_side() const { return side; }
     const int &get_dmg_dealt() const { return dmg_dealt; }

@@ -362,6 +362,9 @@ class VcmiEnv(gym.Env):
     def action_mask(self):
         return self.result.actmask[ACTION_OFFSET:]
 
+    def attn_masks(self):
+        return self.result.attnmasks
+
     def decode(self):
         return VcmiEnv.decode_obs(self.result.state)
 

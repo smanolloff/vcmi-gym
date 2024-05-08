@@ -86,8 +86,13 @@ const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
     for (int i=0; i < r->actmask.size(); i++)
         pammd[i] = r->actmask[i];
 
+    auto patm = P_AttnMasks(r->attnmasks.size());
+    auto patmmd = patm.mutable_data();
+    for (int i=0; i < r->attnmasks.size(); i++)
+        patmmd[i] = r->attnmasks[i];
+
     return P_Result(
-         r->type, ps, pam, r->errmask, r->side,
+         r->type, ps, pam, patm, r->errmask, r->side,
          r->dmgDealt, r->dmgReceived,
          r->unitsLost, r->unitsKilled,
          r->valueLost, r->valueKilled,
@@ -324,6 +329,7 @@ PYBIND11_MODULE(connector, m) {
     py::class_<P_Result>(m, "P_Result")
         .def("get_state", &P_Result::get_state)
         .def("get_actmask", &P_Result::get_actmask)
+        .def("get_attnmasks", &P_Result::get_attnmasks)
         .def("get_errmask", &P_Result::get_errmask)
         .def("get_side", &P_Result::get_side)
         .def("get_dmg_dealt", &P_Result::get_dmg_dealt)
