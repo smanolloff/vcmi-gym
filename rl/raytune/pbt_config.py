@@ -7,17 +7,10 @@ config = {
         "target_ep_rew_mean": 3_000_000,  # impossible target
         "wandb_project": "vcmi-gym",
         "perturbation_interval": 1,
-
-        # Mac
         "synch": True,
         "time_attr": "training_iteration",  # XXX: don't use time_total_s
+
         "population_size": 4,
-        "max_concurrency": 4,
-        # PC
-        # "synch": False,
-        # "time_attr": "time_total_s",  # "training_iteration" | "time_total_s"
-        # "population_size": 4,
-        # "max_concurrency": 4,
 
         # """
         # Parameters are transferred from the top quantile_fraction
