@@ -40,6 +40,7 @@ class Connector {
     const std::string gymdir;
     const std::string mapname;
     const int randomCombat;
+    const int swapSides;
     const std::string loglevelGlobal;
     const std::string loglevelAI;
     const std::string attacker;
@@ -63,6 +64,7 @@ public:
         const std::string gymdir,
         const std::string mapname,
         const int randomCombat,
+        const int swapSides,
         const std::string loglevelGlobal,
         const std::string loglevelAI,
         const std::string attacker,
