@@ -22,7 +22,7 @@ opponent_load_file: ~
 success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
-mapside: "attacker"  # attacker/defender/both
+mapside: "attacker"  # attacker/defender
 mapmask: "gym/generated/4096/4096-mixstack-100K-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
@@ -82,6 +82,7 @@ env:
   reward_clip_tanh_army_frac: 1
   reward_army_value_ref: 500
   random_combat: 1
+  swap_sides: 0
 
 env_wrappers: []
 logparams: {}

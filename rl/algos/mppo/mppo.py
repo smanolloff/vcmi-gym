@@ -68,6 +68,7 @@ class EnvArgs:
     consecutive_error_reward_factor: Optional[int] = None
     vcmi_timeout: int = 5
     random_combat: int = 1
+    swap_sides: int = 0
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
 
@@ -133,7 +134,7 @@ class Args:
     success_rate_target: Optional[float] = None
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
-    mapside: str = "both"
+    mapside: str = "attacker"
     mapmask: str = "gym/A1.vmap"
     randomize_maps: bool = False
     permasave_every: int = 7200  # seconds; no retention
@@ -727,7 +728,7 @@ def debug_args():
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
-        mapside="defender",
+        mapside="attacker",
         mapmask="gym/A1.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
@@ -772,6 +773,7 @@ def debug_args():
             step_reward_mult=1,
             term_reward_mult=0,
             random_combat=0,
+            swap_sides=0,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
 

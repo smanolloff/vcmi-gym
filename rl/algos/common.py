@@ -58,19 +58,8 @@ def create_venv(env_cls, args, map_swaps):
     print("allmaps: maps/%s: %s" % (args.mapmask, all_maps))
     map_offset = None
 
-    assert args.mapside in ["attacker", "defender", "both"]
-
-    if args.mapside == "both":
-        sides = ["attacker", "defender"]
-    else:
-        sides = [args.mapside]
-
-    if args.num_envs == 1:
-        n_maps = 1
-    else:
-        assert args.num_envs % len(sides) == 0
-        assert args.num_envs <= len(all_maps) * len(sides)
-        n_maps = args.num_envs // len(sides)
+    assert args.mapside in ["attacker", "defender"]
+    n_maps = args.num_envs
 
     if args.randomize_maps:
         maps = random.sample(all_maps, n_maps)
@@ -86,9 +75,7 @@ def create_venv(env_cls, args, map_swaps):
 
         assert len(maps) == n_maps
 
-    # pairs = [[("attacker", m), ("defender", m)] for m in maps]
-    pairs = [[(s, m) for s in sides] for m in maps]
-    pairs = [x for y in pairs for x in y]  # aka. pairs.flatten(1)...
+    pairs = [(args.mapside, m) for m in maps]
     state = {"n": 0}
     lock = threading.RLock()
 

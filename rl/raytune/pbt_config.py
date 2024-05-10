@@ -194,7 +194,8 @@ config = {
         "term_reward_mult": 0,
         "reward_clip_tanh_army_frac": 1,
         "reward_army_value_ref": 500,
-        "random_combat": 1
+        "random_combat": 1,
+        "swap_sides": 0
     },
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
