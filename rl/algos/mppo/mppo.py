@@ -77,6 +77,7 @@ class EnvArgs:
 
 @dataclass
 class NetworkArgs:
+    attention: dict = field(default_factory=dict)
     features_extractor: list[dict] = field(default_factory=list)
     actor: dict = field(default_factory=dict)
     critic: dict = field(default_factory=dict)
@@ -204,40 +205,14 @@ class SelfAttention(nn.Module):
         self.edim = edim
         self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=1, batch_first=True)
 
-    def forward(self, b_obs):
-        assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
-
-        b_mask = torch.full((b_obs.shape[0], 165, 165), torch.finfo(torch.float32).min, device=b_obs.device)
-        # => (B, 165, 165)
+    def forward(self, b_obs, b_masks):
+        assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong obs shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
+        assert b_masks.shape == (b_masks.shape[0], 165, 165), f"wrong b_masks shape: {b_masks.shape} != ({b_masks.shape[0]}, 165, 165)"
 
         b_obs = b_obs.flatten(start_dim=1, end_dim=2)
         # => (B, 165, e)
 
-        _, stackside_offset, stackside_n, _ = ATTRMAP_DEFAULT["STACK_SIDE"]
-        stackslot_enctype, stackslot_offset, stackslot_n, _ = ATTRMAP_DEFAULT["STACK_SLOT"]
-
-        for b, obs in enumerate(b_obs):
-            # obs is (165, e)
-            for iq, q in enumerate(obs):
-                # no need to decode STACK_SIDE: it is either NA, =0 (L) or >0 (R)
-                q_side = q[stackside_offset:][:stackside_n]
-
-                if q_side == STATE_VALUE_NA:
-                    continue
-
-                # assert stackslot_enctype == "CATEGORICAL"
-                q_slot = q[stackslot_offset:][:stackslot_n].argmax()
-
-                if q_side == 0:
-                    _, mask_offset, mask_n, _ = ATTRMAP_DEFAULT[f"HEX_ACTION_MASK_FOR_L_STACK_{q_slot}"]
-                else:
-                    _, mask_offset, mask_n, _ = ATTRMAP_DEFAULT[f"HEX_ACTION_MASK_FOR_R_STACK_{q_slot}"]
-
-                for ik, k in enumerate(obs):
-                    if torch.any(k[mask_offset:][:mask_n] > 0):
-                        b_mask[b][iq][ik] = 0
-
-        res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_mask, need_weights=False)
+        res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
         return res
 
     def _qk_mask(self, q, k):
@@ -267,6 +242,12 @@ class AgentNN(nn.Module):
         # 1 nonhex action (RETREAT) + 165 hexes*14 actions each
         assert action_space.n == 1 + (165*14)
 
+        if network.attention:
+            layer = AgentNN.build_layer(network.attention)
+            self.attention = common.layer_init(layer)
+        else:
+            self.attention = None
+
         self.features_extractor = torch.nn.Sequential()
         for spec in network.features_extractor:
             layer = AgentNN.build_layer(spec)
@@ -278,7 +259,9 @@ class AgentNN(nn.Module):
     def get_value(self, x):
         return self.critic(self.features_extractor(x))
 
-    def get_action_and_value(self, x, mask, action=None, deterministic=False):
+    def get_action_and_value(self, x, mask, attn_masks=None, action=None, deterministic=False):
+        if self.attention:
+            x = self.attention(x, attn_masks)
         features = self.features_extractor(x)
         value = self.critic(features)
         action_logits = self.actor(features)
@@ -461,12 +444,14 @@ def main(args, agent_cls=Agent):
         # XXX: the start=0 requirement is needed for SB3 compat
         assert act_space.start == 0
         masks = torch.zeros((args.num_steps, args.num_envs, act_space.n), dtype=torch.bool).to(device)
+        attnmasks = torch.zeros((args.num_steps, args.num_envs, 165, 165)).to(device)
 
         # TRY NOT TO MODIFY: start the game
         next_obs, _ = envs.reset(seed=args.seed)
         next_obs = torch.Tensor(next_obs).to(device)
         next_done = torch.zeros(args.num_envs).to(device)
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
+        next_attnmasks = torch.as_tensor(np.array(envs.unwrapped.call("attn_masks"))).to(device)
 
         progress = 0
         map_rollouts = 0
@@ -489,10 +474,11 @@ def main(args, agent_cls=Agent):
                 obs[step] = next_obs
                 dones[step] = next_done
                 masks[step] = next_mask
+                attnmasks[step] = next_attnmasks
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    action, logprob, _, value = agent.NN.get_action_and_value(next_obs, next_mask)
+                    action, logprob, _, value = agent.NN.get_action_and_value(next_obs, next_mask, attn_masks=next_attnmasks)
                     values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
@@ -503,6 +489,7 @@ def main(args, agent_cls=Agent):
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
+                next_attnmasks = torch.as_tensor(np.array(envs.unwrapped.call("attn_masks"))).to(device)
 
                 # XXX SIMO: SB3 does bootstrapping for truncated episodes here
                 # https://github.com/DLR-RM/stable-baselines3/pull/658
@@ -542,6 +529,7 @@ def main(args, agent_cls=Agent):
             b_logprobs = logprobs.reshape(-1)
             b_actions = actions.reshape((-1,) + act_space.shape)
             b_masks = masks.reshape((-1,) + (act_space.n,))
+            b_attn_masks = attnmasks.reshape((-1,) + (165, 165))
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
@@ -561,7 +549,8 @@ def main(args, agent_cls=Agent):
                     _, newlogprob, entropy, newvalue = agent.NN.get_action_and_value(
                         b_obs[mb_inds],
                         b_masks[mb_inds],
-                        b_actions.long()[mb_inds]
+                        attn_masks=b_attn_masks[mb_inds],
+                        action=b_actions.long()[mb_inds]
                     )
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
@@ -690,6 +679,7 @@ def main(args, agent_cls=Agent):
                 next_obs = torch.Tensor(next_obs).to(device)
                 next_done = torch.zeros(args.num_envs).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
+                next_attnmasks = torch.as_tensor(np.array(envs.unwrapped.call("attn_masks"))).to(device)
 
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
                 wandb_log({
@@ -737,7 +727,7 @@ def debug_args():
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
-        mapside="both",
+        mapside="defender",
         mapmask="gym/A1.vmap",
         randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
@@ -749,7 +739,7 @@ def debug_args():
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
         num_envs=1,
-        num_steps=4,
+        num_steps=64,
         # num_steps=256,
         gamma=0.8,
         gae_lambda=0.8,
@@ -789,11 +779,8 @@ def debug_args():
         env_wrappers=[],
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
+            #attention=dict(t="SelfAttention", edim=547),
             features_extractor=[
-                # dict(t="Flatten", start_dim=2),
-                # dict(t="Unflatten", dim=1, unflattened_size=[1, 11]),
-                # dict(t="Conv2d", in_channels=1, out_channels=32, kernel_size=[1, 86], stride=[1, 86], padding=0),
-                dict(t="SelfAttention", edim=547),
                 dict(t="Flatten"),
                 dict(t="Unflatten", dim=1, unflattened_size=[1, 165*547]),
                 dict(t="Conv1d", in_channels=1, out_channels=32, kernel_size=547, stride=547, padding=0),

@@ -121,7 +121,7 @@ class PyResult():
     def __init__(self, cres):
         self.state = np.ctypeslib.as_array(cres.state).reshape(11, 15, -1)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
-        self.attnmasks = np.ctypeslib.as_array(cres.attnmasks)
+        self.attnmasks = np.ctypeslib.as_array(cres.attnmasks).reshape(165, 165)
         self.errmask = cres.errmask
         self.side = cres.side
         self.dmg_dealt = cres.dmg_dealt
