@@ -6,7 +6,7 @@ tags: ["Map-4096-mixstack", "StupidAI"]
 wandb_project: vcmi-gym
 run_id: ~
 resume: True
-overwrite: ["lr_schedule.start"]
+overwrite: ["lr_schedule.start", "gamma"]
 # overwrite: ["learning_rate", "weight_decay"]
 
 notes: ""
@@ -63,8 +63,8 @@ clip_coef: 0.4
 clip_vloss: false
 ent_coef: 0.007
 gae_lambda: 0.8
-gamma: 0.8425
-lr_schedule: { mode: const, start: 5.0e-6, end: 1.0e-6, rate: 10 }
+gamma: 0.92
+lr_schedule: { mode: const, start: 5.0e-7, end: 1.0e-6, rate: 10 }
 max_grad_norm: 0.5
 norm_adv: true
 num_minibatches: 2   # minibatch_size = rollout_buffer/num_minibatches

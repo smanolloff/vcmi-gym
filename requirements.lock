@@ -1,18 +1,12 @@
+#
+# XXX: ALWAYS save a lock file when modifying requirements:
+#     pip3 freeze -r requirements.txt > requirements.lock
 numpy==1.26.3
-stable-baselines3==2.1.0
-sb3-contrib==2.1.0
-tensorboard==2.14.0
-tensorflow==2.14.0
-tqdm==4.66.1
-rich==13.6.0
 PyYAML==6.0.1
 ray==2.9.0
-GPy==1.10.0
-scikit-learn==1.3.2
-json5==0.9.14
 wandb==0.16.1
 gymnasium==0.29.1
-tyro==0.7.3
+
 ## The following requirements were added by pip freeze:
 absl-py==2.0.0
 aiosignal==1.3.1
@@ -43,11 +37,13 @@ GitPython==3.1.40
 google-auth==2.23.3
 google-auth-oauthlib==1.0.0
 google-pasta==0.2.0
+GPy==1.10.0
 grpcio==1.59.2
 h5py==3.10.0
 idna==3.4
 Jinja2==3.1.3
 joblib==1.3.2
+json5==0.9.14
 jsonschema==4.19.2
 jsonschema-specifications==2023.7.1
 keras==2.14.0
@@ -69,6 +65,7 @@ pandas==2.2.0
 paramz==0.9.5
 pillow==10.2.0
 pip-tools==7.3.0
+pipdeptree==2.16.2
 protobuf==4.23.4
 psutil==5.9.7
 pyarrow==13.0.0
@@ -82,17 +79,23 @@ pytz==2023.3.post1
 referencing==0.30.2
 requests==2.31.0
 requests-oauthlib==1.3.1
+rich==13.6.0
 rpds-py==0.10.6
 rsa==4.9
+sb3-contrib==2.1.0
+scikit-learn==1.3.2
 scipy==1.11.3
 sentry-sdk==1.39.1
 setproctitle==1.3.3
 shtab==1.6.5
 six==1.16.0
 smmap==5.0.1
+stable-baselines3==2.1.0
 sympy==1.12
+tensorboard==2.14.0
 tensorboard-data-server==0.7.2
 tensorboardX==2.6.2.2
+tensorflow==2.14.0
 tensorflow-estimator==2.14.0
 tensorflow-io-gcs-filesystem==0.34.0
 tensorflow-macos==2.14.0
@@ -100,7 +103,9 @@ termcolor==2.4.0
 threadpoolctl==3.2.0
 tomli==2.0.1
 torch==2.1.2
+tqdm==4.66.1
 typing_extensions==4.9.0
+tyro==0.7.3
 tzdata==2023.4
 urllib3==2.1.0
 Werkzeug==3.0.0

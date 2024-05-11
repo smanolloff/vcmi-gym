@@ -5,18 +5,14 @@ import wandb
 #
 
 api = wandb.Api()
-eval_runs = api.runs(
+runs = api.runs(
     path="s-manolloff/vcmi-gym",
-    filters={"group": {"$regex": "4096-mixstack"}}
+    #filters={"group": {"$regex": "PBT-mppo-obsmask-20240425_182811"}}
+    filters={"name": {"$regex": "eval-(7cb19_00000|41540_00000)"}}
 )
 
-for eval_run in eval_runs:
-    print(f"Updating run {eval_run.id}...")
-    orig_id = eval_run.id.removeprefix("eval-")
-    orig_run = api.run(f"s-manolloff/vcmi-gym/{orig_id}")
-
-    # eval_run.tags = orig_run.tags + ["eval"]
-    eval_run.group = "4096-6stack"
-    eval_run.tags = ["Map-6stack-01", "StupidAI"]
-
-    eval_run.save()
+for run in runs:
+    print(f"Updating run {run.id}...")
+    #run.tags = ["Map-4096-mixstack", "StupidAI"]
+    run.tags = [tag for tag in run.tags if tag not in ["MPPO_DNA"]]
+    run.save()
