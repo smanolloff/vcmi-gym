@@ -25,3 +25,8 @@
 
 # NN Arch
 - ResNet
+
+# side
+- side-attacker
+- side-defender
+- side-both

@@ -10,7 +10,7 @@ config = {
         "synch": True,
         "time_attr": "training_iteration",  # XXX: don't use time_total_s
 
-        "population_size": 4,
+        "population_size": 6,
 
         # """
         # Parameters are transferred from the top quantile_fraction
@@ -95,14 +95,14 @@ config = {
     #   = 6K episodes (good for 1K avg metric)
     #   = ~30..60 min (Mac)
     # "vsteps_total": 150_000,
-    "seconds_total": 7200,
+    "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    "agent_load_file": "data/PBT-mppo-obsmask-20240427_002519/7cb19_00000/checkpoint_000072/agent.pt",
-    # "agent_load_file": None,
+    # "agent_load_file": "data/PBT-mppo-obsmask-20240427_002519/7cb19_00000/checkpoint_000072/agent.pt",
+    "agent_load_file": None,
 
-    "tags": ["Map-4096-mixstack", "StupidAI"],
-    "mapside": "attacker",  # attacker/defender/both
+    "tags": ["Map-4096-mixstack", "StupidAI", "side-both"],
+    "mapside": "attacker",  # attacker/defender
     "mapmask": "gym/generated/4096/4096-mixstack-300K-01.vmap",
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -145,13 +145,14 @@ config = {
 
     # NN arch
     "network": {
+        "attention": None,
         "features_extractor": [
             # => (B, 11, 15, 86|547)
-            {"t": "Flatten", "start_dim": 2},
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 11]},
-            # => (B, 1, 11, 1290|8205)
-            # {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 86], "stride": [1, 86], "padding": 0},
-            {"t": "Conv2d", "in_channels": 1, "out_channels": 32, "kernel_size": [1, 547], "stride": [1, 547], "padding": 0},
+            {"t": "Flatten"},
+            # => (B, 90255)  # 165*547
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 90255]},
+            # => (B, 1, 90255)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 547, "stride": 547, "padding": 0},
             {"t": "Tanh"},
             # => (B, 32, 11, 15)
             {"t": "Flatten"},
@@ -195,7 +196,7 @@ config = {
         "reward_clip_tanh_army_frac": 1,
         "reward_army_value_ref": 500,
         "random_combat": 1,
-        "swap_sides": 0
+        "swap_sides": 1
     },
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
