@@ -6,6 +6,6 @@
 numpy==1.26.3
 pyyaml
 ray == 2.9.0
-wandb == 0.16.1
+wandb == 0.16.6
 gymnasium
 torch == 2.1.2

@@ -98,7 +98,7 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    "agent_load_file": "data/PBT-mppo-sideswap-20240511_155115/29d71_00001/checkpoint_000048/agent.pt",
+    "agent_load_file": "data/PBT-mppo-sideswap-20240512_181423/5173c_00004/checkpoint_000001/agent.pt",
     # "agent_load_file": None,
 
     "tags": ["Map-4096-mixstack", "StupidAI", "side-both"],
