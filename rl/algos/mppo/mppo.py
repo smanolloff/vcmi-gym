@@ -217,15 +217,6 @@ class SelfAttention(nn.Module):
         res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
         return res
 
-    def _qk_mask(self, q, k):
-        if q.HEX_STATE != HexState.OCCUPIED:
-            return False
-
-        if q.STACK_SIDE == Side.LEFT:
-            return any(getattr(k, f"HEX_ACTION_MASK_FOR_L_STACK_{q.STACK_SLOT}") > 0)
-        else:
-            return any(getattr(k, f"HEX_ACTION_MASK_FOR_R_STACK_{q.STACK_SLOT}") > 0)
-
 
 class AgentNN(nn.Module):
     @staticmethod
@@ -276,6 +267,7 @@ class AgentNN(nn.Module):
         return action, dist.log_prob(action), dist.entropy(), value
 
     # Inference (deterministic)
+    # XXX: attention is not handled here
     def predict(self, b_obs, b_mask):
         with torch.no_grad():
             b_obs = torch.as_tensor(b_obs).cpu()

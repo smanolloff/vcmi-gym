@@ -157,6 +157,11 @@ def maybe_save(t_save, t_permasave, args, agent, out_dir):
     agent.__class__.save(agent, agent_file, nn_file=nn_file)
     t_save = now
 
+    if args.wandb_project:
+        import wandb
+        assert wandb.run, "expected initialized wandb run"
+        wandb.run.log_model(agent_file, name="agent.pt")
+
     if t_permasave + args.permasave_every <= now:
         permasave_file = os.path.join(out_dir, "agent-permasave-%d.pt" % now)
         agent.__class__.save(agent, permasave_file)

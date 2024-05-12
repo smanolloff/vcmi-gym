@@ -86,6 +86,8 @@ class Trainable(ray.tune.Trainable):
         assert self.agent, "save_checkpoint called but self.agent is None"
         f = os.path.join(checkpoint_dir, "agent.pt")
         self.algo.Agent.save(self.agent, f)
+        if int(self.trial_id.split("_")[1]) == 0:
+            wandb.run.log_model(path=f, name="agent.pt")
         return checkpoint_dir
 
     @debuglog
@@ -93,7 +95,7 @@ class Trainable(ray.tune.Trainable):
         f = os.path.join(checkpoint_dir, "agent.pt")
 
         # Checkpoint tracking: log the trial ID of the checkpoint we are restoring now
-        relpath = re.match(fr".+/{self.experiment_name}/(.+)", f).group(1)
+        relpath = re.match(fr".+/{re.escape(self.experiment_name)}/(.+)", f).group(1)
         # => "6e59d_00004/checkpoint_000038/model.zip"
         origin = int(re.match(r".+?_(\d+)/.+", relpath).group(1))
         # => int("00004") => 4
