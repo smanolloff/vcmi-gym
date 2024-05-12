@@ -33,7 +33,7 @@ def first_valid_action(mask):
 
 def main():
     total_steps = 1000
-    env = VcmiEnv("gym/generated/88/88-7stack-01.vmap", random_combat=1, encoding_type="float")
+    env = VcmiEnv("gym/generated/88/88-7stack-01.vmap", random_heroes=1, random_obstacles=1, encoding_type="float")
     obs, info = env.reset()
     term = False
     trunc = False

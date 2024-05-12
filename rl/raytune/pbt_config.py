@@ -98,8 +98,8 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    # "agent_load_file": "data/PBT-mppo-obsmask-20240427_002519/7cb19_00000/checkpoint_000072/agent.pt",
-    "agent_load_file": None,
+    "agent_load_file": "data/PBT-mppo-sideswap-20240511_155115/29d71_00001/checkpoint_000048/agent.pt",
+    # "agent_load_file": None,
 
     "tags": ["Map-4096-mixstack", "StupidAI", "side-both"],
     "mapside": "attacker",  # attacker/defender
@@ -195,7 +195,8 @@ config = {
         "term_reward_mult": 0,
         "reward_clip_tanh_army_frac": 1,
         "reward_army_value_ref": 500,
-        "random_combat": 1,
+        "random_heroes": 1,
+        "random_obstacles": 1,
         "swap_sides": 1
     },
     "env_wrappers": [],

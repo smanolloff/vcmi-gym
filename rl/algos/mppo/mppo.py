@@ -67,7 +67,8 @@ class EnvArgs:
     term_reward_mult: int = 0
     consecutive_error_reward_factor: Optional[int] = None
     vcmi_timeout: int = 5
-    random_combat: int = 1
+    random_heroes: int = 1
+    random_obstacles: int = 1
     swap_sides: int = 0
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
@@ -772,7 +773,8 @@ def debug_args():
             step_reward_fixed=-100,
             step_reward_mult=1,
             term_reward_mult=0,
-            random_combat=0,
+            random_heroes=0,
+            random_obstacles=0,
             swap_sides=0,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
@@ -781,7 +783,7 @@ def debug_args():
         env_wrappers=[],
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
-            #attention=dict(t="SelfAttention", edim=547),
+            # attention=dict(t="SelfAttention", edim=547),
             features_extractor=[
                 dict(t="Flatten"),
                 dict(t="Unflatten", dim=1, unflattened_size=[1, 165*547]),

@@ -197,7 +197,8 @@ class VcmiEnv(gym.Env):
         reward_clip_tanh_army_frac=1,  # max action reward relative to starting army value
         reward_army_value_ref=0,  # scale rewards relative to starting army value (0=no scaling)
         swap_sides=0,  # swap combat sides at each Nth combat (disabled if 0*)
-        random_combat=0,  # pick heroes at random each Nth combat (disabled if 0*)
+        random_heroes=0,  # pick heroes at random each Nth combat (disabled if 0*)
+        random_obstacles=0,  # place obstacles at random each Nth combat (disabled if 0*)
         step_reward_fixed=0,  # fixed reward
         step_reward_mult=1,
         term_reward_mult=1,  # at term step, reward = diff in total army values
@@ -227,7 +228,8 @@ class VcmiEnv(gym.Env):
             encoding_type,
             os.getcwd(),
             mapname,
-            random_combat,
+            random_heroes,
+            random_obstacles,
             swap_sides,
             vcmi_loglevel_global,
             vcmi_loglevel_ai,

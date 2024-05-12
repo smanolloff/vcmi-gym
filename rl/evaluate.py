@@ -126,7 +126,8 @@ def create_venv(env_cls, env_kwargs, mapname, role, opponent):
     def env_creator():
         env_kwargs2 = dict(
             env_kwargs,
-            random_combat=1,
+            random_heroes=1,
+            random_obstacles=1,
             mapname=mapname,
             attacker=opponent,
             defender=opponent

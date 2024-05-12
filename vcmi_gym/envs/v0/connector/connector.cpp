@@ -23,7 +23,8 @@ Connector::Connector(
     const std::string encoding_,
     const std::string gymdir_,
     const std::string mapname_,
-    const int randomCombat_,
+    const int randomHeroes_,
+    const int randomObstacles_,
     const int swapSides_,
     const std::string loglevelGlobal_,
     const std::string loglevelAI_,
@@ -34,7 +35,8 @@ Connector::Connector(
 ) : encoding(encoding_),
     gymdir(gymdir_),
     mapname(mapname_),
-    randomCombat(randomCombat_),
+    randomHeroes(randomHeroes_),
+    randomObstacles(randomObstacles_),
     swapSides(swapSides_),
     loglevelGlobal(loglevelGlobal_),
     loglevelAI(loglevelAI_),
@@ -230,7 +232,8 @@ const P_Result Connector::start() {
         encoding,
         gymdir,
         mapname,
-        randomCombat,
+        randomHeroes,
+        randomObstacles,
         swapSides,
         loglevelGlobal,
         loglevelAI,
@@ -351,7 +354,8 @@ PYBIND11_MODULE(connector, m) {
             const std::string &, // encoding
             const std::string &, // gymdir
             const std::string &, // mapname
-            const int &,         // randomCombat
+            const int &,         // randomHeroes
+            const int &,         // randomObstacles
             const int &,         // swapSides
             const std::string &, // loglevelGlobal
             const std::string &, // loglevelAI

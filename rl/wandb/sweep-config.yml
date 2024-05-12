@@ -91,4 +91,5 @@ parameters:
       term_reward_mult: { value: 0 }
       reward_clip_tanh_army_frac: { value: 1 }
       reward_army_value_ref: { value: 500 }
-      random_combat: { value: 1 }
+      random_heroes: { value: 1 }
+      random_obstacles: { value: 1 }
