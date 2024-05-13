@@ -129,6 +129,7 @@ def create_venv(env_cls, env_kwargs, mapname, role, opponent):
             env_kwargs,
             random_heroes=1,
             random_obstacles=1,
+            swap_sides=1,
             mapname=mapname,
             attacker=opponent,
             defender=opponent
@@ -313,7 +314,7 @@ def main():
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
                         venv = create_venv(env_cls, asdict(agent.args.env), f"gym/generated/evaluation/{vmap}", "attacker", opponent)
-                        ep_results = evaluate_policy(agent, venv, episodes_per_env=200)
+                        ep_results = evaluate_policy(agent, venv, episodes_per_env=100)
 
                         rewards[opponent].append(np.mean(ep_results["rewards"]))
                         lengths[opponent].append(np.mean(ep_results["lengths"]))

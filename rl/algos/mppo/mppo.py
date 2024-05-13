@@ -733,7 +733,7 @@ def main(args, agent_cls=Agent):
 
     # Needed by PBT to save model after iteration ends
     # XXX: limit returned mean reward to only the rollouts in this iteration
-    return agent, common.safe_mean(list(agent.state.rollout_rew_queue_1000)[:agent.state.current_rollout])
+    return agent, common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-agent.state.current_rollout:])
 
 
 def debug_args():
