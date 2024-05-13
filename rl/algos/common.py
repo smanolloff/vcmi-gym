@@ -30,6 +30,7 @@ import yaml
 
 import dataclasses
 from torch.distributions.categorical import Categorical
+from torch.distributions.utils import lazy_property
 
 
 # https://boring-guy.sh/posts/masking-rl/
@@ -49,6 +50,54 @@ class CategoricalMasked(Categorical):
         p_log_p = self.logits * self.probs
         p_log_p = torch.where(self.mask, p_log_p, torch.tensor(0, dtype=p_log_p.dtype, device=p_log_p.device))
         return -p_log_p.sum(-1)
+
+
+class SerializableCategoricalMasked:
+    """ TorchScript version of CategoricalMasked """
+
+    def __init__(self, logits: torch.Tensor, mask: torch.Tensor):
+        assert mask is not None
+        self.mask = mask
+
+        self.mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits.dtype)
+        logits = torch.where(self.mask, logits, self.mask_value)
+
+        self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
+        self._param = self.logits
+        self._num_events = self._param.size()[-1]
+        batch_shape = (self._param.size()[:-1] if self._param.dim() > 1 else torch.Size([]))
+
+        self._batch_shape = batch_shape
+        self._event_shape = torch.Size([])
+
+    def entropy(self):
+        p_log_p = self.logits * self.probs
+        p_log_p = torch.where(self.mask, p_log_p, torch.tensor(0, dtype=p_log_p.dtype, device=p_log_p.device))
+        return -p_log_p.sum(-1)
+
+    def sample(self):
+        with torch.no_grad():
+            probs_2d = self.probs.reshape(-1, self._num_events)
+            samples_2d = torch.multinomial(probs_2d, 1, True).T
+            _extended_shape = torch.Size(self._batch_shape + self._event_shape)
+            return samples_2d.reshape(_extended_shape)
+
+    def log_prob(self, value):
+        value = value.long().unsqueeze(-1)
+        value, log_pmf = torch.broadcast_tensors(value, self.logits)
+        value = value[..., :1]
+        return log_pmf.gather(-1, value).squeeze(-1)
+
+    @lazy_property
+    def logits(self):
+        probs = self.probs
+        eps = 2**-23
+        ps_clamped = probs.clamp(min=eps, max=1 - eps)
+        return torch.log(ps_clamped)
+
+    @lazy_property
+    def probs(self):
+        return torch.nn.functional.softmax(self.logits, dim=-1)
 
 
 def create_venv(env_cls, args, map_swaps):

@@ -15,14 +15,13 @@
 # =============================================================================
 
 import time
-import random
+import numpy as np
 
 from vcmi_gym import VcmiEnv
 
 
 def random_valid_action(mask):
-    valid_action_indexes = [i for i, v in enumerate(mask) if v]
-    return random.choice(valid_action_indexes)
+    return np.random.choice(np.where(mask)[0])
 
 
 def first_valid_action(mask):
@@ -33,7 +32,14 @@ def first_valid_action(mask):
 
 def main():
     total_steps = 1000
-    env = VcmiEnv("gym/generated/88/88-7stack-01.vmap", random_heroes=1, random_obstacles=1, encoding_type="float")
+    env = VcmiEnv(
+        "gym/generated/4096/4096-6stack-100K-01.vmap",
+        random_heroes=1,
+        random_obstacles=1,
+        swap_sides=1,
+        # defender="MMAI_USER",
+        # defender_model="/Users/simo/Projects/vcmi-gym/data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00000/checkpoint_000020/agent.pt"
+    )
     obs, info = env.reset()
     term = False
     trunc = False

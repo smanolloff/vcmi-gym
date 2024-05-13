@@ -29,11 +29,7 @@ import torch
 import torch.nn as nn
 # import tyro
 
-from vcmi_gym.envs.v0.vcmi_env import (
-    VcmiEnv,
-    ATTRMAP_DEFAULT,
-    STATE_VALUE_NA
-)
+from vcmi_gym.envs.v0.vcmi_env import VcmiEnv
 
 from .. import common
 
@@ -291,7 +287,7 @@ class Agent(nn.Module):
     This prevents issues if the agent contains wandb hooks at save time.
     """
     @staticmethod
-    def save(agent, agent_file, nn_file=None):
+    def save(agent, agent_file):
         print("Saving agent to %s" % agent_file)
         attrs = ["args", "observation_space", "action_space", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
@@ -299,6 +295,20 @@ class Agent(nn.Module):
         clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
         clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
         torch.save(clean_agent, agent_file)
+
+    @staticmethod
+    def jsave(agent, jagent_file):
+        print("Saving JIT agent to %s" % jagent_file)
+        attrs = ["args", "observation_space", "action_space", "state"]
+        data = {k: agent.__dict__[k] for k in attrs}
+        clean_agent = agent.__class__(**data)
+        clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
+        clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
+        jagent = JitAgent()
+        jagent.features_extractor = clean_agent.NN.features_extractor
+        jagent.actor = clean_agent.NN.actor
+        jagent.critic = clean_agent.NN.critic
+        torch.jit.save(torch.jit.script(jagent), jagent_file)
 
     @staticmethod
     def load(agent_file):
@@ -314,6 +324,30 @@ class Agent(nn.Module):
         self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
         self.predict = self.NN.predict
         self.state = state or State()
+
+
+class JitAgent(nn.Module):
+    """ TorchScript version of Agent (inference only) """
+
+    def __init__(self):
+        super().__init__()
+        # XXX: these are overwritten after object is initialized
+        self.features_extractor = nn.Identity()
+        self.actor = nn.Identity()
+        self.critic = nn.Identity()
+
+    # Inference (deterministic)
+    # XXX: attention is not handled here
+    @torch.jit.export
+    def predict(self, obs, mask) -> int:
+        with torch.no_grad():
+            b_obs = torch.as_tensor(obs).cpu().unsqueeze(dim=0)
+            b_mask = torch.as_tensor(mask).cpu().unsqueeze(dim=0)
+            features = self.features_extractor(b_obs)
+            action_logits = self.actor(features)
+            dist = common.SerializableCategoricalMasked(logits=action_logits, mask=b_mask)
+            action = torch.argmax(dist.probs, dim=1)
+            return action.int().item()
 
 
 def main(args, agent_cls=Agent):

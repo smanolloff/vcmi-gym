@@ -19,16 +19,6 @@ target_include_directories(connector PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_include_directories(connexport PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(connector PRIVATE myclient)
 
-add_library(loader SHARED conncommon.h loader.h loader.cpp)
-target_include_directories(loader PUBLIC ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(loader PRIVATE pybind11::embed)
-
-add_executable(loader_main conncommon.h loader_main.cpp)
-target_include_directories(loader_main PUBLIC ${CMAKE_SOURCE_DIR}/include)
-# add_dependencies(loader_main loader)
-# target_link_libraries(loader_main PRIVATE loader)
-
-
 # Make filenames predictable
 set_property(TARGET connexport PROPERTY SUFFIX)
 set_property(TARGET connector PROPERTY SUFFIX)

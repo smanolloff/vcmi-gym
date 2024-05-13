@@ -226,7 +226,6 @@ class VcmiEnv(gym.Env):
 
         result = self.connector.start(
             encoding_type,
-            os.getcwd(),
             mapname,
             random_heroes,
             random_obstacles,

@@ -21,7 +21,6 @@
 
 Connector::Connector(
     const std::string encoding_,
-    const std::string gymdir_,
     const std::string mapname_,
     const int randomHeroes_,
     const int randomObstacles_,
@@ -33,7 +32,6 @@ Connector::Connector(
     const std::string attackerModel_,
     const std::string defenderModel_
 ) : encoding(encoding_),
-    gymdir(gymdir_),
     mapname(mapname_),
     randomHeroes(randomHeroes_),
     randomObstacles(randomObstacles_),
@@ -230,7 +228,6 @@ const P_Result Connector::start() {
     init_vcmi(
         baggage.get(),
         encoding,
-        gymdir,
         mapname,
         randomHeroes,
         randomObstacles,
@@ -352,7 +349,6 @@ PYBIND11_MODULE(connector, m) {
     py::class_<Connector, std::unique_ptr<Connector>>(m, "Connector")
         .def(py::init<
             const std::string &, // encoding
-            const std::string &, // gymdir
             const std::string &, // mapname
             const int &,         // randomHeroes
             const int &,         // randomObstacles
