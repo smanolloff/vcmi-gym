@@ -22,7 +22,7 @@ opponent_load_file: ~
 success_rate_target: ~
 ep_rew_mean_target: ~
 quit_on_target: false
-mapside: "attacker"  # attacker/defender
+mapside: "attacker"  # attacker/defender; irrelevant if env.swap_sides > 0
 mapmask: "gym/generated/4096/4096-mixstack-100K-01.vmap"
 randomize_maps: false
 save_every: 3600  # seconds
@@ -38,9 +38,6 @@ num_envs: 1
 
 network:
   features_extractor:
-    # => (B, 11, 15, 547)
-    - {t: "SelfAttention", edim: 547}
-    # => (B, 165, 547)
     - {t: "Flatten"}
     # => (B, 90255)  # 165*547
     - {t: "Unflatten", dim: 1, unflattened_size: [1, 90255]}

@@ -54,7 +54,8 @@ controls the enemy army.
 
 For this purpose, your model must implement a single `.predict(obs, mask)`
 method where `obs` and `mask` are obtained from VcmiEnv (refer to
-the [Environment docs](./env_info.md)). Save your
-trained model to a file using `torch.save(...)` starting the
-(modified) VCMI binary as described in the "Loading AI Models" section
+the [Environment docs](./env_info.md)). The model must be
+[TorchScript](https://pytorch.org/docs/stable/jit_language_reference.html#language-reference).
+Save the trained model to a file using `torch.jit.save(torch.jit.script(agent), "agent.pt")`
+then start the (modified) VCMI binary as described in the "Loading AI Models" section
 [here](https://github.com/smanolloff/vcmi/blob/mmai/docs/setup_macos.md#loading-ai-models)

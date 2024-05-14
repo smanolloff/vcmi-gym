@@ -10,6 +10,7 @@
 # Opponents
 - StupidAI
 - BattleAI
+- MMAI
 
 # Prevent evaluator from picking those up
 - no-eval
@@ -30,3 +31,7 @@
 - side-attacker
 - side-defender
 - side-both
+
+# obstacles
+- obstacles-fixed
+- obstacles-random

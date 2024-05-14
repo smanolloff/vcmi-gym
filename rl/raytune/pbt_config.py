@@ -98,14 +98,14 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    "agent_load_file": "data/PBT-mppo-sideswap-20240512_181423/5173c_00004/checkpoint_000001/agent.pt",
+    "agent_load_file": "data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00001/checkpoint_000046/agent.pt",
     # "agent_load_file": None,
 
-    "tags": ["Map-4096-mixstack", "StupidAI", "side-both"],
-    "mapside": "attacker",  # attacker/defender
+    "tags": ["Map-4096-mixstack", "MMAI", "side-both", "obstacles-random"],
+    "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "mapmask": "gym/generated/4096/4096-mixstack-300K-01.vmap",
-    "opponent_sbm_probs": [1, 0, 0],
-    "opponent_load_file": None,
+    "opponent_sbm_probs": [0, 0, 1],
+    "opponent_load_file": "data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00001/checkpoint_000046/jit-agent.pt",
 
     #
     # PPO hyperparams
@@ -177,7 +177,6 @@ config = {
     "rollouts_per_mapchange": 0,
     "rollouts_per_log": 1,
     "rollouts_per_table_log": 0,
-    "opponent_load_file": None,
     "success_rate_target": None,
     "ep_rew_mean_target": None,
     "quit_on_target": False,
