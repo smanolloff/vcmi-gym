@@ -104,7 +104,6 @@ def create_venv(env_cls, args, map_swaps):
     all_maps = glob.glob("maps/%s" % args.mapmask)
     all_maps = [m.removeprefix("maps/") for m in all_maps]
     all_maps.sort()
-    print("allmaps: maps/%s: %s" % (args.mapmask, all_maps))
     map_offset = None
 
     assert args.mapside in ["attacker", "defender"]

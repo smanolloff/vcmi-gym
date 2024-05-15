@@ -43,7 +43,7 @@ config = {
             "num_steps": [128, 256, 512],
 
             # PPO-vanilla specific
-            "lr_schedule": {"start": explist(1e-8, 1e-5, n=20)},
+            "lr_schedule": {"start": explist(5e-7, 1e-5, n=20)},
             "gae_lambda": linlist(0.5, 0.99, n=20),
             "num_minibatches": [2, 4, 8],
             "update_epochs": linlist(2, 20, n=5, dtype=int),
