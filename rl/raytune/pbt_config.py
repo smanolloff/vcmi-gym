@@ -98,13 +98,13 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    "agent_load_file": "data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00001/checkpoint_000046/agent.pt",
-    # "agent_load_file": None,
+    # "agent_load_file": "data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00001/checkpoint_000046/agent.pt",
+    "agent_load_file": None,
 
-    "tags": ["Map-4096-mixstack", "MMAI", "side-both", "obstacles-random"],
+    "tags": ["Map-4096-mixstack", "StupidAI", "side-both", "obstacles-random", "encoding-float"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "mapmask": "gym/generated/4096/4096-mixstack-300K-01.vmap",
-    "opponent_sbm_probs": [0, 0, 1],
+    "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": "data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00001/checkpoint_000046/jit-agent.pt",
 
     #
@@ -149,10 +149,10 @@ config = {
         "features_extractor": [
             # => (B, 11, 15, 86|547)
             {"t": "Flatten"},
-            # => (B, 90255)  # 165*547
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 90255]},
-            # => (B, 1, 90255)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 547, "stride": 547, "padding": 0},
+            # => (B, 14190|90255)  #  165*N
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 14190]},
+            # => (B, 1, 14190|90255)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 86, "stride": 86, "padding": 0},
             {"t": "Tanh"},
             # => (B, 32, 11, 15)
             {"t": "Flatten"},
@@ -187,7 +187,7 @@ config = {
     "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
     "num_envs": 1,
     "env": {
-        "encoding_type": "default",
+        "encoding_type": "float",
         "reward_dmg_factor": 5,
         "step_reward_fixed": -100,
         "step_reward_mult": 1,
