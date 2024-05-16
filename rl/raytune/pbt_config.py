@@ -38,12 +38,12 @@ config = {
         # """
         "hyperparam_mutations": {
             "ent_coef": linlist(0, 0.1, n=11),
-            "gamma": linlist(0.8, 0.999, n=13),
+            "gamma": linlist(0.6, 0.999, n=13),
             "max_grad_norm": linlist(0.5, 10, n=11),
             "num_steps": [128, 256, 512],
 
             # PPO-vanilla specific
-            "lr_schedule": {"start": explist(5e-7, 1e-5, n=20)},
+            "lr_schedule": {"start": explist(5e-7, 4e-5, n=20)},
             "gae_lambda": linlist(0.5, 0.99, n=20),
             "num_minibatches": [2, 4, 8],
             "update_epochs": linlist(2, 20, n=5, dtype=int),
@@ -98,14 +98,14 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    # "agent_load_file": "data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00001/checkpoint_000046/agent.pt",
-    "agent_load_file": None,
+    "agent_load_file": "data/PBT-mppo-float-obstacle+sideswap-20240515_184107/8d231_00003/checkpoint_000040/agent.pt",
+    # "agent_load_file": None,
 
     "tags": ["Map-4096-mixstack", "StupidAI", "side-both", "obstacles-random", "encoding-float"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "mapmask": "gym/generated/4096/4096-mixstack-300K-01.vmap",
     "opponent_sbm_probs": [1, 0, 0],
-    "opponent_load_file": "data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00001/checkpoint_000046/jit-agent.pt",
+    "opponent_load_file": None,
 
     #
     # PPO hyperparams

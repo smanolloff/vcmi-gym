@@ -18,7 +18,6 @@ import numpy as np
 import gymnasium as gym
 from collections import namedtuple
 from types import SimpleNamespace
-import os
 
 from .util import log
 from .util.analyzer import Analyzer, ActionType
@@ -190,9 +189,9 @@ class VcmiEnv(gym.Env):
         sparse_info=False,
         allow_invalid_actions=False,
         actions_log_file=None,  # DEBUG
-        user_timeout=0,  # seconds
+        user_timeout=600,  # seconds - user input
         vcmi_timeout=5,  # seconds
-        boot_timeout=0,  # seconds
+        boot_timeout=60,  # seconds - needed as VCMI boot sometimes hangs with a memleak
         reward_dmg_factor=5,
         reward_clip_tanh_army_frac=1,  # max action reward relative to starting army value
         reward_army_value_ref=0,  # scale rewards relative to starting army value (0=no scaling)

@@ -170,87 +170,80 @@ def wandb_init(run):
 def find_local_agents(LOG):
     evaluated = []
 
-    # while True:
-    # XXX: removing endless loop to see if mem issue will be resolved
-    #      (use loop in shell instead)
+    while True:
+        files = glob.glob("data/*/*/agent-[0-9]*.pt")
 
-    files = glob.glob("data/*/*/agent-[0-9]*.pt")
+        def should_pick(f):
+            # saving large NNs may take a lot of time => wait 1min
+            threshold_max = datetime.datetime.now() - datetime.timedelta(minutes=1)
+            threshold_min = datetime.datetime.now() - datetime.timedelta(hours=3)
+            mtime = datetime.datetime.fromtimestamp(os.path.getmtime(f))
+            return mtime > threshold_min and mtime < threshold_max
 
-    def should_pick(f):
-        # saving large NNs may take a lot of time => wait 1min
-        threshold_max = datetime.datetime.now() - datetime.timedelta(minutes=1)
-        threshold_min = datetime.datetime.now() - datetime.timedelta(hours=3)
-        mtime = datetime.datetime.fromtimestamp(os.path.getmtime(f))
-        return mtime > threshold_min and mtime < threshold_max
+        filtered = [f for f in files if should_pick(f)]
+        grouped = itertools.groupby(filtered, key=lambda x: x.split("/")[-2])
+        grouped = {key: list(group) for key, group in grouped}
 
-    filtered = [f for f in files if should_pick(f)]
-    grouped = itertools.groupby(filtered, key=lambda x: x.split("/")[-2])
-    grouped = {key: list(group) for key, group in grouped}
+        # Eval only one PBT worker (the _00000 one)
+        files2 = glob.glob("data/PBT-*/*_00000/*/agent.pt")
+        filtered2 = [f for f in files2 if should_pick(f)]
+        grouped2 = itertools.groupby(filtered2, key=lambda x: x.split("/")[-3])
+        grouped2 = {key: list(group) for key, group in grouped2}
 
-    # Eval only one PBT worker (the _00000 one)
-    files2 = glob.glob("data/PBT-*/*_00000/*/agent.pt")
-    filtered2 = [f for f in files2 if should_pick(f)]
-    grouped2 = itertools.groupby(filtered2, key=lambda x: x.split("/")[-3])
-    grouped2 = {key: list(group) for key, group in grouped2}
+        grouped_all = dict(grouped, **grouped2)
 
-    grouped_all = dict(grouped, **grouped2)
+        for run_id, agent_load_file in grouped_all.items():
+            if agent_load_file in evaluated:
+                LOG.debug("Skip agent: %s (already evaluated)" % (agent_load_file))
+                continue
 
-    for run_id, agent_load_file in grouped_all.items():
-        if agent_load_file in evaluated:
-            LOG.debug("Skip agent: %s (already evaluated)" % (agent_load_file))
-            continue
+            LOG.debug('Evaluating %s' % (agent_load_file))
 
-        LOG.debug('Evaluating %s' % (agent_load_file))
+            try:
+                run = wandb.Api().run(f"s-manolloff/vcmi-gym/{run_id}")
+            except Exception as e:
+                LOG.debug('Skip run %s due to: %s' % (agent_load_file, traceback.format_exception_only(e)))
 
-        try:
-            run = wandb.Api().run(f"s-manolloff/vcmi-gym/{run_id}")
-        except Exception as e:
-            LOG.debug('Skip run %s due to: %s' % (agent_load_file, traceback.format_exception_only(e)))
+            if "no-eval" in run.tags:
+                LOG.debug('Skip %s' % (agent_load_file))
+                continue
 
-        if "no-eval" in run.tags:
-            LOG.debug('Skip %s' % (agent_load_file))
-            continue
+            yield run, agent_load_file
 
-        yield run, agent_load_file
-
-    LOG.debug("Done")
-    # LOG.debug("Sleeping 30s...")
-    # time.sleep(30)
+        LOG.debug("Sleeping 30s...")
+        time.sleep(30)
 
 
 def find_remote_agents(LOG):
     with tempfile.TemporaryDirectory(prefix="vcmi-gym-evaluator") as tmpdir:
-        # while True:
-        # XXX: removing endless loop to see if mem issue will be resolved
-        #      (use loop in shell instead)
-        gt = datetime.datetime.now() - datetime.timedelta(days=1)
-        runs = wandb.Api().runs(
-            path="s-manolloff/vcmi-gym",
-            filters={"updatedAt": {"$gt": gt.isoformat()}, "tags": {"$nin": ["no-eval"]}}
-        )
+        while True:
+            gt = datetime.datetime.now() - datetime.timedelta(days=1)
+            runs = wandb.Api().runs(
+                path="s-manolloff/vcmi-gym",
+                filters={"updatedAt": {"$gt": gt.isoformat()}, "tags": {"$nin": ["no-eval"]}}
+            )
 
-        for run in runs:
-            for artifact in run.logged_artifacts():
-                if not artifact.name.startswith("agent.pt:v"):
-                    continue
-                if "latest" not in artifact.aliases:
-                    continue
-                if artifact.metadata.get("evaluated"):
-                    continue
-                if datetime.datetime.fromisoformat(artifact.updated_at) <= gt:
-                    continue
+            for run in runs:
+                for artifact in run.logged_artifacts():
+                    if not artifact.name.startswith("agent.pt:v"):
+                        continue
+                    if "latest" not in artifact.aliases:
+                        continue
+                    if artifact.metadata.get("evaluated"):
+                        continue
+                    if datetime.datetime.fromisoformat(artifact.updated_at) <= gt:
+                        continue
 
-                files = list(artifact.files())
-                assert len(files) == 1, "expected one file, got: "
-                assert files[0].name == "agent.pt"
-                f = files[0].download(tmpdir, replace=True)
-                yield run, f.name
-                artifact.metadata["evaluated"] = True
-                artifact.delete(delete_aliases=True)
+                    files = list(artifact.files())
+                    assert len(files) == 1, "expected one file, got: "
+                    assert files[0].name == "agent.pt"
+                    f = files[0].download(tmpdir, replace=True)
+                    yield run, f.name
+                    artifact.metadata["evaluated"] = True
+                    artifact.delete(delete_aliases=True)
 
-        LOG.debug("Done")
-        # LOG.debug("Sleeping 30s...")
-        # time.sleep(30)
+            LOG.debug("Sleeping 30s...")
+            time.sleep(30)
 
 
 def find_agents(LOG):
@@ -408,4 +401,3 @@ def main():
 if __name__ == "__main__":
     sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
     main()
-

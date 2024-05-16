@@ -349,6 +349,14 @@ class JitAgent(nn.Module):
             action = torch.argmax(dist.probs, dim=1)
             return action.int().item()
 
+    @torch.jit.export
+    def get_value(self, obs) -> float:
+        with torch.no_grad():
+            b_obs = torch.as_tensor(obs).cpu().unsqueeze(dim=0)
+            features = self.features_extractor(b_obs)
+            value = self.critic(features)
+            return value.float().item()
+
 
 def main(args, agent_cls=Agent):
     LOG = logging.getLogger("mppo_conv")
