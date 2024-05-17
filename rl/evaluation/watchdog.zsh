@@ -16,7 +16,7 @@ if [ "$(uname)" = "Linux" ]; then
 fi
 
 if [ -z "$CHECK_FIRST" ]; then
-  CHECK_FIRST=1
+  CHECK_FIRST=10
 fi
 
 if [ -z "$CHECK_EVERY" ]; then
@@ -30,7 +30,7 @@ function terminate_python() {
     pkill -g 0 -f python || return 0  # no more procs => termination successful
 
     for j in $(seq 3); do
-      sleep 10
+      sleep 3
       pgrep -g 0 -f python || return 0
     done
   done
@@ -44,7 +44,7 @@ function terminate_python() {
     pkill --signal=9 -g 0 -f python || return 0
 
     for j in $(seq 3); do
-      sleep 10
+      sleep 3
       pgrep -g 0 -f python || return 0
     done
   done
@@ -76,19 +76,19 @@ set -eux
 echo "$IDENT Watchdog PID: $$"
 
 WATCHDOGFILE=/tmp/watchdogfile
-touch WATCHDOGFILE
+touch $WATCHDOGFILE
 
-python rl/evaluation/evaluate.py $WATCHDOGFILE &
-ts0=$(stat -c %Y $WATCHDOGFILE)
+python -m rl.evaluation.evaluate $WATCHDOGFILE &
+ts=$(stat -c %Y $WATCHDOGFILE)
 
 while true; do
+  ts0=$ts
   sleep $((CHECK_FIRST * 60))
   ts=$(stat -c %Y $WATCHDOGFILE)
-  if [ $ts -eq $ts0 ];
+  if [ $ts -eq $ts0 ]; then
     echo "$IDENT file not modified in the last ${CHECK_EVERY}m"
     terminate_python
-    python rl/evaluation/evaluate.py $WATCHDOGFILE &
-  else
-    ts0=$ts
+    python -m rl.evaluation.evaluate $WATCHDOGFILE &
   fi
 done
+
