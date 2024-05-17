@@ -43,7 +43,7 @@ config = {
             "num_steps": [128, 256, 512],
 
             # PPO-vanilla specific
-            "lr_schedule": {"start": explist(5e-7, 4e-5, n=20)},
+            "lr_schedule": {"start": explist(5e-7, 1e-4, n=20)},
             "gae_lambda": linlist(0.5, 0.99, n=20),
             "num_minibatches": [2, 4, 8],
             "update_epochs": linlist(2, 20, n=5, dtype=int),
@@ -98,7 +98,7 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    "agent_load_file": "data/PBT-mppo-float-obstacle+sideswap-20240515_184107/8d231_00003/checkpoint_000040/agent.pt",
+    "agent_load_file": "data/PBT-mppo-float-obstacle+sideswap-20240516_210456/cebdb_00004/checkpoint_000003/agent.pt",
     # "agent_load_file": None,
 
     "tags": ["Map-4096-mixstack", "StupidAI", "side-both", "obstacles-random", "encoding-float"],
