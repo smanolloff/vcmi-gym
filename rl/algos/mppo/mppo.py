@@ -91,6 +91,7 @@ class State:
     current_rollout: int = 0
     global_second: int = 0
     current_second: int = 0
+    current_episode: int = 0
 
     ep_length_queue: deque = field(default_factory=lambda: deque(maxlen=100))
 
@@ -416,6 +417,7 @@ def main(args, agent_cls=Agent):
         agent.state.current_vstep = 0
         agent.state.current_rollout = 0
         agent.state.current_second = 0
+        agent.state.current_episode = 0
 
         # backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
         # with open(f, 'rb') as fsrc:
@@ -537,6 +539,7 @@ def main(args, agent_cls=Agent):
                         assert final_info is not None, "has_final_info=True, but final_info=None"
                         agent.state.ep_net_value_queue.append(final_info["net_value"])
                         agent.state.ep_is_success_queue.append(final_info["is_success"])
+                        agent.state.current_episode += 1
 
                 agent.state.current_vstep += 1
                 agent.state.current_timestep += args.num_envs
@@ -679,6 +682,7 @@ def main(args, agent_cls=Agent):
             wandb_log({"global/num_rollouts": agent.state.current_rollout})
             wandb_log({"global/num_timesteps": agent.state.current_timestep})
             wandb_log({"global/num_seconds": agent.state.current_second})
+            wandb_log({"global/num_episode": agent.state.current_episode})
 
             envs.episode_count = 0
 

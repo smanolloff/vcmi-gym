@@ -120,25 +120,25 @@ def load_agent(agent_file, run_id):
     return agent
 
 
-def create_venv(env_cls, env_kwargs, mapname, role, opponent):
+def create_venv(env_cls, agent, mapname, role, opponent):
     mappath = f"maps/{mapname}"
     assert os.path.isfile(mappath), "Map not found at: %s" % mappath
     assert role in ["attacker", "defender"]
 
     def env_creator():
-        env_kwargs2 = dict(
-            env_kwargs,
+        env_kwargs = dict(
+            asdict(agent.args.env),
             random_heroes=1,
             random_obstacles=1,
-            swap_sides=0, #1,
+            swap_sides=agent.args.env.swap_sides,
             mapname=mapname,
             attacker=opponent,
             defender=opponent
         )
 
-        env_kwargs2[role] = "MMAI_USER"
-        # LOG.debug("Env kwargs: %s" % env_kwargs2)
-        return env_cls(**env_kwargs2)
+        env_kwargs[role] = "MMAI_USER"
+        # LOG.debug("Env kwargs: %s" % env_kwargs)
+        return env_cls(**env_kwargs)
 
     vec_env = gym.vector.SyncVectorEnv([env_creator])
     return gym.wrappers.RecordEpisodeStatistics(vec_env)
@@ -319,7 +319,7 @@ def main():
 
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
-                        venv = create_venv(env_cls, asdict(agent.args.env), f"gym/generated/evaluation/{vmap}", "attacker", opponent)
+                        venv = create_venv(env_cls, agent, f"gym/generated/evaluation/{vmap}", "attacker", opponent)
                         ep_results = evaluate_policy(agent, venv, episodes_per_env=100)
 
                         rewards[opponent].append(np.mean(ep_results["rewards"]))

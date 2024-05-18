@@ -21,6 +21,7 @@ import ray.tune
 import ray.train
 import wandb
 import importlib
+import time
 from datetime import datetime
 from .common import debuglog
 from . import common
@@ -87,7 +88,11 @@ class Trainable(ray.tune.Trainable):
         f = os.path.join(checkpoint_dir, "agent.pt")
         self.algo.Agent.save(self.agent, f)
         if int(self.trial_id.split("_")[1]) == 0:
-            wandb.run.log_model(path=f, name="agent.pt")
+            art = wandb.Artifact(name="agent.pt", type="model")
+            art.description = f"Snapshot of agent.pt from {time.ctime(time.time())}"
+            art.ttl = datetime.timedelta(days=7)
+            art.add_file(f, name="agent.pt")
+            wandb.run.log_artifact(art, name="agent.pt")
         return checkpoint_dir
 
     @debuglog

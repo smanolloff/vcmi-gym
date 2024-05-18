@@ -98,10 +98,10 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    "agent_load_file": "data/PBT-mppo-float-obstacle+sideswap-20240516_210456/cebdb_00004/checkpoint_000003/agent.pt",
+    "agent_load_file": "data/PBT-mppo-float-obstacle+sideswap-20240515_184107/8d231_00003/checkpoint_000040/agent.pt",
     # "agent_load_file": None,
 
-    "tags": ["Map-4096-mixstack", "StupidAI", "side-both", "obstacles-random", "encoding-float"],
+    "tags": ["Map-4096-mixstack", "StupidAI", "side-attacker", "obstacles-random", "encoding-float"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "mapmask": "gym/generated/4096/4096-mixstack-300K-01.vmap",
     "opponent_sbm_probs": [1, 0, 0],
@@ -196,7 +196,7 @@ config = {
         "reward_army_value_ref": 500,
         "random_heroes": 1,
         "random_obstacles": 1,
-        "swap_sides": 1
+        "swap_sides": 0
     },
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
