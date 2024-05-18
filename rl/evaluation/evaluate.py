@@ -28,6 +28,7 @@ import torch
 import logging
 import traceback
 import tempfile
+import pathlib
 
 from dataclasses import asdict
 
@@ -129,7 +130,7 @@ def create_venv(env_cls, env_kwargs, mapname, role, opponent):
             env_kwargs,
             random_heroes=1,
             random_obstacles=1,
-            swap_sides=1,
+            swap_sides=0, #1,
             mapname=mapname,
             attacker=opponent,
             defender=opponent
@@ -271,10 +272,15 @@ def main():
     env_cls = vcmi_gym.VcmiEnv
     evaluated = []
     venv = None
+    watchdogfile = None
 
     if len(sys.argv) == 3:
         it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{sys.argv[1]}"), sys.argv[2])]
+        watchdogfile = sys.argv[3]
     else:
+        if len(sys.argv) == 2 > 1:
+            watchdogfile = sys.argv[1]
+
         it = find_agents(LOG)
 
     try:
@@ -338,6 +344,9 @@ def main():
                             np.mean(ep_results["lengths"]),
                             time.time() - tstart
                         ))
+
+                        if watchdogfile:
+                            pathlib.Path(watchdogfile).touch()
 
                     wandb_log({f"map/{vmap}/reward": np.mean(rewards[vmap])})
                     wandb_log({f"map/{vmap}/length": np.mean(lengths[vmap])})
