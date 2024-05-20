@@ -241,7 +241,8 @@ def find_remote_agents(LOG):
                     f = files[0].download(tmpdir, replace=True)
                     yield run, f.name
                     artifact.metadata["evaluated"] = True
-                    artifact.delete(delete_aliases=True)
+                    # artifact.delete(delete_aliases=True)
+                    artifact.ttl = datetime.timedelta(days=1)
 
             LOG.debug("Sleeping 30s...")
             time.sleep(30)
