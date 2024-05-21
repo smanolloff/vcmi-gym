@@ -265,6 +265,7 @@ if __name__ == "__main__":
                     type="hero", subtype=values["type"], x=x, y=y, l=0,
                     options=dict(
                         experience=oid,
+                        name=f"hero_{oid}",
                         formation="wide",
                         gender=1,
                         owner=values["color"],
