@@ -320,7 +320,7 @@ def main():
 
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
-                        venv = create_venv(env_cls, agent, f"gym/generated/evaluation/{vmap}", "attacker", opponent)
+                        venv = create_venv(env_cls, agent, f"gym/generated/evaluation/{vmap}", run.config.get("mapside", "attacker"), opponent)
                         ep_results = evaluate_policy(agent, venv, episodes_per_env=100)
 
                         rewards[opponent].append(np.mean(ep_results["rewards"]))
