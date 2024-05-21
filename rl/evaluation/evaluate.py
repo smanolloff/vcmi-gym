@@ -243,6 +243,7 @@ def find_remote_agents(LOG):
                     artifact.metadata["evaluated"] = True
                     # artifact.delete(delete_aliases=True)
                     artifact.ttl = datetime.timedelta(days=1)
+                    artifact.save()
 
             LOG.debug("Sleeping 30s...")
             time.sleep(30)
