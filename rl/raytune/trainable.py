@@ -22,7 +22,7 @@ import ray.train
 import wandb
 import importlib
 import time
-from datetime import datetime
+import datetime
 from .common import debuglog
 from . import common
 
@@ -30,7 +30,7 @@ from . import common
 # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.Trainable.html
 class Trainable(ray.tune.Trainable):
     def log(self, msg):
-        print("-- %s [%s I=%d] %s" % (datetime.now().isoformat(), self.trial_name, self.iteration, msg))
+        print("-- %s [%s I=%d] %s" % (datetime.datetime.now().isoformat(), self.trial_name, self.iteration, msg))
 
     @staticmethod
     def default_resource_request(_config):
