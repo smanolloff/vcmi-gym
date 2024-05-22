@@ -218,7 +218,7 @@ def find_local_agents(LOG):
 def find_remote_agents(LOG):
     with tempfile.TemporaryDirectory(prefix="vcmi-gym-evaluator") as tmpdir:
         while True:
-            gt = datetime.datetime.now() - datetime.timedelta(days=1)
+            gt = datetime.datetime.now() - datetime.timedelta(days=3)
             runs = wandb.Api().runs(
                 path="s-manolloff/vcmi-gym",
                 filters={"updatedAt": {"$gt": gt.isoformat()}, "tags": {"$nin": ["no-eval"]}}
@@ -226,21 +226,28 @@ def find_remote_agents(LOG):
 
             for run in runs:
                 for artifact in run.logged_artifacts():
+                    # artifact timestamps are UTC
+                    dt = datetime.datetime.fromisoformat(f"{artifact.created_at}")
+                    md = artifact.metadata
+
                     if not artifact.name.startswith("agent.pt:v"):
                         continue
-                    if "latest" not in artifact.aliases:
+                    if "evaluated_at" in md or "evaluated" in md:
                         continue
-                    if artifact.metadata.get("evaluated"):
-                        continue
-                    if datetime.datetime.fromisoformat(artifact.updated_at) <= gt:
+                    if dt <= gt:
                         continue
 
                     files = list(artifact.files())
                     assert len(files) == 1, "expected one file, got: "
                     assert files[0].name == "agent.pt"
+
+                    # add timezone information to dt for printing correct time
+                    dt = dt.replace(tzinfo=datetime.timezone.utc).astimezone()
+                    LOG.info(f"Downloading artifact {artifact.name} from {time.ctime(dt.timestamp())}")
+
                     f = files[0].download(tmpdir, replace=True)
                     yield run, f.name
-                    artifact.metadata["evaluated"] = True
+                    md["evaluated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
                     # artifact.delete(delete_aliases=True)
                     artifact.ttl = datetime.timedelta(days=1)
                     artifact.save()
