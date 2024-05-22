@@ -168,7 +168,7 @@ def wandb_init(run):
     )
 
 
-def find_local_agents(LOG):
+def find_local_agents(LOG, _statusdict):
     evaluated = []
 
     while True:
@@ -215,7 +215,7 @@ def find_local_agents(LOG):
         time.sleep(30)
 
 
-def find_remote_agents(LOG):
+def find_remote_agents(LOG, statusdict):
     with tempfile.TemporaryDirectory(prefix="vcmi-gym-evaluator") as tmpdir:
         while True:
             gt = datetime.datetime.now() - datetime.timedelta(days=3)
@@ -246,8 +246,21 @@ def find_remote_agents(LOG):
                     LOG.info(f"Downloading artifact {artifact.name} from {time.ctime(dt.timestamp())}")
 
                     f = files[0].download(tmpdir, replace=True)
-                    yield run, f.name
+
+                    retries = 3
+                    for retry in range(retries):
+                        statusdict["error"] = False
+                        yield run, f.name
+                        if statusdict["error"]:
+                            LOG.warn(f"Evaluation failed ({retry + 1})")
+                            continue
+                        break
+
+                    if statusdict["error"]:
+                        LOG.error(f"Giving up after {retries} retries, marking as evaluated anyway")
+
                     md["evaluated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+
                     # artifact.delete(delete_aliases=True)
                     artifact.ttl = datetime.timedelta(days=1)
                     artifact.save()
@@ -256,11 +269,11 @@ def find_remote_agents(LOG):
             time.sleep(30)
 
 
-def find_agents(LOG):
+def find_agents(LOG, statusdict):
     if os.environ.get("NO_WANDB", None) == "true":
-        return find_local_agents(LOG)
+        return find_local_agents(LOG, statusdict)
     else:
-        return find_remote_agents(LOG)
+        return find_remote_agents(LOG, statusdict)
 
 
 def main():
@@ -282,6 +295,7 @@ def main():
     evaluated = []
     venv = None
     watchdogfile = None
+    statusdict = {}
 
     if len(sys.argv) == 3:
         it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{sys.argv[1]}"), sys.argv[2])]
@@ -290,7 +304,7 @@ def main():
         if len(sys.argv) == 2 > 1:
             watchdogfile = sys.argv[1]
 
-        it = find_agents(LOG)
+        it = find_agents(LOG, statusdict)
 
     try:
         for run, agent_load_file in it:
@@ -401,6 +415,7 @@ def main():
                 # XXX: force "square" angles in wandb with Wall Clock axis
                 wandb_log({"evaluator/busy": 1})  # commit here as well
                 wandb_log({"evaluator/busy": 0})  # commit here as well
+                statusdict["error"] = False
             except KeyboardInterrupt:
                 print("SIGINT received. Exiting gracefully.")
                 sys.exit(0)
@@ -409,6 +424,7 @@ def main():
                     agent_load_file,
                     "\n".join(traceback.format_exception(e))
                 ))
+                statusdict["error"] = True
                 continue
 
     finally:
