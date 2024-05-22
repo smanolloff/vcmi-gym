@@ -373,6 +373,7 @@ PYBIND11_MODULE(connector, m) {
             const int &,         // swapSides
             const std::string &, // loglevelGlobal
             const std::string &, // loglevelAI
+            const std::string &, // loglevelStats
             const std::string &, // red
             const std::string &, // blue
             const std::string &, // redModel
