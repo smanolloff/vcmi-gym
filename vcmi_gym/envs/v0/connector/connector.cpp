@@ -27,10 +27,16 @@ Connector::Connector(
     const int swapSides_,
     const std::string loglevelGlobal_,
     const std::string loglevelAI_,
-    const std::string attacker_,
-    const std::string defender_,
-    const std::string attackerModel_,
-    const std::string defenderModel_
+    const std::string loglevelStats_,
+    const std::string red_,
+    const std::string blue_,
+    const std::string redModel_,
+    const std::string blueModel_,
+    const std::string statsMode_,
+    const std::string statsStorage_,
+    const int statsPersistFreq_,
+    const int statsSampling_,
+    const float statsScoreVar_
 ) : encoding(encoding_),
     mapname(mapname_),
     randomHeroes(randomHeroes_),
@@ -38,10 +44,16 @@ Connector::Connector(
     swapSides(swapSides_),
     loglevelGlobal(loglevelGlobal_),
     loglevelAI(loglevelAI_),
-    attacker(attacker_),
-    defender(defender_),
-    attackerModel(attackerModel_),
-    defenderModel(defenderModel_),
+    loglevelStats(loglevelStats_),
+    red(red_),
+    blue(blue_),
+    redModel(redModel_),
+    blueModel(blueModel_),
+    statsMode(statsMode_),
+    statsStorage(statsStorage_),
+    statsPersistFreq(statsPersistFreq_),
+    statsSampling(statsSampling_),
+    statsScoreVar(statsScoreVar_),
     baggage(std::make_unique<MMAI::Export::Baggage>(initBaggage())) {}
 
 MMAI::Export::Baggage Connector::initBaggage() {
@@ -234,13 +246,18 @@ const P_Result Connector::start() {
         swapSides,
         loglevelGlobal,
         loglevelAI,
-        attacker,
-        defender,
-        attackerModel,
-        defenderModel,
-        0,
-        false,
-        true  // VCMI GUI requires main thread (where SDL loop runs forever)
+        loglevelStats,
+        red,
+        blue,
+        redModel,
+        blueModel,
+        statsMode,
+        statsStorage,
+        statsPersistFreq,
+        statsSampling,
+        statsScoreVar,
+        false,  // printModelPredictions
+        true  // headless (disable the GUI, as it cannot run in a non-main thread)
     );
 
     LOG("set state = AWAITING_RESULT");
@@ -356,10 +373,15 @@ PYBIND11_MODULE(connector, m) {
             const int &,         // swapSides
             const std::string &, // loglevelGlobal
             const std::string &, // loglevelAI
-            const std::string &, // attacker
-            const std::string &, // defender
-            const std::string &, // attackerModel
-            const std::string &  // defenderModel
+            const std::string &, // red
+            const std::string &, // blue
+            const std::string &, // redModel
+            const std::string &, // blueModel
+            const std::string &, // statsMode
+            const std::string &, // statsStorage
+            const int &,         // statsPersistFreq
+            const int &,         // statsSampling
+            const float &        // statsScoreVar
         >())
         .def("start", &Connector::start)
         .def("reset", &Connector::reset)

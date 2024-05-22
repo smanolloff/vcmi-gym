@@ -43,10 +43,16 @@ class Connector {
     const int swapSides;
     const std::string loglevelGlobal;
     const std::string loglevelAI;
-    const std::string attacker;
-    const std::string defender;
-    const std::string attackerModel;
-    const std::string defenderModel;
+    const std::string loglevelStats;
+    const std::string red;
+    const std::string blue;
+    const std::string redModel;
+    const std::string blueModel;
+    const std::string statsMode;
+    const std::string statsStorage;
+    const int statsPersistFreq;
+    const int statsSampling;
+    const float statsScoreVar;
 
     std::thread vcmithread;
     std::unique_ptr<MMAI::Export::Baggage> baggage;
@@ -67,10 +73,16 @@ public:
         const int swapSides,
         const std::string loglevelGlobal,
         const std::string loglevelAI,
-        const std::string attacker,
-        const std::string defender,
-        const std::string attackerModel,
-        const std::string defenderModel
+        const std::string loglevelStats,
+        const std::string red,
+        const std::string blue,
+        const std::string redModel,
+        const std::string blueModel,
+        const std::string statsMode,
+        const std::string statsStorage,
+        const int statsPersistFreq,
+        const int statsSampling,
+        const float statsScoreVar
     );
 
     const P_Result start();

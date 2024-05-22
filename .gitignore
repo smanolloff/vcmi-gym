@@ -16,3 +16,4 @@ test.out
 *.log
 *.onnx
 rl/models/
+rl/stats/

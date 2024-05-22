@@ -179,6 +179,7 @@ class VcmiEnv(gym.Env):
         render_each_step=False,
         vcmi_loglevel_global="error",  # vcmi loglevel
         vcmi_loglevel_ai="error",  # vcmi loglevel
+        vcmi_loglevel_stats="error",  # vcmi loglevel
         vcmienv_loglevel="WARN",  # python loglevel
         encoding_type="default",  # default / float
         consecutive_error_reward_factor=-1,  # unused
@@ -186,6 +187,11 @@ class VcmiEnv(gym.Env):
         defender="StupidAI",  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
         attacker_model=None,  # MPPO zip model (if attacker=MMAI_MODEL)
         defender_model=None,  # MPPO zip model (if defender=MMAI_MODEL)
+        vcmi_stats_mode="disabled",
+        vcmi_stats_storage="-",
+        vcmi_stats_persist_freq="100",
+        vcmi_stats_sampling=0,
+        vcmi_stats_score_var=0.4,
         sparse_info=False,
         allow_invalid_actions=False,
         actions_log_file=None,  # DEBUG
@@ -231,10 +237,16 @@ class VcmiEnv(gym.Env):
             swap_sides,
             vcmi_loglevel_global,
             vcmi_loglevel_ai,
+            # vcmi_loglevel_stats,
             attacker,
             defender,
             attacker_model or "",
-            defender_model or ""
+            defender_model or "",
+            # vcmi_stats_mode,
+            # vcmi_stats_storage,
+            # vcmi_stats_persist_freq,
+            # vcmi_stats_sampling,
+            # vcmi_stats_score_var,
         )
 
         self.action_space = gym.spaces.Discrete(N_ACTIONS - ACTION_OFFSET)
