@@ -250,20 +250,20 @@ def find_remote_agents(LOG, statedict):
 
                     retries = 3
                     for retry in range(retries):
-                        del statedict["result"]
+                        statedict["result"] = None
                         yield run, f.name
-                        if statedict.get("result") == "error":
+                        if statedict["result"] == "error":
                             LOG.warn(f"Evaluation failed ({retry + 1})")
                             continue
                         break
 
-                    if statedict.get("result") == "error":
+                    if statedict["result"] == "error":
                         LOG.error(f"Giving up after {retries} retries, marking as evaluated anyway")
 
                     md["evaluated"] = True
                     md["evaluated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
                     md["evaluated_by"] = f"{os.uname().nodename} (PID {os.getpid()})"
-                    md["evaluated_result"] = statedict.get("result")
+                    md["evaluated_result"] = statedict["result"]
 
                     # artifact.delete(delete_aliases=True)
                     artifact.ttl = datetime.timedelta(days=1)
