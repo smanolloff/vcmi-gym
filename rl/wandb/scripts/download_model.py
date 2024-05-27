@@ -24,3 +24,6 @@ else:
 
 dest = artifact.download(f"rl/models/{artifact.name}")
 print(f"Downloaded to {dest}")
+
+with open(f"{dest}/description.txt", "w") as f:
+    f.write(artifact.description)

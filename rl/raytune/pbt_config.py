@@ -98,14 +98,17 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    "agent_load_file": "data/PBT-mppo-float-obstacle+sideswap-20240515_184107/8d231_00003/checkpoint_000040/agent.pt",
-    # "agent_load_file": None,
+    # "agent_load_file": "rl/models/model-PBT-mppo-attacker-cont-20240517_134625.b6623_00000:v2/agent.pt",
+    # "agent_load_file": "rl/models/model-PBT-mppo-defender-20240521_112358.79ad0_00000:v1/agent.pt",
+    "agent_load_file": None,
 
-    "tags": ["Map-4096-mixstack", "StupidAI", "side-attacker", "obstacles-random", "encoding-float"],
+    # "agent_load_file": None,
+    "tags": ["Map-4096-mixstack", "StupidAI", "side-defender", "obstacles-random", "encoding-float"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "mapmask": "gym/generated/4096/4096-mixstack-300K-01.vmap",
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
+    # "opponent_load_file": "rl/models/model-PBT-mppo-defender-20240521_112358.79ad0_00000:v1/jit-agent.pt",
 
     #
     # PPO hyperparams
@@ -150,19 +153,12 @@ config = {
             # => (B, 11, 15, 86|547)
             {"t": "Flatten"},
             # => (B, 14190|90255)  #  165*N
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 14190]},
-            # => (B, 1, 14190|90255)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 86, "stride": 86, "padding": 0},
-            {"t": "Tanh"},
-            # => (B, 32, 11, 15)
-            {"t": "Flatten"},
-            # => (B, 5280)
-            {"t": "Linear", "in_features": 5280, "out_features": 1024},
-            {"t": "Tanh"},
+            {"t": "Linear", "in_features": 14190, "out_features": 256},
+            {"t": "LeakyReLU"},
             # => (B, 1024)
         ],
-        "actor": {"t": "Linear", "in_features": 1024, "out_features": 2311},
-        "critic": {"t": "Linear", "in_features": 1024, "out_features": 1}
+        "actor": {"t": "Linear", "in_features": 256, "out_features": 2311},
+        "critic": {"t": "Linear", "in_features": 256, "out_features": 1}
     },
 
 

@@ -241,6 +241,7 @@ const P_Result Connector::start() {
         baggage.get(),
         encoding,
         mapname,
+        0,  // maxbattles
         randomHeroes,
         randomObstacles,
         swapSides,
