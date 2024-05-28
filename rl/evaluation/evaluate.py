@@ -147,7 +147,7 @@ def create_venv(env_cls, agent, mapname, role, opponent):
 
 def wandb_init(run):
     if re.match(r"^T\d+$", run.name):
-        name = f"(E) {run.name} ({run.id.removesuffix('_00000')})"
+        name = f"(E) T0 {run.group} ({run.id.removesuffix('_00000')})"
     else:
         name = f"(E) {run.name}"
 
@@ -253,7 +253,7 @@ def find_remote_agents(LOG, statedict):
                         statedict["result"] = None
                         yield run, f.name
                         if statedict["result"] == "error":
-                            LOG.warn(f"Evaluation failed ({retry + 1})")
+                            LOG.warning(f"Evaluation failed ({retry + 1})")
                             continue
                         break
 

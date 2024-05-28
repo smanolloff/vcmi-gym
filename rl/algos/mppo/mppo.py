@@ -62,7 +62,9 @@ class EnvArgs:
     step_reward_mult: int = 1
     term_reward_mult: int = 0
     consecutive_error_reward_factor: Optional[int] = None
-    vcmi_timeout: int = 5
+    user_timeout: int = 30
+    vcmi_timeout: int = 30
+    boot_timeout: int = 30
     random_heroes: int = 1
     random_obstacles: int = 1
     swap_sides: int = 0
