@@ -150,15 +150,20 @@ config = {
     "network": {
         "attention": None,
         "features_extractor": [
-            # => (B, 11, 15, 86|547)
+            # => (B, 11, 15, 86)
+            {"t": "ChanFirst"},
+            # => (B, 86, 11, 15)
+            {"t": "Flatten", "start_dim": 2},
+            # => (B, 86, 165)
+            # {"t": "Conv1d", "in_channels": 86, "out_channels": 1, "kernel_size": 1},
+            {"t": "Linear", "in_features": 165, "out_features": 32},
+            {"t": "Tanh"},
+            # => (B, 86, 32)
             {"t": "Flatten"},
-            # => (B, 14190|90255)  #  165*N
-            {"t": "Linear", "in_features": 14190, "out_features": 256},
-            {"t": "LeakyReLU"},
-            # => (B, 1024)
+            # => (B, 2752)
         ],
-        "actor": {"t": "Linear", "in_features": 256, "out_features": 2311},
-        "critic": {"t": "Linear", "in_features": 256, "out_features": 1}
+        "actor": {"t": "Linear", "in_features": 2752, "out_features": 2311},
+        "critic": {"t": "Linear", "in_features": 2752, "out_features": 1}
     },
 
 
