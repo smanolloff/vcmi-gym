@@ -62,7 +62,7 @@ $ source .venv/bin/activate
 > python virtual env will be indicated with a `(.venv) $` prompt.
 
 ```bash
-(.venv)$ pip install -r requirements.lock
+(.venv)$ pip install -r requirements.txt
 ```
 
 ### Gym maps

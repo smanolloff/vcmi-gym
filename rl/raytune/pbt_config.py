@@ -192,7 +192,10 @@ config = {
         "reward_army_value_ref": 500,
         "random_heroes": 1,
         "random_obstacles": 1,
-        "swap_sides": 0
+        "swap_sides": 0,
+        "user_timeout": 60,
+        "vcmi_timeout": 60,
+        "boot_timeout": 300,
     },
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked

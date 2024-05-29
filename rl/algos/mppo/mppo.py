@@ -144,7 +144,7 @@ class Args:
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
-    lr_schedule: ScheduleArgs = ScheduleArgs()
+    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
     weight_decay: float = 0.0
     num_envs: int = 1
     num_steps: int = 128
@@ -167,9 +167,9 @@ class Args:
     skip_wandb_init: bool = False
     skip_wandb_log_code: bool = False
 
-    env: EnvArgs = EnvArgs()
+    env: EnvArgs = field(default_factory=lambda: EnvArgs())
     env_wrappers: list = field(default_factory=list)
-    network: NetworkArgs = NetworkArgs()
+    network: NetworkArgs = field(default_factory=lambda: NetworkArgs())
 
     def __post_init__(self):
         if not isinstance(self.env, EnvArgs):

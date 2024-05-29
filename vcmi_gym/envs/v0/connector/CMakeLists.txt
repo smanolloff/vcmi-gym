@@ -7,10 +7,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_HOME_DIRECTORY}/cmake_modules)
 set(Python_VIRTUALENV FIRST)
 set(CMAKE_CXX_STANDARD 17)
 
-# Seems python3.11 is not supported by pybind (as of Oct 2023):
-# https://github.com/pybind/pybind11/discussions/4333
 link_directories(${CMAKE_SOURCE_DIR}/lib)
-find_package(Python3 3.10 REQUIRED EXACT COMPONENTS Interpreter Development)
 find_package(pybind11 REQUIRED)
 
 pybind11_add_module(connector conncommon.h connector.h connector.cpp)
