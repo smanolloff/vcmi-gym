@@ -103,7 +103,7 @@ config = {
     "agent_load_file": None,
 
     # "agent_load_file": None,
-    "tags": ["Map-4096-mixstack", "StupidAI", "side-defender", "obstacles-random", "encoding-float"],
+    "tags": ["Map-4096-mixstack", "StupidAI", "obstacles-random", "encoding-float"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "mapmask": "gym/generated/4096/4096-mixstack-300K-01.vmap",
     "opponent_sbm_probs": [1, 0, 0],

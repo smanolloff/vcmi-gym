@@ -16,7 +16,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", metavar="<strategy>", default="pbt", help="strategy (pbt, pb2)")
     parser.add_argument("-a", metavar="<algo>", default="mppo", help="rl algo module (mppo, mppo_dna, mppg, mqrdqn, ...)")
     parser.add_argument("-n", metavar="<name>", default="PBT-{datetime}", help="experiment name")
-    parser.add_argument("-R", metavar="<path>", help="resume experiment from path")
+    parser.add_argument("-R", metavar="<path>", help="resume experiment from a single saved agent")
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.epilog = """
 
@@ -32,7 +32,7 @@ Available algos:
 
 Examples:
   python -m rl.raytune.main -n "PBT-experiment1-{datetime}"
-  python -m rl.raytune.main -R "/path/to/PBT-experiment1-20240414_141602"
+  python -m rl.raytune.main -R "/path/to/saved/agent.pt"
   python -m rl.raytune.main -s pb2 -a mppg -n "..."
 """
     # XXX: env vars must be set *before* importing ray/wandb modules
