@@ -80,7 +80,10 @@ config = {
             # "num_steps": 128,
             # "update_epochs": 10,
             # "vf_coef": 1.2,
-        }
+        },
+
+        # Appended original run_id when resuming
+        "resumes": [],
     },
 
     #

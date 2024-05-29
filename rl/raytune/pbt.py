@@ -18,6 +18,7 @@ def convert_to_param_space(mutations):
 
 def main(alg, exp_name, resume_path):
     cfg = copy.deepcopy(config)
+    cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
 
     if resume_path:
         import torch
@@ -28,6 +29,8 @@ def main(alg, exp_name, resume_path):
         cfg["agent_load_file"] = resume_path
         alg = cfg["_raytune"]["algo"]
         exp_name = cfg["_raytune"]["experiment_name"]
+        cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
+        cfg["_raytune"]["resumes"].append(agent.args.run_id)
 
     mutations = cfg["_raytune"]["hyperparam_mutations"]
 

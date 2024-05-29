@@ -51,10 +51,21 @@ class Trainable(ray.tune.Trainable):
         if not hasattr(self, "algo"):
             self.algo = importlib.import_module("rl.algos.{a}.{a}".format(a=initargs["_raytune"]["algo"]))
 
+        resumes = initargs["_raytune"].get("resumes", [])
+
+        if len(resumes) > 0:
+            resumed_id = resumes[-1]
+            assert re.match(r"^[0-9a-z]+_0+[1-9]+$", resumed_id)
+            run_id = "%s_%s" % (resumed_id.split("_")[0], self.trial_id.split("_")[1])
+        else:
+            run_id = self.trial_id
+
+        print("Will resume run as id %s (Trial ID is %s)" % (run_id, self.trial_id))
+
         wandb.init(
             project=initargs["_raytune"]["wandb_project"],
             group=self.experiment_name,
-            id=self.trial_id,
+            id=run_id,
             name="T%d" % int(self.trial_name.split("_")[-1]),
             resume="allow",
             reinit=True,
