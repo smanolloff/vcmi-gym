@@ -55,7 +55,7 @@ class Trainable(ray.tune.Trainable):
 
         if len(resumes) > 0:
             resumed_id = resumes[-1]
-            assert re.match(r"^[0-9a-z]+_0+[1-9]+$", resumed_id)
+            assert re.match(r"^[0-9a-z]+_[0-9]+$", resumed_id), f"bad id to resume: {resumed_id}"
             run_id = "%s_%s" % (resumed_id.split("_")[0], self.trial_id.split("_")[1])
         else:
             run_id = self.trial_id
