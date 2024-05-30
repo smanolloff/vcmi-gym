@@ -15,7 +15,6 @@
 # =============================================================================
 
 import glob
-import re
 import gymnasium as gym
 import wandb
 import datetime
@@ -156,7 +155,7 @@ def wandb_init(run):
     )
 
 
-def find_local_agents(LOG, _statusdict):
+def find_local_agents(LOG, _WORKER_ID, _N_WORKERS, _statedict):
     evaluated = []
 
     while True:
@@ -203,7 +202,7 @@ def find_local_agents(LOG, _statusdict):
         time.sleep(30)
 
 
-def find_remote_agents(LOG, statedict):
+def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
     with tempfile.TemporaryDirectory(prefix="vcmi-gym-evaluator") as tmpdir:
         while True:
             gt = datetime.datetime.now() - datetime.timedelta(days=3)
@@ -213,12 +212,16 @@ def find_remote_agents(LOG, statedict):
             )
 
             for run in runs:
-                for artifact in run.logged_artifacts():
-                    # artifact timestamps are UTC
-                    dt = datetime.datetime.fromisoformat(f"{artifact.created_at}")
+                # XXX: artifact timestamps are naive UTC
+                artifacts = [(a, datetime.datetime.fromisoformat(a.created_at)) for a in run.logged_artifacts()]
+
+                for artifact, dt in sorted(artifacts, key=lambda x: x[1]):
                     md = artifact.metadata
 
                     if not artifact.name.startswith("agent.pt:v"):
+                        continue
+
+                    if int(artifact.version[1:]) % N_WORKERS != WORKER_ID:
                         continue
                     if md.get("evaluated", False):
                         continue
@@ -249,7 +252,7 @@ def find_remote_agents(LOG, statedict):
 
                     md["evaluated"] = True
                     md["evaluated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
-                    md["evaluated_by"] = f"{os.uname().nodename} (PID {os.getpid()})"
+                    md["evaluated_by"] = f"{os.uname().nodename} (PID {os.getpid()}, worker {WORKER_ID}/{N_WORKERS})"
                     md["evaluated_result"] = statedict["result"]
 
                     # artifact.delete(delete_aliases=True)
@@ -260,11 +263,11 @@ def find_remote_agents(LOG, statedict):
             time.sleep(30)
 
 
-def find_agents(LOG, statedict):
+def find_agents(LOG, WORKER_ID, N_WORKERS, statedict):
     if os.environ.get("NO_WANDB", None) == "true":
-        return find_local_agents(LOG, statedict)
+        return find_local_agents(LOG, WORKER_ID, N_WORKERS, statedict)
     else:
-        return find_remote_agents(LOG, statedict)
+        return find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict)
 
 
 # Flatten dict:
@@ -288,7 +291,12 @@ def main():
     LOG = logging.getLogger("evaluator")
     LOG.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter("-- %(asctime)s <%(process)d> %(levelname)s: %(message)s")
+    WORKER_ID = int(os.getenv("EVAL_WORKER_ID", 0))
+    N_WORKERS = int(os.getenv("EVAL_N_WORKERS", 1))
+
+    assert WORKER_ID < N_WORKERS, "EVAL_WORKER_ID must be between 1 and %d, got: %d" % (N_WORKERS, WORKER_ID)
+
+    formatter = logging.Formatter(f"-- %(asctime)s <%(process)d> [{WORKER_ID}/{N_WORKERS}] %(levelname)s: %(message)s")
     formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
     formatter.default_msec_format = None
     loghandler = logging.StreamHandler()
@@ -309,7 +317,7 @@ def main():
         if len(sys.argv) == 2 > 1:
             watchdogfile = sys.argv[1]
 
-        it = find_agents(LOG, statedict)
+        it = find_agents(LOG, WORKER_ID, N_WORKERS, statedict)
 
     try:
         for run, agent_load_file, metadata in it:
@@ -439,3 +447,4 @@ def main():
 if __name__ == "__main__":
     sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
     main()
+
