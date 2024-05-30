@@ -201,8 +201,7 @@ def maybe_save(t_save, t_permasave, args, agent, out_dir):
 
     os.makedirs(out_dir, exist_ok=True)
     agent_file = os.path.join(out_dir, "agent-%d.pt" % now)
-    nn_file = os.path.join(out_dir, "nn-%d.pt" % now)
-    agent.__class__.save(agent, agent_file, nn_file=nn_file)
+    agent.__class__.save(agent, agent_file)
     t_save = now
 
     if args.wandb_project:

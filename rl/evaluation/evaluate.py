@@ -336,7 +336,7 @@ def main():
 
                 wandb_results = {}
 
-                for k, v in flatten_dict(metadata, sep="."):
+                for k, v in flatten_dict(metadata, sep=".").items():
                     wandb_results[f"eval/metadata/{k}"] = v
 
                 for vmap in ["88-3stack-300K.vmap", "88-3stack-20K.vmap", "88-7stack-300K.vmap"]:

@@ -102,7 +102,7 @@ class Trainable(ray.tune.Trainable):
             art = wandb.Artifact(name="agent.pt", type="model")
             art.description = f"Snapshot of agent.pt from {time.ctime(time.time())}"
             art.ttl = datetime.timedelta(days=7)
-            art.metadata["iteration"] = self.iteration
+            art.metadata["step"] = wandb.run.step
             art.add_file(f, name="agent.pt")
             wandb.run.log_artifact(art, name="agent.pt")
         return checkpoint_dir
