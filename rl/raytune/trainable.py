@@ -57,10 +57,10 @@ class Trainable(ray.tune.Trainable):
             resumed_id = resumes[-1]
             assert re.match(r"^[0-9a-z]+_[0-9]+$", resumed_id), f"bad id to resume: {resumed_id}"
             run_id = "%s_%s" % (resumed_id.split("_")[0], self.trial_id.split("_")[1])
+            print("Will resume run as id %s (Trial ID is %s)" % (run_id, self.trial_id))
         else:
             run_id = self.trial_id
-
-        print("Will resume run as id %s (Trial ID is %s)" % (run_id, self.trial_id))
+            print("Will start new run %s" % run_id)
 
         wandb.init(
             project=initargs["_raytune"]["wandb_project"],
@@ -102,6 +102,7 @@ class Trainable(ray.tune.Trainable):
             art = wandb.Artifact(name="agent.pt", type="model")
             art.description = f"Snapshot of agent.pt from {time.ctime(time.time())}"
             art.ttl = datetime.timedelta(days=7)
+            art.metadata["iteration"] = self.iteration
             art.add_file(f, name="agent.pt")
             wandb.run.log_artifact(art, name="agent.pt")
         return checkpoint_dir
