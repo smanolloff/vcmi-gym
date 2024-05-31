@@ -25,18 +25,19 @@ import zipfile
 # relative to script dir
 MAP_DIR = "../gym/generated/4096"
 # name template containing a single {id} token to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "4096-mixstack-100K-{id:02d}"
+MAP_NAME_TEMPLATE = "4096-mixstack-5K-{id:02d}"
 # id of maps to generate (inclusive)
 MAP_ID_START = 2
 MAP_ID_END = 2
 
 # ARMY_N_STACKS_SAME = False  # same for both sides
-ARMY_N_STACKS_MIN = 2
+ARMY_N_STACKS_MIN = 1
 ARMY_N_STACKS_MAX = 7
 ARMY_N_STACKS_ENFORCE = False  # whether to fail if not all stacks are filled
 
-ARMY_VALUE_MIN = 100_000
-ARMY_VALUE_MAX = 100_000
+# XXX: these should be equal, otherwise battle will be one-sided
+ARMY_VALUE_MIN = 5000
+ARMY_VALUE_MAX = 5000
 
 STACK_QTY_MAX = 1023
 
@@ -48,7 +49,20 @@ ARMY_VALUE_ERROR_MAX = 0.1
 
 # Max value for a single unit of the weakest creature type in the army
 # (this to allow rebalancing, i.e. avoid armies with 6+ tier units only)
-ARMY_WEAKEST_CREATURE_VALUE_MAX = 1000
+#
+# Some ref values:
+#   peasant         = 15    (tier 1 - weakest unit)
+#   pikeman         = 80    (tier 1)
+#   archer          = 126   (tier 2)
+#   griffin         = 351   (tier 3)
+#   swordsman       = 445   (tier 4)
+#   monk            = 485   (tier 5)
+#   cavalier        = 1946  (tier 6)
+#   angel           = 5000  (tier 7)
+#   crystal dragon  = 39338 (tier 8 - strongest unit, azure dragon is removed)
+#
+# i.e. a value of "15" will ensure all armies contain a stack of peasants.
+ARMY_WEAKEST_CREATURE_VALUE_MAX = 100
 
 # Hero IDs are re-mapped when game starts
 # => use hero experience as a reference
@@ -104,7 +118,7 @@ def get_templates():
 
 
 def build_army_with_retry(*args, **kwargs):
-    max_attempts = 100
+    max_attempts = 1000
 
     for r in range(1, max_attempts):
         try:

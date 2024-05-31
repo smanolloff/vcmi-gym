@@ -145,7 +145,7 @@ def create_venv(env_cls, agent, mapname, role, opponent):
 
 
 def wandb_init(run):
-    wandb.init(
+    return wandb.init(
         id=run.id,
         resume="must",
         reinit=True,
@@ -264,7 +264,7 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
 
 
 def find_agents(LOG, WORKER_ID, N_WORKERS, statedict):
-    if os.environ.get("NO_WANDB", None) == "true":
+    if os.getenv("NO_WANDB") == "true":
         return find_local_agents(LOG, WORKER_ID, N_WORKERS, statedict)
     else:
         return find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict)
@@ -296,6 +296,11 @@ def main():
 
     assert WORKER_ID < N_WORKERS, "EVAL_WORKER_ID must be between 1 and %d, got: %d" % (N_WORKERS, WORKER_ID)
 
+    # XXX: logging metrics for the same run in multiple processes on the same
+    #      machine is messes metrics up. Until some kind of lock is implemented,
+    #      better to simply disable workers.
+    assert WORKER_ID == 0 and N_WORKERS == 1, "multiple workers are not supported"
+
     formatter = logging.Formatter(f"-- %(asctime)s <%(process)d> [{WORKER_ID}/{N_WORKERS}] %(levelname)s: %(message)s")
     formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
     formatter.default_msec_format = None
@@ -325,17 +330,6 @@ def main():
                 LOG.info('Evaluating %s (%s/%s)' % (run.name, run.group, run.id))
                 agent = load_agent(agent_file=agent_load_file, run_id=run.id)
                 agent.eval()
-
-                if os.environ.get("NO_WANDB", None) == "true":
-                    def wandb_log(*args, **kwargs):
-                        pass
-                else:
-                    # For wandb.log, commit=True by default
-                    # for wandb_log, commit=False by default
-                    def wandb_log(*args, **kwargs):
-                        # LOG.debug("wandb.log: %s %s" % (args, kwargs))
-                        wandb.log(*args, **dict({"commit": False}, **kwargs))
-                    wandb_init(run)
 
                 rewards = {"StupidAI": [], "BattleAI": []}
                 lengths = {"StupidAI": [], "BattleAI": []}
@@ -413,8 +407,9 @@ def main():
                 wandb_results["eval/all/net_value"] = np.mean(net_values["StupidAI"] + net_values["BattleAI"])
                 wandb_results["eval/all/is_success"] = np.mean(is_successes["StupidAI"] + is_successes["BattleAI"])
 
-                wandb_log(wandb_results, commit=True)
-                # ^^^^^^^ commit here
+                if os.getenv("NO_WANDB") != "true":
+                    with wandb_init(run) as irun:
+                        irun.log(copy.deepcopy(wandb_results))
 
                 # LOG.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
                 #     run.id,
@@ -447,4 +442,3 @@ def main():
 if __name__ == "__main__":
     sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
     main()
-
