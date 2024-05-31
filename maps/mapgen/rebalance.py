@@ -30,6 +30,7 @@ import random
 import datetime
 import argparse
 import numpy as np
+import sqlite3
 from math import log
 
 from mapgen_4096 import (
@@ -93,34 +94,32 @@ def backup(path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-f', help="read input json from file", metavar="FILE")
-    parser.add_argument('-a', help="analyze input and exit", action='store_true')
-    parser.add_argument('--change', help="allow army comp change", action='store_true')
-    parser.add_argument('--dry-run', help="don't save anything", action='store_true')
+    parser.add_argument('-a', help="analyze data and exit", action="store_true")
+    parser.add_argument('--change', help="allow army comp change", action="store_true")
+    parser.add_argument('--dry-run', help="don't save anything", action="store_true")
+    parser.add_argument('map', metavar="<map>", type=str, help="map to be rebalanced (as passed to VCMI)")
+    parser.add_argument('statsdb', metavar="<statsdb>", type=str, help="map's stats database file (sqlite3)")
     args = parser.parse_args()
 
-    j = None
-    if (args.f):
-        with open(args.f, "r") as file:
-            j = file.read()
-    else:
-        print("Waiting for stdin...")
-        try:
-            j = input()
-            print("Got json: %s" % j)
-        except EOFError:
-            pass
-
-    j = json.loads(j)
-    path, (header, objects, surface_terrain) = load(j["map"])
+    path, (header, objects, surface_terrain) = load(args.map)
     creatures_dict = {vcminame: (name, value) for (vcminame, name, value) in get_all_creatures()}
 
-    # analyze map
+    db = sqlite3.connect(args.statsdb)
+
+    # XXX: permit stats where some heroes have 0 games?
+    query = "select count(*) from (select lhero from stats where side == 0 group by lhero having sum(games) == 0)"
+    [(count,)] = db.execute(query).fetchall()
+    assert count == 0, f"there are {count} heroes with no stats"
+
+    query = "select 'hero_' || lhero, 1.0*sum(wins)/sum(games) from stats where games > 0 GROUP BY lhero"
+    winrates = dict(db.execute(query).fetchall())
+
     heroes_data = {}
 
-    for (k, v) in objects.items():
+    for k, v in objects.items():
         if not k.startswith("hero_"):
             continue
+        assert k in winrates, "hero %s not in stats db" % k
 
         heroes_data[k] = {"old_army": [], "army_value": 0, "army_creatures": []}
         for stack in v["options"]["army"]:
@@ -138,51 +137,29 @@ if __name__ == "__main__":
     stddev_army_value = np.std(army_value_list)
     stddev_army_value_frac = stddev_army_value / mean_army_value
 
-    winlist = list(j["wins"].values())
-    mean_wins = np.mean(winlist)
-    stddev_wins = np.std(winlist)
-    stddev_wins_frac = stddev_wins / mean_wins
+    winlist = list(winrates.values())
+    mean_winrate = np.mean(winlist)
+    stddev_winrate = np.std(winlist)
+    stddev_winrate_frac = stddev_winrate / mean_winrate
 
     clip = ARMY_VALUE_CORRECTION_CLIP
+
     if clip is None:
-        """
-        A 0.2 (20%) correction limit is good. Example:
-
-            mean_wins = 30
-            stddev_wins_frac = 0.4
-            examples = [1, 5, 10, 20, 25, 30, 35, 50, 100]
-            damp = 40 - 100*max(min(stddev_wins_frac, 0.35), 0.1)
-            corrections = ["%d => %.2f" % (w, log(mean_wins/w)/damp) for w in examples]
-            print("corrections (mean_wins=%d, stddev_wins_frac=%.2f, damp=%d):\n%s" % (
-              mean_wins, stddev_wins_frac, damp, "\n".join(corrections)
-            ))
-
-
-        corrections (mean_wins=30, stddev_wins_frac=0.40, damp=10):
-        1 => 0.34
-        5 => 0.18
-        10 => 0.11
-        20 => 0.04
-        25 => 0.02
-        30 => 0.00
-        35 => -0.02
-        50 => -0.05
-        100 => -0.12
-        """
+        # 0.2 = 20% correction limit
         clip = 0.2
 
     errmax = ARMY_VALUE_ERROR_MAX
     if errmax is None:
         """
-        Maximum allowed error when generating the army value is ~1000
+        Maximum allowed error when generating the army value is ~500
         (given peasant=15, imp=50, ogre=416, minotaur=835, etc.)
-        For 100K armies, this is 0.01
+        For 5K armies, this is 0.1
         """
-        errmax = 1000 / mean_army_value
+        errmax = 500 / mean_army_value
 
     print("Stats:")
-    print("  mean_wins: %d" % mean_wins)
-    print("  stddev_wins: %d (%.2f%%)" % (stddev_wins, stddev_wins_frac * 100))
+    print("  mean_winrate: %d" % mean_winrate)
+    print("  stddev_winrate: %d (%.2f%%)" % (stddev_winrate, stddev_winrate_frac * 100))
     print("  mean_army_value: %d" % mean_army_value)
     print("  stddev_army_value: %d (%.2f%%)" % (stddev_army_value, stddev_army_value_frac * 100))
 
@@ -195,9 +172,8 @@ if __name__ == "__main__":
     changed = False
 
     for hero_name, hero_data in heroes_data.items():
-        hero_wins = j["wins"].get(hero_name, 0)
-        damp = 40 - 100*max(min(stddev_wins_frac, 0.35), 0.1)
-        correction_factor = log(mean_wins/(hero_wins or 1)) / damp
+        hero_winrate = winrates[hero_name]
+        correction_factor = (mean_winrate - hero_winrate) * stddev_winrate * 2
         correction_factor = np.clip(correction_factor, -clip, clip)
         if abs(correction_factor) <= errmax:
             # nothing to correct
@@ -208,10 +184,10 @@ if __name__ == "__main__":
         old_army = hero_data["old_army"]
 
         new_value = int(army_value * (1 + correction_factor))
-        print("=== %s ===\n  wins:\t\t\t%s (mean=%d)\n  value (current):\t%d\n  value (target):\t%d (%s%.2f%%)" % (
+        print("=== %s ===\n  winrate:\t\t%.2f (mean=%.2f)\n  value (current):\t%d\n  value (target):\t%d (%s%.2f%%)" % (
             hero_name,
-            hero_wins,
-            mean_wins,
+            hero_winrate,
+            mean_winrate,
             army_value,
             new_value,
             "+" if correction_factor > 0 else "",
@@ -255,7 +231,7 @@ if __name__ == "__main__":
             t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             report = (
                 f"[{t}] Rebalanced {path} with stats: "
-                f"mean_wins={mean_wins:.2f}, stddev_wins={stddev_wins:.2f} ({stddev_wins_frac*100:.2f}%), "
+                f"mean_winrate={mean_winrate:.2f}, stddev_winrate={stddev_winrate:.2f} ({stddev_winrate_frac*100:.2f}%), "
                 f"mean_army_value={mean_army_value:.2f}, stddev_army_value={stddev_army_value:.2f} ({stddev_army_value_frac*100:.2f}%), "
                 f"max_correction={clip:.2f}\n"
             )
