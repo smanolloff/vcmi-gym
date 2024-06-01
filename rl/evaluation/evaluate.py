@@ -221,7 +221,9 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
                     if not artifact.name.startswith("agent.pt:v"):
                         continue
 
-                    if int(artifact.version[1:]) % N_WORKERS != WORKER_ID:
+                    version = int(artifact.version[1:])
+
+                    if version % N_WORKERS != WORKER_ID:
                         continue
                     if md.get("evaluated", False):
                         continue
@@ -241,7 +243,7 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
                     retries = 3
                     for retry in range(retries):
                         statedict["result"] = None
-                        yield run, f.name, artifact.metadata
+                        yield run, f.name, dict(artifact.metadata, artifact_version=version)
                         if statedict["result"] == "error":
                             LOG.warning(f"Evaluation failed ({retry + 1})")
                             continue

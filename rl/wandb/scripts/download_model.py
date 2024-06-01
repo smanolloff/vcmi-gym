@@ -1,6 +1,7 @@
 import os
 import sys
 import wandb
+import json
 
 api = wandb.Api()
 
@@ -27,3 +28,6 @@ print(f"Downloaded to {dest}")
 
 with open(f"{dest}/description.txt", "w") as f:
     f.write(artifact.description)
+
+with open(f"{dest}/metadata.json", "w") as f:
+    f.write(json.dumps(artifact.metadata, indent=4))
