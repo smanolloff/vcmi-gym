@@ -31,7 +31,6 @@ import datetime
 import argparse
 import numpy as np
 import sqlite3
-from math import log
 
 from mapgen_4096 import (
     get_all_creatures,
@@ -105,6 +104,8 @@ if __name__ == "__main__":
     creatures_dict = {vcminame: (name, value) for (vcminame, name, value) in get_all_creatures()}
 
     db = sqlite3.connect(args.statsdb)
+
+    print("Loading database %s ..." % args.statsdb)
 
     # XXX: permit stats where some heroes have 0 games?
     query = "select count(*) from (select lhero from stats where side == 0 group by lhero having sum(games) == 0)"
