@@ -26,7 +26,7 @@ while true; do
       --red-ai StupidAI --blue-ai StupidAI \
       --stats-mode red --stats-persist-freq 1000 --stats-sampling 0 \
       --stats-storage "$db" \
-      --max-battles 10 \
+      --max-battles 10000 \
       --map "$vcmimap"
   done
 

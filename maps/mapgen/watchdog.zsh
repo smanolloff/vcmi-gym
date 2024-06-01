@@ -15,20 +15,19 @@ MAP=$1
 [ -n "$MAP" ] || { echo "$USAGE"; exit 1; }
 
 # in minutes
-CHECK_FIRST=1
-CHECK_EVERY=10
+CHECK_EVERY=60
 
 IDENT="*** [🐕]"
 
 function terminate_rebalance() {
   for i in $(seq 3); do
     pkill -g 0 -f rebalance.zsh || return 0  # no more procs => termination successful
-    pkill -g 0 -f python || return 0  # no more procs => termination successful
+    pkill -g 0 -f myclient-headless || return 0  # no more procs => termination successful
 
     for j in $(seq 3); do
       sleep 3
       pkill -g 0 -f rebalance.zsh || return 0
-      pgrep -g 0 -f python || return 0
+      pgrep -g 0 -f myclient-headless || return 0
     done
   done
 
@@ -39,12 +38,12 @@ function terminate_rebalance() {
     # Linux process kills itself with -g0...
     # It also names all sub-proccesses the same way
     pkill --signal=9 -g 0 -f rebalance.zsh || return 0  # no more procs => termination successful
-    pkill --signal=9 -g 0 -f python || return 0
+    pkill --signal=9 -g 0 -f myclient-headless || return 0
 
     for j in $(seq 3); do
       sleep 3
       pgrep -g 0 -f rebalance.zsh || return 0
-      pgrep -g 0 -f python || return 0
+      pgrep -g 0 -f myclient-headless || return 0
     done
   done
 
@@ -52,7 +51,7 @@ function terminate_rebalance() {
   # 4. STILL alive => abort
   #
 
-  ps -ef | grep -E "python|rebalance.zsh"
+  ps -ef | grep -E "myclient-headless|rebalance.zsh"
   echo "$IDENT ERROR: failed to terminate processes"
   return 1
 }
@@ -74,13 +73,12 @@ echo "$IDENT Watchdog PID: $$"
 
 WATCHDOGFILE=/tmp/watchdogfile_rebalance
 touch $WATCHDOGFILE
-
 ts=$(stat -c %Y $WATCHDOGFILE)
 maps/mapgen/rebalance.zsh "$MAP" "$WATCHDOGFILE" &
 
 while true; do
   ts0=$ts
-  sleep $((CHECK_FIRST * 60))
+  sleep $((CHECK_EVERY * 60))
   ts=$(stat -c %Y $WATCHDOGFILE)
   if [ $ts -eq $ts0 ]; then
     echo "$IDENT file not modified in the last ${CHECK_EVERY}m"
