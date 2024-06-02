@@ -3,35 +3,31 @@
 # XXX: This is a LINUX-specific version
 #      for Mac, commands must be amended
 
-#
-# Usage:
-#
 USAGE="
-Usage: zsh rl/evaluation/watchdog.zsh
+Usage: zsh rl/evaluation/watchdog.zsh N_WORKERS WORKER_ID
 "
 
-IS_LINUX=false
-if [ "$(uname)" = "Linux" ]; then
-  IS_LINUX=true
-fi
+CHECK_EVERY=10  # minutes
 
-if [ -z "$CHECK_FIRST" ]; then
-  CHECK_FIRST=10
-fi
+N_WORKERS=$1
+WORKER_ID=$2
+WATCHDOGFILE=/tmp/evaluator-${WORKER_ID}
 
-if [ -z "$CHECK_EVERY" ]; then
-  CHECK_EVERY=10
-fi
+[ -n "$N_WORKERS" -a -n "$WORKER_ID" ] || { echo "$USAGE"; exit 1; }
+[ $WORKER_ID -ge 0 ] || { echo "check failed: WORKER_ID >= 0"; exit 1; }
+[ $WORKER_ID -lt $N_WORKERS ] || { echo "check failed: WORKER_ID < N_WORKERS"; exit 1; }
 
 IDENT="*** [🐕]"
 
-function terminate_python() {
+function terminate_evaluator() {
   for i in $(seq 3); do
     pkill -g 0 -f python || return 0  # no more procs => termination successful
+    pkill -g 0 -f myclient-headless || return 0  # no more procs => termination successful
 
     for j in $(seq 3); do
       sleep 3
-      pgrep -g 0 -f python || return 0
+      pkill -g 0 -f python || return 0
+      pgrep -g 0 -f myclient-headless || return 0
     done
   done
 
@@ -41,11 +37,13 @@ function terminate_python() {
   for i in $(seq 3); do
     # Linux process kills itself with -g0...
     # It also names all sub-proccesses the same way
-    pkill --signal=9 -g 0 -f python || return 0
+    pkill --signal=9 -g 0 -f python || return 0  # no more procs => termination successful
+    pkill --signal=9 -g 0 -f myclient-headless || return 0
 
     for j in $(seq 3); do
       sleep 3
       pgrep -g 0 -f python || return 0
+      pgrep -g 0 -f myclient-headless || return 0
     done
   done
 
@@ -53,15 +51,19 @@ function terminate_python() {
   # 4. STILL alive => abort
   #
 
-  ps -ef | grep "python"
+  ps -ef | grep -E "myclient-headless|python"
   echo "$IDENT ERROR: failed to terminate processes"
   return 1
 }
 
 function handle_sigint() {
   echo "$IDENT SIGINT caught"
-  terminate_python
+  terminate_evaluator
   exit 0
+}
+
+function start_evaluator() {
+  python -m rl.evaluation.evaluate -w $WATCHDOGFILE -d locks.sqlite3 -I $N_WORKERS -i $WORKER_ID
 }
 
 trap "handle_sigint" INT
@@ -74,21 +76,19 @@ export PS4="+[%D{%Y-%m-%d %H:%M:%S}]<$$> "
 set -eux
 
 echo "$IDENT Watchdog PID: $$"
-
-WATCHDOGFILE=/tmp/watchdogfile
 touch $WATCHDOGFILE
-
-python -m rl.evaluation.evaluate $WATCHDOGFILE &
 ts=$(stat -c %Y $WATCHDOGFILE)
+sqlite3 locks.sqlite3 "CREATE TABLE IF NOT EXISTS LOCKS (id PRIMARY KEY)"
+start_evaluator &
 
 while true; do
   ts0=$ts
-  sleep $((CHECK_FIRST * 60))
+  sleep $((CHECK_EVERY * 60))
   ts=$(stat -c %Y $WATCHDOGFILE)
   if [ $ts -eq $ts0 ]; then
-    echo "$IDENT file not modified in the last ${CHECK_EVERY}m"
-    terminate_python
-    python -m rl.evaluation.evaluate $WATCHDOGFILE &
+    echo "$IDENT $WATCHDOGFILE not modified in the last ${CHECK_EVERY}m"
+    terminate_evaluator
+    start_evaluator &
   fi
 done
 

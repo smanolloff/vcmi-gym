@@ -289,7 +289,6 @@ def flatten_dict(d, parent_key='', sep='.'):
 
 
 def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None):
-
     import vcmi_gym
     os.environ["WANDB_SILENT"] = "true"
 
@@ -308,8 +307,8 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
     db = None
 
     # To init DB: CREATE TABLE locks (id PRIMARY KEY)
-    if args.statsdb:
-        db = sqlite3.connect(args.statsdb)
+    if args.database:
+        db = sqlite3.connect(args.database)
         db.execute("PRAGMA busy_timeout = 60000")
 
         # test DB
@@ -317,7 +316,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
         db.execute(f"INSERT INTO locks VALUES({WORKER_ID})")
         db.execute("ROLLBACK")
 
-    formatter = logging.Formatter(f"-- %(asctime)s <%(process)d> [{WORKER_ID}/{N_WORKERS}] %(levelname)s: %(message)s")
+    formatter = logging.Formatter(f"-- %(asctime)s <%(process)d> [{WORKER_ID}] %(levelname)s: %(message)s")
     formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
     formatter.default_msec_format = None
     loghandler = logging.StreamHandler()
@@ -328,16 +327,12 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
     env_cls = vcmi_gym.VcmiEnv
     evaluated = []
     venv = None
-    watchdogfile = None
     statedict = {}
 
-    if len(sys.argv) == 3:
-        it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{sys.argv[1]}"), sys.argv[2], {})]
-        watchdogfile = sys.argv[3]
+    if model:
+        rid = torch.load(model).args.run_id
+        it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{rid}"), model, {})]
     else:
-        if len(sys.argv) == 2 > 1:
-            watchdogfile = sys.argv[1]
-
         it = find_agents(LOG, WORKER_ID, N_WORKERS, statedict)
 
     try:
@@ -391,8 +386,8 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                             time.time() - tstart
                         ))
 
-                        if watchdogfile:
-                            pathlib.Path(watchdogfile).touch()
+                        if watchdog_file:
+                            pathlib.Path(watchdog_file).touch()
 
                     wandb_results[f"eval/map/{vmap}/reward"] = np.mean(rewards[vmap])
                     wandb_results[f"eval/map/{vmap}/length"] = np.mean(lengths[vmap])
@@ -470,12 +465,5 @@ if __name__ == "__main__":
     parser.add_argument('-I', '--n-workers', type=int, default=1, help="total number of workers")
     parser.add_argument('-d', '--database', type=str, help="path to sqlite3 database for locking")
     args = parser.parse_args()
-
-    if len(sys.argv) == 3:
-        it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{sys.argv[1]}"), sys.argv[2], {})]
-        watchdogfile = sys.argv[3]
-    else:
-        if len(sys.argv) == 2 > 1:
-            watchdogfile = sys.argv[1]
 
     main(**args.__dict__)
