@@ -20,23 +20,28 @@ import numpy as np
 from vcmi_gym import VcmiEnv
 
 
-def random_valid_action(mask):
-    return np.random.choice(np.where(mask)[0])
+def get_action(model, obs, mask):
+    # torch import is at runtime to avoid libtorch/pytorch conflict
+    import torch
+    if model is None:
+        return np.random.choice(np.where(mask)[0])
 
-
-def first_valid_action(mask):
-    for (i, m) in enumerate(mask):
-        if m:
-            return i
+    return model.predict(
+        torch.as_tensor(obs).float(),
+        torch.as_tensor(np.array(mask))
+    )
 
 
 def main():
+    # torch import is at runtime to avoid libtorch/pytorch conflict
+    import torch
     total_steps = 1000
     env = VcmiEnv(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
+        encoding_type="float",
         random_heroes=1,
         random_obstacles=1,
-        swap_sides=1,
+        # swap_sides=1,
         # defender="MMAI_USER",
         # defender_model="/Users/simo/Projects/vcmi-gym/data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00000/checkpoint_000020/agent.pt"
     )
@@ -66,6 +71,15 @@ def main():
     termside = -1
     two_users = ew.attacker == "MMAI_USER" and ew.defender == "MMAI_USER"
 
+    # No model => get_action() will pick a random valid action
+    model = None
+
+    # Normal torch model
+    # model = torch.load("rl/models/agent.pt:v877/agent.pt")
+
+    # JIT torch model (~5% faster)
+    model = torch.jit.load("rl/models/agent.pt:v877/jit-agent.pt")
+
     try:
         while steps < total_steps:
             if term or trunc:
@@ -88,7 +102,7 @@ def main():
                     tmpresets += 1
                 obs, info = env.reset()
             else:
-                act = random_valid_action(ew.action_mask())
+                act = get_action(model, obs, ew.action_mask())
                 obs, _, term, trunc, info = env.step(act)
 
             # reset is also a "step" (aka. a round-trip to VCMI)
