@@ -1,33 +1,34 @@
-import os
 import sys
 import wandb
 import json
+import os
 
-api = wandb.Api()
 
-if len(sys.argv) == 2:
-    name = sys.argv[1]
-    artifact = api.artifact(name)
-elif len(sys.argv) == 3:
-    os.environ["WANDB_PROJECT"] = "vcmi-gym"
+def main(name):
     os.environ["WANDB_ENTITY"] = "s-manolloff"
-    run_id = sys.argv[1]
-    tag = sys.argv[2]
-    run = api.run(run_id)
+    os.environ["WANDB_PROJECT"] = "vcmi-gym"
+
+    api = wandb.Api()
+
     artifact = api.artifact(name)
-    name = f"model-{run.group}.{run.id}:{tag}"
-else:
-    print("Usage (1): python -m rl.wandb.scripts.download_model FULL_NAME")
-    print("Usage (2): python -m rl.wandb.scripts.download_model <RUN_ID> ALIAS")
-    print("Example:")
-    print("    (1) python -m rl.wandb.scripts.download_model s-manolloff/vcmi-gym/model-PBT-...b6623_00000:v2")
-    print("    (2) python -m rl.wandb.scripts.download_model b6623_00000 v4")
 
-dest = artifact.download(f"rl/models/{artifact.name}")
-print(f"Downloaded to {dest}")
+    dest = artifact.download(f"rl/models/{artifact.name}")
+    print(f"Downloaded to {dest}")
 
-with open(f"{dest}/description.txt", "w") as f:
-    f.write(artifact.description)
+    with open(f"{dest}/description.txt", "w") as f:
+        f.write(artifact.description)
 
-with open(f"{dest}/metadata.json", "w") as f:
-    f.write(json.dumps(artifact.metadata, indent=4))
+    with open(f"{dest}/metadata.json", "w") as f:
+        f.write(json.dumps(artifact.metadata, indent=4))
+
+    return dest
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python -m rl.wandb.scripts.download_model ARTIFACT_NAME")
+        print("Examples:")
+        print("    python -m rl.wandb.scripts.download_model s-manolloff/vcmi-gym/model-PBT-...b6623_00000:v2")
+        print("    python -m rl.wandb.scripts.download_model agent.pt:v7")
+    else:
+        main(sys.argv[1])

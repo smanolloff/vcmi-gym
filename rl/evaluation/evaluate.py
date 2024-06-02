@@ -28,7 +28,9 @@ import logging
 import traceback
 import tempfile
 import pathlib
+import argparse
 import copy
+import sqlite3
 
 from dataclasses import asdict
 
@@ -286,22 +288,34 @@ def flatten_dict(d, parent_key='', sep='.'):
     return dict(items)
 
 
-def main():
+def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None):
+
     import vcmi_gym
     os.environ["WANDB_SILENT"] = "true"
 
     LOG = logging.getLogger("evaluator")
     LOG.setLevel(logging.DEBUG)
 
-    WORKER_ID = int(os.getenv("EVAL_WORKER_ID", 0))
-    N_WORKERS = int(os.getenv("EVAL_N_WORKERS", 1))
+    WORKER_ID = worker_id
+    N_WORKERS = n_workers
 
-    assert WORKER_ID < N_WORKERS, "EVAL_WORKER_ID must be between 1 and %d, got: %d" % (N_WORKERS, WORKER_ID)
+    assert WORKER_ID >= 0 and WORKER_ID < N_WORKERS, "worker ID must be between 0 and N_WORKERS - 1 (%d), got: %d" % (N_WORKERS - 1, WORKER_ID)
 
-    # XXX: logging metrics for the same run in multiple processes on the same
-    #      machine is messes metrics up. Until some kind of lock is implemented,
-    #      better to simply disable workers.
-    assert WORKER_ID == 0 and N_WORKERS == 1, "multiple workers are not supported"
+    if N_WORKERS > 1 and database is None:
+        print("database is required when N_WORKERS > 1")
+        sys.exit(1)
+
+    db = None
+
+    # To init DB: CREATE TABLE locks (id PRIMARY KEY)
+    if args.statsdb:
+        db = sqlite3.connect(args.statsdb)
+        db.execute("PRAGMA busy_timeout = 60000")
+
+        # test DB
+        db.execute("BEGIN")
+        db.execute(f"INSERT INTO locks VALUES({WORKER_ID})")
+        db.execute("ROLLBACK")
 
     formatter = logging.Formatter(f"-- %(asctime)s <%(process)d> [{WORKER_ID}/{N_WORKERS}] %(levelname)s: %(message)s")
     formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
@@ -410,8 +424,13 @@ def main():
                 wandb_results["eval/all/is_success"] = np.mean(is_successes["StupidAI"] + is_successes["BattleAI"])
 
                 if os.getenv("NO_WANDB") != "true":
+                    if db:
+                        db.execute("BEGIN")
+                        db.execute(f"INSERT INTO locks VALUES({WORKER_ID})")
                     with wandb_init(run) as irun:
                         irun.log(copy.deepcopy(wandb_results))
+                    if db:
+                        db.execute("ROLLBACK")
 
                 # LOG.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
                 #     run.id,
@@ -443,4 +462,20 @@ def main():
 
 if __name__ == "__main__":
     sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-    main()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-w', '--watchdog-file', type=str, help="file to touch periodically")
+    parser.add_argument('-m', '--model', type=str, help="path to model file to evaluate")
+    parser.add_argument('-i', '--worker-id', type=int, default=0, help="this worker's ID (0-based)")
+    parser.add_argument('-I', '--n-workers', type=int, default=1, help="total number of workers")
+    parser.add_argument('-d', '--database', type=str, help="path to sqlite3 database for locking")
+    args = parser.parse_args()
+
+    if len(sys.argv) == 3:
+        it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{sys.argv[1]}"), sys.argv[2], {})]
+        watchdogfile = sys.argv[3]
+    else:
+        if len(sys.argv) == 2 > 1:
+            watchdogfile = sys.argv[1]
+
+    main(**args.__dict__)

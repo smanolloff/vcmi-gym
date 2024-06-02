@@ -3,31 +3,49 @@ import os
 import sys
 import time
 import wandb
+import json
 
-assert len(sys.argv) == 2, "Usage: python -m rl.wandb.scripts.upload_model /path/to/agent.pt"
 
-file = sys.argv[1]
-ctime = int(os.path.getmtime(file))
+def main(file, mdfile=None):
+    ctime = int(os.path.getmtime(file))
 
-folder = os.path.dirname(file)
-jitfile = os.path.join(folder, f"jit-{os.path.basename(file)}")
+    folder = os.path.dirname(file)
+    jitfile = os.path.join(folder, f"jit-{os.path.basename(file)}")
 
-agent = torch.load(file)
+    agent = torch.load(file)
 
-run = wandb.init(project="vcmi-gym", id=agent.args.run_id, resume="must", reinit=True)
-art = wandb.Artifact(
-    name=f"model-{agent.args.group_id}.{agent.args.run_id}",
-    type="model",
-    description=f"Snapshot of agent.pt from {time.ctime(ctime)}"
-)
+    run = wandb.init(project="vcmi-gym", id=agent.args.run_id, resume="must", reinit=True)
+    art = wandb.Artifact(
+        name=f"model-{agent.args.group_id}.{agent.args.run_id}",
+        type="model",
+        description=f"Snapshot of agent.pt from {time.ctime(ctime)}"
+    )
 
-agent.__class__.jsave(agent, jitfile)
+    if mdfile:
+        with open(mdfile, "r") as jfile:
+            art.metadata = json.load(jfile)
 
-art.add_file(file, name="agent.pt")
-art.add_file(jitfile, name="jit-agent.pt")
+    art.metadata["origin"] = {
+        "run_id": agent.args.run_id,
+        "group_id": agent.args.group_id
+    }
 
-print("Logging artifact:")
-print(f"    name: {art.name}")
-print(f"    description: {art.description}")
+    agent.__class__.jsave(agent, jitfile)
 
-run.log_artifact(art)
+    art.add_file(file, name="agent.pt")
+    art.add_file(jitfile, name="jit-agent.pt")
+
+    print("Uploading artifact:")
+    print(f"    name: {art.name}")
+    print(f"    description: {art.description}")
+    print(f"    metadata: {art.metadata}")
+
+    run.log_artifact(art)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or len(sys.argv) > 3:
+        print("Usage: python -m rl.wandb.scripts.upload_model /path/to/agent.pt")
+        print("Usage: python -m rl.wandb.scripts.upload_model /path/to/agent.pt /path/to/metadata.json")
+    else:
+        main(*sys.argv[1:])
