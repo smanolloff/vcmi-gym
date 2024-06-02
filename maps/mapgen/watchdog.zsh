@@ -4,10 +4,12 @@
 #      for Mac, commands must be amended
 
 #
+# Watchdog script for maps/mapgen/rebalance.zsh
+#
 # Usage:
 #
 USAGE="
-Usage: zsh rl/evaluation/watchdog.zsh <map>
+Usage: zsh maps/mapgen/watchdog.zsh <map>
 "
 
 MAP=$1

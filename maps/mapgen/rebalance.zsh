@@ -1,5 +1,8 @@
 #!/usr/bin/zsh
 
+# Script for evaluating map and optimizing a map
+# in cycles of 100K battles (StupidAI vs StupidAI)
+
 # add timestamps to xtrace output
 export PS4="+[%D{%Y-%m-%d %H:%M:%S}]<$$> (rebalance.zsh) "
 

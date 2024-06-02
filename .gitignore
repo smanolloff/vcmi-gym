@@ -16,5 +16,6 @@ test.out
 *.log
 *.onnx
 *.sqlite3
+*.sqlite3-journal
 rl/models/
 rl/stats/

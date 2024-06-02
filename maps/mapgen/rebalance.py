@@ -15,9 +15,9 @@
 # =============================================================================
 
 #
-# Usage: python maps/mapgen/rebalance.py -h
+# Usage: python maps/mapgen/rebalance -h
 #
-# See also: `eval-rebalance.fish` script for automated usage
+# See also: `maps/mapgen/watchdog.zsh` script for automated usage
 #
 
 import os
