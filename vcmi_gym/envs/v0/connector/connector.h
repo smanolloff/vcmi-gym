@@ -38,6 +38,7 @@ class Connector {
 
     const std::string encoding;
     const std::string mapname;
+    const int seed;
     const int randomHeroes;
     const int randomObstacles;
     const int swapSides;
@@ -68,6 +69,7 @@ public:
     Connector(
         const std::string encoding,
         const std::string mapname,
+        const int seed,
         const int randomHeroes,
         const int randomObstacles,
         const int swapSides,

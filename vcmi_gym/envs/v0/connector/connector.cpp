@@ -22,6 +22,7 @@
 Connector::Connector(
     const std::string encoding_,
     const std::string mapname_,
+    const int seed_,
     const int randomHeroes_,
     const int randomObstacles_,
     const int swapSides_,
@@ -39,6 +40,7 @@ Connector::Connector(
     const float statsScoreVar_
 ) : encoding(encoding_),
     mapname(mapname_),
+    seed(seed_),
     randomHeroes(randomHeroes_),
     randomObstacles(randomObstacles_),
     swapSides(swapSides_),
@@ -241,6 +243,7 @@ const P_Result Connector::start() {
         baggage.get(),
         encoding,
         mapname,
+        seed,  // maxbattles
         0,  // maxbattles
         randomHeroes,
         randomObstacles,
@@ -369,6 +372,7 @@ PYBIND11_MODULE(connector, m) {
         .def(py::init<
             const std::string &, // encoding
             const std::string &, // mapname
+            const int &,         // seed
             const int &,         // randomHeroes
             const int &,         // randomObstacles
             const int &,         // swapSides
