@@ -20,9 +20,11 @@ import numpy as np
 from vcmi_gym import VcmiEnv
 
 
+
 def get_action(model, obs, mask):
     # torch import is at runtime to avoid libtorch/pytorch conflict
     import torch
+
     if model is None:
         return np.random.choice(np.where(mask)[0])
 
