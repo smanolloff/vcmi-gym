@@ -173,7 +173,7 @@ class VcmiEnv(gym.Env):
     def __init__(
         self,
         mapname,
-        seed=None,  # not used currently
+        seed=None,
         render_mode="ansi",
         max_steps=500,
         render_each_step=False,
@@ -232,7 +232,7 @@ class VcmiEnv(gym.Env):
         result = self.connector.start(
             encoding_type,
             mapname,
-            seed,
+            seed or 0,
             random_heroes,
             random_obstacles,
             swap_sides,
