@@ -106,7 +106,7 @@ class Hex(namedtuple("Hex", ATTRMAP_DEFAULT.keys())):
             if field.startswith("HEX_ACTION_MASK_FOR_"):
                 names = list(HEXACTMAP.keys())
                 indexes = np.where(value)[0]
-                value = None if not indexes else ", ".join([names[i] for i in indexes])
+                value = None if not any(indexes) else ", ".join([names[i] for i in indexes])
             elif field.startswith("HEX_STATE"):
                 value = None if not value else list(HEXSTATEMAP.keys())[value]
             elif field.startswith("HEX_MELEE_DISTANCE_FROM"):
@@ -152,7 +152,7 @@ class Battlefield(list):
         return "Battlefield(11x15)"
 
     def get(self, y_or_n, x=None):
-        if x:
+        if x is not None:
             y = y_or_n
         else:
             y = y_or_n // 15

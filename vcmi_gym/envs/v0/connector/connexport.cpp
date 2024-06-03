@@ -167,6 +167,7 @@ static const std::vector<std::tuple<std::string, std::string, int, int, int>> ge
         std::string attrname;
 
         switch (a) {
+        break; case Attribute::PERCENT_CUR_TO_START_TOTAL_VALUE: attrname = "PERCENT_CUR_TO_START_TOTAL_VALUE";
         break; case Attribute::HEX_Y_COORD: attrname = "HEX_Y_COORD";
         break; case Attribute::HEX_X_COORD: attrname = "HEX_X_COORD";
         break; case Attribute::HEX_STATE: attrname = "HEX_STATE";

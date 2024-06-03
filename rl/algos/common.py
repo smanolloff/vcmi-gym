@@ -17,7 +17,6 @@
 import torch
 import threading
 import glob
-import random
 import concurrent
 import gymnasium as gym
 import os
@@ -100,30 +99,20 @@ class SerializableCategoricalMasked:
         return torch.nn.functional.softmax(self.logits, dim=-1)
 
 
-def create_venv(env_cls, args, map_swaps):
-    all_maps = glob.glob("maps/%s" % args.mapmask)
-    all_maps = [m.removeprefix("maps/") for m in all_maps]
-    all_maps.sort()
-    map_offset = None
-
+def create_venv(env_cls, args):
     assert args.mapside in ["attacker", "defender"]
-    n_maps = args.num_envs
 
-    if args.randomize_maps:
-        maps = random.sample(all_maps, n_maps)
+    if args.mapmask:
+        # XXX: mapmask is supported for backward compatibility only
+        assert args.num_envs == 1
+        num_envs = 1
+        all_maps = glob.glob("maps/%s" % args.mapmask)
+        all_maps = [m.removeprefix("maps/") for m in all_maps]
+        all_maps.sort()
     else:
-        i = (n_maps * map_swaps) % len(all_maps)
-        new_i = (i + n_maps) % len(all_maps)
-        map_offset = i
+        num_envs = len(args.envmaps)
+        all_maps = args.envmaps
 
-        if new_i > i:
-            maps = all_maps[i:new_i]
-        else:
-            maps = all_maps[i:] + all_maps[:new_i]
-
-        assert len(maps) == n_maps
-
-    pairs = [(args.mapside, m) for m in maps]
     state = {"n": 0}
     lock = threading.RLock()
 
@@ -139,10 +128,8 @@ def create_venv(env_cls, args, map_swaps):
 
     def env_creator():
         with lock:
-            assert state["n"] < args.num_envs
-            role, mapname = pairs[state["n"]]
-            # logfile = f"/tmp/{run_id}-env{state['n']}-actions.log"
-            logfile = None
+            assert state["n"] < len(all_maps)
+            mapname = all_maps[state["n"]]
 
             if opponent == "MMAI_MODEL":
                 assert args.opponent_load_file, "opponent_load_file is required for MMAI_MODEL"
@@ -154,10 +141,9 @@ def create_venv(env_cls, args, map_swaps):
                 defender=opponent,
                 attacker_model=args.opponent_load_file,
                 defender_model=args.opponent_load_file,
-                actions_log_file=logfile
             )
 
-            env_kwargs[role] = "MMAI_USER"
+            env_kwargs[args.mapside] = "MMAI_USER"
             print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs))
             state["n"] += 1
 
@@ -170,10 +156,10 @@ def create_venv(env_cls, args, map_swaps):
 
         return res
 
-    if args.num_envs > 1:
+    if len(all_maps) > 1:
         # I don't remember anymore, but there were issues if max_workers>8
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.num_envs, 8)) as executor:
-            futures = [executor.submit(env_creator) for _ in range(args.num_envs)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(num_envs, 8)) as executor:
+            futures = [executor.submit(env_creator) for _ in range(num_envs)]
             results = [future.result() for future in futures]
 
         funcs = [lambda x=x: x for x in results]
@@ -183,7 +169,7 @@ def create_venv(env_cls, args, map_swaps):
 
     vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env, deque_size=args.stats_buffer_size)
 
-    return vec_env, map_offset
+    return vec_env
 
 
 def maybe_save(t_save, t_permasave, args, agent, out_dir):

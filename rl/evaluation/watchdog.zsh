@@ -7,7 +7,7 @@ USAGE="
 Usage: zsh rl/evaluation/watchdog.zsh N_WORKERS WORKER_ID
 "
 
-CHECK_EVERY=10  # minutes
+CHECK_EVERY=30  # minutes
 
 N_WORKERS=$1
 WORKER_ID=$2

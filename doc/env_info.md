@@ -27,9 +27,10 @@ follows:
 
 | Attribute name                            | Encoding type     | Encoded size |
 | ----------------------------------------- | ----------------- | ------------ |
+| PERCENT_CUR_TO_START_TOTAL_VALUE \*       | FLOATING          | 1            |
 | HEX_Y_COORD                               | CATEGORICAL       | 11           |
 | HEX_X_COORD                               | CATEGORICAL       | 15           |
-| HEX_STATE \*                              | CATEGORICAL       | 3            |
+| HEX_STATE \*\*                            | CATEGORICAL       | 3            |
 | HEX_ACTION_MASK_FOR_ACT_STACK             | BINARY            | 14           |
 | HEX_ACTION_MASK_FOR_L_STACK_0             | BINARY            | 14           |
 | HEX_ACTION_MASK_FOR_L_STACK_1             | BINARY            | 14           |
@@ -45,7 +46,7 @@ follows:
 | HEX_ACTION_MASK_FOR_R_STACK_4             | BINARY            | 14           |
 | HEX_ACTION_MASK_FOR_R_STACK_5             | BINARY            | 14           |
 | HEX_ACTION_MASK_FOR_R_STACK_6             | BINARY            | 14           |
-| HEX_MELEEABLE_BY_ACT_STACK                | CATEGORICAL       | 3            |
+| HEX_MELEEABLE_BY_ACT_STACK \*\*\*         | CATEGORICAL       | 3            |
 | HEX_MELEEABLE_BY_L_STACK_0                | CATEGORICAL       | 3            |
 | HEX_MELEEABLE_BY_L_STACK_1                | CATEGORICAL       | 3            |
 | HEX_MELEEABLE_BY_L_STACK_2                | CATEGORICAL       | 3            |
@@ -90,34 +91,37 @@ follows:
 | HEX_MELEE_DISTANCE_FROM_R_STACK_4         | CATEGORICAL       | 3            |
 | HEX_MELEE_DISTANCE_FROM_R_STACK_5         | CATEGORICAL       | 3            |
 | HEX_MELEE_DISTANCE_FROM_R_STACK_6         | CATEGORICAL       | 3            |
-| STACK_QUANTITY                            | NUMERIC_SQRT      | 31           |
-| STACK_ATTACK                              | NUMERIC_SQRT      | 7            |
-| STACK_DEFENSE                             | NUMERIC_SQRT      | 7            |
-| STACK_SHOTS                               | NUMERIC_SQRT      | 5            |
-| STACK_DMG_MIN                             | NUMERIC_SQRT      | 8            |
-| STACK_DMG_MAX                             | NUMERIC_SQRT      | 8            |
-| STACK_HP                                  | NUMERIC_SQRT      | 28           |
-| STACK_HP_LEFT                             | NUMERIC_SQRT      | 28           |
-| STACK_SPEED                               | NUMERIC           | 23           |
-| STACK_WAITED                              | CATEGORICAL       | 2            |
-| STACK_QUEUE_POS                           | NUMERIC           | 15           |
-| STACK_RETALIATIONS_LEFT                   | NUMERIC           | 3            |
-| STACK_SIDE                                | CATEGORICAL       | 2            |
+| STACK_QUANTITY                            | FLOATING          | 1            |
+| STACK_ATTACK                              | FLOATING          | 1            |
+| STACK_DEFENSE                             | FLOATING          | 1            |
+| STACK_SHOTS                               | FLOATING          | 1            |
+| STACK_DMG_MIN                             | FLOATING          | 1            |
+| STACK_DMG_MAX                             | FLOATING          | 1            |
+| STACK_HP                                  | FLOATING          | 1            |
+| STACK_HP_LEFT                             | FLOATING          | 1            |
+| STACK_SPEED                               | FLOATING          | 1            |
+| STACK_WAITED                              | FLOATING          | 1            |
+| STACK_QUEUE_POS                           | FLOATING          | 1            |
+| STACK_RETALIATIONS_LEFT                   | FLOATING          | 1            |
+| STACK_SIDE                                | FLOATING          | 1            |
 | STACK_SLOT                                | CATEGORICAL       | 7            |
 | STACK_CREATURE_TYPE                       | CATEGORICAL       | 145          |
-| STACK_AI_VALUE_TENTH                      | NUMERIC_SQRT      | 62           |
-| STACK_IS_ACTIVE                           | CATEGORICAL       | 2            |
-| STACK_IS_WIDE                             | CATEGORICAL       | 2            |
-| STACK_FLYING                              | CATEGORICAL       | 2            |
-| STACK_NO_MELEE_PENALTY                    | CATEGORICAL       | 2            |
-| STACK_TWO_HEX_ATTACK_BREATH               | CATEGORICAL       | 2            |
-| STACK_BLOCKS_RETALIATION                  | CATEGORICAL       | 2            |
-| STACK_DEFENSIVE_STANCE                    | CATEGORICAL       | 2            |
+| STACK_AI_VALUE_TENTH                      | FLOATING          | 1            |
+| STACK_IS_ACTIVE                           | FLOATING          | 1            |
+| STACK_IS_WIDE                             | FLOATING          | 1            |
+| STACK_FLYING                              | FLOATING          | 1            |
+| STACK_NO_MELEE_PENALTY                    | FLOATING          | 1            |
+| STACK_TWO_HEX_ATTACK_BREATH               | FLOATING          | 1            |
+| STACK_BLOCKS_RETALIATION                  | FLOATING          | 1            |
+| STACK_DEFENSIVE_STANCE                    | FLOATING          | 1            |
 
+\* This is a "global" metric and has the same value for all hexes -- it
+contains a sum of the AI value of all units currently alive on the battlefield
+as a percentage of that same value in the beginning of combat.
 
-\* The 3 hex states are: obstacle / occupied / free
+\*\* The 3 hex states are: obstacle / occupied / free
 
-\*\* "meleeable" indicates if stack can reach (or already stands on) a
+\*\*\* "meleeable" indicates if stack can reach (or already stands on) a
 neighbouring hex. The 3 values are "none" (can't reach), "half dmg" and
 "full dmg".
 

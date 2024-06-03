@@ -108,7 +108,11 @@ config = {
     # "agent_load_file": None,
     "tags": ["Map-4096-mixstack", "StupidAI", "obstacles-random", "encoding-float"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
-    "mapmask": "gym/generated/4096/4096-mixstack-300K-01.vmap",
+    "envmaps": [
+        "gym/generated/4096/4096-mixstack-300K-01.vmap",
+        "gym/generated/4096/4096-mixstack-100K-01.vmap",
+        "gym/generated/4096/4096-mixstack-5K-01.vmap"
+    ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
     # "opponent_load_file": "rl/models/model-PBT-mppo-defender-20240521_112358.79ad0_00000:v1/jit-agent.pt",
@@ -154,19 +158,18 @@ config = {
         "attention": None,
         "features_extractor": [
             # => (B, 11, 15, 86)
-            {"t": "ChanFirst"},
-            # => (B, 86, 11, 15)
-            {"t": "Flatten", "start_dim": 2},
-            # => (B, 86, 165)
-            # {"t": "Conv1d", "in_channels": 86, "out_channels": 1, "kernel_size": 1},
-            {"t": "Linear", "in_features": 165, "out_features": 32},
-            {"t": "Tanh"},
-            # => (B, 86, 32)
             {"t": "Flatten"},
-            # => (B, 2752)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 14190]},
+            # => (B, 1, 14190)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 86, "stride": 86},
+            {"t": "LeakyReLU"},
+            # => (B, 32, 165)
+            {"t": "Flatten"},
+            {"t": "Linear", "in_features": 5280, "out_features": 1024},
+            {"t": "LeakyReLU"},
         ],
-        "actor": {"t": "Linear", "in_features": 2752, "out_features": 2311},
-        "critic": {"t": "Linear", "in_features": 2752, "out_features": 1}
+        "actor": {"t": "Linear", "in_features": 1024, "out_features": 2311},
+        "critic": {"t": "Linear", "in_features": 1024, "out_features": 1}
     },
 
 

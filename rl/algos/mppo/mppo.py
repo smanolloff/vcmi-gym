@@ -86,7 +86,7 @@ class NetworkArgs:
 @dataclass
 class State:
     resumes: int = 0
-    map_swaps: int = 0
+    map_swaps: int = 0  # DEPRECATED
     global_timestep: int = 0
     current_timestep: int = 0
     current_vstep: int = 0
@@ -135,8 +135,7 @@ class Args:
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
     mapside: str = "attacker"
-    mapmask: str = "gym/A1.vmap"
-    randomize_maps: bool = False
+    mapmask: str = ""  # DEPRECATED
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
     max_saves: int = 3
@@ -146,7 +145,8 @@ class Args:
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
     lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
     weight_decay: float = 0.0
-    num_envs: int = 1
+    num_envs: int = 0  # DEPRECATED (envmaps determines number of envs now)
+    envmaps: list = field(default_factory=lambda: ["gym/A1.vmap"])
     num_steps: int = 128
     gamma: float = 0.99
     stats_buffer_size: int = 100
@@ -396,7 +396,8 @@ def main(args, agent_cls=Agent):
 
     lr_schedule_fn = common.schedule_fn(args.lr_schedule)
 
-    batch_size = int(args.num_envs * args.num_steps)
+    num_envs = len(args.envmaps)
+    batch_size = int(num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
 
     # TRY NOT TO MODIFY: seeding
@@ -408,13 +409,11 @@ def main(args, agent_cls=Agent):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_ts = None
     permasave_ts = None
-    start_map_swaps = 0
 
     if args.agent_load_file and not agent:
         f = args.agent_load_file
         agent = Agent.load(f)
         agent.args = args
-        start_map_swaps = agent.state.map_swaps
         agent.state.current_timestep = 0
         agent.state.current_vstep = 0
         agent.state.current_rollout = 0
@@ -430,7 +429,7 @@ def main(args, agent_cls=Agent):
     common.validate_tags(args.tags)
 
     try:
-        envs, _ = common.create_venv(VcmiEnv, args, start_map_swaps)
+        envs = common.create_venv(VcmiEnv, args)
         [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         obs_space = envs.unwrapped.single_observation_space
@@ -474,22 +473,22 @@ def main(args, agent_cls=Agent):
         assert act_space.shape == ()
 
         # ALGO Logic: Storage setup
-        obs = torch.zeros((args.num_steps, args.num_envs) + obs_space.shape).to(device)
-        actions = torch.zeros((args.num_steps, args.num_envs) + act_space.shape).to(device)
-        logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+        obs = torch.zeros((args.num_steps, num_envs) + obs_space.shape).to(device)
+        actions = torch.zeros((args.num_steps, num_envs) + act_space.shape).to(device)
+        logprobs = torch.zeros((args.num_steps, num_envs)).to(device)
+        rewards = torch.zeros((args.num_steps, num_envs)).to(device)
+        dones = torch.zeros((args.num_steps, num_envs)).to(device)
+        values = torch.zeros((args.num_steps, num_envs)).to(device)
 
         # XXX: the start=0 requirement is needed for SB3 compat
         assert act_space.start == 0
-        masks = torch.zeros((args.num_steps, args.num_envs, act_space.n), dtype=torch.bool).to(device)
-        attnmasks = torch.zeros((args.num_steps, args.num_envs, 165, 165)).to(device)
+        masks = torch.zeros((args.num_steps, num_envs, act_space.n), dtype=torch.bool).to(device)
+        attnmasks = torch.zeros((args.num_steps, num_envs, 165, 165)).to(device)
 
         # TRY NOT TO MODIFY: start the game
         next_obs, _ = envs.reset(seed=args.seed)
         next_obs = torch.Tensor(next_obs).to(device)
-        next_done = torch.zeros(args.num_envs).to(device)
+        next_done = torch.zeros(num_envs).to(device)
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
         next_attnmasks = torch.as_tensor(np.array(envs.unwrapped.call("attn_masks"))).to(device)
 
@@ -544,8 +543,8 @@ def main(args, agent_cls=Agent):
                         agent.state.current_episode += 1
 
                 agent.state.current_vstep += 1
-                agent.state.current_timestep += args.num_envs
-                agent.state.global_timestep += args.num_envs
+                agent.state.current_timestep += num_envs
+                agent.state.global_timestep += num_envs
                 agent.state.current_second = int(time.time() - start_time)
                 agent.state.global_second = global_start_second + agent.state.current_second
 
@@ -711,18 +710,6 @@ def main(args, agent_cls=Agent):
                 else:
                     raise Exception("Not implemented: map change on target")
 
-            if args.rollouts_per_mapchange and map_rollouts % args.rollouts_per_mapchange == 0:
-                map_rollouts = 0
-                agent.state.map_swaps += 1
-                wandb_log({"global/map_swaps": agent.state.map_swaps})
-                envs.close()
-                envs, _ = common.create_venv(VcmiEnv, args, agent.state.map_swaps)
-                next_obs, _ = envs.reset(seed=args.seed)
-                next_obs = torch.Tensor(next_obs).to(device)
-                next_done = torch.zeros(args.num_envs).to(device)
-                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
-                next_attnmasks = torch.as_tensor(np.array(envs.unwrapped.call("attn_masks"))).to(device)
-
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
                 wandb_log({
                     "global/global_num_timesteps": agent.state.global_timestep,
@@ -743,7 +730,8 @@ def main(args, agent_cls=Agent):
 
     finally:
         common.maybe_save(0, 10e9, args, agent, out_dir)
-        envs.close()
+        if "envs" in locals():
+            envs.close()
 
     # Needed by PBT to save model after iteration ends
     # XXX: limit returned mean reward to only the rollouts in this iteration
@@ -771,8 +759,6 @@ def debug_args():
         ep_rew_mean_target=None,
         quit_on_target=False,
         mapside="attacker",
-        mapmask="gym/A1.vmap",
-        randomize_maps=False,
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=0,
@@ -781,7 +767,7 @@ def debug_args():
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
-        num_envs=1,
+        envmaps=["gym/A1.vmap"],
         num_steps=64,
         # num_steps=256,
         gamma=0.8,
