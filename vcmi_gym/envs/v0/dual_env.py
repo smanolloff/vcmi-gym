@@ -26,9 +26,9 @@ MAXLEN = 100
 
 
 def withcond(func):
-    def wrapper(*args, **kwargs):
-        with args[0].cond:
-            return func(*args, **kwargs)
+    def wrapper(self, *args, **kwargs):
+        with self.cond:
+            return func(self, *args, **kwargs)
 
     return wrapper
 
@@ -64,7 +64,7 @@ class Side(enum.Enum):
 
 
 # XXX: can't be a nametuple (immutable)
-class Clients():
+class Clients:
     def __init__(self):
         self.A = None
         self.B = None
@@ -78,7 +78,7 @@ StepResult = collections.namedtuple("StepResult", ["obs", "rew", "term", "trunc"
 ResetResult = collections.namedtuple("ResetResult", ["obs", "info"])
 
 
-class DualEnvController():
+class DualEnvController:
     def __init__(self, env, loglevel="DEBUG"):
         self.env = env
         self.clients = Clients()
@@ -97,7 +97,7 @@ class DualEnvController():
     # The "regular" reset afterwards (in flow_reg_a) will work as expected.
     #
     # NOTE: There are 2 calls to env.reset(), but only 1 restart occurs!
-    # (because the defending does nothing with the reset action)
+    # (because the defending client does nothing with the reset action)
     #
     @withcond
     @tracelog
@@ -252,9 +252,9 @@ class DualEnvClient(gym.Env):
         return self.controller.env.close(*args, **kwargs)
 
     @tracelog
-    def action_masks(self):
+    def action_mask(self):
         # call env directly
-        return self.controller.env.action_masks()
+        return self.controller.env.action_mask()
 
     #
     # private
@@ -262,3 +262,77 @@ class DualEnvClient(gym.Env):
 
     def _debug(self, msg):
         self.logger.debug("[%s] %s" % (self.side, msg))
+
+
+if __name__ == "__main__":
+    import torch
+    import numpy as np
+    import time
+    import logging
+    from .vcmi_env import VcmiEnv
+
+    def npstr(self):
+        return f"ndarray{self.shape}"
+
+    np.set_string_function(npstr)
+
+    def predictor(model):
+        def pred(obs, mask):
+            return model.predict(torch.as_tensor(obs), torch.as_tensor(mask))
+        return pred
+
+    def legacy_predictor(model):
+        def pred(obs, mask):
+            return model.predict(torch.as_tensor(obs[:, :, 1:]), torch.as_tensor(mask))
+        return pred
+
+    attacker = legacy_predictor(torch.jit.load("rl/models/model-PBT-mppo-attacker-cont-20240517_134625.b6623_00000:v4/jit-agent.pt"))
+    defender = predictor(torch.jit.load("rl/models/agent.pt:v929/jit-agent.pt"))
+
+    steps = 0
+
+    def play(controller, predictors, games, name):
+        global steps
+        client = DualEnvClient(controller, name, logging.getLevelName(controller.logger.level))
+        pred_att, pred_def = predictors
+        logger = log.get_logger(f"player-{name}", logging.getLevelName(controller.logger.level))
+        counter = 0
+
+        while counter < games:
+            # time.sleep(np.random.rand())
+            logger.info("Will reset (%d)" % counter)
+            counter += 1
+            obs, _ = client.reset()
+            if client.side == Side.ATTACKER:
+                logger.info("Will play as ATTACKER")
+                pred = pred_att
+            else:
+                logger.info("Will play as DEFENDER")
+                pred = pred_def
+
+            action = pred(obs, client.action_mask())
+
+            while True:
+                steps += 1
+                obs, _, term, trunc, _ = client.step(action)
+                if term or trunc:
+                    break
+                action = pred(obs, client.action_mask())
+
+        logger.info("Done.")
+
+    env = VcmiEnv("gym/A1.vmap", attacker="MMAI_USER", defender="MMAI_USER", encoding_type="float", max_steps=50)
+    controller = DualEnvController(env, "ERROR")
+
+    kwargs = dict(controller=controller, predictors=(attacker, defender), games=10)
+    baba = threading.Thread(target=play, kwargs=dict(kwargs, name="baba"))
+    pena = threading.Thread(target=play, kwargs=dict(kwargs, name="pena"))
+
+    ts = time.time()
+    baba.start()
+    pena.start()
+
+    baba.join()
+    pena.join()
+    elapsed = time.time() - ts
+    print("Elapsed: %.3fs, steps: %d, steps/s: %.2f" % (elapsed, steps, steps/elapsed))

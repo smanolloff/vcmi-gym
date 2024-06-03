@@ -23,7 +23,6 @@ import sys
 import itertools
 import numpy as np
 import time
-import torch
 import logging
 import traceback
 import tempfile
@@ -31,6 +30,7 @@ import pathlib
 import argparse
 import copy
 import sqlite3
+import torch
 
 from dataclasses import asdict
 

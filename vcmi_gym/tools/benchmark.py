@@ -16,15 +16,12 @@
 
 import time
 import numpy as np
+import torch
 
 from vcmi_gym import VcmiEnv
 
 
-
 def get_action(model, obs, mask):
-    # torch import is at runtime to avoid libtorch/pytorch conflict
-    import torch
-
     if model is None:
         return np.random.choice(np.where(mask)[0])
 
@@ -35,8 +32,6 @@ def get_action(model, obs, mask):
 
 
 def main():
-    # torch import is at runtime to avoid libtorch/pytorch conflict
-    import torch
     total_steps = 1000
     env = VcmiEnv(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
@@ -77,10 +72,10 @@ def main():
     model = None
 
     # Normal torch model
-    # model = torch.load("rl/models/agent.pt:v877/agent.pt")
+    # model = torch.load("data/PBT-3env-classic-20240603_030530/feeb5_00000/checkpoint_000019/agent.pt")
 
     # JIT torch model (~5% faster)
-    model = torch.jit.load("rl/models/agent.pt:v877/jit-agent.pt")
+    # model = torch.load("data/PBT-3env-classic-20240603_030530/feeb5_00000/checkpoint_000019/jit-agent.pt")
 
     try:
         while steps < total_steps:

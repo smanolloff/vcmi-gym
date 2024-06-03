@@ -195,9 +195,9 @@ class VcmiEnv(gym.Env):
         sparse_info=False,
         allow_invalid_actions=False,
         actions_log_file=None,  # DEBUG
-        user_timeout=600,  # seconds - user input might take very long
-        vcmi_timeout=30,  # seconds - VCMI occasionally writes stats DB to disk (see vcmi_stats_persist_freq)
-        boot_timeout=60,  # seconds - needed as VCMI boot sometimes hangs with a memleak
+        user_timeout=0,  # seconds - user input might take very long
+        vcmi_timeout=0,  # seconds - VCMI occasionally writes stats DB to disk (see vcmi_stats_persist_freq)
+        boot_timeout=0,  # seconds - needed as VCMI boot sometimes hangs with a memleak
         reward_dmg_factor=5,
         reward_clip_tanh_army_frac=1,  # max action reward relative to starting army value
         reward_army_value_ref=0,  # scale rewards relative to starting army value (0=no scaling)

@@ -15,31 +15,6 @@ $ export VCMI_GYM_DIR="$PWD/vcmi-gym"
 $ export VCMI_DIR="$VCMI_GYM_DIR/vcmi_gym/envs/v0/vcmi"
 ```
 
-### Build VCMI
-
-Please follow the instructions in [this guide](https://github.com/smanolloff/vcmi/blob/mmai/docs/setup_macos.md).
-
-### Build vcmi-gym C++ libs
-
-These libraries are the "link" between the gym env and VCMI itself.
-
-```bash
-$ cd "$VCMI_GYM_DIR/envs/v0/connector"
-$ conan install . \
-    --install-folder=conan-generated \
-    --no-imports \
-    --build=missing \
-    --profile:build=default \
-    --profile:host=default
-
-$ cmake --fresh -S . -B build -Wno-dev \
-    -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
-    -D CMAKE_BUILD_TYPE=Debug \
-    -D CMAKE_EXPORT_COMPILE_COMMANDS=1
-
-$ cmake --build build/
-```
-
 ### Python env and deps
 
 To avoid polluting your system with vcmi-gym dependencies, it's best to create
@@ -63,6 +38,31 @@ $ source .venv/bin/activate
 
 ```bash
 (.venv)$ pip install -r requirements.txt
+```
+
+### Build VCMI
+
+Please follow the instructions in [this guide](https://github.com/smanolloff/vcmi/blob/mmai/docs/setup_macos.md).
+
+### Build vcmi-gym C++ libs
+
+These libraries are the "link" between the gym env and VCMI itself.
+
+```bash
+$ cd "$VCMI_GYM_DIR/envs/v0/connector"
+$ conan install . \
+    --install-folder=conan-generated \
+    --no-imports \
+    --build=missing \
+    --profile:build=default \
+    --profile:host=default
+
+$ cmake --fresh -S . -B build -Wno-dev \
+    -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
+    -D CMAKE_BUILD_TYPE=Debug \
+    -D CMAKE_EXPORT_COMPILE_COMMANDS=1
+
+$ cmake --build build/
 ```
 
 ### Gym maps
