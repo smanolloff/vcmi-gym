@@ -159,9 +159,9 @@ config = {
         "features_extractor": [
             # => (B, 11, 15, 86)
             {"t": "Flatten"},
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 14190]},
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 14355]},
             # => (B, 1, 14190)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 86, "stride": 86},
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 87, "stride": 87},
             {"t": "LeakyReLU"},
             # => (B, 32, 165)
             {"t": "Flatten"},
@@ -187,7 +187,6 @@ config = {
     "success_rate_target": None,
     "ep_rew_mean_target": None,
     "quit_on_target": False,
-    "randomize_maps": False,
     "save_every": 0,        # no effect (NO_SAVE=true)
     "permasave_every": 0,   # no effect (NO_SAVE=true)
     "max_saves": 3,         # no effect (NO_SAVE=true)

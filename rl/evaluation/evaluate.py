@@ -74,6 +74,10 @@ def evaluate_policy(agent, venv, episodes_per_env):
     #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/wrappers/record_episode_statistics.py#L102-L124
     #
     while (counts < episodes_per_env).any():
+        if not hasattr(agent.args, "envmaps"):
+            # old scheme (without PERCENT_CUR_TO_START_TOTAL_VALUE)
+            observations = observations[:, :, :, 1:]
+
         actions = agent.predict(
             torch.as_tensor(observations).float(),
             torch.as_tensor(np.array(venv.unwrapped.call("action_mask")))

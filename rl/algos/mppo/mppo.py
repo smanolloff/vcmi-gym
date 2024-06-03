@@ -136,6 +136,7 @@ class Args:
     quit_on_target: bool = False
     mapside: str = "attacker"
     mapmask: str = ""  # DEPRECATED
+    randomize_maps: bool = False  # DEPRECATED
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
     max_saves: int = 3
