@@ -1,5 +1,6 @@
 import copy
 import ray.tune
+import ast
 from . import common
 from .pbt_config import config
 
@@ -16,7 +17,23 @@ def convert_to_param_space(mutations):
     return res
 
 
-def main(alg, exp_name, resume_path):
+def update_config_value(cfg, path, value):
+    keys = path.split('.')
+    d = cfg
+
+    # Traverse the dict to find the position of the final key
+    for key in keys[:-1]:
+        if key not in d:
+            d[key] = {}
+        d = d[key]
+
+    old_value = d.get(keys[-1])
+    new_value = ast.literal_eval(value)
+    print("Overwrite %s: %s -> %s" % (path, old_value, value))
+    d[keys[-1]] = new_value
+
+
+def main(alg, exp_name, resume_path, config_overrides=[]):
     cfg = copy.deepcopy(config)
     cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
 
@@ -29,8 +46,14 @@ def main(alg, exp_name, resume_path):
         cfg["agent_load_file"] = resume_path
         alg = cfg["_raytune"]["algo"]
         exp_name = cfg["_raytune"]["experiment_name"]
+        cfg["_raytune"]["resumed_run_id"] = agent.args.run_id
         cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
-        cfg["_raytune"]["resumes"].append(agent.args.run_id)
+        cfg["_raytune"]["resumes"].append(getattr(agent.args, "trial_id", "(no trial_id)"))
+
+        # config_overrides is a list of "path.to.key=value"
+        for co in config_overrides:
+            name, value = co.split("=")
+            update_config_value(cfg, name, value)
 
     mutations = cfg["_raytune"]["hyperparam_mutations"]
 

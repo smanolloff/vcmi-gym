@@ -82,8 +82,8 @@ config = {
             # "vf_coef": 1.2,
         },
 
-        # Appended original run_id when resuming
-        "resumes": [],
+        "resumes": [],  # trial_id will be appended here when resuming (trial_id != run_id)
+        "resumed_run_id": None,  # will be set to the *original* run_id to resume
     },
 
     #
@@ -178,6 +178,7 @@ config = {
     "logparams": {},  # overwritten based on "hyperparam_mutations"
     "skip_wandb_init": True,
     "skip_wandb_log_code": False,  # overwritten to True after 1st iteration
+    "trial_id": None,  # overwritten based on the trial id
     "resume": False,
     "overwrite": [],
     "notes": "",

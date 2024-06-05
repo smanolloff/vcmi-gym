@@ -17,6 +17,7 @@ if __name__ == "__main__":
     parser.add_argument("-a", metavar="<algo>", default="mppo", help="rl algo module (mppo, mppo_dna, mppg, mqrdqn, ...)")
     parser.add_argument("-n", metavar="<name>", default="PBT-{datetime}", help="experiment name")
     parser.add_argument("-R", metavar="<path>", help="resume experiment from a single saved agent")
+    parser.add_argument('-o', metavar="<cfgpath>=<value>", action='append', help='Override config value based on dot-delimited path')
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.epilog = """
 
@@ -32,7 +33,7 @@ Available algos:
 
 Examples:
   python -m rl.raytune.main -n "PBT-experiment1-{datetime}"
-  python -m rl.raytune.main -R "/path/to/saved/agent.pt"
+  python -m rl.raytune.main -R "/path/to/saved/agent.pt" -o "_raytune.hyperparam_mutations.num_steps=[32, 64, 128, 256]"
   python -m rl.raytune.main -s pb2 -a mppg -n "..."
 """
     # XXX: env vars must be set *before* importing ray/wandb modules
@@ -57,4 +58,4 @@ Examples:
         raise
 
     experiment_name = args.n.format(datetime=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
-    mod.main(args.a, experiment_name, args.R)
+    mod.main(args.a, experiment_name, args.R, args.o)

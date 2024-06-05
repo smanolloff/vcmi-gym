@@ -51,10 +51,9 @@ class Trainable(ray.tune.Trainable):
         if not hasattr(self, "algo"):
             self.algo = importlib.import_module("rl.algos.{a}.{a}".format(a=initargs["_raytune"]["algo"]))
 
-        resumes = initargs["_raytune"].get("resumes", [])
+        resumed_id = initargs["_raytune"].get("resumed_run_id", None)
 
-        if len(resumes) > 0:
-            resumed_id = resumes[-1]
+        if resumed_id:
             assert re.match(r"^[0-9a-z]+_[0-9]+$", resumed_id), f"bad id to resume: {resumed_id}"
             run_id = "%s_%s" % (resumed_id.split("_")[0], self.trial_id.split("_")[1])
             print("Will resume run as id %s (Trial ID is %s)" % (run_id, self.trial_id))
@@ -125,6 +124,7 @@ class Trainable(ray.tune.Trainable):
     def step(self):
         wandb.log({"trial/iteration": self.iteration}, commit=False)
         self.cfg["skip_wandb_log_code"] = (self.iteration > 0)
+        self.cfg["trial_id"] = self.trial_id
         args = self.algo.Args(wandb.run.id, wandb.run.group, **self.cfg)
         self.agent, rew_mean = self.algo.main(args)
         return {"rew_mean": rew_mean}
