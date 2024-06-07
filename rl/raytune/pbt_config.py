@@ -207,6 +207,7 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
+        "seed": 0,  # random
     },
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked

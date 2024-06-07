@@ -20,6 +20,7 @@
 #      in VcmiEnv's observation space
 #
 
+import numpy as np
 from .. import HexAction
 
 
@@ -80,3 +81,6 @@ class TestHelper:
                         x = self.battlefield.get(x.HEX_Y_COORD, x.HEX_X_COORD + 1)
                     self._maybe_render(x.action(HexAction.MOVE))
                     return
+
+    def random(self):
+        return self._maybe_render(np.random.choice(np.where(self.env.action_mask())[0]))
