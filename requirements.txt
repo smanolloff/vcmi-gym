@@ -3,19 +3,40 @@
 #
 #     pip3 freeze -r requirements.txt > requirements.lock
 #
-numpy==1.26.3
+numpy
 pyyaml
-ray == 2.9.0
-ray[tune] == 2.9.0
-wandb == 0.16.6
+wandb
 gymnasium
 onnx-pytorch
+ray == 2.9.0
+ray[tune] == 2.9.0
 
-# VCMI uses CXX11 ABI
-# Python's "torch" package is *not* compiled with CXX11 ABI flag by default:
-# - on macOS, compatibility between the two is natively provided
-# - on linux, the two are incompatible (undefined symbols), so a special cxx11.abi version of torch is needed
-torch == 2.1.2; sys_platform != 'linux'
-https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.1.2%2Bcpu.cxx11.abi-cp310-cp310-linux_x86_64.whl; sys.platform == 'linux' and python_version < '3.11'
-https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.1.2%2Bcpu.cxx11.abi-cp311-cp311-linux_x86_64.whl; sys.platform == 'linux' and python_version ~= '3.11.0'
+# Nightly ray builds
+#ray @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
+#ray[tune] @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
+
+# Manually uncomment one of the torch packages -- see comment below
+#torch
+#torch @ https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.3.1%2Bcpu.cxx11.abi-cp312-cp312-linux_x86_64.whl
+
+#
+# Python's "torch" package is *not* compiled with CXX11 ABI flag by default.
+# - on macOS there is no issue (CXX11 ABI is not used there)
+# - on linux, VCMI is CXX11 ABI, and torch are incompatible, so a special cxx11.abi version of torch is needed
+#
+# ref. https://github.com/pytorch/pytorch/issues/51039#issuecomment-2111849591
+#
+# Choose which torch you want based on your needs:
+#
+# a) default torch package (non-CXX11 ABI)
+# - macOS users should always choose this option
+# - linux users should choose this option if they need CUDA (for GPU training)
+#   and won't be using VCMI for loading pre-trained models to play against.
+#   VCMI must be compiled with ENABLE_LIBTORCH=0 in this case.
+#
+# b) URL-specified torch package (CXX11 ABI)
+# - linux users should choose this option if they are ok with CPU-only training
+#   and want to use VCMI for loading pre-trained models to play against.
+#   URL must be modified based on your python version.
+#
 
