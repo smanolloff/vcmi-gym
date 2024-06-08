@@ -33,6 +33,21 @@ import sqlite3
 import torch
 
 from dataclasses import asdict
+from contextlib import contextmanager
+
+
+@contextmanager
+def dblock(db, lock_id):
+    if db is None:
+        yield
+    else:
+        db.execute("BEGIN")
+        try:
+            db.execute(f"INSERT INTO locks VALUES({lock_id})")
+            yield
+        finally:
+            # ensure transaction does not remain open
+            db.execute("ROLLBACK")
 
 
 def evaluate_policy(agent, venv, episodes_per_env):
@@ -316,10 +331,9 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
         db = sqlite3.connect(args.database)
         db.execute("PRAGMA busy_timeout = 60000")
 
-        # test DB
-        db.execute("BEGIN")
-        db.execute(f"INSERT INTO locks VALUES({WORKER_ID})")
-        db.execute("ROLLBACK")
+        # test table
+        with dblock(db, WORKER_ID):
+            pass
 
     formatter = logging.Formatter(f"-- %(asctime)s <%(process)d> [{WORKER_ID}] %(levelname)s: %(message)s")
     formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
@@ -366,7 +380,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
                         venv = create_venv(env_cls, agent, f"gym/generated/evaluation/{vmap}", run.config.get("mapside", "attacker"), opponent)
-                        ep_results = evaluate_policy(agent, venv, episodes_per_env=500)
+                        ep_results = evaluate_policy(agent, venv, episodes_per_env=400)
 
                         rewards[opponent].append(np.mean(ep_results["rewards"]))
                         lengths[opponent].append(np.mean(ep_results["lengths"]))
@@ -424,13 +438,9 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 wandb_results["eval/all/is_success"] = np.mean(is_successes["StupidAI"] + is_successes["BattleAI"])
 
                 if os.getenv("NO_WANDB") != "true":
-                    if db:
-                        db.execute("BEGIN")
-                        db.execute(f"INSERT INTO locks VALUES({WORKER_ID})")
-                    with wandb_init(run) as irun:
-                        irun.log(copy.deepcopy(wandb_results))
-                    if db:
-                        db.execute("ROLLBACK")
+                    with dblock(db, WORKER_ID):
+                        with wandb_init(run) as irun:
+                            irun.log(copy.deepcopy(wandb_results))
 
                 # LOG.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
                 #     run.id,

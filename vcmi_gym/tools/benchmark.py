@@ -25,6 +25,10 @@ def get_action(model, obs, mask):
     if model is None:
         return np.random.choice(np.where(mask)[0])
 
+    #if not hasattr(model.args, "envmaps"):
+    # old scheme (without PERCENT_CUR_TO_START_TOTAL_VALUE)
+    obs = obs[:, :, 1:]
+
     return model.predict(
         torch.as_tensor(obs).float(),
         torch.as_tensor(np.array(mask))
@@ -69,13 +73,13 @@ def main():
     two_users = ew.attacker == "MMAI_USER" and ew.defender == "MMAI_USER"
 
     # No model => get_action() will pick a random valid action
-    model = None
+    #model = None
 
     # Normal torch model
-    # model = torch.load("data/PBT-3env-classic-20240603_030530/feeb5_00000/checkpoint_000019/agent.pt")
+    # model = torch.load("rl/models/Attacker model:v2/agent.pt")
 
     # JIT torch model (~5% faster)
-    # model = torch.load("data/PBT-3env-classic-20240603_030530/feeb5_00000/checkpoint_000019/jit-agent.pt")
+    model = torch.jit.load("rl/models/Attacker model:v2/jit-agent.pt")
 
     try:
         while steps < total_steps:

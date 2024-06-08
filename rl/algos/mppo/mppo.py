@@ -93,6 +93,7 @@ class State:
     current_rollout: int = 0
     global_second: int = 0
     current_second: int = 0
+    global_episode: int = 0
     current_episode: int = 0
 
     ep_length_queue: deque = field(default_factory=lambda: deque(maxlen=100))
@@ -543,6 +544,7 @@ def main(args, agent_cls=Agent):
                         agent.state.ep_net_value_queue.append(final_info["net_value"])
                         agent.state.ep_is_success_queue.append(final_info["is_success"])
                         agent.state.current_episode += 1
+                        agent.state.global_episode += 1
 
                 agent.state.current_vstep += 1
                 agent.state.current_timestep += num_envs
@@ -715,7 +717,8 @@ def main(args, agent_cls=Agent):
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
                 wandb_log({
                     "global/global_num_timesteps": agent.state.global_timestep,
-                    "global/global_num_seconds": agent.state.global_second
+                    "global/global_num_seconds": agent.state.global_second,
+                    "global/global_num_episodes": agent.state.global_episode,
                 }, commit=True)  # commit on final log line
 
                 LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f loss=%.2f" % (
