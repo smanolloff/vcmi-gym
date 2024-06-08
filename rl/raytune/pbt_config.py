@@ -208,7 +208,7 @@ config = {
         "vcmi_timeout": 60,
         "boot_timeout": 300,
     },
-    # "seed": 0,  # root seed
+    "seed": 0,  # root seed; 0 means no seed
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None

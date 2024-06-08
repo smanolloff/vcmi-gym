@@ -403,11 +403,12 @@ def main(args, agent_cls=Agent):
     batch_size = int(num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
 
-    # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = True  # args.torch_deterministic
+    if args.seed != 0:
+        # TRY NOT TO MODIFY: seeding
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.backends.cudnn.deterministic = False  # args.torch_deterministic
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_ts = None
