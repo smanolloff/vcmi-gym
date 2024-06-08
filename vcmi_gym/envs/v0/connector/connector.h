@@ -54,6 +54,7 @@ class Connector {
     const int statsPersistFreq;
     const int statsSampling;
     const float statsScoreVar;
+    const bool trueRng;
 
     std::thread vcmithread;
     std::unique_ptr<MMAI::Export::Baggage> baggage;
@@ -84,7 +85,8 @@ public:
         const std::string statsStorage,
         const int statsPersistFreq,
         const int statsSampling,
-        const float statsScoreVar
+        const float statsScoreVar,
+        const bool trueRng
     );
 
     const P_Result start();

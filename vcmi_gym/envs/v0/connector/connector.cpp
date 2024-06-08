@@ -37,7 +37,8 @@ Connector::Connector(
     const std::string statsStorage_,
     const int statsPersistFreq_,
     const int statsSampling_,
-    const float statsScoreVar_
+    const float statsScoreVar_,
+    const bool trueRng_
 ) : encoding(encoding_),
     mapname(mapname_),
     seed(seed_),
@@ -56,6 +57,7 @@ Connector::Connector(
     statsPersistFreq(statsPersistFreq_),
     statsSampling(statsSampling_),
     statsScoreVar(statsScoreVar_),
+    trueRng(trueRng_),
     baggage(std::make_unique<MMAI::Export::Baggage>(initBaggage())) {}
 
 MMAI::Export::Baggage Connector::initBaggage() {
@@ -261,6 +263,7 @@ const P_Result Connector::start() {
         statsSampling,
         statsScoreVar,
         false,  // printModelPredictions
+        trueRng,
         true  // headless (disable the GUI, as it cannot run in a non-main thread)
     );
 
@@ -387,7 +390,8 @@ PYBIND11_MODULE(connector, m) {
             const std::string &, // statsStorage
             const int &,         // statsPersistFreq
             const int &,         // statsSampling
-            const float &        // statsScoreVar
+            const float &,       // statsScoreVar
+            const bool &         // trueRng
         >())
         .def("start", &Connector::start)
         .def("reset", &Connector::reset)

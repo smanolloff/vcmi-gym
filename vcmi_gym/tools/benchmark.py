@@ -73,13 +73,13 @@ def main():
     two_users = ew.attacker == "MMAI_USER" and ew.defender == "MMAI_USER"
 
     # No model => get_action() will pick a random valid action
-    #model = None
+    model = None
 
     # Normal torch model
-    # model = torch.load("rl/models/Attacker model:v2/agent.pt")
+    #model = torch.load("rl/models/Attacker model:v2/agent.pt")
 
     # JIT torch model (~5% faster)
-    model = torch.jit.load("rl/models/Attacker model:v2/jit-agent.pt")
+    #model = torch.jit.load("rl/models/Attacker model:v2/jit-agent.pt")
 
     try:
         while steps < total_steps:

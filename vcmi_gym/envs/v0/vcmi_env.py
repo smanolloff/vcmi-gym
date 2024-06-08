@@ -192,6 +192,7 @@ class VcmiEnv(gym.Env):
         vcmi_stats_persist_freq=100,
         vcmi_stats_sampling=0,
         vcmi_stats_score_var=0.4,
+        true_rng=True,
         sparse_info=False,
         allow_invalid_actions=False,
         actions_log_file=None,  # DEBUG
@@ -248,6 +249,7 @@ class VcmiEnv(gym.Env):
             vcmi_stats_persist_freq,
             vcmi_stats_sampling,
             vcmi_stats_score_var,
+            true_rng,
         )
 
         self.action_space = gym.spaces.Discrete(N_ACTIONS - ACTION_OFFSET)
