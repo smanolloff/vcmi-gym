@@ -109,9 +109,9 @@ config = {
     "tags": ["Map-4096-mixstack", "StupidAI", "obstacles-random", "encoding-float"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
-        "gym/generated/4096/4096-mixstack-300K-01.vmap",
+        # "gym/generated/4096/4096-mixstack-300K-01.vmap",
         "gym/generated/4096/4096-mixstack-100K-01.vmap",
-        "gym/generated/4096/4096-mixstack-5K-01.vmap"
+        # "gym/generated/4096/4096-mixstack-5K-01.vmap"
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -207,8 +207,8 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "seed": 0,  # random
     },
+    # "seed": 0,  # root seed
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None
