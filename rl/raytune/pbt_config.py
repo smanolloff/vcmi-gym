@@ -207,6 +207,7 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
+        "true_rng": True,
     },
     "seed": 0,  # root seed; 0 means no seed
     "env_wrappers": [],

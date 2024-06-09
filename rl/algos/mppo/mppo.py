@@ -70,6 +70,7 @@ class EnvArgs:
     swap_sides: int = 0
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
+    true_rng: bool = True
 
     def __post_init__(self):
         common.coerce_dataclass_ints(self)
