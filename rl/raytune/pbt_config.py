@@ -51,10 +51,11 @@ config = {
         #   mila-pc (cpu)
         #       18% of all (64) CPUs, spiking to 32%
         #       1.1% (700M) of all (64G) system memory
-        #       => 5 workers for 90% of CPU
+        #       => 4 workers for 72% of CPU (20% free are needed for VCMIs running on GPU)
         #
         # """
-        "population_size": 6,
+        "population_size": 8,
+        "cuda": True,  # use CUDA if available
 
         # """
         # Parameters are transferred from the top quantile_fraction

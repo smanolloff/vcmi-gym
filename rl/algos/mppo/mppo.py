@@ -370,9 +370,11 @@ def main(args, agent_cls=Agent):
     LOG = logging.getLogger("mppo_conv")
     LOG.setLevel(args.loglevel)
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     assert isinstance(args, Args)
 
-    agent, args = common.maybe_resume(Agent, args)
+    agent, args = common.maybe_resume(Agent, args, device=device)
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
