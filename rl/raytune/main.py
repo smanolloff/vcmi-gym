@@ -38,9 +38,6 @@ Examples:
 """
     # XXX: env vars must be set *before* importing ray/wandb modules
 
-    # this makes the "storage" arg redundant. By default, TUNE_RESULT_DIR
-    # is $HOME/ray_results and "storage" just *copies* everything into data
-    os.environ["TUNE_RESULT_DIR"] = os.path.join(os.path.dirname(__file__), "..", "..", "data")
     os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
     os.environ["RAY_DEDUP_LOGS"] = "0"
     os.environ["WANDB_SILENT"] = "true"

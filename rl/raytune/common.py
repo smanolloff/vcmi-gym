@@ -15,6 +15,7 @@
 # =============================================================================
 
 import re
+import os
 import importlib
 import copy
 import torch
@@ -131,7 +132,7 @@ def new_tuner(algo, experiment_name, config, scheduler, searcher=None, param_spa
         checkpoint_config=checkpoint_config,
         stop={"rew_mean": config["_raytune"]["target_ep_rew_mean"]},
         callbacks=[TBXDummyCallback()],
-        # storage_path=results_dir,  # redundant, using TUNE_RESULT_DIR instead
+        storage_path=os.path.join(os.path.dirname(__file__), "..", "..", "data")
     )
 
     # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.TuneConfig.html#ray.tune.TuneConfig
