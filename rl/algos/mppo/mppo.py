@@ -318,16 +318,17 @@ class Agent(nn.Module):
         torch.jit.save(torch.jit.script(jagent), jagent_file)
 
     @staticmethod
-    def load(agent_file):
+    def load(agent_file, device="cpu"):
         print("Loading agent from %s" % agent_file)
-        return torch.load(agent_file)
+        return torch.load(agent_file, map_location=device)
 
-    def __init__(self, args, observation_space, action_space, state=None):
+    def __init__(self, args, observation_space, action_space, state=None, device="cpu"):
         super().__init__()
         self.args = args
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
         self.NN = AgentNN(args.network, action_space, observation_space)
+        self.NN.to(device)
         self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
         self.predict = self.NN.predict
         self.state = state or State()
@@ -411,13 +412,12 @@ def main(args, agent_cls=Agent):
         torch.manual_seed(args.seed)
         torch.backends.cudnn.deterministic = False  # args.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_ts = None
     permasave_ts = None
 
     if args.agent_load_file and not agent:
         f = args.agent_load_file
-        agent = Agent.load(f)
+        agent = Agent.load(f, device=device)
         agent.args = args
         agent.state.current_timestep = 0
         agent.state.current_vstep = 0
@@ -443,9 +443,7 @@ def main(args, agent_cls=Agent):
         assert isinstance(act_space, gym.spaces.Discrete), "only discrete action space is supported"
 
         if agent is None:
-            agent = Agent(args, obs_space, act_space)
-
-        agent = agent.to(device)
+            agent = Agent(args, obs_space, act_space, device=device)
 
         # these are used by gym's RecordEpisodeStatistics wrapper
         envs.return_queue = agent.state.ep_rew_queue
@@ -776,14 +774,14 @@ def debug_args():
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
         envmaps=["gym/A1.vmap"],
-        num_steps=64,
-        # num_steps=256,
+        # num_steps=64,
+        num_steps=256,
         gamma=0.8,
         gae_lambda=0.8,
         num_minibatches=2,
         # num_minibatches=16,
-        update_epochs=2,
-        # update_epochs=10,
+        #update_epochs=2,
+        update_epochs=10,
         norm_adv=True,
         clip_coef=0.3,
         clip_vloss=True,
@@ -797,7 +795,7 @@ def debug_args():
         skip_wandb_init=False,
         skip_wandb_log_code=False,
         env=EnvArgs(
-            encoding_type="default",
+            encoding_type="float",
             max_steps=500,
             reward_dmg_factor=5,
             vcmi_loglevel_global="error",
@@ -813,7 +811,9 @@ def debug_args():
             swap_sides=0,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
-
+            user_timeout=0,
+            vcmi_timeout=0,
+            boot_timeout=0,
         ),
         env_wrappers=[],
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
@@ -821,8 +821,8 @@ def debug_args():
             # attention=dict(t="SelfAttention", edim=547),
             features_extractor=[
                 dict(t="Flatten"),
-                dict(t="Unflatten", dim=1, unflattened_size=[1, 165*547]),
-                dict(t="Conv1d", in_channels=1, out_channels=32, kernel_size=547, stride=547, padding=0),
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 165*87]),
+                dict(t="Conv1d", in_channels=1, out_channels=32, kernel_size=87, stride=87, padding=0),
                 dict(t="LeakyReLU"),
                 dict(t="Flatten"),
                 dict(t="Linear", in_features=5280, out_features=1024),

@@ -58,4 +58,4 @@ Examples:
         raise
 
     experiment_name = args.n.format(datetime=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
-    mod.main(args.a, experiment_name, args.R, args.o)
+    mod.main(args.a, experiment_name, args.R, args.o or [])
