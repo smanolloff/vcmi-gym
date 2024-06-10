@@ -17,6 +17,7 @@
 import re
 import importlib
 import copy
+import torch
 import ray.train
 import ray.tune
 
@@ -149,8 +150,23 @@ def new_tuner(algo, experiment_name, config, scheduler, searcher=None, param_spa
     initargs["_raytune"]["experiment_name"] = experiment_name
     initargs["_raytune"]["algo"] = algo
 
+    #
+    # XXX: no use in limiting cluster or worker resources
+    #      Calculating the appropriate population_size is enough
+    #      (it is essentially the limit for number of spawned workers)
+    #      => don't impose any additional limits here to avoid confusion
+    #      GPU must be non-0 to be available at all => set to 0.01 if cuda is available
+    #
+    # ray.init() by default uses num_cpus=os.cpu_count(), num_gpus=torch.cuda.device_count()
+    # However, if GPU is 0 then CUDA is always unavailable in the workers => set to 0.01
+    #
+    resources = ray.tune.PlacementGroupFactory([{"CPU": 0.01, "GPU": 0.01 if torch.cuda.is_available() else 0}])
+
+    trainable = ray.tune.with_parameters(trainable_cls, initargs=initargs)
+    trainable = ray.tune.with_resources(trainable, resources=resources)
+
     tuner = ray.tune.Tuner(
-        trainable=ray.tune.with_parameters(trainable_cls, initargs=initargs),
+        trainable=trainable,
         run_config=run_config,
         tune_config=tune_config,
         param_space=param_space,

@@ -10,6 +10,50 @@ config = {
         "synch": True,
         "time_attr": "training_iteration",  # XXX: don't use time_total_s
 
+        # """
+        # *** Resource allocation ***
+        #
+        # Instead of using ray.init(num_cpus=..., num_gpus=...)
+        # and assigning per-worker requested resources CPU=..., GPU=...,
+        # all workers request 0.01 CPU and 0.01 GPU (if available)
+        #
+        # => limit on spawned workers is defined by population_size
+        #
+        # Care must be taken to ensure this population has enough resources.
+        # Measuring resource consumption with 1 MPPO process:
+        #
+        #       $ NO_WANDB=true NO_SAVE=true python -m rl.algos.mppo.mppo
+        #
+        # with config: num_envs=1, num_steps=256, update_epochs=10
+        #
+        # Results taken from `htop` with a huge refresh interfal (10+s)
+        # to ensure multiple rollouts occur in a single refresh.
+        # `htop` must be configured to show combined CPU usage in 1 bar
+        # For GPU, `nvidia-smi` is used to obtain memory consumption.
+        #
+        #   mac: TODO
+        #       16% of all (10) CPUs, spiking to 23%
+        #       5% of all (16G) system memory
+        #       ---
+        #       => 6 workers for 96% of CPU (real CPU reported: 45%...)
+        #
+        #   pc: TODO
+        #
+        #   dancho-server: TODO
+        #
+        #   mila-pc (cuda)
+        #       1.7% of all (64) CPUs
+        #       2% (1.2G) of all (64G) system memory
+        #       6.7% (408M) of all (6.1G) GPU memory
+        #       ---
+        #       => 12 workers for 80% of GPU
+        #
+        #   mila-pc (cpu)
+        #       18% of all (64) CPUs, spiking to 32%
+        #       1.1% (700M) of all (64G) system memory
+        #       => 5 workers for 90% of CPU
+        #
+        # """
         "population_size": 6,
 
         # """
@@ -161,11 +205,11 @@ config = {
             {"t": "Flatten"},
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 14355]},
             # => (B, 1, 14190)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 87, "stride": 87},
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 87, "stride": 87},
             {"t": "LeakyReLU"},
-            # => (B, 32, 165)
+            # => (B, 4, 165)
             {"t": "Flatten"},
-            {"t": "Linear", "in_features": 5280, "out_features": 1024},
+            {"t": "Linear", "in_features": 660, "out_features": 1024},
             {"t": "LeakyReLU"},
         ],
         "actor": {"t": "Linear", "in_features": 1024, "out_features": 2311},
@@ -209,7 +253,7 @@ config = {
         "boot_timeout": 300,
         "true_rng": True,
     },
-    "seed": 0,  # root seed; 0 means no seed
+    "seed": 42,  # root seed; 0 means no seed
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None

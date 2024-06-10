@@ -410,7 +410,7 @@ def main(args, agent_cls=Agent):
         random.seed(args.seed)
         np.random.seed(args.seed)
         torch.manual_seed(args.seed)
-        torch.backends.cudnn.deterministic = False  # args.torch_deterministic
+        torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
     save_ts = None
     permasave_ts = None
@@ -780,7 +780,7 @@ def debug_args():
         gae_lambda=0.8,
         num_minibatches=2,
         # num_minibatches=16,
-        #update_epochs=2,
+        # update_epochs=2,
         update_epochs=10,
         norm_adv=True,
         clip_coef=0.3,
