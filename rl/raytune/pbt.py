@@ -72,6 +72,8 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
             cfg["_raytune"]["hyperparam_mutations"]
         )
 
+        print("Using initial hyperparams: %s" % cfg["_raytune"]["initial_hyperparams"])
+
         # config_overrides is a list of "path.to.key=value"
         for co in config_overrides:
             name, value = co.split("=")

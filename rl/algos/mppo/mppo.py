@@ -86,6 +86,7 @@ class NetworkArgs:
 
 @dataclass
 class State:
+    seed: int = -1
     resumes: int = 0
     map_swaps: int = 0  # DEPRECATED
     global_timestep: int = 0
@@ -407,13 +408,6 @@ def main(args, agent_cls=Agent):
     batch_size = int(num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
 
-    if args.seed != 0:
-        # TRY NOT TO MODIFY: seeding
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        torch.backends.cudnn.deterministic = True  # args.torch_deterministic
-
     save_ts = None
     permasave_ts = None
 
@@ -435,8 +429,21 @@ def main(args, agent_cls=Agent):
 
     common.validate_tags(args.tags)
 
+    if args.seed >= 0:
+        seed = args.seed
+    elif agent and agent.state.seed >= 0:
+        seed = agent.state.seed
+    else:
+        seed = np.random.randint(2**31)
+
+    # TRY NOT TO MODIFY: seeding
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = True  # args.torch_deterministic
+
     try:
-        envs = common.create_venv(VcmiEnv, args)
+        envs = common.create_venv(VcmiEnv, args, seed=np.random.randint(2**31))
         [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         obs_space = envs.unwrapped.single_observation_space
@@ -446,6 +453,8 @@ def main(args, agent_cls=Agent):
 
         if agent is None:
             agent = Agent(args, obs_space, act_space, device=device)
+
+        agent.state.seed = seed
 
         # these are used by gym's RecordEpisodeStatistics wrapper
         envs.return_queue = agent.state.ep_rew_queue
@@ -491,7 +500,7 @@ def main(args, agent_cls=Agent):
         attnmasks = torch.zeros((args.num_steps, num_envs, 165, 165)).to(device)
 
         # TRY NOT TO MODIFY: start the game
-        next_obs, _ = envs.reset(seed=args.seed)
+        next_obs, _ = envs.reset(seed=agent.state.seed)  # XXX: seed has no effect here
         next_obs = torch.Tensor(next_obs).to(device)
         next_done = torch.zeros(num_envs).to(device)
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)

@@ -47,11 +47,13 @@ config = {
         #       6.7% (408M) of all (6.1G) GPU memory
         #       ---
         #       => 12 workers for 80% of GPU
+        #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         #   mila-pc (cpu)
         #       18% of all (64) CPUs, spiking to 32%
         #       1.1% (700M) of all (64G) system memory
-        #       => 4 workers for 72% of CPU (20% free are needed for VCMIs running on GPU)
+        #       => 4 workers for 72% of all CPU (real CPU reported: 7%...)
+        #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         # """
         "population_size": 8,
@@ -252,9 +254,8 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "true_rng": True,
+        "true_rng": True,  # for random heroes and obstacles only
     },
-    "seed": 42,  # root seed; 0 means no seed
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None

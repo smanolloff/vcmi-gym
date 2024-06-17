@@ -142,9 +142,14 @@ def new_tuner(algo, experiment_name, config, scheduler, searcher=None, param_spa
         scheduler=scheduler,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
         num_samples=config["_raytune"]["population_size"],
-        #max_concurrent_trials=config["_raytune"]["max_concurrency"],  # XXX: not working?
-        max_concurrent_trials=config["_raytune"]["population_size"],
         search_alg=searcher
+
+        # FIXME: not working:
+        # WARNING tune.py:821 -- You have passed a `SearchGenerator` instance as the `sea
+        # rch_alg`, but `max_concurrent_trials` requires a `Searcher` instance`. `max_concurrent_trials` will be
+        # ignored.
+        # max_concurrent_trials=config["_raytune"]["max_concurrency"],  # XXX: not working?
+        # max_concurrent_trials=config["_raytune"]["population_size"],
     )
 
     initargs = copy.deepcopy(config)

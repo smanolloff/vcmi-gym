@@ -99,7 +99,7 @@ class SerializableCategoricalMasked:
         return torch.nn.functional.softmax(self.logits, dim=-1)
 
 
-def create_venv(env_cls, args):
+def create_venv(env_cls, args, seed):
     assert args.mapside in ["attacker", "defender"]
 
     if args.mapmask:
@@ -136,6 +136,7 @@ def create_venv(env_cls, args):
 
             env_kwargs = dict(
                 dataclasses.asdict(args.env),
+                seed=seed,
                 mapname=mapname,
                 attacker=opponent,
                 defender=opponent,

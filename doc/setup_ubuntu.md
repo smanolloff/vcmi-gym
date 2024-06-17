@@ -24,8 +24,8 @@ Custom-made libraries that "connect" VCMI with the gym env:
 $ cd "$VCMI_GYM_DIR/envs/v0/connector"
 $ ln -s ../../vcmi/rel/bin/libmyclient.so lib/
 $ cmake -S . -B build -Wno-dev \
-    -D CMAKE_BUILD_TYPE=Debug \
-    -D CMAKE_EXPORT_COMPILE_COMMANDS=1
+    -D CMAKE_BUILD_TYPE=Release \
+    -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 
 $ cmake --build build/
 ```

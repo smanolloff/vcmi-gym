@@ -136,7 +136,7 @@ def evaluate_policy(agent, venv, episodes_per_env):
 
 def load_agent(agent_file, run_id):
     # LOG.debug("Loading agent from %s" % agent_file)
-    agent = torch.load(agent_file)
+    agent = torch.load(agent_file, map_location="cpu")
     assert agent.args.run_id == run_id, "%s != %s" % (agent.args.run_id, run_id)
     return agent
 
@@ -349,7 +349,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
     statedict = {}
 
     if model:
-        rid = torch.load(model).args.run_id
+        rid = torch.load(model, map_location="cpu").args.run_id
         it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{rid}"), model, {})]
     else:
         it = find_agents(LOG, WORKER_ID, N_WORKERS, statedict)
