@@ -1,1 +1,0 @@
-../../vcmi/myclient/myclient.h

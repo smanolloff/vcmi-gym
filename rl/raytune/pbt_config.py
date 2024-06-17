@@ -37,17 +37,27 @@ config = {
         #       ---
         #       => 6 workers for 96% of CPU (real CPU reported: 45%...)
         #
-        #   pc: TODO
+        #   pc (cpu):
+        #       50.5% of all (8) CPUs
+        #       14% (1.1G) of all (8G) system memory
+        #       ---
+        #       => not good for PBT (2 workers max)
+        #
+        #   pc (cuda):
+        #       13% of all (8) CPUs
+        #       14% (1.1G) of all (8G) system memory
+        #       12.5% (500M) of all (8G) system memory
+        #       ---
+        #       => 6 workers for 78% of CPU, 75% of GPU, 84% of memory
         #
         #   dancho-server: TODO
         #
         #   mila-pc (cuda)
         #       1.7% of all (64) CPUs
         #       2% (1.2G) of all (64G) system memory
-        #       6.7% (408M) of all (6.1G) GPU memory
+        #       8.5% (500M) of all (6.1G) GPU memory
         #       ---
         #       => 12 workers for 80% of GPU
-        #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         #   mila-pc (cpu)
         #       18% of all (64) CPUs, spiking to 32%

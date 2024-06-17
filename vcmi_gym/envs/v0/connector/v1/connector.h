@@ -22,19 +22,21 @@
 #include <cstdio>
 #include <iostream>
 
+#include "AI/MMAI/schema/base.h"
+#include "AI/MMAI/schema/v1/types.h"
 #include "conncommon.h"
 
 enum ConnectorState {
     NEW,
     AWAITING_ACTION,
-    AWAITING_RESULT,
+    AWAITING_STATE,
 };
 
 class Connector {
     std::mutex m;
     std::condition_variable cond;
 
-    ConnectorState state = ConnectorState::NEW;
+    ConnectorState connstate = ConnectorState::NEW;
 
     const std::string encoding;
     const std::string mapname;
@@ -55,17 +57,18 @@ class Connector {
     const int statsSampling;
     const float statsScoreVar;
     const bool trueRng;
+    const int schemaVersion;
 
     std::thread vcmithread;
-    std::unique_ptr<MMAI::Export::Baggage> baggage;
-    MMAI::Export::Action action;
-    const MMAI::Export::Result * result;
+    std::unique_ptr<MMAI::Schema::Baggage> baggage;
+    MMAI::Schema::Action action;
+    const MMAI::Schema::IState * state;
 
-    const P_Result convertResult(const MMAI::Export::Result * r);
-    MMAI::Export::Action getAction(const MMAI::Export::Result * r);
-    const MMAI::Export::Action getActionDummy(MMAI::Export::Result);
+    const P_State convertState(const MMAI::Schema::IState * r);
+    MMAI::Schema::Action getAction(const MMAI::Schema::IState * r);
+    const MMAI::Schema::Action getActionDummy(MMAI::Schema::IState);
 
-    MMAI::Export::Baggage initBaggage();
+    MMAI::Schema::Baggage initBaggage(); // XXX: initialized last
 public:
     Connector(
         const std::string encoding,
@@ -89,12 +92,8 @@ public:
         const bool trueRng
     );
 
-    const P_Result start();
-    const P_Result reset();
-    const P_Result act(const MMAI::Export::Action a);
+    const P_State start();
+    const P_State reset();
+    const P_State act(const MMAI::Schema::Action a);
     const std::string renderAnsi();
-
-    // Called when VcmiGym is started from within VCMI itself
-    // (ie. VCMI is started normally, and vcmi-gym is started as its AI)
-    const MMAI::Export::Baggage* getCBProvider();
 };

@@ -15,8 +15,7 @@
 // =============================================================================
 
 #include "connector.h"
-#include "mmai_export.h"
-#include "myclient.h"
+#include "gymclient/gymclient.h"
 #include <stdexcept>
 
 Connector::Connector(
@@ -38,7 +37,8 @@ Connector::Connector(
     const int statsPersistFreq_,
     const int statsSampling_,
     const float statsScoreVar_,
-    const bool trueRng_
+    const bool trueRng_,
+    const int schemaVersion_
 ) : encoding(encoding_),
     mapname(mapname_),
     seed(seed_),
@@ -57,79 +57,65 @@ Connector::Connector(
     statsPersistFreq(statsPersistFreq_),
     statsSampling(statsSampling_),
     statsScoreVar(statsScoreVar_),
-    trueRng(trueRng_),
-    baggage(std::make_unique<MMAI::Export::Baggage>(initBaggage())) {}
+    schemaVersion(schemaVersion_),
+    trueRng(trueRng_) {
+        baggage = std::make_unique<MMAI::Schema::Baggage>(
+            mapname,
+            [this](const MMAI::Schema::IState* s) { return this->getAction(s); },
+            schemaVersion
+        );
+    }
 
-MMAI::Export::Baggage Connector::initBaggage() {
-    return MMAI::Export::Baggage([this](const MMAI::Export::Result* r) {
-        return this->getAction(r);
-    });
-}
 
-const P_Result Connector::convertResult(const MMAI::Export::Result* r) {
-    LOG("Convert Result -> P_Result");
+const P_State Connector::convertState(const MMAI::Schema::IState* s) {
+    LOG("Convert IState -> P_State");
 
-    P_State ps;
+    assert(s->version() == 1);
 
-    if (encoding == MMAI::Export::STATE_ENCODING_DEFAULT) {
-        auto vec = MMAI::Export::State{};
-        vec.reserve(MMAI::Export::STATE_SIZE_DEFAULT);
+    auto &bs = s->getBattlefieldState();
 
-        for (auto &u : r->stateUnencoded)
-            u.encode(vec);
+    P_BattlefieldState pbs;
+    auto pbsmd = pbs.mutable_data();
 
-        if (vec.size() != MMAI::Export::STATE_SIZE_DEFAULT)
-            throw std::runtime_error("STATE_ENCODING_DEFAULT: Unexpected state size: " + std::to_string(vec.size()));
+    for (int i=0; i<bs.size(); i++)
+        pbsmd[i] = bs[i];
 
-        ps = P_State(MMAI::Export::STATE_SIZE_DEFAULT);
-        auto psmd = ps.mutable_data();
-
-        for (int i=0; i<MMAI::Export::STATE_SIZE_DEFAULT; i++)
-            psmd[i] = vec[i];
-    } else if (encoding == MMAI::Export::STATE_ENCODING_FLOAT) {
-        if (r->stateUnencoded.size() != MMAI::Export::STATE_SIZE_FLOAT)
-            throw std::runtime_error("STATE_ENCODING_FLOAT: Unexpected state size: " + std::to_string(r->stateUnencoded.size()));
-
-        ps = P_State(MMAI::Export::STATE_SIZE_FLOAT);
-        auto psmd = ps.mutable_data();
-
-        for (int i=0; i<MMAI::Export::STATE_SIZE_FLOAT; i++)
-            psmd[i] = r->stateUnencoded[i].encode2Floating();
-    } else {
-        throw std::runtime_error("Unexpected encoding: " + encoding);
-    };
-
-    auto pam = P_ActMask(r->actmask.size());
+    auto &actmask = s->getActionMask();
+    auto pam = P_ActionMask(actmask.size());
     auto pammd = pam.mutable_data();
-    for (int i=0; i < r->actmask.size(); i++)
-        pammd[i] = r->actmask[i];
+    for (int i=0; i < actmask.size(); i++)
+        pammd[i] = actmask[i];
 
-    auto patm = P_AttnMasks(r->attnmasks.size());
+    auto &attnmask = s->getAttentionMask();
+    auto patm = P_AttentionMask(attnmask.size());
     auto patmmd = patm.mutable_data();
-    for (int i=0; i < r->attnmasks.size(); i++)
-        patmmd[i] = r->attnmasks[i];
+    for (int i=0; i < attnmask.size(); i++)
+        patmmd[i] = attnmask[i];
 
-    return P_Result(
-         r->type, ps, pam, patm, r->errmask, r->side,
-         r->dmgDealt, r->dmgReceived,
-         r->unitsLost, r->unitsKilled,
-         r->valueLost, r->valueKilled,
-         r->side0ArmyValue, r->side1ArmyValue,
-         r->ended, r->victory, r->ansiRender
+    auto any = s->getSupplementaryData();
+    auto sup = std::any_cast<MMAI::Schema::V1::ISupplementaryData*>(any);
+
+    return P_State(
+         sup->getType(), pbs, pam, patm, sup->getErrorCode(), sup->getSide(),
+         sup->getDmgDealt(), sup->getDmgReceived(),
+         sup->getUnitsLost(), sup->getUnitsKilled(),
+         sup->getValueLost(), sup->getValueKilled(),
+         sup->getSide0ArmyValue(), sup->getSide1ArmyValue(),
+         sup->getIsBattleEnded(), sup->getIsVictorious(), sup->getAnsiRender()
     );
 }
 
-const P_Result Connector::reset() {
-    assert(state == ConnectorState::AWAITING_ACTION);
+const P_State Connector::reset() {
+    assert(connstate == ConnectorState::AWAITING_ACTION);
 
     std::unique_lock lock(m);
     LOG("obtain lock: done");
 
-    LOGSTR("set this->action = ", std::to_string(MMAI::Export::ACTION_RESET));
-    action = MMAI::Export::ACTION_RESET;
+    LOGSTR("set this->action = ", std::to_string(MMAI::Schema::ACTION_RESET));
+    action = MMAI::Schema::ACTION_RESET;
 
-    LOG("set state = AWAITING_RESULT");
-    state = ConnectorState::AWAITING_RESULT;
+    LOG("set state = AWAITING_STATE");
+    connstate = ConnectorState::AWAITING_STATE;
 
     LOG("cond.notify_one()");
     cond.notify_one();
@@ -146,26 +132,27 @@ const P_Result Connector::reset() {
         // py::gil_scoped_acquire acquire2;
     }
 
-    assert(state == ConnectorState::AWAITING_ACTION);
-    assert(result->type == MMAI::Export::ResultType::REGULAR);
+    assert(connstate == ConnectorState::AWAITING_ACTION);
 
     LOG("release lock (return)");
-    LOG("return P_Result");
-    return convertResult(result);
+    LOG("return P_State");
+    const auto pstate = convertState(state);
+    assert(pstate.type == MMAI::Schema::V1::ISupplementaryData::Type::REGULAR);
+    return pstate;
 }
 
 const std::string Connector::renderAnsi() {
-    assert(state == ConnectorState::AWAITING_ACTION);
+    assert(connstate == ConnectorState::AWAITING_ACTION);
 
     LOG("obtain lock");
     std::unique_lock lock(m);
     LOG("obtain lock: done");
 
-    LOGSTR("set this->action = ", std::to_string(MMAI::Export::ACTION_RENDER_ANSI));
+    LOGSTR("set this->action = ", std::to_string(MMAI::Schema::ACTION_RENDER_ANSI));
     action = MMAI::Export::ACTION_RENDER_ANSI;
 
-    LOG("set state = AWAITING_RESULT");
-    state = ConnectorState::AWAITING_RESULT;
+    LOG("set connstate = AWAITING_STATE");
+    connstate = ConnectorState::AWAITING_STATE;
 
     LOG("cond.notify_one()");
     cond.notify_one();
@@ -181,16 +168,20 @@ const std::string Connector::renderAnsi() {
         LOG("acquire Python GIL (scope-auto)");
     }
 
-    assert(state == ConnectorState::AWAITING_ACTION);
-    assert(result->type == MMAI::Export::ResultType::ANSI_RENDER);
+    assert(connstate == ConnectorState::AWAITING_ACTION);
+
+
+
+
+
 
     LOG("release lock (return)");
-    LOG("return P_Result");
+    LOG("return state->ansiRender");
     return result->ansiRender;
 }
 
 const P_Result Connector::act(MMAI::Export::Action a) {
-    assert(state == ConnectorState::AWAITING_ACTION);
+    assert(connstate == ConnectorState::AWAITING_ACTION);
 
     // Prevent control actions via `step`
     assert(a > 0);
@@ -202,8 +193,8 @@ const P_Result Connector::act(MMAI::Export::Action a) {
     LOGSTR("set this->action = ", std::to_string(a));
     action = a;
 
-    LOG("set state = AWAITING_RESULT");
-    state = ConnectorState::AWAITING_RESULT;
+    LOG("set connstate = AWAITING_STATE");
+    connstate = ConnectorState::AWAITING_STATE;
 
     LOG("cond.notify_one()");
     cond.notify_one();
@@ -219,16 +210,16 @@ const P_Result Connector::act(MMAI::Export::Action a) {
         LOG("acquire Python GIL (scope-auto)");
     }
 
-    assert(state == ConnectorState::AWAITING_ACTION);
+    assert(connstate == ConnectorState::AWAITING_ACTION);
     assert(result->type == MMAI::Export::ResultType::REGULAR);
 
     LOG("release lock (return)");
     LOG("return P_Result");
-    return convertResult(result);
+    return convertState(result);
 }
 
 const P_Result Connector::start() {
-    assert(state == ConnectorState::NEW);
+    assert(connstate == ConnectorState::NEW);
 
     setvbuf(stdout, NULL, _IONBF, 0);
     LOG("start");
@@ -267,8 +258,8 @@ const P_Result Connector::start() {
         true  // headless (disable the GUI, as it cannot run in a non-main thread)
     );
 
-    LOG("set state = AWAITING_RESULT");
-    state = ConnectorState::AWAITING_RESULT;
+    LOG("set connstate = AWAITING_STATE");
+    connstate = ConnectorState::AWAITING_STATE;
 
     LOG("launch new thread");
     vcmithread = std::thread([] {
@@ -302,16 +293,16 @@ const P_Result Connector::start() {
     // LOGSTR("Change cwd back to", oldcwd.string());
     // std::filesystem::current_path(oldcwd);
 
-    assert(state == ConnectorState::AWAITING_ACTION);
+    assert(connstate == ConnectorState::AWAITING_ACTION);
     assert(result->type == MMAI::Export::ResultType::REGULAR);
 
     LOG("release lock (return)");
     LOG("return P_Result");
 
-    return convertResult(result);
+    return convertState(result);
 }
 
-MMAI::Export::Action Connector::getAction(const MMAI::Export::Result* r) {
+MMAI::Export::Action Connector::getAction(const MMAI::Export::IState* s) {
 
     LOG("acquire Python GIL");
     py::gil_scoped_acquire acquire;
@@ -320,18 +311,18 @@ MMAI::Export::Action Connector::getAction(const MMAI::Export::Result* r) {
     std::unique_lock lock(m);
     LOG("obtain lock: done");
 
-    assert(state == ConnectorState::AWAITING_RESULT);
+    assert(connstate == ConnectorState::AWAITING_STATE);
 
-    LOG("set this->result = r");
-    result = r;
+    LOG("set this->istate = s");
+    istate = s;
 
-    LOG("set state = AWAITING_ACTION");
-    state = ConnectorState::AWAITING_ACTION;
+    LOG("set connstate = AWAITING_ACTION");
+    connstate = ConnectorState::AWAITING_ACTION;
 
     LOG("cond.notify_one()");
     cond.notify_one();
 
-    assert(state == ConnectorState::AWAITING_ACTION);
+    assert(connstate == ConnectorState::AWAITING_ACTION);
 
     {
         LOG("release Python GIL");
@@ -346,7 +337,7 @@ MMAI::Export::Action Connector::getAction(const MMAI::Export::Result* r) {
         // py::gil_scoped_acquire acquire2;
     }
 
-    assert(state == ConnectorState::AWAITING_RESULT);
+    assert(connstate == ConnectorState::AWAITING_STATE);
 
     LOG("release lock (return)");
     LOGSTR("return Action: ", std::to_string(action));

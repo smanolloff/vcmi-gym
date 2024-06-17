@@ -23,7 +23,7 @@ while true; do
   rm -f "$db"
   for i in $(seq 10); do
     touch "$watchdogfile"
-    $VCMI/rel/bin/myclient-headless \
+    $VCMI/rel/bin/gymclient-headless \
       --loglevel-ai error --loglevel-global error --loglevel-stats info \
       --random-heroes 1 --random-obstacles 1 --swap-sides 0 \
       --red-ai StupidAI --blue-ai StupidAI \

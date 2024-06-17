@@ -25,7 +25,7 @@
 2. (connector root folder) build connector
     2.1. symlinks to dependencies
 
-        $ ln -s ../vcmi/build/bin/libmyclient.dylib lib/
+        $ ln -s ../vcmi/build/bin/libgymclient.dylib lib/
         $ ln -s ../vcmi/pyclient/pyclient.h include/
 
     2.2. conan deps (see 1.1)

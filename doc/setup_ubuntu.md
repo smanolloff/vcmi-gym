@@ -22,7 +22,7 @@ Custom-made libraries that "connect" VCMI with the gym env:
 
 ```bash
 $ cd "$VCMI_GYM_DIR/envs/v0/connector"
-$ ln -s ../../vcmi/rel/bin/libmyclient.so lib/
+$ ln -s ../../vcmi/rel/bin/libgymclient.so lib/
 $ cmake -S . -B build -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0

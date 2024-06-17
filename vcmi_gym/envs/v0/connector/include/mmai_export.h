@@ -1,1 +1,0 @@
-../../vcmi/myclient/mmai_export.h

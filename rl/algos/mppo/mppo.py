@@ -313,6 +313,7 @@ class Agent(nn.Module):
         clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
         clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
         jagent = JitAgent()
+        jagent.schema_version = clean_agent.schema_version
         jagent.features_extractor = clean_agent.NN.features_extractor
         jagent.actor = clean_agent.NN.actor
         jagent.critic = clean_agent.NN.critic
@@ -326,6 +327,7 @@ class Agent(nn.Module):
     def __init__(self, args, observation_space, action_space, state=None, device="cpu"):
         super().__init__()
         self.args = args
+        self.schema_version = getattr(args, "schema_version", 2)
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
         self.NN = AgentNN(args.network, action_space, observation_space)
@@ -344,6 +346,7 @@ class JitAgent(nn.Module):
         self.features_extractor = nn.Identity()
         self.actor = nn.Identity()
         self.critic = nn.Identity()
+        self.schema_version = 2
 
     # Inference (deterministic)
     # XXX: attention is not handled here
@@ -365,6 +368,10 @@ class JitAgent(nn.Module):
             features = self.features_extractor(b_obs)
             value = self.critic(features)
             return value.float().item()
+
+    @torch.jit.export
+    def get_schema_version(self) -> int:
+        return self.schema_version
 
 
 def main(args, agent_cls=Agent):

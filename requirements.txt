@@ -37,5 +37,7 @@ ray[tune]
 # - linux users should choose this option if they are ok with CPU-only training
 #   and want to use VCMI for loading pre-trained models to play against.
 #   URL must be modified based on your python version.
+#   List of available wheels (documented officially by pytorch):
+#   https://download.pytorch.org/whl/cpu-cxx11-abi/torch/
 #
 

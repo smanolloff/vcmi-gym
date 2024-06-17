@@ -7,7 +7,7 @@ required_conan_version = ">=1.51.3"
 
 class Connector(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
-    requires = ["pybind11/[~2.11.1]"]
+    requires = ["pybind11/[~2.12.0]"]
 
     def generate(self):
         tc = CMakeToolchain(self)

@@ -27,7 +27,7 @@
 #include <pybind11/functional.h>
 #include <filesystem>
 
-#include "mmai_export.h" // "vendor" header file
+#include "AI/MMAI/schema/schema.h"
 
 #define VERBOSE false
 
@@ -36,18 +36,18 @@
 
 namespace py = pybind11;
 
-using P_State = py::array_t<float>;
-using P_ActMask = py::array_t<bool>;
-using P_AttnMasks = py::array_t<float>;
+using P_BattlefieldState = py::array_t<float>;
+using P_ActionMask = py::array_t<bool>;
+using P_AttentionMask = py::array_t<float>;
 
-struct P_Result {
-    P_Result(
-        MMAI::Export::ResultType type_,
-        P_State state_,
-        P_ActMask actmask_,
-        P_AttnMasks attnmasks_,
-        MMAI::Export::ErrMask errmask_,
-        MMAI::Export::Side side_,
+struct P_State {
+    P_State(
+        MMAI::Schema::V1::ISupplementaryData::Type type_,
+        P_BattlefieldState state_,
+        P_ActionMask actmask_,
+        P_AttentionMask attnmasks_,
+        MMAI::Schema::V1::ErrorCode errcode_,
+        MMAI::Schema::V1::ISupplementaryData::Side side_,
         int dmg_dealt_,
         int dmg_received_,
         int units_lost_,
@@ -59,30 +59,29 @@ struct P_Result {
         bool is_battle_over_,
         bool is_victorious_,
         std::string ansiRender_
-    )
-    : type(type_),
-        errmask(errmask_),
-        actmask(actmask_),
-        attnmasks(attnmasks_),
-        state(state_),
-        side(static_cast<int>(side_)),
-        dmg_dealt(dmg_dealt_),
-        dmg_received(dmg_received_),
-        is_battle_over(is_battle_over_),
-        units_lost(units_lost_),
-        units_killed(units_killed_),
-        value_lost(value_lost_),
-        value_killed(value_killed_),
-        side0_army_value(side0_army_value_),
-        side1_army_value(side1_army_value_),
-        is_victorious(is_victorious_),
-        ansiRender(ansiRender_) {}
+    ) : type(type_)
+      , errcode(errcode_)
+      , actmask(actmask_)
+      , attnmasks(attnmasks_)
+      , state(state_)
+      , side(static_cast<int>(side_))
+      , dmg_dealt(dmg_dealt_)
+      , dmg_received(dmg_received_)
+      , is_battle_over(is_battle_over_)
+      , units_lost(units_lost_)
+      , units_killed(units_killed_)
+      , value_lost(value_lost_)
+      , value_killed(value_killed_)
+      , side0_army_value(side0_army_value_)
+      , side1_army_value(side1_army_value_)
+      , is_victorious(is_victorious_)
+      , ansiRender(ansiRender_) {}
 
-    const MMAI::Export::ResultType type;
+    const MMAI::Schema::V1::ISupplementaryData::Type type;
     const py::array_t<float> state;
     const py::array_t<bool> actmask;
     const py::array_t<float> attnmasks;
-    const MMAI::Export::ErrMask errmask;
+    const MMAI::Schema::V1::ErrorCode errcode;
     const int side;
     const int dmg_dealt;
     const int dmg_received;
@@ -99,7 +98,7 @@ struct P_Result {
     const py::array_t<float> &get_state() const { return state; }
     const py::array_t<bool> &get_actmask() const { return actmask; }
     const py::array_t<float> &get_attnmasks() const { return attnmasks; }
-    const MMAI::Export::ErrMask &get_errmask() const { return errmask; }
+    const MMAI::Schema::V1::ErrorCode &get_errmask() const { return errcode; }
     const int &get_side() const { return side; }
     const int &get_dmg_dealt() const { return dmg_dealt; }
     const int &get_dmg_received() const { return dmg_received; }
