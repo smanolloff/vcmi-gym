@@ -162,8 +162,8 @@ def new_tuner(algo, experiment_name, config, scheduler, searcher=None, param_spa
     # However, if GPU is 0 then CUDA is always unavailable in the workers => set to 0.01
     #
     resources = ray.tune.PlacementGroupFactory([{
-      "CPU": 0.01,
-      "GPU": 0.01 if initargs["_raytune"].get("cuda", False) and torch.cuda.is_available() else 0
+        "CPU": 0.01,
+        "GPU": 0.01 if initargs["_raytune"].get("cuda", False) and torch.cuda.is_available() else 0
     }])
 
     trainable = ray.tune.with_parameters(trainable_cls, initargs=initargs)

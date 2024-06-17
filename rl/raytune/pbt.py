@@ -1,6 +1,7 @@
 import copy
 import ray.tune
 import ast
+from dataclasses import asdict
 from . import common
 from .pbt_config import config
 
@@ -33,6 +34,22 @@ def update_config_value(cfg, path, value):
     d[keys[-1]] = new_value
 
 
+def extract_initial_hyperparams(runtime_cfg, hyperparam_mutations, res=None):
+    if res is None:
+        res = {}
+    for k in runtime_cfg:
+        if k in hyperparam_mutations:
+            if isinstance(runtime_cfg[k], dict):
+                assert isinstance(hyperparam_mutations[k], dict), "not a dict: hyperparam_mutations[%s]" % k
+                res[k] = extract_initial_hyperparams(runtime_cfg[k], hyperparam_mutations[k])
+            else:
+                assert isinstance(hyperparam_mutations[k], list), "not a list: allowed_keys_dict[%s]" % k
+                assert isinstance(runtime_cfg[k], (int, float, str)), "not an int/float/str: src_dict[%s]" % k
+                k not in res, "'%s' key already present in res" % k
+                res[k] = runtime_cfg[k]
+    return res
+
+
 def main(alg, exp_name, resume_path, config_overrides=[]):
     cfg = copy.deepcopy(config)
     cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
@@ -49,6 +66,11 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
         cfg["_raytune"]["resumed_run_id"] = agent.args.run_id
         cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
         cfg["_raytune"]["resumes"].append(getattr(agent.args, "trial_id", "(no trial_id)"))
+
+        cfg["_raytune"]["initial_hyperparams"] = extract_initial_hyperparams(
+            asdict(agent.args),
+            cfg["_raytune"]["hyperparam_mutations"]
+        )
 
         # config_overrides is a list of "path.to.key=value"
         for co in config_overrides:
