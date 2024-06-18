@@ -131,7 +131,7 @@ neighbouring hex. The 3 values are "none" (can't reach), "half dmg" and
 > which returns a `name: (encoding, offset, size, max_value)` mapping.
 
 ```python
-from vcmi_gym import VcmiEnv
+from vcmi_gym import VcmiEnv_v1 as VcmiEnv
 
 env = VcmiEnv("gym/A2.vmap")
 obs0, _info = env.reset()

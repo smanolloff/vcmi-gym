@@ -19,7 +19,9 @@ import threading
 import enum
 import collections
 
-from .util import log
+from . import log
+from . import wrappers
+
 
 DEBUG = True
 MAXLEN = 100
@@ -58,7 +60,7 @@ class State(enum.Enum):
 
 
 class Side(enum.Enum):
-    # Must correspond to VCMI's MMAI::Export::Side enum
+    # Must correspond to VCMI's MMAI::Schema::V1::Side enum
     ATTACKER = 0
     DEFENDER = 1
 
@@ -269,7 +271,7 @@ if __name__ == "__main__":
     import numpy as np
     import time
     import logging
-    from .vcmi_env import VcmiEnv
+    from ..v2.vcmi_env import VcmiEnv
 
     def npstr(self):
         return f"ndarray{self.shape}"
@@ -321,7 +323,8 @@ if __name__ == "__main__":
 
         logger.info("Done.")
 
-    env = VcmiEnv("gym/A1.vmap", attacker="MMAI_USER", defender="MMAI_USER", encoding_type="float", max_steps=50)
+    env = VcmiEnv("gym/A1.vmap", attacker="MMAI_USER", defender="MMAI_USER", max_steps=50)
+    env = wrappers.LegacyActionSpaceWrapper(env)
     controller = DualEnvController(env, "ERROR")
 
     kwargs = dict(controller=controller, predictors=(attacker, defender), games=10)

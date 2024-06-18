@@ -16,50 +16,22 @@
 
 import numpy as np
 import gymnasium as gym
-from collections import namedtuple
-from types import SimpleNamespace
 
-from .util import log
-from .util.analyzer import Analyzer, ActionType
-from .util.pyconnector import (
+from ..util import log
+from .analyzer import Analyzer, ActionType
+from .decoder.decoder import Decoder
+from .pyconnector import (
     PyConnector,
     STATE_VALUE_NA,
-    STATE_SIZE_DEFAULT_ONE_HEX,
-    STATE_SIZE_FLOAT_ONE_HEX,
-    STATE_ENCODING_DEFAULT,
-    STATE_ENCODING_FLOAT,
-    ATTRMAP_DEFAULT,
-    ATTRMAP_FLOAT,
-    HEXACTMAP,
-    HEXSTATEMAP,
-    MELEEDISTMAP,
-    SHOOTDISTMAP,
-    DMGMODMAP,
-    SIDEMAP,
-    N_NONHEX_ACTIONS,
-    N_HEX_ACTIONS,
+    STATE_SIZE_ONE_HEX,
+    ATTRMAP,
     N_ACTIONS,
 )
 
-
-# the numpy data type (pytorch works best with float32)
-DTYPE = np.float32
-ZERO = DTYPE(0)
-ONE = DTYPE(1)
-
 TRACE = True
-MAXLEN = 80
 
 
-# NOTE: removing action=0 (retreat) which is used for resetting.
-#       => start from 1 and reduce total actions by 1
-#          XXX: there seems to be a bug as start=1 causes this error with SB3:
-#          index 1322 is out of bounds for dimension 2 with size 1322
-#       => just start from 0, reduce max by 1, and manually add +1
-ACTION_OFFSET = 1
-
-
-def tracelog(func, maxlen=MAXLEN):
+def tracelog(func, maxlen=80):
     if not TRACE:
         return func
 
@@ -92,83 +64,22 @@ class InfoDict(dict):
         super().__setitem__(k, v)
 
 
-class Hex(namedtuple("Hex", ATTRMAP_DEFAULT.keys())):
-    def __repr__(self):
-        return f'Hex(y={self.HEX_Y_COORD} x={self.HEX_X_COORD})'
-
-    def dump(self, compact=True):
-        maxlen = 0
-        lines = []
-        for field in self._fields:
-            value = getattr(self, field)
-            maxlen = max(maxlen, len(field))
-
-            if field.startswith("HEX_ACTION_MASK_FOR_"):
-                names = list(HEXACTMAP.keys())
-                indexes = np.where(value)[0]
-                value = None if not any(indexes) else ", ".join([names[i] for i in indexes])
-            elif field.startswith("HEX_STATE"):
-                value = None if not value else list(HEXSTATEMAP.keys())[value]
-            elif field.startswith("HEX_MELEE_DISTANCE_FROM"):
-                value = None if not value else list(MELEEDISTMAP.keys())[value]
-            elif field.startswith("HEX_SHOOT_DISTANCE_FROM"):
-                value = None if not value else list(SHOOTDISTMAP.keys())[value]
-            elif field.startswith("HEX_MELEEABLE_BY"):
-                value = None if not value else list(DMGMODMAP.keys())[value]
-
-            if value is None and compact:
-                continue
-            lines.append((field, value))
-        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))
-
-    def action(self, hexaction):
-        if isinstance(hexaction, str):
-            hexaction = HEXACTMAP.get(hexaction, None)
-
-        if hexaction not in HEXACTMAP.values():
-            return None
-
-        if not self.HEX_ACTION_MASK_FOR_ACT_STACK[hexaction]:
-            print("Action not possible for this hex")
-            return None
-
-        n = 15*self.HEX_Y_COORD + self.HEX_X_COORD
-        return N_NONHEX_ACTIONS - ACTION_OFFSET + n*N_HEX_ACTIONS + hexaction
-
-    def actions(self):
-        return [k for k, v in HexAction.__dict__.items() if self.HEX_ACTION_MASK_FOR_ACT_STACK[v]]
-
-
-HexAction = SimpleNamespace(**HEXACTMAP)
-HexState = SimpleNamespace(**HEXSTATEMAP)
-MeleeDistance = SimpleNamespace(**MELEEDISTMAP)
-ShootDistance = SimpleNamespace(**SHOOTDISTMAP)
-DmgMod = SimpleNamespace(**DMGMODMAP)
-Side = SimpleNamespace(**SIDEMAP)
-
-
-class Battlefield(list):
-    def __repr__(self):
-        return "Battlefield(11x15)"
-
-    def get(self, y_or_n, x=None):
-        if x is not None:
-            y = y_or_n
-        else:
-            y = y_or_n // 15
-            x = y_or_n % 15
-
-        if y >= 0 and y < len(self) and x >= 0 and x < len(self[y]):
-            return self[y][x]
-        else:
-            print("Invalid hex (y=%s x=%s)" % (y, x))
-
-
 class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
     ROLES = ["MMAI_USER", "MMAI_MODEL", "StupidAI", "BattleAI"]
+
+    CONNECTOR_CLASS = PyConnector
+
+    # NOTE: removing action=0 to prevent agents from freely retreating for now
+    ACTION_SPACE = gym.spaces.Discrete(N_ACTIONS)
+    OBSERVATION_SPACE = gym.spaces.Box(
+        low=STATE_VALUE_NA,
+        high=1,
+        shape=(11, 15, STATE_SIZE_ONE_HEX),
+        dtype=np.float32
+    )
 
     def __init__(
         self,
@@ -181,7 +92,6 @@ class VcmiEnv(gym.Env):
         vcmi_loglevel_ai="error",  # vcmi loglevel
         vcmi_loglevel_stats="error",  # vcmi loglevel
         vcmienv_loglevel="WARN",  # python loglevel
-        encoding_type="default",  # default / float
         consecutive_error_reward_factor=-1,  # unused
         attacker="MMAI_USER",  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
         defender="StupidAI",  # MMAI_USER / MMAI_MODEL / StupidAI / BattleAI
@@ -195,7 +105,6 @@ class VcmiEnv(gym.Env):
         true_rng=True,
         sparse_info=False,
         allow_invalid_actions=False,
-        actions_log_file=None,  # DEBUG
         user_timeout=0,  # seconds - user input might take very long
         vcmi_timeout=0,  # seconds - VCMI occasionally writes stats DB to disk (see vcmi_stats_persist_freq)
         boot_timeout=0,  # seconds - needed as VCMI boot sometimes hangs with a memleak
@@ -208,30 +117,47 @@ class VcmiEnv(gym.Env):
         step_reward_fixed=0,  # fixed reward
         step_reward_mult=1,
         term_reward_mult=1,  # at term step, reward = diff in total army values
+        allow_retreat=False,  # whether to always mask the "0" action
     ):
-        assert vcmi_loglevel_global in VcmiEnv.VCMI_LOGLEVELS
-        assert vcmi_loglevel_ai in VcmiEnv.VCMI_LOGLEVELS
-        assert attacker in VcmiEnv.ROLES
-        assert defender in VcmiEnv.ROLES
+        assert vcmi_loglevel_global in self.__class__.VCMI_LOGLEVELS
+        assert vcmi_loglevel_ai in self.__class__.VCMI_LOGLEVELS
+        assert attacker in self.__class__.ROLES
+        assert defender in self.__class__.ROLES
         assert attacker == "MMAI_USER" or defender == "MMAI_USER", "an MMAI_USER role is required"
 
-        if encoding_type == STATE_ENCODING_DEFAULT:
-            hex_size = STATE_SIZE_DEFAULT_ONE_HEX
-            self.attribute_mapping = ATTRMAP_DEFAULT
-        elif encoding_type == STATE_ENCODING_FLOAT:
-            hex_size = STATE_SIZE_FLOAT_ONE_HEX
-            self.attribute_mapping = ATTRMAP_FLOAT
-        else:
-            raise Exception("Expected encoding_type: expected one of %s, got: %s" % (
-                [STATE_ENCODING_DEFAULT, STATE_ENCODING_FLOAT], encoding_type)
-            )
+        self.attribute_mapping = ATTRMAP
+
+        # <params>
+        self.render_mode = render_mode
+        self.sparse_info = sparse_info
+        self.allow_invalid_actions = allow_invalid_actions
+        self.max_steps = max_steps
+        self.render_each_step = render_each_step
+        self.mapname = mapname
+        self.attacker = attacker
+        self.defender = defender
+        self.attacker_model = attacker_model
+        self.defender_model = defender_model
+        self.reward_clip_tanh_army_frac = reward_clip_tanh_army_frac
+        self.reward_army_value_ref = reward_army_value_ref
+        self.reward_dmg_factor = reward_dmg_factor
+        self.step_reward_fixed = step_reward_fixed
+        self.step_reward_mult = step_reward_mult
+        self.term_reward_mult = term_reward_mult
+        self.allow_retreat = allow_retreat
+        # </params>
 
         self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
-        self.connector = PyConnector(vcmienv_loglevel, user_timeout, vcmi_timeout, boot_timeout)
-        self.encoding_type = encoding_type
+
+        self.connector = self.__class__.CONNECTOR_CLASS(
+            vcmienv_loglevel,
+            user_timeout,
+            vcmi_timeout,
+            boot_timeout,
+            allow_retreat,
+        )
 
         result = self.connector.start(
-            encoding_type,
             mapname,
             seed or 0,
             random_heroes,
@@ -252,55 +178,27 @@ class VcmiEnv(gym.Env):
             true_rng,
         )
 
-        self.action_space = gym.spaces.Discrete(N_ACTIONS - ACTION_OFFSET)
-        self.observation_space = gym.spaces.Box(
-            low=STATE_VALUE_NA,
-            high=1,
-            shape=(11, 15, hex_size),
-            dtype=np.float32
-        )
+        self.action_space = self.__class__.ACTION_SPACE
+        self.observation_space = self.__class__.OBSERVATION_SPACE
 
-        self.actfile = None
-
-        # <params>
-        self.render_mode = render_mode
-        self.sparse_info = sparse_info
-        self.allow_invalid_actions = allow_invalid_actions
-        self.max_steps = max_steps
-        self.render_each_step = render_each_step
-        self.mapname = mapname
-        self.attacker = attacker
-        self.defender = defender
-        self.attacker_model = attacker_model
-        self.defender_model = defender_model
-        self.actions_log_file = actions_log_file
-        self.reward_clip_tanh_army_frac = reward_clip_tanh_army_frac
-        self.reward_army_value_ref = reward_army_value_ref
-        self.reward_dmg_factor = reward_dmg_factor
-        self.step_reward_fixed = step_reward_fixed
-        self.step_reward_mult = step_reward_mult
-        self.term_reward_mult = term_reward_mult
-        # </params>
+        print("Action space: %s" % self.action_space)
+        print("Observation space: %s" % self.observation_space)
 
         # required to init vars
         self._reset_vars(result)
 
     @tracelog
     def step(self, action):
-        action = self._transform_action(action)
-
         if self.terminated or self.truncated:
             raise Exception("Reset needed")
 
-        if self.actfile:
-            self.actfile.write(f"{action}\n")
+        # Prevent VCMI exceptions (mid-battle retreats are not handled)
+        if action == 0 and not self.allow_retreat:
+            raise Exception("Retreat is not allowed")
 
         res = self.connector.act(action)
-        # assert res.errmask == 0 or self.allow_invalid_actions, "Errmask != 0: %d" % res.errmask
-        if res.errmask != 0 and not self.allow_invalid_actions:
-            # MQRDQN sometimes (very rarely) hits an invalid action
-            # Could be a corner case for just after learning starts
-            self.logger.warn("errmask=%d" % res.errmask)
+        if res.errcode > 0 and not self.allow_invalid_actions:
+            self.logger.warn("errcode=%d" % res.errcode)
 
         analysis = self.analyzer.analyze(action, res)
         term = res.is_battle_over
@@ -312,7 +210,7 @@ class VcmiEnv(gym.Env):
         self._update_vars_after_step(res, rew, rew_unclipped, term, trunc, analysis)
         self._maybe_render(analysis)
 
-        info = VcmiEnv.build_info(
+        info = self.__class__.build_info(
             res,
             term,
             trunc,
@@ -333,11 +231,6 @@ class VcmiEnv(gym.Env):
 
         if self.render_each_step:
             self.render()
-
-        if self.actions_log_file:
-            if self.actfile:
-                self.actfile.close()
-            self.actfile = open(self.actions_log_file, "w")
 
         return self.result.state, {"side": self.result.side}
 
@@ -366,8 +259,6 @@ class VcmiEnv(gym.Env):
     @tracelog
     def close(self):
         self.logger.info("Closing env...")
-        if self.actfile:
-            self.actfile.close()
 
         self.connector.shutdown()
         self.logger.info("Env closed")
@@ -377,82 +268,20 @@ class VcmiEnv(gym.Env):
 
     @tracelog
     def action_mask(self):
-        return self.result.actmask[ACTION_OFFSET:]
+        return self.result.actmask
 
-    def attn_masks(self):
-        return self.result.attnmasks
+    # To use attnmask, code in pyconnector.py and BAI/v1/state.cpp
+    # must be uncommented and both VCMI and connector must be recompiled.
+    def attn_mask(self):
+        raise Exception("attn_mask disabled for performance reasons")
+        return self.result.attnmask
 
     def decode(self):
-        return VcmiEnv.decode_obs(self.result.state)
+        return self.__class__.decode_obs(self.result.state)
 
     @staticmethod
     def decode_obs(obs):
-        assert len(obs.shape) == 3
-        assert obs.shape[0] == 11
-        assert obs.shape[1] == 15
-        assert obs.shape[2] in [STATE_SIZE_DEFAULT_ONE_HEX, STATE_SIZE_FLOAT_ONE_HEX]
-
-        attrmap = ATTRMAP_FLOAT if obs.shape[2] == STATE_SIZE_FLOAT_ONE_HEX else ATTRMAP_DEFAULT
-
-        res = Battlefield()
-        for y in range(11):
-            row = []
-            for x in range(15):
-                row.append(VcmiEnv.decode_hex(obs[y][x], attrmap))
-            res.append(row)
-
-        return res
-
-    @staticmethod
-    def decode_hex(hexdata, attrmap):
-        res = {}
-
-        for attr, (enctype, offset, n, vmax) in attrmap.items():
-            attrdata = hexdata[offset:][:n]
-
-            if attrdata[0] == STATE_VALUE_NA:
-                res[attr] = None
-                continue
-
-            match enctype:
-                case "NUMERIC":
-                    res[attr] = attrdata.argmin()
-                case "NUMERIC_SQRT":
-                    value_sqrt = attrdata.argmin()
-                    value_min = round(value_sqrt ** 2)
-                    value_max = round((value_sqrt+1) ** 2)
-                    assert value_max <= vmax, f"internal error: {value_max} > {vmax}"
-                    res[attr] = value_min, value_max
-                case "BINARY":
-                    bits = attrdata
-                    res[attr] = bits.astype(int)
-                case "CATEGORICAL":
-                    res[attr] = attrdata.argmax()
-
-                case "FLOATING":
-                    assert n == 1, f"internal error: {n} != 1"
-                    res[attr] = round(attrdata[0] * vmax)
-                case "CATEGORICAL":
-                    res[attr] = attrdata.argmax()
-                case _:
-                    raise Exception(f"Unexpected encoding type: {enctype}")
-
-        return Hex(**res)
-
-    # just play a pre-recorded actions from vcmi actions.txt
-    # useful when "resuming" battle after reproducing & fixing a bug
-    def replay_actions_txt(self, actions_txt="vcmi_gym/envs/v0/vcmi/actions.txt"):
-        with open(actions_txt, "r") as f:
-            actions_str = f.read()
-
-        for a in actions_str.split():
-            print("Replaying %s" % a)
-            obs, rew, term, trunc, info = self.step(int(a) - 1)
-            if rew < 0:
-                self.render()
-                raise Exception("error replaying: %s" % a)
-
-        self.render()
+        return Decoder.decode(obs)
 
     #
     # private
@@ -498,25 +327,11 @@ class VcmiEnv(gym.Env):
             self.reward_scaling_factor = 1
 
         # Vars updated after other events
-        self.analyzer = Analyzer(N_ACTIONS - ACTION_OFFSET)
+        self.analyzer = Analyzer(self.action_space.n)
 
     def _maybe_render(self, analysis):
         if self.render_each_step:
             self.render()
-
-    def _transform_action(self, action):
-        # see note for action_space
-        max_action = self.action_space.n - ACTION_OFFSET
-        assert action >= 0 and action <= max_action
-        return action + ACTION_OFFSET
-
-    #
-    # A note on the static methods
-    # Initially simply instance methods, I wanted to rip off the
-    # reference to "self" as it introduced bugs related to the env state
-    # (eg. some instance vars being used in calculations were not yet updated)
-    # This approach is justified for training-critical methods only
-    # (ie. no need to abstract out `render`, for example)
 
     #
     # NOTE:
@@ -542,7 +357,7 @@ class VcmiEnv(gym.Env):
         return dict(info)
 
     def calc_reward(self, analysis, res):
-        if res.errmask > 0:
+        if res.errcode > 0:
             return -100, -100
 
         rew = analysis.net_value + self.reward_dmg_factor * analysis.net_dmg

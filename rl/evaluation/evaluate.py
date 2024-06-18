@@ -35,6 +35,7 @@ import torch
 from dataclasses import asdict
 from contextlib import contextmanager
 
+import vcmi_gym
 
 @contextmanager
 def dblock(db, lock_id):
@@ -141,7 +142,7 @@ def load_agent(agent_file, run_id):
     return agent
 
 
-def create_venv(env_cls, agent, mapname, role, opponent):
+def create_venv(env_cls, agent, mapname, role, opponent, wrappers):
     mappath = f"maps/{mapname}"
     assert os.path.isfile(mappath), "Map not found at: %s" % mappath
     assert role in ["attacker", "defender"]
@@ -158,9 +159,13 @@ def create_venv(env_cls, agent, mapname, role, opponent):
             defender=opponent
         )
 
+        env_kwargs.pop("encoding_type", None)  # deprecated arg
         env_kwargs[role] = "MMAI_USER"
         # LOG.debug("Env kwargs: %s" % env_kwargs)
-        return env_cls(**env_kwargs)
+        env = env_cls(**env_kwargs)
+        for wrapper_cls in wrappers:
+            env = wrapper_cls(env)
+        return env
 
     vec_env = gym.vector.SyncVectorEnv([env_creator])
     return gym.wrappers.RecordEpisodeStatistics(vec_env)
@@ -321,7 +326,6 @@ def flatten_dict(d, parent_key='', sep='.'):
 
 
 def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None):
-    import vcmi_gym
     os.environ["WANDB_SILENT"] = "true"
 
     LOG = logging.getLogger("evaluator")
@@ -354,8 +358,6 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
     loghandler.setFormatter(formatter)
     LOG.addHandler(loghandler)
 
-    # prevent warnings for action_mask method
-    env_cls = vcmi_gym.VcmiEnv
     evaluated = []
     venv = None
     statedict = {}
@@ -372,6 +374,23 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 LOG.info('Evaluating %s (%s/%s)' % (run.name, run.group, run.id))
                 agent = load_agent(agent_file=agent_load_file, run_id=run.id)
                 agent.eval()
+
+                # XXX: backport for models with old action space
+                if agent.NN.actor.out_features == 2311:
+                    print("Legacy model detected -- using LegacyActionSpaceWrapper")
+                    env_version = 2
+                    wrappers = [vcmi_gym.LegacyActionSpaceWrapper]
+                else:
+                    env_version = agent.env_version
+                    wrappers = []
+
+                match env_version:
+                    case 1:
+                        env_cls = vcmi_gym.VcmiEnv_v1
+                    case 2:
+                        env_cls = vcmi_gym.VcmiEnv_v2
+                    case _:
+                        raise Exception("unsupported env version: %d" % env_version)
 
                 rewards = {"StupidAI": [], "BattleAI": []}
                 lengths = {"StupidAI": [], "BattleAI": []}
@@ -391,7 +410,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
 
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
-                        venv = create_venv(env_cls, agent, f"gym/generated/evaluation/{vmap}", run.config.get("mapside", "attacker"), opponent)
+                        venv = create_venv(env_cls, agent, f"gym/generated/evaluation/{vmap}", run.config.get("mapside", "attacker"), opponent, wrappers)
                         ep_results = evaluate_policy(agent, venv, episodes_per_env=700)
 
                         rewards[opponent].append(np.mean(ep_results["rewards"]))

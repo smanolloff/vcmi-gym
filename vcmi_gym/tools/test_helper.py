@@ -27,6 +27,7 @@ from .. import HexAction
 class TestHelper:
     def __init__(self, env, auto_render=True):
         self.env = env
+        self.term = False
         self.auto_render = auto_render
         self.env.reset()
         self.battlefield = self.env.decode()
@@ -44,7 +45,7 @@ class TestHelper:
         if action is None:
             return
 
-        self.env.step(action)
+        obs, rew, self.term, trunc, info = self.env.step(action)
         self.battlefield = self.env.decode()
         self.env.render()
 
@@ -83,4 +84,10 @@ class TestHelper:
                     return
 
     def random(self):
-        return self._maybe_render(np.random.choice(np.where(self.env.action_mask())[0]))
+        actions = np.where(self.env.action_mask())[0]
+        if actions.any():
+            return self._maybe_render(np.random.choice(actions))
+        else:
+            assert self.term, "action mask allows 0 actions, but last result was not terminal"
+            print("Battle ended, re-starting...")
+            self.reset()

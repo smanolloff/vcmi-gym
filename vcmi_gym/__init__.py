@@ -15,20 +15,36 @@
 # =============================================================================
 
 import gymnasium
-from .envs.v0.vcmi_env import VcmiEnv, Hex, HexState, HexAction, ShootDistance, MeleeDistance, DmgMod, Side, InfoDict
+from .envs.v1.vcmi_env import VcmiEnv as VcmiEnv_v1, InfoDict
+from .envs.v1.decoder.other import (
+    HexAction,
+    HexState,
+    MeleeDistance,
+    ShootDistance,
+    DmgMod,
+    Side,
+)
+
+from .envs.v2.vcmi_env import VcmiEnv as VcmiEnv_v2
+
+from .envs.util.dual_env import DualEnvController, DualEnvClient
+from .envs.util.wrappers import LegacyActionSpaceWrapper
 from .tools.test_helper import TestHelper
 
 all = [
-    VcmiEnv,
-    Hex,
-    HexState,
+    VcmiEnv_v1,
+    VcmiEnv_v2,
+    DualEnvController,
+    DualEnvClient,
     HexAction,
+    HexState,
     MeleeDistance,
     ShootDistance,
     DmgMod,
     Side,
     InfoDict,
     TestHelper,
+    LegacyActionSpaceWrapper,
 ]
 
-gymnasium.register(id="VCMI-v0", entry_point="vcmi_gym:VcmiEnv")
+gymnasium.register(id="VCMI-v1", entry_point="vcmi_gym:VcmiEnv")

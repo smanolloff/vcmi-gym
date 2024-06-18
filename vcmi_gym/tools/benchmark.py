@@ -18,7 +18,8 @@ import time
 import numpy as np
 import torch
 
-from vcmi_gym import VcmiEnv
+from vcmi_gym import VcmiEnv_v1, VcmiEnv_v2  # noqa: F401
+from .offset_action_wrapper import OffsetActionWrapper
 
 
 def get_action(model, obs, mask):
@@ -37,15 +38,15 @@ def get_action(model, obs, mask):
 
 def main():
     total_steps = 1000
-    env = VcmiEnv(
+    env = VcmiEnv_v2(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
-        encoding_type="float",
         random_heroes=1,
         random_obstacles=1,
         # swap_sides=1,
         # defender="MMAI_USER",
         # defender_model="/Users/simo/Projects/vcmi-gym/data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00000/checkpoint_000020/agent.pt"
     )
+    env = OffsetActionWrapper(env)
     obs, info = env.reset()
     term = False
     trunc = False
@@ -76,7 +77,7 @@ def main():
     model = None
 
     # Normal torch model
-    #model = torch.load("rl/models/Attacker model:v2/agent.pt")
+    model = torch.load("rl/models/Attacker model:v2/agent.pt")
 
     # JIT torch model (~5% faster)
     #model = torch.jit.load("rl/models/Attacker model:v2/jit-agent.pt")
@@ -103,7 +104,7 @@ def main():
                     tmpresets += 1
                 obs, info = env.reset()
             else:
-                act = get_action(model, obs, ew.action_mask())
+                act = get_action(model, obs, env.action_mask())
                 obs, _, term, trunc, info = env.step(act)
 
             # reset is also a "step" (aka. a round-trip to VCMI)

@@ -21,7 +21,7 @@ class Connector(ConanFile):
         configs = [
             "Debug",
             # "MinSizeRel",
-            # "Release",
+            "Release",
             # "RelWithDebInfo",
         ]
 

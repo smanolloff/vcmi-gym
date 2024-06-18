@@ -5,36 +5,20 @@
 			"path": ".",
 			"folder_exclude_patterns": [
 				"*.egg-info",
+				".vscode",
 				".cache",
 				"build",
 				"rel",
-				"vcmi_gym/envs/v0/vcmi/.cache",
-				"vcmi_gym/envs/v0/vcmi/.github",
-				"vcmi_gym/envs/v0/vcmi/.vscode",
-				// "vcmi_gym/envs/v0/vcmi/AI", // lots of code which I don't care about
-				"vcmi_gym/envs/v0/vcmi/android",
-				"vcmi_gym/envs/v0/vcmi/CI",
-				"vcmi_gym/envs/v0/vcmi/AI/FuzzyLite",
-				// "vcmi_gym/envs/v0/vcmi/cmake_modules",
-				//"vcmi_gym/envs/v0/vcmi/conan-generated",
-				"vcmi_gym/envs/v0/vcmi/debian",
-				// "vcmi_gym/envs/v0/vcmi/docs",
-				"vcmi_gym/envs/v0/vcmi/game",
-				"vcmi_gym/envs/v0/vcmi/ios",
-				// "vcmi_gym/envs/v0/vcmi/mapeditor",
-				"vcmi_gym/envs/v0/vcmi/Mods",
-				"vcmi_gym/envs/v0/vcmi/osx",
-				"vcmi_gym/envs/v0/vcmi/out",
-				"vcmi_gym/envs/v0/vcmi/scripting",
-				"vcmi_gym/envs/v0/vcmi/scripts",
-				"vcmi_gym/envs/v0/vcmi/rpm",
-				"vcmi_gym/envs/v0/vcmi/win",
-				"testing/maps",
-				"data/",
-				"pip-sb3",
+				"conan-generated",
+
+				// "testing/maps",
+				"//data",
 
 				// NOTE: also hides config/wandb :( but I dont use it anyway
-				"/wandb/",
+				"//wandb",
+
+				// This is a separate project
+				"//vcmi",
 			],
 			"binary_file_patterns": [
 				"testing/maps/*.vmap",

@@ -7,3 +7,6 @@
 [submodule "rl/algos/lightzero"]
 	path = rl/algos/lightzero
 	url = git@github.com:opendilab/LightZero.git
+[submodule "vcmi"]
+	path = vcmi
+	url = git@github.com:smanolloff/vcmi.git

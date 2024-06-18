@@ -23,44 +23,35 @@ import signal
 import atexit
 from collections import OrderedDict
 
-from . import log
+from ..util import log
 
-from ..connector.build import connexport
+from ...connectors.rel import exporter_v1
 
-N_NONHEX_ACTIONS = connexport.get_n_nonhex_actions()
-N_HEX_ACTIONS = connexport.get_n_hex_actions()
-N_ACTIONS = connexport.get_n_actions()
+EXPORTER = exporter_v1.Exporter()
 
-STATE_SIZE_DEFAULT = connexport.get_state_size_default()
-STATE_SIZE_DEFAULT_ONE_HEX = connexport.get_state_size_default_one_hex()
-STATE_SIZE_FLOAT = connexport.get_state_size_float()
-STATE_SIZE_FLOAT_ONE_HEX = connexport.get_state_size_float_one_hex()
-STATE_VALUE_NA = connexport.get_state_value_na()
-STATE_ENCODING_DEFAULT = connexport.get_encoding_type_default()
-STATE_ENCODING_FLOAT = connexport.get_encoding_type_float()
+N_NONHEX_ACTIONS = EXPORTER.get_n_nonhex_actions()
+N_HEX_ACTIONS = EXPORTER.get_n_hex_actions()
+N_ACTIONS = EXPORTER.get_n_actions()
 
-ATTRMAP_DEFAULT = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in connexport.get_attribute_mapping(STATE_ENCODING_DEFAULT)]))
-ATTRMAP_FLOAT = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in connexport.get_attribute_mapping(STATE_ENCODING_FLOAT)]))
+STATE_SIZE = EXPORTER.get_state_size()
+STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
+STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
-HEXACTMAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(connexport.get_hexactions())]))
-HEXSTATEMAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(connexport.get_hexstates())]))
-DMGMODMAP = types.MappingProxyType(OrderedDict([(mod, i) for i, mod in enumerate(connexport.get_dmgmods())]))
-SHOOTDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(connexport.get_shootdistances())]))
-MELEEDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(connexport.get_meleedistances())]))
-SIDEMAP = types.MappingProxyType(OrderedDict([("LEFT", connexport.get_side_left()), ("RIGHT", connexport.get_side_right())]))
+ATTRMAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_attribute_mapping()]))
 
-ERRMAP = connexport.get_error_mapping()
-ERRSIZE = len(ERRMAP)
-ERRNAMES = [errname for (errname, _) in ERRMAP.values()]
-ERRFLAGS = list(ERRMAP.keys())
+HEXACTMAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_hexactions())]))
+HEXSTATEMAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_hexstates())]))
+DMGMODMAP = types.MappingProxyType(OrderedDict([(mod, i) for i, mod in enumerate(EXPORTER.get_dmgmods())]))
+SHOOTDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(EXPORTER.get_shootdistances())]))
+MELEEDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(EXPORTER.get_meleedistances())]))
+SIDEMAP = types.MappingProxyType(OrderedDict([("LEFT", EXPORTER.get_side_left()), ("RIGHT", EXPORTER.get_side_right())]))
 
-PyStateDefault = ctypes.c_float * STATE_SIZE_DEFAULT
-PyStateFloat = ctypes.c_float * STATE_SIZE_FLOAT
+PyState = ctypes.c_float * STATE_SIZE
 PyAction = ctypes.c_int
 PyActmask = ctypes.c_bool * N_ACTIONS
-PyAttnmasks = ctypes.c_float * (165*165)
+PyAttnmask = ctypes.c_float * (165*165)
 
-TRACE = True
+TRACE = False
 MAXLEN = 80
 
 
@@ -90,39 +81,13 @@ def tracelog(func, maxlen=MAXLEN):
     return wrapper
 
 
-COMMON_FIELDS = [
-    ("actmask", PyActmask),
-    ("attnmasks", PyAttnmasks),
-    ("errmask", ctypes.c_ushort),
-    ("side", ctypes.c_int),
-    ("dmg_dealt", ctypes.c_int),
-    ("dmg_received", ctypes.c_int),
-    ("units_lost", ctypes.c_int),
-    ("units_killed", ctypes.c_int),
-    ("value_lost", ctypes.c_int),
-    ("value_killed", ctypes.c_int),
-    ("side0_army_value", ctypes.c_int),
-    ("side1_army_value", ctypes.c_int),
-    ("is_battle_over", ctypes.c_bool),
-    ("is_victorious", ctypes.c_bool),
-]
-
-
-class PyRawResultDefault(ctypes.Structure):
-    _fields_ = [("state", PyStateDefault)] + COMMON_FIELDS
-
-
-class PyRawResultFloat(ctypes.Structure):
-    _fields_ = [("state", PyStateFloat)] + COMMON_FIELDS
-
-
 # Same as connector's P_Result, but with values converted to ctypes
 class PyResult():
     def __init__(self, cres):
         self.state = np.ctypeslib.as_array(cres.state).reshape(11, 15, -1)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
-        self.attnmasks = np.ctypeslib.as_array(cres.attnmasks).reshape(165, 165)
-        self.errmask = cres.errmask
+        self.attnmask = np.ctypeslib.as_array(cres.attnmask).reshape(165, 165)
+        self.errcode = cres.errcode
         self.side = cres.side
         self.dmg_dealt = cres.dmg_dealt
         self.dmg_received = cres.dmg_received
@@ -142,23 +107,44 @@ class PyConnector():
     COMMAND_TYPE_ACT = 1
     COMMAND_TYPE_RENDER_ANSI = 2
 
+    # Needs to be overwritten by subclasses => define in PyConnector body
+    class PyRawState(ctypes.Structure):
+        _fields_ = [
+            ("state", PyState),
+            ("actmask", PyActmask),
+            ("attnmask", PyAttnmask),
+            ("errcode", ctypes.c_int),
+            ("side", ctypes.c_int),
+            ("dmg_dealt", ctypes.c_int),
+            ("dmg_received", ctypes.c_int),
+            ("units_lost", ctypes.c_int),
+            ("units_killed", ctypes.c_int),
+            ("value_lost", ctypes.c_int),
+            ("value_killed", ctypes.c_int),
+            ("side0_army_value", ctypes.c_int),
+            ("side1_army_value", ctypes.c_int),
+            ("is_battle_over", ctypes.c_bool),
+            ("is_victorious", ctypes.c_bool),
+        ]
+
     #
     # MAIN PROCESS
     #
-    def __init__(self, loglevel, user_timeout, vcmi_timeout, boot_timeout):
+    def __init__(self, loglevel, user_timeout, vcmi_timeout, boot_timeout, allow_retreat):
         self.started = False
         self.loglevel = loglevel
         self.shutdown_lock = multiprocessing.Lock()
         self.shutdown_complete = False
         self.logger = log.get_logger("PyConnector", self.loglevel)
-        # use "or" to catch zeros
+        self.allow_retreat = allow_retreat
 
+        # use "or" to catch zeros
         self.user_timeout = user_timeout or 999999
         self.vcmi_timeout = vcmi_timeout or 999999
         self.boot_timeout = boot_timeout or 999999
 
     @tracelog
-    def start(self, encoding, *args):
+    def start(self, *args):
         assert not self.started, "Already started"
         self.started = True
 
@@ -166,13 +152,7 @@ class PyConnector():
         self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 8192)
         self.v_command_type = multiprocessing.Value(ctypes.c_int)
         self.v_command_type.value = PyConnector.COMMAND_TYPE_UNSET
-
-        if encoding == STATE_ENCODING_DEFAULT:
-            self.v_result_act = multiprocessing.Value(PyRawResultDefault)
-        elif encoding == STATE_ENCODING_FLOAT:
-            self.v_result_act = multiprocessing.Value(PyRawResultFloat)
-        else:
-            raise Exception("Unexpected encoding: %s" % encoding)
+        self.v_result_act = multiprocessing.Value(self.__class__.PyRawState)
 
         # Process synchronization:
         # cond.notify() will wake up the other proc (which immediately tries to acquire the lock)
@@ -180,7 +160,7 @@ class PyConnector():
         self.cond = multiprocessing.Condition()
         self.proc = multiprocessing.Process(
             target=self.start_connector,
-            args=(encoding, *args),
+            args=args,
             name="VCMI",
             daemon=True
         )
@@ -300,16 +280,12 @@ class PyConnector():
 
         atexit.register(self.shutdown_proc)
 
-        # NOTE: import is done here to ensure VCMI inits
-        #       in the newly created process
-        from ..connector.build import connector
-
         self.logger = log.get_logger("PyConnector-sub", self.loglevel)
 
         self.logger.info("Starting VCMI")
         self.logger.debug("VCMI connector args: %s" % str(args))
         # XXX: self.__connector is ONLY available in the sub-process!
-        self.__connector = connector.Connector(*args)
+        self.__connector = self._get_connector().Connector(*args)
 
         with self.cond:
             self.set_v_result_act(self.__connector.start())
@@ -329,11 +305,17 @@ class PyConnector():
                 # wake up the subproc (which immediately tries to acquire the lock)
                 self.cond.notify()
 
+    # NOTE: import is done at runtime to ensure VCMI inits
+    #       in the newly created process
+    def _get_connector(self):
+        from ...connectors.rel import connector_v1
+        return connector_v1
+
     def set_v_result_act(self, result):
         self.v_result_act.state = np.ctypeslib.as_ctypes(result.get_state())
         self.v_result_act.actmask = np.ctypeslib.as_ctypes(result.get_actmask())
-        self.v_result_act.attnmasks = np.ctypeslib.as_ctypes(result.get_attnmasks())
-        self.v_result_act.errmask = ctypes.c_ushort(result.get_errmask())
+        # self.v_result_act.attnmask = np.ctypeslib.as_ctypes(result.get_attnmask())
+        self.v_result_act.errcode = ctypes.c_int(result.get_errcode())
         self.v_result_act.side = ctypes.c_int(result.get_side())
         self.v_result_act.dmg_dealt = ctypes.c_int(result.get_dmg_dealt())
         self.v_result_act.dmg_received = ctypes.c_int(result.get_dmg_received())
@@ -345,6 +327,9 @@ class PyConnector():
         self.v_result_act.side1_army_value = ctypes.c_int(result.get_side1_army_value())
         self.v_result_act.is_battle_over = ctypes.c_bool(result.get_is_battle_over())
         self.v_result_act.is_victorious = ctypes.c_bool(result.get_is_victorious())
+
+        if not self.allow_retreat:
+            self.v_result_act.actmask[0] = False
 
     def process_command(self):
         match self.v_command_type.value:
