@@ -227,61 +227,73 @@ def find_local_agents(LOG, _WORKER_ID, _N_WORKERS, _statedict):
 def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
     with tempfile.TemporaryDirectory(prefix="vcmi-gym-evaluator") as tmpdir:
         while True:
-            gt = datetime.datetime.now() - datetime.timedelta(days=3)
-            runs = wandb.Api().runs(
-                path="s-manolloff/vcmi-gym",
-                filters={"updatedAt": {"$gt": gt.isoformat()}, "tags": {"$nin": ["no-eval"]}}
-            )
+            try:
+                gt = datetime.datetime.now() - datetime.timedelta(days=3)
+                runs = wandb.Api().runs(
+                    path="s-manolloff/vcmi-gym",
+                    filters={
+                        "updatedAt": {"$gt": gt.isoformat()},
+                        "tags": {"$nin": ["no-eval"]},
+                        "display_name": "T0"
+                    }
+                )
 
-            for run in runs:
-                # XXX: artifact timestamps are naive UTC
-                artifacts = [(a, datetime.datetime.fromisoformat(a.created_at)) for a in run.logged_artifacts()]
+                for run in runs:
+                    LOG.info("Scanning artifacts of run %s (%s/%s)" % (run.name, run.group, run.id))
 
-                for artifact, dt in sorted(artifacts, key=lambda x: x[1]):
-                    md = artifact.metadata
+                    # XXX: artifact timestamps are naive UTC
+                    artifacts = [(a, datetime.datetime.fromisoformat(a.created_at)) for a in run.logged_artifacts()]
 
-                    if not artifact.name.startswith("agent.pt:v"):
-                        continue
+                    LOG.debug("Found %d artifacts" % len(artifacts))
+                    for artifact, dt in sorted(artifacts, key=lambda x: x[1]):
+                        # LOG.debug("Inspecting artifact %s" % artifact.name)
+                        md = artifact.metadata
 
-                    version = int(artifact.version[1:])
-
-                    if version % N_WORKERS != WORKER_ID:
-                        continue
-                    if md.get("evaluated", False):
-                        continue
-                    if dt <= gt:
-                        continue
-
-                    files = list(artifact.files())
-                    assert len(files) == 1, "expected one file, got: "
-                    assert files[0].name == "agent.pt"
-
-                    # add timezone information to dt for printing correct time
-                    dt = dt.replace(tzinfo=datetime.timezone.utc).astimezone()
-                    LOG.info(f"Downloading artifact {artifact.name} from {time.ctime(dt.timestamp())}")
-
-                    f = files[0].download(tmpdir, replace=True)
-
-                    retries = 3
-                    for retry in range(retries):
-                        statedict["result"] = None
-                        yield run, f.name, dict(artifact.metadata, artifact_version=version)
-                        if statedict["result"] == "error":
-                            LOG.warning(f"Evaluation failed ({retry + 1})")
+                        if not artifact.name.startswith("agent.pt:v"):
                             continue
-                        break
 
-                    if statedict["result"] == "error":
-                        LOG.error(f"Giving up after {retries} retries, marking as evaluated anyway")
+                        version = int(artifact.version[1:])
 
-                    md["evaluated"] = True
-                    md["evaluated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
-                    md["evaluated_by"] = f"{os.uname().nodename} (PID {os.getpid()}, worker {WORKER_ID}/{N_WORKERS})"
-                    md["evaluated_result"] = statedict["result"]
+                        if version % N_WORKERS != WORKER_ID:
+                            continue
+                        if md.get("evaluated", False):
+                            continue
+                        if dt <= gt:
+                            continue
 
-                    # artifact.delete(delete_aliases=True)
-                    artifact.ttl = datetime.timedelta(days=1)
-                    artifact.save()
+                        files = list(artifact.files())
+                        assert len(files) == 1, "expected one file, got: "
+                        assert files[0].name == "agent.pt"
+
+                        # add timezone information to dt for printing correct time
+                        dt = dt.replace(tzinfo=datetime.timezone.utc).astimezone()
+                        LOG.info(f"Downloading artifact {artifact.name} from {time.ctime(dt.timestamp())}")
+
+                        f = files[0].download(tmpdir, replace=True)
+
+                        retries = 3
+                        for retry in range(retries):
+                            statedict["result"] = None
+                            yield run, f.name, dict(artifact.metadata, artifact_version=version)
+                            if statedict["result"] == "error":
+                                LOG.warning(f"Evaluation failed ({retry + 1})")
+                                continue
+                            break
+
+                        if statedict["result"] == "error":
+                            LOG.error(f"Giving up after {retries} retries, marking as evaluated anyway")
+
+                        md["evaluated"] = True
+                        md["evaluated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+                        md["evaluated_by"] = f"{os.uname().nodename} (PID {os.getpid()}, worker {WORKER_ID}/{N_WORKERS})"
+                        md["evaluated_result"] = statedict["result"]
+
+                        # artifact.delete(delete_aliases=True)
+                        artifact.ttl = datetime.timedelta(days=1)
+                        artifact.save()
+
+            except wandb.errors.CommError:
+                LOG.error("Communication error", exc_info=True)
 
             LOG.debug("Sleeping 30s...")
             time.sleep(30)
@@ -380,7 +392,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     for opponent in ["StupidAI", "BattleAI"]:
                         tstart = time.time()
                         venv = create_venv(env_cls, agent, f"gym/generated/evaluation/{vmap}", run.config.get("mapside", "attacker"), opponent)
-                        ep_results = evaluate_policy(agent, venv, episodes_per_env=400)
+                        ep_results = evaluate_policy(agent, venv, episodes_per_env=700)
 
                         rewards[opponent].append(np.mean(ep_results["rewards"]))
                         lengths[opponent].append(np.mean(ep_results["lengths"]))

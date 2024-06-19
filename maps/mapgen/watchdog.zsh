@@ -17,7 +17,7 @@ MAP=$1
 [ -n "$MAP" ] || { echo "$USAGE"; exit 1; }
 
 # in minutes
-CHECK_EVERY=60
+CHECK_EVERY=90
 
 IDENT="*** [🐕]"
 
