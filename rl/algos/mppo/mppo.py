@@ -49,7 +49,7 @@ class ScheduleArgs:
 
 @dataclass
 class EnvArgs:
-    encoding_type: str = "default"
+    encoding_type: str = ""  # DEPRECATED
     max_steps: int = 500
     reward_dmg_factor: int = 5
     vcmi_loglevel_global: str = "error"
@@ -236,7 +236,8 @@ class AgentNN(nn.Module):
         self.action_space = action_space
 
         # 2 nonhex actions (RETREAT, WAIT) + 165 hexes*14 actions each
-        assert action_space.n == 2 + (165*14)
+        # Commented assert due to false positives on legacy models
+        # assert action_space.n == 2 + (165*14)
 
         if network.attention:
             layer = AgentNN.build_layer(network.attention)
@@ -255,9 +256,9 @@ class AgentNN(nn.Module):
     def get_value(self, x):
         return self.critic(self.features_extractor(x))
 
-    def get_action_and_value(self, x, mask, attn_masks=None, action=None, deterministic=False):
+    def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
         if self.attention:
-            x = self.attention(x, attn_masks)
+            x = self.attention(x, attn_mask)
         features = self.features_extractor(x)
         value = self.critic(features)
         action_logits = self.actor(features)
@@ -326,7 +327,7 @@ class Agent(nn.Module):
     def __init__(self, args, observation_space, action_space, state=None, device="cpu"):
         super().__init__()
         self.args = args
-        self.env_version = getattr(args, "env_version", 2)
+        self.env_version = args.env_version
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
         self.NN = AgentNN(args.network, action_space, observation_space)
@@ -442,10 +443,14 @@ def main(args, agent_cls=Agent):
     else:
         seed = np.random.randint(2**31)
 
-    if args.env_version == 1:
-        from vcmi_gym import VcmiEnv_v0 as VcmiEnv
-    elif args.env_version == 2:
+    wrappers = args.env_wrappers
+
+    if args.env_version == 0:
+        from vcmi_gym import VcmiEnv_v2 as VcmiEnv
+    elif args.env_version == 1:
         from vcmi_gym import VcmiEnv_v1 as VcmiEnv
+    elif args.env_version == 2:
+        from vcmi_gym import VcmiEnv_v2 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
@@ -454,6 +459,15 @@ def main(args, agent_cls=Agent):
 
     if agent is None:
         agent = Agent(args, obs_space, act_space, device=device)
+
+    # Legacy models with offset actions
+    if agent.NN.actor.out_features == 2311:
+        print("Using legacy model with 2311 actions")
+        wrappers.append(dict(module="vcmi_gym", cls="LegacyActionSpaceWrapper"))
+        n_actions = 2311
+    else:
+        print("Using new model with 2312 actions")
+        n_actions = 2312
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -498,6 +512,8 @@ def main(args, agent_cls=Agent):
 
         assert act_space.shape == ()
 
+        attn = agent.NN.attention is not None
+
         # ALGO Logic: Storage setup
         obs = torch.zeros((args.num_steps, num_envs) + obs_space.shape).to(device)
         actions = torch.zeros((args.num_steps, num_envs) + act_space.shape).to(device)
@@ -506,7 +522,7 @@ def main(args, agent_cls=Agent):
         dones = torch.zeros((args.num_steps, num_envs)).to(device)
         values = torch.zeros((args.num_steps, num_envs)).to(device)
 
-        masks = torch.zeros((args.num_steps, num_envs, act_space.n), dtype=torch.bool).to(device)
+        masks = torch.zeros((args.num_steps, num_envs, n_actions), dtype=torch.bool).to(device)
         attnmasks = torch.zeros((args.num_steps, num_envs, 165, 165)).to(device)
 
         # TRY NOT TO MODIFY: start the game
@@ -514,7 +530,9 @@ def main(args, agent_cls=Agent):
         next_obs = torch.Tensor(next_obs).to(device)
         next_done = torch.zeros(num_envs).to(device)
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
-        next_attnmasks = torch.as_tensor(np.array(envs.unwrapped.call("attn_masks"))).to(device)
+
+        if attn:
+            next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask"))).to(device)
 
         progress = 0
         map_rollouts = 0
@@ -537,11 +555,17 @@ def main(args, agent_cls=Agent):
                 obs[step] = next_obs
                 dones[step] = next_done
                 masks[step] = next_mask
-                attnmasks[step] = next_attnmasks
+
+                if attn:
+                    attnmasks[step] = next_attnmask
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    action, logprob, _, value = agent.NN.get_action_and_value(next_obs, next_mask, attn_masks=next_attnmasks)
+                    action, logprob, _, value = agent.NN.get_action_and_value(
+                        next_obs,
+                        next_mask,
+                        attn_mask=next_attnmask if attn else None
+                    )
                     values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
@@ -552,7 +576,9 @@ def main(args, agent_cls=Agent):
                 rewards[step] = torch.tensor(reward).to(device).view(-1)
                 next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
-                next_attnmasks = torch.as_tensor(np.array(envs.unwrapped.call("attn_masks"))).to(device)
+
+                if attn:
+                    next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask"))).to(device)
 
                 # XXX SIMO: SB3 does bootstrapping for truncated episodes here
                 # https://github.com/DLR-RM/stable-baselines3/pull/658
@@ -593,11 +619,13 @@ def main(args, agent_cls=Agent):
             b_obs = obs.reshape((-1,) + obs_space.shape)
             b_logprobs = logprobs.reshape(-1)
             b_actions = actions.reshape((-1,) + act_space.shape)
-            b_masks = masks.reshape((-1,) + (act_space.n,))
-            b_attn_masks = attnmasks.reshape((-1,) + (165, 165))
+            b_masks = masks.reshape((-1,) + (n_actions,))
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
+
+            if attn:
+                b_attn_masks = attnmasks.reshape((-1,) + (165, 165))
 
             # Optimizing the policy and value network
             b_inds = np.arange(batch_size)
@@ -614,7 +642,7 @@ def main(args, agent_cls=Agent):
                     _, newlogprob, entropy, newvalue = agent.NN.get_action_and_value(
                         b_obs[mb_inds],
                         b_masks[mb_inds],
-                        attn_masks=b_attn_masks[mb_inds],
+                        attn_mask=b_attn_masks[mb_inds] if attn else None,
                         action=b_actions.long()[mb_inds]
                     )
                     logratio = newlogprob - b_logprobs[mb_inds]
@@ -775,7 +803,8 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="data/debug-crl/debug-crl/agent-permasave-1713526737.pt",
+        # agent_load_file="data/debug-crl/debug-crl/agent-1718753136.pt",
+        # agent_load_file="data/debug-crl/debug-crl/agent-1718752596.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -786,9 +815,10 @@ def debug_args():
         ep_rew_mean_target=None,
         quit_on_target=False,
         mapside="attacker",
-        save_every=2000000000,  # greater than time.time()
+        # save_every=2000000000,  # greater than time.time()
+        save_every=2,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
-        max_saves=0,
+        max_saves=1,
         out_dir_template="data/debug-crl/debug-crl",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
@@ -816,7 +846,6 @@ def debug_args():
         skip_wandb_init=False,
         skip_wandb_log_code=False,
         env=EnvArgs(
-            encoding_type="float",
             max_steps=500,
             reward_dmg_factor=5,
             vcmi_loglevel_global="error",

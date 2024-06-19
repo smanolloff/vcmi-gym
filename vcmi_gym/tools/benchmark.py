@@ -17,18 +17,12 @@
 import time
 import numpy as np
 import torch
-
-from vcmi_gym import VcmiEnv_v1, VcmiEnv_v2  # noqa: F401
-from .offset_action_wrapper import OffsetActionWrapper
+import vcmi_gym
 
 
 def get_action(model, obs, mask):
     if model is None:
         return np.random.choice(np.where(mask)[0])
-
-    #if not hasattr(model.args, "envmaps"):
-    # old scheme (without PERCENT_CUR_TO_START_TOTAL_VALUE)
-    obs = obs[:, :, 1:]
 
     return model.predict(
         torch.as_tensor(obs).float(),
@@ -38,7 +32,7 @@ def get_action(model, obs, mask):
 
 def main():
     total_steps = 1000
-    env = VcmiEnv_v2(
+    env = vcmi_gym.VcmiEnv_v2(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
         random_heroes=1,
         random_obstacles=1,
@@ -46,7 +40,6 @@ def main():
         # defender="MMAI_USER",
         # defender_model="/Users/simo/Projects/vcmi-gym/data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00000/checkpoint_000020/agent.pt"
     )
-    env = OffsetActionWrapper(env)
     obs, info = env.reset()
     term = False
     trunc = False
@@ -77,12 +70,18 @@ def main():
     model = None
 
     # Normal torch model
-    model = torch.load("rl/models/Attacker model:v2/agent.pt")
+    model = torch.load("rl/models/Attacker model:v7/agent.pt")
 
     # JIT torch model (~5% faster)
-    #model = torch.jit.load("rl/models/Attacker model:v2/jit-agent.pt")
+    #model = torch.jit.load("rl/models/Attacker model:v7/jit-agent.pt")
 
     try:
+        if model:
+            actor = model.actor if isinstance(model, torch.jit._script.RecursiveScriptModule) else model.NN.actor
+            if actor.out_features == 2311:
+                print("Legacy model detected -- using LegacyActionSpaceWrapper")
+                env = vcmi_gym.LegacyActionSpaceWrapper(env)
+
         while steps < total_steps:
             if term or trunc:
                 assert not was_term

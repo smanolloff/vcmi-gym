@@ -66,7 +66,7 @@ config = {
         #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         # """
-        "population_size": 8,
+        "population_size": 6,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -163,16 +163,16 @@ config = {
     "agent_load_file": None,
 
     # "agent_load_file": None,
-    "tags": ["Map-4096-mixstack", "StupidAI", "obstacles-random", "encoding-float"],
-    "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
+    "tags": ["Map-4096-mixstack", "StupidAI", "obstacles-random"],
+    "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
         # "gym/generated/4096/4096-mixstack-300K-01.vmap",
         "gym/generated/4096/4096-mixstack-100K-01.vmap",
         # "gym/generated/4096/4096-mixstack-5K-01.vmap"
     ],
-    "opponent_sbm_probs": [1, 0, 0],
-    "opponent_load_file": None,
-    # "opponent_load_file": "rl/models/model-PBT-mppo-defender-20240521_112358.79ad0_00000:v1/jit-agent.pt",
+    "opponent_sbm_probs": [0, 0, 1],
+    # "opponent_load_file": None,
+    "opponent_load_file": "rl/models/Attacker model:v7/jit-agent.pt",
 
     #
     # PPO hyperparams
@@ -266,6 +266,7 @@ config = {
         "boot_timeout": 300,
         "true_rng": True,  # for random heroes and obstacles only
     },
+    "env_version": 2,
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None

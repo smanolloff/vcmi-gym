@@ -144,6 +144,7 @@ def create_venv(env_cls, args, seed):
                 defender_model=args.opponent_load_file,
             )
 
+            env_kwargs.pop("encoding_type", None)  # deprecated arg
             env_kwargs[args.mapside] = "MMAI_USER"
             print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs))
             state["n"] += 1

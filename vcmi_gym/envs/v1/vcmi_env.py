@@ -181,8 +181,8 @@ class VcmiEnv(gym.Env):
         self.action_space = self.__class__.ACTION_SPACE
         self.observation_space = self.__class__.OBSERVATION_SPACE
 
-        print("Action space: %s" % self.action_space)
-        print("Observation space: %s" % self.observation_space)
+        # print("Action space: %s" % self.action_space)
+        # print("Observation space: %s" % self.observation_space)
 
         # required to init vars
         self._reset_vars(result)
@@ -273,8 +273,8 @@ class VcmiEnv(gym.Env):
     # To use attnmask, code in pyconnector.py and BAI/v1/state.cpp
     # must be uncommented and both VCMI and connector must be recompiled.
     def attn_mask(self):
+        # return self.result.attnmask
         raise Exception("attn_mask disabled for performance reasons")
-        return self.result.attnmask
 
     def decode(self):
         return self.__class__.decode_obs(self.result.state)
