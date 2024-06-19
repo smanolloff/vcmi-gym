@@ -11,8 +11,9 @@ The setup guide below is tested with Python 3.10.12 on MacOS 14.0.
 
 ```bash
 $ git clone --recurse-submodules https://github.com/smanolloff/vcmi-gym.git
-$ export VCMI_GYM_DIR="$PWD/vcmi-gym"
-$ export VCMI_DIR="$VCMI_GYM_DIR/vcmi_gym/envs/v0/vcmi"
+$ cd vcmi-gym
+$ export VCMIGYM="$PWD"
+$ export VCMI="$PWD/vcmi"
 ```
 
 ### Python env and deps
@@ -21,7 +22,7 @@ To avoid polluting your system with vcmi-gym dependencies, it's best to create
 a [Python virtual env](https://docs.python.org/3/library/venv.html):
 
 ```bash
-$ cd "$VCMI_GYM_DIR"
+$ cd "$VCMIGYM"
 $ python3 -m venv .venv
 ```
 
@@ -49,7 +50,7 @@ Please follow the instructions in [this guide](https://github.com/smanolloff/vcm
 These libraries are the "link" between the gym env and VCMI itself.
 
 ```bash
-$ cd "$VCMI_GYM_DIR/envs/v0/connector"
+$ cd "$VCMIGYM/vcmi_gym/connectors"
 $ conan install . \
     --install-folder=conan-generated \
     --no-imports \
@@ -57,12 +58,12 @@ $ conan install . \
     --profile:build=default \
     --profile:host=default
 
-$ cmake --fresh -S . -B build -Wno-dev \
+$ cmake -S . -B rel -Wno-dev \
     -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 
-$ cmake --build build/
+$ cmake --build rel/
 ```
 
 ### Gym maps
@@ -71,7 +72,7 @@ Auto-generated maps for the purposes of training combat AIs must be symlinked
 in order to make them visible in VCMI:
 
 ```bash
-(.venv)$ ln -s "$VCMI_GYM_DIR/maps/gym" "$HOME/Library/Application Support/vcmi/Maps/gym"
+(.venv)$ ln -s "$VCMIGYM/maps/gym" "$HOME/Library/Application Support/vcmi/Maps/gym"
 ```
 
 ### Manual test

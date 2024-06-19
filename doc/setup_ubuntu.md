@@ -21,13 +21,12 @@ Please follow the instructions in [this guide](https://github.com/smanolloff/vcm
 Custom-made libraries that "connect" VCMI with the gym env:
 
 ```bash
-$ cd "$VCMI_GYM_DIR/envs/v0/connector"
-$ ln -s ../../vcmi/rel/bin/libgymclient.so lib/
-$ cmake -S . -B build -Wno-dev \
+$ cd "$VCMIGYM/vcmi_gym/connectors"
+$ cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 
-$ cmake --build build/
+$ cmake --build rel/
 ```
 ### Python env and deps
 
@@ -40,7 +39,7 @@ Auto-generated maps for the purposes of training combat AIs must be symlinked
 in order to make them visible in VCMI:
 
 ```bash
-$ ln -s "$VCMI_GYM_DIR/maps/gym" "${XDG_DATA_HOME:-$HOME/.local/share}/vcmi/Maps/gym"
+$ ln -s "$VCMIGYM/maps/gym" "${XDG_DATA_HOME:-$HOME/.local/share}/vcmi/Maps/gym"
 ```
 
 ### Manual test
