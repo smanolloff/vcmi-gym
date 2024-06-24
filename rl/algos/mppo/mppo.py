@@ -210,15 +210,19 @@ class SelfAttention(nn.Module):
         self.edim = edim
         self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=1, batch_first=True)
 
-    def forward(self, b_obs, b_masks):
+    def forward(self, b_obs, b_masks=None):
         assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong obs shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
-        assert b_masks.shape == (b_masks.shape[0], 165, 165), f"wrong b_masks shape: {b_masks.shape} != ({b_masks.shape[0]}, 165, 165)"
-
-        b_obs = b_obs.flatten(start_dim=1, end_dim=2)
-        # => (B, 165, e)
-
-        res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
-        return res
+        if b_masks is None:
+            b_obs = b_obs.flatten(start_dim=1, end_dim=2)
+            # => (B, 165, e)
+            res, _ = self.mha(b_obs, b_obs, b_obs, need_weights=False)
+            return res
+        else:
+            assert b_masks.shape == (b_masks.shape[0], 165, 165), f"wrong b_masks shape: {b_masks.shape} != ({b_masks.shape[0]}, 165, 165)"
+            b_obs = b_obs.flatten(start_dim=1, end_dim=2)
+            # => (B, 165, e)
+            res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
+            return res
 
 
 class AgentNN(nn.Module):
@@ -512,7 +516,8 @@ def main(args, agent_cls=Agent):
 
         assert act_space.shape == ()
 
-        attn = agent.NN.attention is not None
+        # attn = agent.NN.attention is not None
+        attn = False
 
         # ALGO Logic: Storage setup
         obs = torch.zeros((args.num_steps, num_envs) + obs_space.shape).to(device)
@@ -868,17 +873,18 @@ def debug_args():
         env_wrappers=[],
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
-            # attention=dict(t="SelfAttention", edim=547),
+            attention=dict(t="SelfAttention", edim=87),
             features_extractor=[
                 dict(t="Flatten"),
                 dict(t="Unflatten", dim=1, unflattened_size=[1, 165*87]),
-                dict(t="Conv1d", in_channels=1, out_channels=32, kernel_size=87, stride=87, padding=0),
-                dict(t="LeakyReLU"),
+                dict(t="Conv1d", in_channels=1, out_channels=4, kernel_size=87, stride=87),
                 dict(t="Flatten"),
-                dict(t="Linear", in_features=5280, out_features=1024),
+                dict(t="LeakyReLU"),
+                # dict(t="Linear", in_features=660, out_features=1024),
+                # dict(t="LeakyReLU"),
             ],
-            actor=dict(t="Linear", in_features=1024, out_features=2311),
-            critic=dict(t="Linear", in_features=1024, out_features=1)
+            actor=dict(t="Linear", in_features=660, out_features=2311),
+            critic=dict(t="Linear", in_features=660, out_features=1)
         )
     )
 
