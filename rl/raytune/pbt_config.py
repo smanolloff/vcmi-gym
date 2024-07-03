@@ -66,7 +66,7 @@ config = {
         #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         # """
-        "population_size": 6,
+        "population_size": 5,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -212,23 +212,33 @@ config = {
 
     # NN arch
     "network": {
-        "attention": {"t": "SelfAttention", "edim": 87},
-        "features_extractor": [
-            # => (B, 11, 15, 86)
+        "attention": None,
+        "features_extractor1_stacks": [
+            # => (B, 1960)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*98]},
+            # => (B, 1, 1960)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 98, "stride": 98},
             {"t": "Flatten"},
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 14355]},
-            # => (B, 1, 14190)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 87, "stride": 87},
             {"t": "LeakyReLU"},
-            # => (B, 4, 165)
+            # => (B, 160)
+        ],
+        "features_extractor1_hexes": [
+            # => (B, 10725)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 165*65]},
+            # => (B, 1, 10725)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 65, "stride": 65},
             {"t": "Flatten"},
-            {"t": "Linear", "in_features": 660, "out_features": 1024},
+            {"t": "LeakyReLU"},
+            # => (B, 660)
+        ],
+        "features_extractor2": [
+            # => (B, 820)
+            {"t": "Linear", "in_features": 820, "out_features": 512},
             {"t": "LeakyReLU"},
         ],
-        "actor": {"t": "Linear", "in_features": 1024, "out_features": 2311},
-        "critic": {"t": "Linear", "in_features": 1024, "out_features": 1}
+        "actor": {"t": "Linear", "in_features": 512, "out_features": 2311},
+        "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
     },
-
 
     # Static
     "loglevel": logging.INFO,
@@ -240,7 +250,7 @@ config = {
     "overwrite": [],
     "notes": "",
     "rollouts_per_mapchange": 0,
-    "rollouts_per_log": 1,
+    "rollouts_per_log": 50,
     "rollouts_per_table_log": 0,
     "success_rate_target": None,
     "ep_rew_mean_target": None,
@@ -260,13 +270,18 @@ config = {
         "reward_army_value_ref": 500,
         "random_heroes": 1,
         "random_obstacles": 1,
+        "town_chance": 0,
+        "warmachine_chance": 0,
+        "mana_min": 0,
+        "mana_max": 0,
         "swap_sides": 0,
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "true_rng": True,  # for random heroes and obstacles only
+        "true_rng": False,  # for random heroes and obstacles only
     },
-    "env_version": 2,
+    "seed": 0,
+    "env_version": 3,
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None

@@ -65,6 +65,10 @@ class EnvArgs:
     boot_timeout: int = 30
     random_heroes: int = 1
     random_obstacles: int = 1
+    town_chance: int = 0
+    warmachine_chance: int = 0
+    mana_min: int = 0
+    mana_max: int = 0
     swap_sides: int = 0
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
@@ -77,7 +81,9 @@ class EnvArgs:
 @dataclass
 class NetworkArgs:
     attention: dict = field(default_factory=dict)
-    features_extractor: list[dict] = field(default_factory=list)
+    features_extractor1_stacks: list[dict] = field(default_factory=list)
+    features_extractor1_hexes: list[dict] = field(default_factory=list)
+    features_extractor2: list[dict] = field(default_factory=list)
     actor: dict = field(default_factory=dict)
     critic: dict = field(default_factory=dict)
 
@@ -171,7 +177,7 @@ class Args:
     skip_wandb_log_code: bool = False
 
     env: EnvArgs = field(default_factory=lambda: EnvArgs())
-    env_version: int = 2
+    env_version: int = 0
     env_wrappers: list = field(default_factory=list)
     network: NetworkArgs = field(default_factory=lambda: NetworkArgs())
 
@@ -249,21 +255,38 @@ class AgentNN(nn.Module):
         else:
             self.attention = None
 
-        self.features_extractor = torch.nn.Sequential()
-        for spec in network.features_extractor:
+        self.features_extractor1_stacks = torch.nn.Sequential()
+        for spec in network.features_extractor1_stacks:
             layer = AgentNN.build_layer(spec)
-            self.features_extractor.append(common.layer_init(layer))
+            self.features_extractor1_stacks.append(common.layer_init(layer))
+
+        self.features_extractor1_hexes = torch.nn.Sequential()
+        for spec in network.features_extractor1_hexes:
+            layer = AgentNN.build_layer(spec)
+            self.features_extractor1_hexes.append(common.layer_init(layer))
+
+        self.features_extractor2 = torch.nn.Sequential()
+        for spec in network.features_extractor2:
+            layer = AgentNN.build_layer(spec)
+            self.features_extractor2.append(common.layer_init(layer))
 
         self.actor = common.layer_init(AgentNN.build_layer(network.actor), gain=0.01)
         self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
+    def extract_features(self, x):
+        stacks, hexes = x.split([1960, 10725], dim=1)
+        fstacks = self.features_extractor1_stacks(stacks)
+        fhexes = self.features_extractor1_hexes(hexes)
+        fcat = torch.cat((fstacks, fhexes), dim=1)
+        return self.features_extractor2(fcat)
+
     def get_value(self, x):
-        return self.critic(self.features_extractor(x))
+        return self.critic(self.extract_features(x))
 
     def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
         if self.attention:
             x = self.attention(x, attn_mask)
-        features = self.features_extractor(x)
+        features = self.extract_features(x)
         value = self.critic(features)
         action_logits = self.actor(features)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
@@ -449,12 +472,12 @@ def main(args, agent_cls=Agent):
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 0:
-        from vcmi_gym import VcmiEnv_v2 as VcmiEnv
-    elif args.env_version == 1:
+    if args.env_version == 1:
         from vcmi_gym import VcmiEnv_v1 as VcmiEnv
     elif args.env_version == 2:
         from vcmi_gym import VcmiEnv_v2 as VcmiEnv
+    elif args.env_version == 3:
+        from vcmi_gym import VcmiEnv_v3 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
@@ -863,6 +886,10 @@ def debug_args():
             term_reward_mult=0,
             random_heroes=0,
             random_obstacles=0,
+            town_chance=0,
+            warmachine_chance=0,
+            mana_min=0,
+            mana_max=0,
             swap_sides=0,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
@@ -871,20 +898,34 @@ def debug_args():
             boot_timeout=0,
         ),
         env_wrappers=[],
+        env_version=3,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
-            attention=dict(t="SelfAttention", edim=87),
-            features_extractor=[
-                dict(t="Flatten"),
-                dict(t="Unflatten", dim=1, unflattened_size=[1, 165*87]),
-                dict(t="Conv1d", in_channels=1, out_channels=4, kernel_size=87, stride=87),
+            attention=None,
+            features_extractor1_stacks=[
+                # => (B, 1960)
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 20*98]),
+                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=98, stride=98),
                 dict(t="Flatten"),
                 dict(t="LeakyReLU"),
-                # dict(t="Linear", in_features=660, out_features=1024),
-                # dict(t="LeakyReLU"),
+                # => (B, 160)
             ],
-            actor=dict(t="Linear", in_features=660, out_features=2311),
-            critic=dict(t="Linear", in_features=660, out_features=1)
+            features_extractor1_hexes=[
+                # => (B, 10725)
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 165*65]),
+                # => (B, 1, 10725)
+                dict(t="Conv1d", in_channels=1, out_channels=4, kernel_size=65, stride=65),
+                dict(t="Flatten"),
+                dict(t="LeakyReLU"),
+                # => (B, 660)
+            ],
+            features_extractor2=[
+                # => (B, 820)
+                dict(t="Linear", in_features=820, out_features=512),
+                dict(t="LeakyReLU"),
+            ],
+            actor=dict(t="Linear", in_features=512, out_features=2311),
+            critic=dict(t="Linear", in_features=512, out_features=1)
         )
     )
 

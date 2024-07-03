@@ -23,7 +23,7 @@ from .decoder.decoder import Decoder
 from .pyconnector import (
     PyConnector,
     STATE_VALUE_NA,
-    STATE_SIZE_ONE_HEX,
+    STATE_SIZE,
     N_ACTIONS,
 )
 
@@ -67,7 +67,7 @@ class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
-    ROLES = ["MMAI_USER", "MMAI_MODEL", "StupidAI", "BattleAI"]
+    ROLES = ["MMAI_USER", "MMAI_MODEL", "MMAI_SCRIPT_SUMMONER", "StupidAI", "BattleAI"]
 
     CONNECTOR_CLASS = PyConnector
 
@@ -76,7 +76,7 @@ class VcmiEnv(gym.Env):
     OBSERVATION_SPACE = gym.spaces.Box(
         low=STATE_VALUE_NA,
         high=1,
-        shape=(11, 15, STATE_SIZE_ONE_HEX),
+        shape=(STATE_SIZE,),
         dtype=np.float32
     )
 

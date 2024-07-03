@@ -116,7 +116,7 @@ def create_venv(env_cls, args, seed):
     state = {"n": 0}
     lock = threading.RLock()
 
-    sbm = ["StupidAI", "BattleAI", "MMAI_MODEL"]
+    sbm = ["MMAI_SCRIPT_SUMMONER", "BattleAI", "MMAI_MODEL"]
     sbm_probs = torch.tensor(args.opponent_sbm_probs, dtype=torch.float)
 
     assert len(sbm_probs) == 3

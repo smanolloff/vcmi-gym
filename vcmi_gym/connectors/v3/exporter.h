@@ -34,6 +34,9 @@ namespace Connector::V3 {
         virtual const int getNHexActions() const;
         virtual const int getStateSize() const;
         virtual const int getStateSizeOneHex() const;
+        virtual const int getStateSizeAllHexes() const;
+        virtual const int getStateSizeOneStack() const;
+        virtual const int getStateSizeAllStacks() const;
         virtual const int getStateValueNa() const;
         virtual const int getSideLeft() const;
         virtual const int getSideRight() const;

@@ -28,6 +28,9 @@ namespace Connector::V3 {
     const int Exporter::getNHexActions() const { return N_HEX_ACTIONS; }
     const int Exporter::getStateSize() const { return BATTLEFIELD_STATE_SIZE; }
     const int Exporter::getStateSizeOneHex() const { return BATTLEFIELD_STATE_SIZE_ONE_HEX; }
+    const int Exporter::getStateSizeAllHexes() const { return BATTLEFIELD_STATE_SIZE_ALL_HEXES; }
+    const int Exporter::getStateSizeOneStack() const { return BATTLEFIELD_STATE_SIZE_ONE_STACK; }
+    const int Exporter::getStateSizeAllStacks() const { return BATTLEFIELD_STATE_SIZE_ALL_STACKS; }
     const int Exporter::getStateValueNa() const { return NULL_VALUE_ENCODED; }
     const int Exporter::getSideLeft() const { return static_cast<int>(MMAI::Schema::V3::Side::LEFT); }
     const int Exporter::getSideRight() const { return static_cast<int>(MMAI::Schema::V3::Side::RIGHT); }
@@ -200,6 +203,9 @@ namespace Connector::V3 {
             .def("get_n_nonhex_actions", &Exporter::getNNonhexActions)
             .def("get_n_hex_actions", &Exporter::getNHexActions)
             .def("get_state_size", &Exporter::getStateSize)
+            .def("get_state_size_hexes", &Exporter::getStateSizeAllHexes)
+            .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)
+            .def("get_state_size_stacks", &Exporter::getStateSizeAllStacks)
             .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)
             .def("get_state_value_na", &Exporter::getStateValueNa)
             .def("get_side_left", &Exporter::getSideLeft)
