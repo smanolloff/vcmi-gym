@@ -32,7 +32,7 @@ def get_action(model, obs, mask):
 
 def main():
     total_steps = 1000
-    env = vcmi_gym.VcmiEnv_v2(
+    env = vcmi_gym.VcmiEnv_v3(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
         random_heroes=1,
         random_obstacles=1,
@@ -70,7 +70,7 @@ def main():
     model = None
 
     # Normal torch model
-    model = torch.load("rl/models/Attacker model:v7/agent.pt")
+    # model = torch.load("rl/models/Attacker model:v7/agent.pt")
 
     # JIT torch model (~5% faster)
     #model = torch.jit.load("rl/models/Attacker model:v7/jit-agent.pt")

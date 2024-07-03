@@ -26,6 +26,7 @@ from .envs.v1.decoder.other import (
 )
 
 from .envs.v2.vcmi_env import VcmiEnv as VcmiEnv_v2
+from .envs.v3.vcmi_env import VcmiEnv as VcmiEnv_v3
 
 from .envs.util.dual_env import DualEnvController, DualEnvClient
 from .envs.util.wrappers import LegacyActionSpaceWrapper
@@ -34,6 +35,7 @@ from .tools.test_helper import TestHelper
 all = [
     VcmiEnv_v1,
     VcmiEnv_v2,
+    VcmiEnv_v3,
     DualEnvController,
     DualEnvClient,
     HexAction,

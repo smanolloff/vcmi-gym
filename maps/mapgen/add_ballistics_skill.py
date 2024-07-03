@@ -2,6 +2,7 @@ import json
 import sys
 import zipfile
 import io
+import random
 
 # Usage:
 # python maps/mapgen/add_hero_names.py path/to/map.vmap
@@ -23,7 +24,14 @@ if __name__ == "__main__":
 
     for k, v in objects.items():
         if k.startswith("hero_"):
-            v["options"]["name"] = k
+            level = random.choice([None, "basic", "advanced", "expert"])
+            if not level:
+                v["options"]["secondarySkills"] = []
+            else:
+                v["options"]["secondarySkills"] = [{
+                    "level": level,
+                    "skill": "core:ballistics"
+                }]
 
     memory_zip = io.BytesIO()
     with zipfile.ZipFile(memory_zip, 'w') as zipf:

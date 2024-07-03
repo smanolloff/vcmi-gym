@@ -170,9 +170,9 @@ config = {
         "gym/generated/4096/4096-mixstack-100K-01.vmap",
         # "gym/generated/4096/4096-mixstack-5K-01.vmap"
     ],
-    "opponent_sbm_probs": [0, 0, 1],
-    # "opponent_load_file": None,
-    "opponent_load_file": "rl/models/Attacker model:v7/jit-agent.pt",
+    "opponent_sbm_probs": [1, 0, 0],
+    "opponent_load_file": None,
+    # "opponent_load_file": "rl/models/Attacker model:v7/jit-agent.pt",
 
     #
     # PPO hyperparams
@@ -212,7 +212,7 @@ config = {
 
     # NN arch
     "network": {
-        "attention": None,
+        "attention": {"t": "SelfAttention", "edim": 87},
         "features_extractor": [
             # => (B, 11, 15, 86)
             {"t": "Flatten"},

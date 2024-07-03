@@ -22,13 +22,15 @@ import random
 import io
 import zipfile
 
+from creatures_core import ALL_CREATURES
+
 # relative to script dir
 MAP_DIR = "../gym/generated/4096"
 # name template containing a single {id} token to be replaced with MAP_ID
-MAP_NAME_TEMPLATE = "4096-mixstack-5K-{id:02d}"
+MAP_NAME_TEMPLATE = "4096-all-mixstack-100K-{id:02d}"
 # id of maps to generate (inclusive)
-MAP_ID_START = 2
-MAP_ID_END = 2
+MAP_ID_START = 1
+MAP_ID_END = 1
 
 # ARMY_N_STACKS_SAME = False  # same for both sides
 ARMY_N_STACKS_MIN = 1
@@ -36,8 +38,8 @@ ARMY_N_STACKS_MAX = 7
 ARMY_N_STACKS_ENFORCE = False  # whether to fail if not all stacks are filled
 
 # XXX: these should be equal, otherwise battle will be one-sided
-ARMY_VALUE_MIN = 5000
-ARMY_VALUE_MAX = 5000
+ARMY_VALUE_MIN = 100_000
+ARMY_VALUE_MAX = 100_000
 
 STACK_QTY_MAX = 1023
 
@@ -45,7 +47,7 @@ STACK_QTY_MAX = 1023
 ARMY_VALUE_ROUND = 1000
 
 # Max value for abs(1 - army_value/target_value)
-ARMY_VALUE_ERROR_MAX = 0.1
+ARMY_VALUE_ERROR_MAX = 0.01
 
 # Max value for a single unit of the weakest creature type in the army
 # (this to allow rebalancing, i.e. avoid armies with 6+ tier units only)
@@ -90,13 +92,7 @@ class MaxAttemptsExceeded(Exception):
 
 
 def get_all_creatures():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-
-    all_creatures = None
-    with open(os.path.join(current_dir, "all_creatures.json"), "r") as f:
-        all_creatures = json.load(f)
-
-    return [(vcminame, name, value) for (vcminame, (name, value)) in all_creatures.items()]
+    return [(c["vcminame"], c["name"], c["value"]) for c in ALL_CREATURES]
 
 
 def get_templates():
@@ -275,6 +271,12 @@ if __name__ == "__main__":
                 color = values["color"]
                 header["players"][color]["heroes"][f"hero_{oid}"] = dict(type=f"core:{values['name']}")
 
+                secondary_skills = []
+
+                ballistics = random.choice([None, "basic", "advanced", "expert"])
+                if ballistics:
+                    secondary_skills = [{"skill": "core:ballistics", "level": ballistics}]
+
                 objects[f"hero_{oid}"] = dict(
                     type="hero", subtype=values["type"], x=x, y=y, l=0,
                     options=dict(
@@ -285,7 +287,8 @@ if __name__ == "__main__":
                         owner=values["color"],
                         portrait=f"core:{values['name']}",
                         type=f"core:{values['name']}",
-                        army=hero_army
+                        army=hero_army,
+                        secondary_skills=secondary_skills
                     ),
                     template=dict(
                         animation=f"{values['animation']}_.def",

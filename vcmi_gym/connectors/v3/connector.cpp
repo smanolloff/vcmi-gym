@@ -15,20 +15,30 @@
 // =============================================================================
 
 #include "connector.h"
-#include "AI/MMAI/schema/v1/constants.h"
-#include "AI/MMAI/schema/v1/types.h"
+#include "AI/MMAI/schema/v3/constants.h"
+#include "AI/MMAI/schema/v3/types.h"
 #include "client/ML/MLClient.h"
 #include <algorithm>
+
+#include <pybind11/pybind11.h>
 #include <pybind11/detail/common.h>
+#include <pybind11/stl.h>
+
 #include <stdexcept>
 #include <string>
 
-namespace Connector::V1 {
+namespace Connector::V3 {
+    namespace py = pybind11;
+
     Connector::Connector(
         const std::string mapname_,
         const int seed_,
         const int randomHeroes_,
         const int randomObstacles_,
+        const int townChance_,
+        const int warmachineChance_,
+        const int manaMin_,
+        const int manaMax_,
         const int swapSides_,
         const std::string loglevelGlobal_,
         const std::string loglevelAI_,
@@ -47,6 +57,10 @@ namespace Connector::V1 {
         seed(seed_),
         randomHeroes(randomHeroes_),
         randomObstacles(randomObstacles_),
+        townChance(townChance_),
+        warmachineChance(warmachineChance_),
+        manaMin(manaMin_),
+        manaMax(manaMax_),
         swapSides(swapSides_),
         loglevelGlobal(loglevelGlobal_),
         loglevelAI(loglevelAI_),
@@ -63,7 +77,7 @@ namespace Connector::V1 {
         trueRng(trueRng_) {};
 
     const int Connector::version() {
-        return 1;
+        return 3;
     }
 
     std::unique_ptr<MMAI::Schema::Baggage> Connector::createBaggage() {
@@ -75,22 +89,35 @@ namespace Connector::V1 {
         );
     }
 
-    const MMAI::Schema::V1::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
-        // LOG("Extracting supplementary data...");
-        // auto &any = s->getSupplementaryData();
-        // if(!any.has_value()) throw std::runtime_error("supdata is empty");
-        // auto &t = typeid(const MMAI::Schema::V1::ISupplementaryData*);
-        // if(any.type() != t) LOG(
-        //     std::string("Bad std::any payload type from getSupplementaryData()") \
-        //     + ": want: " + t.name() + "/" + std::to_string(t.hash_code()) \
-        //     + ", have: " + any.type().name() + "/" + std::to_string(any.type().hash_code())
-        // );
+    const MMAI::Schema::V3::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
+        LOG("Extracting supplementary data...");
+        auto &any = s->getSupplementaryData();
+        if(!any.has_value()) throw std::runtime_error("supdata is empty");
+        auto &t = typeid(const MMAI::Schema::V3::ISupplementaryData*);
+        if(any.type() != t) LOG(
+            std::string("Bad std::any payload type from getSupplementaryData()") \
+            + ": want: " + t.name() + "/" + std::to_string(t.hash_code()) \
+            + ", have: " + any.type().name() + "/" + std::to_string(any.type().hash_code())
+        );
 
-        return std::any_cast<const MMAI::Schema::V1::ISupplementaryData*>(s->getSupplementaryData());
+        return std::any_cast<const MMAI::Schema::V3::ISupplementaryData*>(s->getSupplementaryData());
     };
 
     const P_State Connector::convertState(const MMAI::Schema::IState* s) {
         LOG("Convert IState -> P_State");
+        auto sup = extractSupplementaryData(s);
+        assert(sup->getType() == MMAI::Schema::V3::ISupplementaryData::Type::REGULAR);
+
+        // XXX: these do not improve performance, better avoid the const_cast
+        // auto pbs = P_BattlefieldState(bs.size(), const_cast<float*>(bs.data()));
+        // auto patm = P_AttentionMask(attnmask.size(), const_cast<float*>(attnmask.data()));
+
+        // XXX: manually copying the state into py::array_t<float> is
+        //      ~10% faster than storing the BattlefieldState& reference in
+        //      P_State as pybind's STL automatically converts it to a python
+        //      list of python floats, which needs to be converted to a numpy
+        //      array of float32 floats in pyconnector.set_v_result_act()
+        //      (which copies the data anyway and is ultimately slower).
 
         auto &bs = s->getBattlefieldState();
         P_BattlefieldState pbs(bs.size());
@@ -111,20 +138,27 @@ namespace Connector::V1 {
         for (int i=0; i < attnmask.size(); i++)
             patmmd[i] = attnmask[i];
 
-        // XXX: these do not improve performance, better avoid the const_cast
-        // auto pbs = P_BattlefieldState(bs.size(), const_cast<float*>(bs.data()));
-        // auto patm = P_AttentionMask(attnmask.size(), const_cast<float*>(attnmask.data()));
-
-        auto sup = extractSupplementaryData(s);
-        assert(sup->getType() == MMAI::Schema::V1::ISupplementaryData::Type::REGULAR);
-
+        auto stats = sup->getStats();
         auto res = P_State(
-             sup->getType(), pbs, pam, patm, sup->getErrorCode(), sup->getSide(),
-             sup->getDmgDealt(), sup->getDmgReceived(),
-             sup->getUnitsLost(), sup->getUnitsKilled(),
-             sup->getValueLost(), sup->getValueKilled(),
-             sup->getSide0ArmyValue(), sup->getSide1ArmyValue(),
-             sup->getIsBattleEnded(), sup->getIsVictorious(), sup->getAnsiRender()
+             sup->getType(),
+             pbs,
+             pam,
+             patm,
+             sup->getErrorCode(),
+             sup->getSide(),
+             sup->getDmgDealt(),
+             sup->getDmgReceived(),
+             sup->getUnitsLost(),
+             sup->getUnitsKilled(),
+             sup->getValueLost(),
+             sup->getValueKilled(),
+             stats->getInitialArmyValueLeft(),
+             stats->getInitialArmyValueRight(),
+             stats->getCurrentArmyValueLeft(),
+             stats->getCurrentArmyValueRight(),
+             sup->getIsBattleEnded(),
+             sup->getIsVictorious(),
+             sup->getAnsiRender()
         );
 
         return res;
@@ -162,7 +196,7 @@ namespace Connector::V1 {
         LOG("release lock (return)");
         LOG("return P_State");
         const auto pstate = convertState(state);
-        assert(pstate.type == MMAI::Schema::V1::ISupplementaryData::Type::REGULAR);
+        assert(pstate.type == MMAI::Schema::V3::ISupplementaryData::Type::REGULAR);
         return pstate;
     }
 
@@ -195,7 +229,7 @@ namespace Connector::V1 {
 
         assert(connstate == ConnectorState::AWAITING_ACTION);
         auto sup = extractSupplementaryData(state);
-        assert(sup->getType() == MMAI::Schema::V1::ISupplementaryData::Type::ANSI_RENDER);
+        assert(sup->getType() == MMAI::Schema::V3::ISupplementaryData::Type::ANSI_RENDER);
 
         LOG("release lock (return)");
         LOG("return state->ansiRender");
@@ -261,10 +295,10 @@ namespace Connector::V1 {
             seed,
             randomHeroes,
             randomObstacles,
-            0,
-            0,
-            0,
-            0,
+            townChance,
+            warmachineChance,
+            manaMin,
+            manaMax,
             swapSides,
             loglevelGlobal,
             loglevelAI,
@@ -367,7 +401,7 @@ namespace Connector::V1 {
         return action;
     }
 
-    PYBIND11_MODULE(connector_v1, m) {
+    PYBIND11_MODULE(connector_v3, m) {
         py::class_<P_State>(m, "P_State")
             .def("get_state", &P_State::get_state)
             .def("get_actmask", &P_State::get_actmask)
@@ -380,8 +414,10 @@ namespace Connector::V1 {
             .def("get_units_killed", &P_State::get_units_killed)
             .def("get_value_lost", &P_State::get_value_lost)
             .def("get_value_killed", &P_State::get_value_killed)
-            .def("get_side0_army_value", &P_State::get_side0_army_value)
-            .def("get_side1_army_value", &P_State::get_side1_army_value)
+            .def("get_initial_side0_army_value", &P_State::get_initial_side0_army_value)
+            .def("get_initial_side1_army_value", &P_State::get_initial_side1_army_value)
+            .def("get_current_side0_army_value", &P_State::get_current_side0_army_value)
+            .def("get_current_side1_army_value", &P_State::get_current_side1_army_value)
             .def("get_is_battle_over", &P_State::get_is_battle_over)
             .def("get_is_victorious", &P_State::get_is_victorious);
 
@@ -391,6 +427,10 @@ namespace Connector::V1 {
                 const int &,         // seed
                 const int &,         // randomHeroes
                 const int &,         // randomObstacles
+                const int &,         // townChance
+                const int &,         // warmachineChance
+                const int &,         // manaMin
+                const int &,         // manaMax
                 const int &,         // swapSides
                 const std::string &, // loglevelGlobal
                 const std::string &, // loglevelAI
