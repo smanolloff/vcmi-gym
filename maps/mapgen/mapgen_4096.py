@@ -258,6 +258,18 @@ if __name__ == "__main__":
         )
         oid = 0
 
+        assert 8 == len([k for k in objects if k.startswith("town_")]), "expected 8 towns"
+
+        # add forts for the 8 towns
+        fortnames = ["core:fort", "core:citadel", "core:castle"]
+        fortlvls = [3] * 5  # 5 castles
+        fortlvls += [2] * 2  # 2 citadels
+        fortlvls += [1] * 1  # 1 fort
+        for i, fortlvl in enumerate(fortlvls):
+            # mapeditor generates them in reversed order
+            buildings = list(reversed(fortnames[:fortlvl]))
+            objects[f"town_{i}"]["options"]["buildings"]["allOf"] = buildings
+
         for y in range(2, 66):  # 64 rows
             for x in range(5, 69):  # 64 columns (heroes are 2 tiles for some reason)
                 print(f"* Generating army for hero #{oid}")
@@ -267,15 +279,34 @@ if __name__ == "__main__":
                 for (slot, (vcminame, _, number)) in enumerate(army):
                     hero_army[slot] = dict(amount=number, type=f"core:{vcminame}")
 
+                random.shuffle(hero_army)
                 values = dict(hero_mapping[(x-2) % 8], id=oid, x=x, y=y)
                 color = values["color"]
                 header["players"][color]["heroes"][f"hero_{oid}"] = dict(type=f"core:{values['name']}")
 
-                secondary_skills = []
+                primary_skills = {"knowledge": 20}
+                primary_skills["spellpower"] = random.randint(5, 15)
 
-                ballistics = random.choice([None, "basic", "advanced", "expert"])
-                if ballistics:
-                    secondary_skills = [{"skill": "core:ballistics", "level": ballistics}]
+                secondary_skills = []
+                skilllevels = ["basic", "advanced", "expert"]
+
+                ballistics_chance = 20
+                ballistics_roll = random.randint(0, 100)
+                if ballistics_roll < ballistics_chance:
+                    secondary_skills.append({"skill": "core:ballistics", "level": skilllevels[ballistics_roll % 3]})
+
+                artillery_chance = 20
+                artillery_roll = random.randint(0, 100)
+                if artillery_roll < artillery_chance:
+                    secondary_skills.append({"skill": "core:artillery", "level": skilllevels[ballistics_roll % 3]})
+
+                spell_book = [
+                    "preset",
+                    "core:fireElemental",
+                    "core:earthElemental",
+                    "core:waterElemental",
+                    "core:airElemental"
+                ]
 
                 objects[f"hero_{oid}"] = dict(
                     type="hero", subtype=values["type"], x=x, y=y, l=0,
@@ -288,7 +319,9 @@ if __name__ == "__main__":
                         portrait=f"core:{values['name']}",
                         type=f"core:{values['name']}",
                         army=hero_army,
-                        secondary_skills=secondary_skills
+                        primarySkills=primary_skills,
+                        secondarySkills=secondary_skills,
+                        spellBook=spell_book
                     ),
                     template=dict(
                         animation=f"{values['animation']}_.def",

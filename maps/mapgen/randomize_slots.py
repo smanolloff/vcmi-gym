@@ -24,15 +24,7 @@ if __name__ == "__main__":
 
     for k, v in objects.items():
         if k.startswith("hero_"):
-            sp = random.randint(5, 15)
-            v["options"]["primarySkills"] = {"knowledge": 20, "spellpower": sp}
-            v["options"]["spellBook"] = [
-                "preset",
-                "core:fireElemental",
-                "core:earthElemental",
-                "core:waterElemental",
-                "core:airElemental"
-            ]
+            random.shuffle(v["options"]["army"])
 
     memory_zip = io.BytesIO()
     with zipfile.ZipFile(memory_zip, 'w') as zipf:
