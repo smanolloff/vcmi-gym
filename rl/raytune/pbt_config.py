@@ -163,7 +163,7 @@ config = {
     "agent_load_file": None,
 
     # "agent_load_file": None,
-    "tags": ["Map-4096-mixstack", "StupidAI", "obstacles-random"],
+    "tags": ["Map-4096-mixstack", "StupidAI", "obstacles-random", "v3"],
     "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
         # "gym/generated/4096/4096-mixstack-300K-01.vmap",
@@ -261,7 +261,6 @@ config = {
     "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
     "num_envs": 1,
     "env": {
-        "encoding_type": "float",
         "reward_dmg_factor": 5,
         "step_reward_fixed": -100,
         "step_reward_mult": 1,
@@ -278,7 +277,7 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "true_rng": False,  # for random heroes and obstacles only
+        "true_rng": False,
     },
     "seed": 0,
     "env_version": 3,
