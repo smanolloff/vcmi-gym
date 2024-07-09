@@ -112,7 +112,7 @@ if __name__ == "__main__":
     query = "select count(*) from (select lhero from stats where side == 0 group by lhero having sum(games) == 0)"
     [(count,)] = db.execute(query).fetchall()
     # assert count == 0, f"there are {count} heroes with no stats"
-    if count == 0:
+    if count > 0:
         warnings.warn(f"there are {count} heroes with no stats")
 
     query = "select 'hero_' || lhero, 1.0*sum(wins)/sum(games) from stats where games > 0 GROUP BY lhero"

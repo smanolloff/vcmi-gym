@@ -275,6 +275,7 @@ namespace Connector::V1 {
             blueModel,
             statsMode,
             statsStorage,
+            "", // statsLockdb
             statsPersistFreq,
             statsSampling,
             statsScoreVar,

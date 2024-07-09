@@ -308,6 +308,7 @@ namespace Connector::V3 {
             blueModel,
             statsMode,
             statsStorage,
+            "",  // statsLockdb
             statsPersistFreq,
             statsSampling,
             statsScoreVar,

@@ -22,12 +22,12 @@ IDENT="*** [🐕]"
 function terminate_evaluator() {
   for i in $(seq 3); do
     pkill -g 0 -f python || return 0  # no more procs => termination successful
-    pkill -g 0 -f myclient-headless || return 0  # no more procs => termination successful
+    pkill -g 0 -f mlclient-headless || return 0  # no more procs => termination successful
 
     for j in $(seq 3); do
       sleep 3
       pkill -g 0 -f python || return 0
-      pgrep -g 0 -f myclient-headless || return 0
+      pgrep -g 0 -f mlclient-headless || return 0
     done
   done
 
@@ -38,12 +38,12 @@ function terminate_evaluator() {
     # Linux process kills itself with -g0...
     # It also names all sub-proccesses the same way
     pkill --signal=9 -g 0 -f python || return 0  # no more procs => termination successful
-    pkill --signal=9 -g 0 -f myclient-headless || return 0
+    pkill --signal=9 -g 0 -f mlclient-headless || return 0
 
     for j in $(seq 3); do
       sleep 3
       pgrep -g 0 -f python || return 0
-      pgrep -g 0 -f myclient-headless || return 0
+      pgrep -g 0 -f mlclient-headless || return 0
     done
   done
 
@@ -51,7 +51,7 @@ function terminate_evaluator() {
   # 4. STILL alive => abort
   #
 
-  ps -ef | grep -E "myclient-headless|python"
+  ps -ef | grep -E "mlclient-headless|python"
   echo "$IDENT ERROR: failed to terminate processes"
   return 1
 }
