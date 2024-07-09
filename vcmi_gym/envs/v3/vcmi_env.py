@@ -19,7 +19,6 @@ import gymnasium as gym
 
 from ..util import log
 from .analyzer import Analyzer, ActionType
-from .decoder.decoder import Decoder
 from .pyconnector import (
     PyConnector,
     STATE_VALUE_NA,
@@ -101,7 +100,7 @@ class VcmiEnv(gym.Env):
         vcmi_stats_persist_freq=100,
         vcmi_stats_sampling=0,
         vcmi_stats_score_var=0.4,
-        true_rng=True,
+        true_rng=False,  # deprecated
         sparse_info=False,
         allow_invalid_actions=False,
         user_timeout=0,  # seconds - user input might take very long
@@ -180,7 +179,6 @@ class VcmiEnv(gym.Env):
             vcmi_stats_persist_freq,
             vcmi_stats_sampling,
             vcmi_stats_score_var,
-            true_rng,
         )
 
         self.action_space = self.__class__.ACTION_SPACE

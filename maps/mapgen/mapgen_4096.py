@@ -21,6 +21,7 @@ import os
 import random
 import io
 import zipfile
+import collections
 
 from creatures_core import ALL_CREATURES
 
@@ -115,14 +116,17 @@ def get_templates():
 
 def build_army_with_retry(*args, **kwargs):
     max_attempts = 1000
-
-    for r in range(1, max_attempts):
+    counters = collections.defaultdict(lambda: 0)
+    for r in range(1, max_attempts + 1):
         try:
             return build_army(*args, **kwargs)
         except (StackTooBigError, UnusedCreditError, NotAllStacksFilled, WeakestCreatureTooStrongError) as e:
-            print("[%d] Rebuilding army due to: %s" % (r, str(e)))
-
-    raise MaxAttemptsExceeded("Max attempts (%d) exceeded" % max_attempts)
+            counters[e.__class__.__name__] += 1
+            # print("[%d] Rebuilding army due to: %s" % (r, str(e)))
+        else:
+            if r > 1:
+                print("Made %d army rebuilds due to: %s" % (r, dict(counters)))
+    raise MaxAttemptsExceeded("Max attempts (%d) exceeded. Errors: %s" % (max_attempts, dict(counters)))
 
 
 def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_creatures=None, print_creatures=True):

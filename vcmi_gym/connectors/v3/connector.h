@@ -60,7 +60,6 @@ namespace Connector::V3 {
         const int statsPersistFreq;
         const int statsSampling;
         const float statsScoreVar;
-        const bool trueRng;
 
         std::thread vcmithread;
         std::unique_ptr<MMAI::Schema::Baggage> baggage;
@@ -95,8 +94,7 @@ namespace Connector::V3 {
             const std::string statsStorage,
             const int statsPersistFreq,
             const int statsSampling,
-            const float statsScoreVar,
-            const bool trueRng
+            const float statsScoreVar
         );
 
         const P_State start();

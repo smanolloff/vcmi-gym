@@ -279,7 +279,6 @@ namespace Connector::V1 {
             statsSampling,
             statsScoreVar,
             false,  // printModelPredictions
-            trueRng,
             true  // headless (disable the GUI, as it cannot run in a non-main thread)
         );
 

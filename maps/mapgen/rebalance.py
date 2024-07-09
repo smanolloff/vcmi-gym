@@ -31,6 +31,7 @@ import datetime
 import argparse
 import numpy as np
 import sqlite3
+import warnings
 
 from mapgen_4096 import (
     get_all_creatures,
@@ -107,20 +108,34 @@ if __name__ == "__main__":
 
     print("Loading database %s ..." % args.statsdb)
 
-    # XXX: permit stats where some heroes have 0 games?
+    # XXX: heroes with no stats will not be modified
     query = "select count(*) from (select lhero from stats where side == 0 group by lhero having sum(games) == 0)"
     [(count,)] = db.execute(query).fetchall()
-    assert count == 0, f"there are {count} heroes with no stats"
+    # assert count == 0, f"there are {count} heroes with no stats"
+    if count == 0:
+        warnings.warn(f"there are {count} heroes with no stats")
 
     query = "select 'hero_' || lhero, 1.0*sum(wins)/sum(games) from stats where games > 0 GROUP BY lhero"
     winrates = dict(db.execute(query).fetchall())
 
     heroes_data = {}
 
+    n_total = 0     # total heroes on the map (sum of counters below)
+    n_unknown = 0   # heroes we have no stats for
+    n_skipped = 0   # heroes that don't need any change
+    n_updated = 0   # heroes changed
+    n_failed = 0    # heroes failed
+
     for k, v in objects.items():
         if not k.startswith("hero_"):
             continue
-        assert k in winrates, "hero %s not in stats db" % k
+
+        n_total += 1
+
+        # assert k in winrates, "hero %s not in stats db" % k
+        if k not in winrates:
+            n_unknown += 1
+            continue
 
         heroes_data[k] = {"old_army": [], "army_value": 0, "army_creatures": []}
         for stack in v["options"]["army"]:
@@ -178,6 +193,7 @@ if __name__ == "__main__":
         correction_factor = np.clip(correction_factor, -clip, clip)
         if abs(correction_factor) <= errmax:
             # nothing to correct
+            n_skipped += 1
             continue
 
         army_value = hero_data["army_value"]
@@ -201,14 +217,17 @@ if __name__ == "__main__":
                 new_army = build_army_with_retry(new_value, errmax, creatures=army_creatures, print_creatures=False)
                 print("  creatures (old):\t%s" % ", ".join([f"{number} \"{name}\"" for (_, name, number) in sorted(old_army, key=lambda x: x[1])]))
                 print("  creatures (new):\t%s" % ", ".join([f"{number} \"{name}\"" for (_, name, number) in sorted(new_army, key=lambda x: x[1])]))
+                changed = True
+                n_updated += 1
                 break
-            except MaxAttemptsExceeded:
+            except MaxAttemptsExceeded as e:
                 if not ALLOW_ARMY_COMP_CHANGE:
-                    print("Give up rebuilding (ALLOW_ARMY_COMP_CHANGE=false); skipping hero")
+                    print("Give up rebuilding %s due to: %s (ALLOW_ARMY_COMP_CHANGE=false)" % (hero_name, str(e)))
                     new_army = old_army
+                    n_failed += 1
                     break
 
-                print("[%d] Trying different army composition for hero %s" % (r, hero_name))
+                print("[%d] Trying different army composition for hero %s due to: %s" % (r, hero_name, str(e)))
                 army_creatures = random.sample(list(creatures_dict.items()), len(army_creatures))
                 army_creatures = [(a, b, c) for a, (b, c) in army_creatures]
 
@@ -216,11 +235,8 @@ if __name__ == "__main__":
             raise Exception("Failed to generate army for %s" % hero_name)
 
         objects[hero_name]["options"]["army"] = [{} for i in range(7)]
-
         for (slot, (vcminame, _, number)) in enumerate(new_army):
             objects[hero_name]["options"]["army"][slot] = dict(amount=number, type=f"core:{vcminame}")
-
-        changed = True
 
     if not changed:
         print("Nothing to do.")
@@ -230,8 +246,15 @@ if __name__ == "__main__":
     else:
         with open(os.path.join(os.path.dirname(path), "rebalance.log"), "a") as f:
             t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             report = (
                 f"[{t}] Rebalanced {path} with stats: "
+                f"tot={n_total}, "
+                f"ukn={n_unknown*100.0/n_total:.0f}%, "
+                f"skip={n_skipped*100.0/n_total:.0f}%, "
+                f"upd={n_updated*100.0/n_total:.0f}%, "
+                f"fail={n_failed*100.0/n_total:.0f}%, "
+                f"mean_winrate={mean_winrate:.2f}, stddev_winrate={stddev_winrate:.2f} ({stddev_winrate_frac*100:.2f}%), "
                 f"mean_winrate={mean_winrate:.2f}, stddev_winrate={stddev_winrate:.2f} ({stddev_winrate_frac*100:.2f}%), "
                 f"mean_army_value={mean_army_value:.2f}, stddev_army_value={stddev_army_value:.2f} ({stddev_army_value_frac*100:.2f}%), "
                 f"max_correction={clip:.2f}\n"
