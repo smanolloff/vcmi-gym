@@ -58,8 +58,6 @@ namespace Connector::V3 {
         const std::string statsMode;
         const std::string statsStorage;
         const int statsPersistFreq;
-        const int statsSampling;
-        const float statsScoreVar;
 
         std::thread vcmithread;
         std::unique_ptr<MMAI::Schema::Baggage> baggage;
@@ -92,9 +90,7 @@ namespace Connector::V3 {
             const std::string blueModel,
             const std::string statsMode,
             const std::string statsStorage,
-            const int statsPersistFreq,
-            const int statsSampling,
-            const float statsScoreVar
+            const int statsPersistFreq
         );
 
         const P_State start();

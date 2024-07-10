@@ -49,9 +49,7 @@ namespace Connector::V3 {
         const std::string blueModel_,
         const std::string statsMode_,
         const std::string statsStorage_,
-        const int statsPersistFreq_,
-        const int statsSampling_,
-        const float statsScoreVar_
+        const int statsPersistFreq_
     ) : mapname(mapname_),
         seed(seed_),
         randomHeroes(randomHeroes_),
@@ -70,9 +68,7 @@ namespace Connector::V3 {
         blueModel(blueModel_),
         statsMode(statsMode_),
         statsStorage(statsStorage_),
-        statsPersistFreq(statsPersistFreq_),
-        statsSampling(statsSampling_),
-        statsScoreVar(statsScoreVar_)
+        statsPersistFreq(statsPersistFreq_)
         {};
 
     const int Connector::version() {
@@ -308,10 +304,7 @@ namespace Connector::V3 {
             blueModel,
             statsMode,
             statsStorage,
-            "",  // statsLockdb
             statsPersistFreq,
-            statsSampling,
-            statsScoreVar,
             false,  // printModelPredictions
             true  // headless (disable the GUI, as it cannot run in a non-main thread)
         );
@@ -440,9 +433,7 @@ namespace Connector::V3 {
                 const std::string &, // blueModel
                 const std::string &, // statsMode
                 const std::string &, // statsStorage
-                const int &,         // statsPersistFreq
-                const int &,         // statsSampling
-                const float &        // statsScoreVar
+                const int &          // statsPersistFreq
             >())
             .def("start", &Connector::start)
             .def("reset", &Connector::reset)

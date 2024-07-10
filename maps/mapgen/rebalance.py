@@ -109,7 +109,7 @@ if __name__ == "__main__":
     print("Loading database %s ..." % args.statsdb)
 
     # XXX: heroes with no stats will not be modified
-    query = "select count(*) from (select lhero from stats where side == 0 group by lhero having sum(games) == 0)"
+    query = "select count(*) from (select lhero from stats group by lhero having sum(games) == 0)"
     [(count,)] = db.execute(query).fetchall()
     # assert count == 0, f"there are {count} heroes with no stats"
     if count > 0:

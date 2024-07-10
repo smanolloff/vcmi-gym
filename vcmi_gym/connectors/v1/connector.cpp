@@ -275,10 +275,7 @@ namespace Connector::V1 {
             blueModel,
             statsMode,
             statsStorage,
-            "", // statsLockdb
             statsPersistFreq,
-            statsSampling,
-            statsScoreVar,
             false,  // printModelPredictions
             true  // headless (disable the GUI, as it cannot run in a non-main thread)
         );
