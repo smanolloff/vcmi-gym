@@ -95,15 +95,13 @@ function run_mlclient() {
     done
 }
 
-while true; do
-    for i in $(seq 0 $((N_WORKERS-1))); do
-        # Use stats-sampling=max-battles+1 to enable stats sampling
-        # by using only the distributions calculated after db was loaded
-        # (each redistribution involves disk IO)
-        bgjob $i run_mlclient
+for i in $(seq 1 10); do
+    for j in $(seq 0 $((N_WORKERS-1))); do
+        bgjob $j run_mlclient
     done
 
     wait
+    cp "$DB" "${DB%.sqlite3}-$i.sqlite3"
     python maps/mapgen/rebalance.py "$VCMIMAP" "$DB"
     echo "update stats set wins=0, games=0" | sqlite3 "$DB"
 done
