@@ -105,4 +105,5 @@ while true; do
 
     wait
     python maps/mapgen/rebalance.py "$VCMIMAP" "$DB"
+    echo "update stats set wins=0, games=0" | sqlite3 "$DB"
 done

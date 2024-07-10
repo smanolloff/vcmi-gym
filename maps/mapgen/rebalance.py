@@ -261,7 +261,6 @@ if __name__ == "__main__":
                 f"upd={n_updated*100.0/n_total:.0f}%, "
                 f"fail={n_failed*100.0/n_total:.0f}%, "
                 f"mean_winrate={mean_winrate:.2f}, stddev_winrate={stddev_winrate:.2f} ({stddev_winrate_frac*100:.2f}%), "
-                f"mean_winrate={mean_winrate:.2f}, stddev_winrate={stddev_winrate:.2f} ({stddev_winrate_frac*100:.2f}%), "
                 f"mean_army_value={mean_army_value:.2f}, stddev_army_value={stddev_army_value:.2f} ({stddev_army_value_frac*100:.2f}%), "
                 f"max_correction={clip:.2f}\n"
             )
