@@ -60,6 +60,21 @@ bgjob() {
     } &
 }
 
+function run_mlclient() {
+    for _ in $(seq 10); do
+        $VCMI/rel/bin/mlclient-headless \
+            --loglevel-ai error --loglevel-global error --loglevel-stats info \
+            --random-heroes 1 --random-obstacles 1 --swap-sides 0 \
+            --red-ai MMAI_SCRIPT_SUMMONER --blue-ai MMAI_SCRIPT_SUMMONER \
+            --stats-mode red \
+            --stats-storage "$DB" \
+            --stats-timeout 300000 \
+            --stats-persist-freq 0 \
+            --max-battles 10000 \
+            --map "$VCMIMAP"
+    done
+}
+
 while true; do
     touch "$WATCHDOGFILE"
 
@@ -67,15 +82,7 @@ while true; do
         # Use stats-sampling=max-battles+1 to enable stats sampling
         # by using only the distributions calculated after db was loaded
         # (each redistribution involves disk IO)
-        bgjob $i $VCMI/rel/bin/mlclient-headless \
-            --loglevel-ai error --loglevel-global error --loglevel-stats info \
-            --random-heroes 1 --random-obstacles 1 --swap-sides 0 \
-            --red-ai MMAI_SCRIPT_SUMMONER --blue-ai MMAI_SCRIPT_SUMMONER \
-            --stats-mode red \
-            --stats-storage "$DB" \
-            --stats-persist-freq 0 \
-            --max-battles 10000 \
-            --map "$VCMIMAP"
+        bgjob $i run_mlclient
     done
 
     wait

@@ -275,6 +275,7 @@ namespace Connector::V1 {
             blueModel,
             statsMode,
             statsStorage,
+            60000,  // statsTimeout
             statsPersistFreq,
             false,  // printModelPredictions
             true  // headless (disable the GUI, as it cannot run in a non-main thread)
