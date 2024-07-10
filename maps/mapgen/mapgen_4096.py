@@ -114,22 +114,22 @@ def get_templates():
     return header, objects, surface_terrain, hero_mapping
 
 
-def build_army_with_retry(*args, **kwargs):
+def build_army_with_retry(*args, verbose, **kwargs):
     max_attempts = 1000
     counters = collections.defaultdict(lambda: 0)
     for r in range(1, max_attempts + 1):
         try:
-            return build_army(*args, **kwargs)
+            return build_army(*args, **dict(kwargs, verbose=verbose))
         except (StackTooBigError, UnusedCreditError, NotAllStacksFilled, WeakestCreatureTooStrongError) as e:
             counters[e.__class__.__name__] += 1
             # print("[%d] Rebuilding army due to: %s" % (r, str(e)))
         else:
-            if r > 1:
+            if r > 1 and verbose:
                 print("Made %d army rebuilds due to: %s" % (r, dict(counters)))
     raise MaxAttemptsExceeded("Max attempts (%d) exceeded. Errors: %s" % (max_attempts, dict(counters)))
 
 
-def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_creatures=None, print_creatures=True):
+def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_creatures=None, verbose=True, print_creatures=True):
     if creatures is None:
         assert all_creatures, "when creatures is None, all_creatures is required"
         assert n_stacks, "when creatures is None, n_stacks is required"
@@ -186,16 +186,16 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
     real_value = real_value or 1  # fix zero div error theres no army
     error = 1 - target_value/real_value
 
-    print("  value (new):\t\t%d (%s%.2f%%)\n  max allowed error:\t%.2f%%\n  stacks:\t\t%d" % (
-        real_value,
-        "+" if error > 0 else "",
-        error*100,
-        err_frac_max*100,
-        len(creatures)
-    ))
-
-    if print_creatures:
-        print("  creatures:\t\t%s" % ", ".join([f"{number} \"{name}\"" for (name, number) in sorted(filled_creatures.items(), key=lambda x: x[0])]))
+    if verbose:
+        print("  value (new):\t\t%d (%s%.2f%%)\n  max allowed error:\t%.2f%%\n  stacks:\t\t%d" % (
+            real_value,
+            "+" if error > 0 else "",
+            error*100,
+            err_frac_max*100,
+            len(creatures)
+        ))
+        if print_creatures:
+            print("  creatures:\t\t%s" % ", ".join([f"{number} \"{name}\"" for (name, number) in sorted(filled_creatures.items(), key=lambda x: x[0])]))
 
     if abs(error) > err_frac_max:
         # raise UnusedCreditError("Too much unused credit: %d (target value: %d)" % (credit, value))
@@ -207,7 +207,8 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
         newnumber = 1 + (army[i][2] if army[i] else 0)
         real_value += aivalue
         error = 1 - target_value/real_value
-        print("  * added 1 '%s': army value: %d of %d (%.2f%%)" % (name, real_value, target_value, error*100))
+        if verbose:
+            print("  * added 1 '%s': army value: %d of %d (%.2f%%)" % (name, real_value, target_value, error*100))
         if abs(error) > err_frac_max:
             raise UnusedCreditError(f"Could not reach target value of {target_value}")
         elif newnumber > STACK_QTY_MAX:
@@ -278,7 +279,7 @@ if __name__ == "__main__":
             for x in range(5, 69):  # 64 columns (heroes are 2 tiles for some reason)
                 print(f"* Generating army for hero #{oid}")
                 n_stacks = random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
-                army = build_army_with_retry(value, ARMY_VALUE_ERROR_MAX, n_stacks=n_stacks, all_creatures=all_creatures)
+                army = build_army_with_retry(value, ARMY_VALUE_ERROR_MAX, n_stacks=n_stacks, all_creatures=all_creatures, verbose=True)
                 hero_army = [{} for i in range(7)]
                 for (slot, (vcminame, _, number)) in enumerate(army):
                     hero_army[slot] = dict(amount=number, type=f"core:{vcminame}")

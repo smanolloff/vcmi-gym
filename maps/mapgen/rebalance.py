@@ -95,6 +95,7 @@ def backup(path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-a', help="analyze data and exit", action="store_true")
+    parser.add_argument('-v', help="be more verbose", action="store_true")
     parser.add_argument('--change', help="allow army comp change", action="store_true")
     parser.add_argument('--dry-run', help="don't save anything", action="store_true")
     parser.add_argument('map', metavar="<map>", type=str, help="map to be rebalanced (as passed to VCMI)")
@@ -201,33 +202,38 @@ if __name__ == "__main__":
         old_army = hero_data["old_army"]
 
         new_value = int(army_value * (1 + correction_factor))
-        print("=== %s ===\n  winrate:\t\t%.2f (mean=%.2f)\n  value (current):\t%d\n  value (target):\t%d (%s%.2f%%)" % (
-            hero_name,
-            hero_winrate,
-            mean_winrate,
-            army_value,
-            new_value,
-            "+" if correction_factor > 0 else "",
-            correction_factor * 100,
-        ))
+
+        if args.v:
+            print("=== %s ===\n  winrate:\t\t%.2f (mean=%.2f)\n  value (current):\t%d\n  value (target):\t%d (%s%.2f%%)" % (
+                hero_name,
+                hero_winrate,
+                mean_winrate,
+                army_value,
+                new_value,
+                "+" if correction_factor > 0 else "",
+                correction_factor * 100,
+            ))
 
         new_army = None
         for r in range(1, 10):
             try:
-                new_army = build_army_with_retry(new_value, errmax, creatures=army_creatures, print_creatures=False)
-                print("  creatures (old):\t%s" % ", ".join([f"{number} \"{name}\"" for (_, name, number) in sorted(old_army, key=lambda x: x[1])]))
-                print("  creatures (new):\t%s" % ", ".join([f"{number} \"{name}\"" for (_, name, number) in sorted(new_army, key=lambda x: x[1])]))
+                new_army = build_army_with_retry(new_value, errmax, creatures=army_creatures, verbose=args.v, print_creatures=False)
+                if args.v:
+                    print("  creatures (old):\t%s" % ", ".join([f"{number} \"{name}\"" for (_, name, number) in sorted(old_army, key=lambda x: x[1])]))
+                    print("  creatures (new):\t%s" % ", ".join([f"{number} \"{name}\"" for (_, name, number) in sorted(new_army, key=lambda x: x[1])]))
                 changed = True
                 n_updated += 1
                 break
             except MaxAttemptsExceeded as e:
                 if not ALLOW_ARMY_COMP_CHANGE:
-                    print("Give up rebuilding %s due to: %s (ALLOW_ARMY_COMP_CHANGE=false)" % (hero_name, str(e)))
+                    if args.v:
+                        print("Give up rebuilding %s due to: %s (ALLOW_ARMY_COMP_CHANGE=false)" % (hero_name, str(e)))
                     new_army = old_army
                     n_failed += 1
                     break
 
-                print("[%d] Trying different army composition for hero %s due to: %s" % (r, hero_name, str(e)))
+                if args.v:
+                    print("[%d] Trying different army composition for hero %s due to: %s" % (r, hero_name, str(e)))
                 army_creatures = random.sample(list(creatures_dict.items()), len(army_creatures))
                 army_creatures = [(a, b, c) for a, (b, c) in army_creatures]
 
