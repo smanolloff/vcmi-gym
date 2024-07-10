@@ -61,23 +61,41 @@ bgjob() {
 }
 
 function run_mlclient() {
+    #
+    # Measured values with 20K battles, 36 workers, 5.4K RPM HDD:
+    # * 1 worker gathers data for 14min
+    # * 36 workers need a total of 15min for dbupdate (~25s per worker)
+    #
+    # This is problematic as the 1st worker finishes a 2nd round
+    # of data gathering, while the 36th worker still waits for dbupdate
+    # from the 1st round.
+    #
+    # Increasing the number of battles causes a greater increase in data
+    # gathering time compared to the increase in dbupdate time
+    # => increase battles such that dbupdate time becomes the smaller value
+    #
+    # Expected values with 26K battles:
+    # * 36 workers should need a total of 17min (+3s per per dbupdate)
+    # * 1 worker should gather data for 19min
+    #
+    timeout_minutes=20  # XXX: ensure watchdog has bigger timeout
+
     for _ in $(seq 10); do
+        touch "$WATCHDOGFILE"
         $VCMI/rel/bin/mlclient-headless \
             --loglevel-ai error --loglevel-global error --loglevel-stats info \
             --random-heroes 1 --random-obstacles 1 --swap-sides 0 \
             --red-ai MMAI_SCRIPT_SUMMONER --blue-ai MMAI_SCRIPT_SUMMONER \
             --stats-mode red \
             --stats-storage "$DB" \
-            --stats-timeout 300000 \
+            --stats-timeout $((timeout_minutes*60*1000)) \
             --stats-persist-freq 0 \
-            --max-battles 10000 \
+            --max-battles 26000 \
             --map "$VCMIMAP"
     done
 }
 
 while true; do
-    touch "$WATCHDOGFILE"
-
     for i in $(seq 0 $((N_WORKERS-1))); do
         # Use stats-sampling=max-battles+1 to enable stats sampling
         # by using only the distributions calculated after db was loaded
@@ -86,6 +104,5 @@ while true; do
     done
 
     wait
-    touch "$WATCHDOGFILE"
     python maps/mapgen/rebalance.py "$VCMIMAP" "$DB"
 done

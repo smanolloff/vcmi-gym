@@ -18,7 +18,7 @@ readonly MAP=$2
 [ -n "$MAP" ] || { echo "$USAGE"; exit 1; }
 
 # in minutes
-readonly CHECK_EVERY=90
+readonly CHECK_EVERY=30
 
 readonly IDENT="*** [🐕]"
 
