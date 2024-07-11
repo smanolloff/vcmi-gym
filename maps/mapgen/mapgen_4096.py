@@ -289,7 +289,7 @@ if __name__ == "__main__":
                 color = values["color"]
                 header["players"][color]["heroes"][f"hero_{oid}"] = dict(type=f"core:{values['name']}")
 
-                primary_skills = {"knowledge": 20}
+                primary_skills = {"knowledge": 20}  # no effect due VCMI mana randomization
                 primary_skills["spellpower"] = random.randint(5, 15)
 
                 secondary_skills = []

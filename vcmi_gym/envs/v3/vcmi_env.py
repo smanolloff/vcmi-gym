@@ -177,8 +177,6 @@ class VcmiEnv(gym.Env):
             vcmi_stats_mode,
             vcmi_stats_storage,
             vcmi_stats_persist_freq,
-            vcmi_stats_sampling,
-            vcmi_stats_score_var,
         )
 
         self.action_space = self.__class__.ACTION_SPACE

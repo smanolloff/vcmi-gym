@@ -43,20 +43,20 @@ bgjob() {
 
     # Run the command in the background, redirecting its output to the named pipe
     {
-            "$@"
-            echo "done"
+        "$@"
+        echo "done"
     } >"$fifo" 2>&1 &
 
     # Read from the named pipe and prefix each line with the job ID
     {
-            set +x
-            while IFS= read -r line; do
-                    echo -en "\033[0m"
-                    echo "<job=$job_id PID=$!> [$(date +"%Y-%m-%d %H:%M:%S")] $line"
-            done <"$fifo"
-            set -x
-            # Remove the named pipe after the job is done
-            rm -f "$fifo"
+        set +x
+        while IFS= read -r line; do
+            echo -en "\033[0m"
+            echo "<job=$job_id PID=$!> [$(date +"%Y-%m-%d %H:%M:%S")] $line"
+        done <"$fifo"
+        set -x
+        # Remove the named pipe after the job is done
+        rm -f "$fifo"
     } &
 }
 
