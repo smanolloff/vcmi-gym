@@ -378,7 +378,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 # XXX: backport for models with old action space
                 if agent.NN.actor.out_features == 2311:
                     print("Legacy model detected -- using LegacyActionSpaceWrapper")
-                    env_version = 2
+                    env_version = 3
                     wrappers = [vcmi_gym.LegacyActionSpaceWrapper]
                 else:
                     env_version = agent.env_version
@@ -389,6 +389,8 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                         env_cls = vcmi_gym.VcmiEnv_v1
                     case 2:
                         env_cls = vcmi_gym.VcmiEnv_v2
+                    case 3:
+                        env_cls = vcmi_gym.VcmiEnv_v3
                     case _:
                         raise Exception("unsupported env version: %d" % env_version)
 
