@@ -67,7 +67,7 @@ namespace Connector::V1 {
     }
 
     std::unique_ptr<MMAI::Schema::Baggage> Connector::createBaggage() {
-        printf("INITIALIZING WITH VERSION: %d\n", version());
+        printf("VCMI Connector v%d initialized\n", version());
         return std::make_unique<MMAI::Schema::Baggage>(
             mapname,
             [this](const MMAI::Schema::IState* s) { return this->getAction(s); },

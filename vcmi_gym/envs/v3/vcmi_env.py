@@ -238,7 +238,7 @@ class VcmiEnv(gym.Env):
     @tracelog
     def render(self):
         if self.render_mode == "ansi":
-            print((
+            return (
                 "%s\n"
                 "Step:      %-5s\n"
                 "Reward:    %-5s (total: %s)\n"
@@ -250,7 +250,7 @@ class VcmiEnv(gym.Env):
                 round(self.reward_total, 2),
                 self.net_value_last,
                 self.analyzer.net_value
-            ))
+            )
 
         elif self.render_mode == "rgb_array":
             gym.logger.warn("Rendering RGB arrays is not implemented")

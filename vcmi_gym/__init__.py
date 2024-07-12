@@ -49,4 +49,6 @@ all = [
     LegacyActionSpaceWrapper,
 ]
 
-gymnasium.register(id="VCMI-v1", entry_point="vcmi_gym:VcmiEnv")
+gymnasium.register(id="VCMI-v1", entry_point="vcmi_gym:VcmiEnv_v1")
+gymnasium.register(id="VCMI-v2", entry_point="vcmi_gym:VcmiEnv_v2")
+gymnasium.register(id="VCMI-v3", entry_point="vcmi_gym:VcmiEnv_v3")
