@@ -163,12 +163,13 @@ config = {
     "agent_load_file": None,
 
     # "agent_load_file": None,
-    "tags": ["Map-4096-mixstack", "StupidAI", "obstacles-random", "v3"],
-    "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
+    "tags": ["Map-v3", "StupidAI", "obstacles-random", "v3"],
+    "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
         # "gym/generated/4096/4096-mixstack-300K-01.vmap",
-        "gym/generated/4096/4096-mixstack-100K-01.vmap",
+        # "gym/generated/4096/4096-mixstack-100K-01.vmap",
         # "gym/generated/4096/4096-mixstack-5K-01.vmap"
+        "gym/generated/4096/4096-v3-100K.vmap",
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -269,10 +270,10 @@ config = {
         "reward_army_value_ref": 500,
         "random_heroes": 1,
         "random_obstacles": 1,
-        "town_chance": 0,
-        "warmachine_chance": 0,
+        "town_chance": 10,
+        "warmachine_chance": 40,
         "mana_min": 0,
-        "mana_max": 0,
+        "mana_max": 100,
         "swap_sides": 0,
         "user_timeout": 60,
         "vcmi_timeout": 60,

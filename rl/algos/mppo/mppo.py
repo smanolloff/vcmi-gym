@@ -341,7 +341,16 @@ class Agent(nn.Module):
         clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
         jagent = JitAgent()
         jagent.env_version = clean_agent.env_version
-        jagent.features_extractor = clean_agent.NN.features_extractor
+
+        # v1, v2
+        # jagent.features_extractor = clean_agent.NN.features_extractor
+
+        # v3
+        jagent.features_extractor1_stacks = clean_agent.NN.features_extractor1_stacks
+        jagent.features_extractor1_hexes = clean_agent.NN.features_extractor1_hexes
+        jagent.features_extractor2 = clean_agent.NN.features_extractor2
+
+        # common
         jagent.actor = clean_agent.NN.actor
         jagent.critic = clean_agent.NN.critic
         torch.jit.save(torch.jit.script(jagent), jagent_file)
@@ -382,7 +391,17 @@ class JitAgent(nn.Module):
         with torch.no_grad():
             b_obs = torch.as_tensor(obs).cpu().unsqueeze(dim=0)
             b_mask = torch.as_tensor(mask).cpu().unsqueeze(dim=0)
-            features = self.features_extractor(b_obs)
+
+            # v1, v2
+            # features = self.features_extractor(b_obs)
+
+            # v3
+            stacks, hexes = b_obs.split([1960, 10725], dim=1)
+            fstacks = self.features_extractor1_stacks(stacks)
+            fhexes = self.features_extractor1_hexes(hexes)
+            fcat = torch.cat((fstacks, fhexes), dim=1)
+            features = self.features_extractor2(fcat)
+
             action_logits = self.actor(features)
             dist = common.SerializableCategoricalMasked(logits=action_logits, mask=b_mask)
             action = torch.argmax(dist.probs, dim=1)
