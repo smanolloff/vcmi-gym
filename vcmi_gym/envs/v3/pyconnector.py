@@ -21,11 +21,15 @@ import numpy as np
 import os
 import signal
 import atexit
+import threading
 from collections import OrderedDict
 
 from ..util import log
 
-from ...connectors.rel import exporter_v3
+if (os.getenv("VCMIGYM_DEBUG", None) == "1"):
+    from ...connectors.build import exporter_v3
+else:
+    from ...connectors.rel import exporter_v3
 
 EXPORTER = exporter_v3.Exporter()
 
@@ -82,7 +86,7 @@ def tracelog(func, maxlen=MAXLEN):
 # Same as connector's P_Result, but with values converted to ctypes
 class PyResult():
     def __init__(self, cres):
-        self.state = np.ctypeslib.as_array(cres.state)#.reshape(11, 15, -1)
+        self.state = np.ctypeslib.as_array(cres.state)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
         self.attnmask = np.ctypeslib.as_array(cres.attnmask).reshape(165, 165)
         self.errcode = cres.errcode
@@ -136,7 +140,7 @@ class PyConnector():
         self.started = False
         self.loglevel = loglevel
         self.shutdown_lock = multiprocessing.Lock()
-        self.shutdown_complete = False
+        self.shutting_down = multiprocessing.Event()
         self.logger = log.get_logger("PyConnector", self.loglevel)
         self.allow_retreat = allow_retreat
 
@@ -144,6 +148,26 @@ class PyConnector():
         self.user_timeout = user_timeout or 999999
         self.vcmi_timeout = vcmi_timeout or 999999
         self.boot_timeout = boot_timeout or 999999
+
+    @classmethod
+    def deathwatch(cls, proc, cond, logger, shutting_down):
+        proc.join()  # Wait for the process to complete
+
+        if not shutting_down.is_set():
+            logger.error("VCMI process has died")
+
+        # VCMI process is has died, most likely while holding the lock
+        # for some reason this prevents cond.wait(timeout) in `self._wait()`
+        # process from working (hangs forever)
+        # However, releasing the lock here un-hangs the wait above.
+        # (...NOTE: does not work if monitor_process is an instance method?!)
+        # Not sure what's going on, but this resolves the issue.
+        try:
+            cond._lock.release()
+        except ValueError:
+            # ValueError: semaphore or lock released too many times
+            # i.e. lock was not owned; just ignore it
+            pass
 
     @tracelog
     def start(self, *args):
@@ -159,7 +183,7 @@ class PyConnector():
         # Process synchronization:
         # cond.notify() will wake up the other proc (which immediately tries to acquire the lock)
         # cond.wait() will release the lock and wait (other proc now successfully acquires the lock)
-        self.cond = multiprocessing.Condition()
+        self.cond = multiprocessing.Condition(multiprocessing.Lock())
         self.proc = multiprocessing.Process(
             target=self.start_connector,
             args=args,
@@ -169,16 +193,8 @@ class PyConnector():
 
         atexit.register(self.shutdown)
 
-        # Multiple VCMIs booting simultaneously is not OK
-        # (they all write to the same files at boot)
         # Boot time is <1s, 6 simultaneously procs should not take <10s
         if not self._try_start(100, 0.1):
-            # self.semaphore.release()
-
-            # Is this needed?
-            # (NOTE: it might raise posix_ipc.ExistentialError)
-            # posix_ipc.unlink_semaphore(self.semaphore.name)
-
             # try once again after releasing
             if not self._try_start(1, 0):
                 raise Exception("Failed to acquire semaphore")
@@ -186,11 +202,11 @@ class PyConnector():
         return PyResult(self.v_result_act)
 
     def shutdown(self):
-        if self.shutdown_complete:
+        if self.shutting_down.is_set():
             return
 
         with self.shutdown_lock:
-            self.shutdown_complete = True
+            self.shutting_down.set()
 
         self.logger.info("Terminating VCMI PID=%s" % self.proc.pid)
 
@@ -250,7 +266,12 @@ class PyConnector():
     def _try_start(self, _retries, _retry_interval):
         with self.cond:
             self.proc.start()
-            # boot time may be long, add extra 10s
+
+            # XXX: deathwatch must be started AFTER self.proc.start()
+            #      (they are not pickle-able, and won't exist in sub-proc)
+            self.deathwatch_thread = threading.Thread(target=self.__class__.deathwatch, args=(self.proc, self.cond, self.logger, self.shutting_down))
+            self.deathwatch_thread.start()
+
             self._wait_boot()
         return True
 
@@ -310,7 +331,12 @@ class PyConnector():
     # NOTE: import is done at runtime to ensure VCMI inits
     #       in the newly created process
     def _get_connector(self):
-        from ...connectors.rel import connector_v3
+        if (os.getenv("VCMIGYM_DEBUG", None) == "1"):
+            print("Using debug connector...")
+            from ...connectors.build import connector_v3
+        else:
+            from ...connectors.rel import connector_v3
+
         return connector_v3
 
     def set_v_result_act(self, result):

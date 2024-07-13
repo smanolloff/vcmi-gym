@@ -30,7 +30,7 @@
 #include "AI/MMAI/schema/base.h"
 #include "AI/MMAI/schema/v1/types.h"
 
-#define VERBOSE false  // no effect on release builds
+#define VERBOSE true  // no effect on release builds
 
 #ifdef DEBUG_BUILD
     #define LOG(msg) if(VERBOSE) { std::cout << "<" << std::this_thread::get_id() << ">[" << std::filesystem::path(__FILE__).filename().string() << "][" << (PyGILState_Check() ? "GIL=1" : "GIL=0") << "] (" << __FUNCTION__ << ") " << msg << "\n"; }

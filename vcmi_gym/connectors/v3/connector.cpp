@@ -27,6 +27,10 @@
 #include <stdexcept>
 #include <string>
 
+#define ASSERT_STATE(want) \
+    if(want != connstate) \
+        throw std::runtime_error("Unexpected connector state: want: " + std::to_string(EI(want)) + ", have: " + std::to_string(EI(connstate)))
+
 namespace Connector::V3 {
     namespace py = pybind11;
 
@@ -160,7 +164,7 @@ namespace Connector::V3 {
     }
 
     const P_State Connector::reset() {
-        assert(connstate == ConnectorState::AWAITING_ACTION);
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         std::unique_lock lock(m);
         LOG("obtain lock: done");
@@ -179,14 +183,18 @@ namespace Connector::V3 {
             py::gil_scoped_release release;
 
             LOG("cond.wait(lock)");
-            cond.wait(lock);
+            try {
+                cond.wait(lock);
+            } catch (std::exception e) {
+                LOG("ERROR: " + std::string(e.what()))
+            }
             LOG("cond.wait(lock): done");
 
             LOG("acquire Python GIL (scope-auto)");
             // py::gil_scoped_acquire acquire2;
         }
 
-        assert(connstate == ConnectorState::AWAITING_ACTION);
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         LOG("release lock (return)");
         LOG("return P_State");
@@ -196,7 +204,7 @@ namespace Connector::V3 {
     }
 
     const std::string Connector::renderAnsi() {
-        assert(connstate == ConnectorState::AWAITING_ACTION);
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         LOG("obtain lock");
         std::unique_lock lock(m);
@@ -222,7 +230,7 @@ namespace Connector::V3 {
             LOG("acquire Python GIL (scope-auto)");
         }
 
-        assert(connstate == ConnectorState::AWAITING_ACTION);
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
         auto sup = extractSupplementaryData(state);
         assert(sup->getType() == MMAI::Schema::V3::ISupplementaryData::Type::ANSI_RENDER);
 
@@ -232,7 +240,7 @@ namespace Connector::V3 {
     }
 
     const P_State Connector::act(MMAI::Schema::Action a) {
-        assert(connstate == ConnectorState::AWAITING_ACTION);
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         // Prevent control actions via `step`
         assert(a > 0);
@@ -261,7 +269,7 @@ namespace Connector::V3 {
             LOG("acquire Python GIL (scope-auto)");
         }
 
-        assert(connstate == ConnectorState::AWAITING_ACTION);
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         LOG("release lock (return)");
         LOG("return P_State");
@@ -269,7 +277,7 @@ namespace Connector::V3 {
     }
 
     const P_State Connector::start() {
-        assert(connstate == ConnectorState::NEW);
+        ASSERT_STATE(ConnectorState::NEW);
 
         baggage = createBaggage();
 
@@ -313,11 +321,11 @@ namespace Connector::V3 {
         LOG("set connstate = AWAITING_STATE");
         connstate = ConnectorState::AWAITING_STATE;
 
-        LOG("launch new thread");
+        LOG("launch VCMI thread");
         vcmithread = std::thread([] {
             LOG("[thread] Start VCMI");
             start_vcmi();
-            assert(false); // should never happen
+            assert(false); // should never be here
         });
 
         // LOG("detach the newly created thread...")
@@ -345,7 +353,7 @@ namespace Connector::V3 {
         // LOGSTR("Change cwd back to", oldcwd.string());
         // std::filesystem::current_path(oldcwd);
 
-        assert(connstate == ConnectorState::AWAITING_ACTION);
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         LOG("release lock (return)");
         LOG("return P_Result");
@@ -361,7 +369,7 @@ namespace Connector::V3 {
         std::unique_lock lock(m);
         LOG("obtain lock: done");
 
-        assert(connstate == ConnectorState::AWAITING_STATE);
+        ASSERT_STATE(ConnectorState::AWAITING_STATE);
 
         LOG("set this->istate = s");
         state = s;
@@ -372,7 +380,7 @@ namespace Connector::V3 {
         LOG("cond.notify_one()");
         cond.notify_one();
 
-        assert(connstate == ConnectorState::AWAITING_ACTION);
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         {
             LOG("release Python GIL");
@@ -387,7 +395,7 @@ namespace Connector::V3 {
             // py::gil_scoped_acquire acquire2;
         }
 
-        assert(connstate == ConnectorState::AWAITING_STATE);
+        ASSERT_STATE(ConnectorState::AWAITING_STATE);
 
         LOG("release lock (return)");
         LOGSTR("return Action: ", std::to_string(action));
