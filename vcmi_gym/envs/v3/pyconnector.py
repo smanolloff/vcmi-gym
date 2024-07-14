@@ -210,11 +210,15 @@ class PyConnector():
 
         self.logger.info("Terminating VCMI PID=%s" % self.proc.pid)
 
-        # proc may not have been started at all (semaphore failed to acquire)
+        # proc may not have been started at all
+        # it is also already joined by deathwatch, but joining it again is ok
         if self.proc:
-            self.proc.terminate()
-            self.proc.join()
-            self.proc.close()
+            try:
+                self.proc.terminate()
+                self.proc.join()
+                self.proc.close()
+            except Exception as e:
+                self.logger.warn("Could not close self.proc: %s" % str(e))
 
         try:
             self.cond.release()
