@@ -152,6 +152,7 @@ class PyConnector():
     @classmethod
     def deathwatch(cls, proc, cond, logger, shutting_down):
         proc.join()  # Wait for the process to complete
+        proc.close()  # shutdown's close does not seem to work if proc is joined here
 
         if not shutting_down.is_set():
             logger.error("VCMI process has died")
