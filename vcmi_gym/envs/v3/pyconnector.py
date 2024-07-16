@@ -284,7 +284,11 @@ class PyConnector():
 
             # XXX: deathwatch must be started AFTER self.proc.start()
             #      (they are not pickle-able, and won't exist in sub-proc)
-            self.deathwatch_thread = threading.Thread(target=self.__class__.deathwatch, args=(self.proc, self.cond, self.logger, self.shutting_down))
+            self.deathwatch_thread = threading.Thread(
+                target=self.__class__.deathwatch,
+                args=(self.proc, self.cond, self.logger, self.shutting_down),
+                daemon=True
+            )
             self.deathwatch_thread.start()
 
             self._wait_boot()
