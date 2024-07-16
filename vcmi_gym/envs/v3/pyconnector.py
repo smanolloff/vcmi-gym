@@ -152,7 +152,11 @@ class PyConnector():
     @classmethod
     def deathwatch(cls, proc, cond, logger, shutting_down):
         proc.join()  # Wait for the process to complete
-        proc.close()  # shutdown's close does not seem to work if proc is joined here
+
+        try:
+            proc.close()  # shutdown's close does not seem to work if proc is joined here
+        except Exception:
+            pass  # AttributeError: _sentinel
 
         if not shutting_down.is_set():
             logger.error("VCMI process has died")
@@ -220,6 +224,12 @@ class PyConnector():
                 self.proc.close()
             except Exception as e:
                 self.logger.warn("Could not close self.proc: %s" % str(e))
+
+        if getattr(self, "deathwatch_thread", None):
+            try:
+                self.deathwatch_thread.join()
+            except Exception as e:
+                self.logger.warn("Could not join deathwatch_thread: %s" % str(e))
 
         try:
             self.cond.release()
