@@ -222,6 +222,9 @@ class PyConnector():
                 self.proc.terminate()
                 self.proc.join()
                 self.proc.close()
+            except ValueError:
+                # most likely already closed by deathwatch
+                pass
             except Exception as e:
                 self.logger.warn("Could not close self.proc: %s" % str(e))
 
