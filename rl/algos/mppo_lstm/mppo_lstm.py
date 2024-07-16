@@ -327,6 +327,14 @@ class AgentNN(nn.Module):
                 self.lstm_hstate = torch.zeros((1, self.lstm_d * self.lstm_num_layers, self.lstm_proj_size or self.lstm_hidden_size))
                 self.lstm_cstate = torch.zeros((1, self.lstm_d * self.lstm_num_layers, self.lstm_hidden_size))
 
+            # TODO: lstm states must be RESET at the end of an episode.
+            #       Maybe expose an Agent#reset() method which does this
+            #       (it is up to the user to invoke it when the env resets)
+            #       VCMI's MMAI_MODEL getAction function can also check the
+            #       SupplementaryData if this is a new game. This will require
+            #       careful handling (e.g. AutoPlay re-inits the bot but the
+            #       state will be inconsistent if turns were played manually
+            #       in the meantime...)
             self.lstm_obs_seq = self.lstm_obs_seq.roll(-1, dims=1)
             self.lstm_obs_seq[0][-1] = obs
             self.lstm_hstate, self.lstm_cstate, b_env_action, _, _, _ = self.get_action_and_value(

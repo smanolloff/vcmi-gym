@@ -688,6 +688,7 @@ def main(args, agent_cls=Agent):
                 # next_lstm_obs_seq[1][-1] = next_obs[1]
                 # ...
                 next_lstm_obs_seq[:, -1] = next_obs
+                next_lstm_feat_seq[next_done] = torch.zeros_like(next_lstm_feat_seq[0])
                 next_lstm_feat_seq = next_lstm_feat_seq.roll(-1, dims=1)
                 next_lstm_feat_seq[:, -1] = agent.NN.extract_features(next_obs)
                 # Reset LSTM states on episode end
