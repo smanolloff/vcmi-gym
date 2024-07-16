@@ -213,8 +213,7 @@ config = {
 
     # NN arch
     "network": {
-        "attention": None,
-        "features_extractor1_stacks": [
+        "features_extractor_stacks": [
             # => (B, 1960)
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*98]},
             # => (B, 1, 1960)
@@ -223,7 +222,7 @@ config = {
             {"t": "LeakyReLU"},
             # => (B, 160)
         ],
-        "features_extractor1_hexes": [
+        "features_extractor_hexes": [
             # => (B, 10725)
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 165*65]},
             # => (B, 1, 10725)
@@ -232,11 +231,14 @@ config = {
             {"t": "LeakyReLU"},
             # => (B, 660)
         ],
-        "features_extractor2": [
-            # => (B, 820)
-            {"t": "Linear", "in_features": 820, "out_features": 512},
-            {"t": "LeakyReLU"},
-        ],
+        "lstm": {
+            "input_shape": [820],
+            "bidirectional": False,
+            "num_layers": 1,
+            "hidden_size": 512,
+            "proj_size": 0,
+            "seq_len": 5
+        },
         "actor": {"t": "Linear", "in_features": 512, "out_features": 2311},
         "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
     },

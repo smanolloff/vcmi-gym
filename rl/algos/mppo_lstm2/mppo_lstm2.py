@@ -270,6 +270,8 @@ class AgentNN(nn.Module):
         self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
     def get_value(self, features_seq, hstate, cstate):
+        hstate = hstate.transpose(0, 1)
+        cstate = cstate.transpose(0, 1)
         memories, _ = self.lstm(features_seq, (hstate, cstate))
         return self.critic(memories[:, -1, :])
 
@@ -282,17 +284,23 @@ class AgentNN(nn.Module):
     def get_action_and_value(
         self,
         features_seq,
-        hstate,
-        cstate,
+        hstate,  # batch-first
+        cstate,  # batch-first
         mask,
         action=None,
         deterministic=False
     ):
+        hstate = hstate.transpose(0, 1)
+        cstate = cstate.transpose(0, 1)
         memories, (hstate, cstate) = self.lstm(features_seq, (hstate, cstate))
-        # XXX: memory contains n_seq for each element in the sequence
+        hstate = hstate.transpose(0, 1)
+        cstate = cstate.transpose(0, 1)
+
+        # XXX: memories contains n_seq for each element in the sequence
         #      In contrast, hstate and cstate are the *final* states
-        #      Not sure how to use intermediate memory => just use the final one
+        #      Not sure how to use intermediate memories => just use the final one
         memory = memories[:, -1, :]
+
         value = self.critic(memory)
         action_logits = self.actor(memory)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
@@ -602,6 +610,8 @@ def main(args, agent_cls=Agent):
         lstm = args.network.lstm
         lstm_d = 1 + lstm.bidirectional
 
+        # XXX: storing hstates and cstates as batch-first
+        #      see comments in get_action_and_value()
         lstm_obs_seqs = torch.zeros((args.num_steps, num_envs, lstm.seq_len, *obs_space.shape), device=device)
         lstm_feat_seqs = torch.zeros((args.num_steps, num_envs, lstm.seq_len, *lstm.input_shape), device=device)
         lstm_hstates = torch.zeros((args.num_steps, num_envs, lstm_d * lstm.num_layers, lstm.proj_size or lstm.hidden_size), device=device)
@@ -651,16 +661,11 @@ def main(args, agent_cls=Agent):
                 masks[step] = next_mask
 
                 # ALGO LOGIC: action logic
-                # XXX: torch.LSTM has a batch_first arg, but this only applies
-                #      to the input tensor. The returned LSTM state tensors
-                #      must *always* be as if batch_first=False (i.e. B=dim1, not dim0)
-                #      => transpose(0,1) to swap the dims of hstate and cstate
-                #      => (N, B, *) => (B, N, *)
                 with torch.no_grad():
                     next_lstm_hstate, next_lstm_cstate, action, logprob, _, value = agent.NN.get_action_and_value(
                         next_lstm_feat_seq,
-                        next_lstm_hstate.transpose(0, 1),
-                        next_lstm_cstate.transpose(0, 1),
+                        next_lstm_hstate,
+                        next_lstm_cstate,
                         next_mask
                     )
                     values[step] = value.flatten()
@@ -675,9 +680,20 @@ def main(args, agent_cls=Agent):
                 # (verified that this does not mutate lstm_obs_seqs[step])
                 next_lstm_obs_seq[next_done] = torch.zeros_like(next_lstm_obs_seq[0])
                 next_lstm_obs_seq = next_lstm_obs_seq.roll(-1, dims=1)
-                next_lstm_obs_seq[-1] = next_obs
+
+                # next_lstm_obs_seq is (E,N,*), next_obs is (E,*)
+                #
+                # next_lstm_obs_seq[:, -1] = next_obs expands to:
+                # next_lstm_obs_seq[0][-1] = next_obs[0]
+                # next_lstm_obs_seq[1][-1] = next_obs[1]
+                # ...
+                next_lstm_obs_seq[:, -1] = next_obs
                 next_lstm_feat_seq = next_lstm_feat_seq.roll(-1, dims=1)
-                next_lstm_feat_seq[-1] = agent.NN.extract_features(next_obs)
+                next_lstm_feat_seq[:, -1] = agent.NN.extract_features(next_obs)
+                # Reset LSTM states on episode end
+                next_lstm_hstate[next_done] = torch.zeros_like(next_lstm_hstate[0])
+                next_lstm_cstate[next_done] = torch.zeros_like(next_lstm_cstate[0])
+
                 rewards[step] = torch.as_tensor(reward, device=device).view(-1)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
 
@@ -765,8 +781,8 @@ def main(args, agent_cls=Agent):
 
                     _, _, _, newlogprob, entropy, newvalue = agent.NN.get_action_and_value(
                         mb_lstm_feat_seqs,
-                        b_lstm_hstates[mb_inds].transpose(0, 1),  # => (N,B,*) => (B,N,*)
-                        b_lstm_cstates[mb_inds].transpose(0, 1),  # => (N,B,*) => (B,N,*)
+                        b_lstm_hstates[mb_inds],
+                        b_lstm_cstates[mb_inds],
                         b_masks[mb_inds],
                         action=b_actions.long()[mb_inds]
                     )
@@ -949,7 +965,7 @@ def debug_args():
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
-        envmaps=["gym/A1.vmap"],
+        envmaps=["gym/A1.vmap", "gym/A2.vmap"],
         # num_steps=64,
         num_steps=256,
         gamma=0.8,
