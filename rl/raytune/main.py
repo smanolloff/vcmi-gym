@@ -30,6 +30,7 @@ Available algos:
   mppo_dna      MPPO with Dual Network Arch (MPPO-DNA)
   mppg          Maskable Phasic Policy Gradient (PPG)
   mqrdqn        Maskable Quantile-Regression DQN (QRDQN)
+  ...           (refer to the contents of the rl/algos directory)
 
 Examples:
   python -m rl.raytune.main -n "PBT-experiment1-{datetime}"
