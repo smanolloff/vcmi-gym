@@ -269,7 +269,9 @@ class VcmiEnv(gym.Env):
 
     @tracelog
     def action_mask(self):
-        return self.result.actmask
+        mask = self.result.actmask
+        mask[0] = False  # prevent retreats for now
+        return mask
 
     # To use attnmask, code in pyconnector.py and BAI/v1/state.cpp
     # must be uncommented and both VCMI and connector must be recompiled.

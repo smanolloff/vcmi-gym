@@ -1039,7 +1039,7 @@ def debug_args():
                 proj_size=0,
                 seq_len=5
             ),
-            actor=dict(t="Linear", in_features=512, out_features=2311),
+            actor=dict(t="Linear", in_features=512, out_features=2312),
             critic=dict(t="Linear", in_features=512, out_features=1)
         )
     )

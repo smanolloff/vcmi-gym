@@ -213,33 +213,20 @@ config = {
 
     # NN arch
     "network": {
-        "features_extractor_stacks": [
-            # => (B, 1960)
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*98]},
-            # => (B, 1, 1960)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 98, "stride": 98},
-            {"t": "Flatten"},
-            {"t": "LeakyReLU"},
-            # => (B, 160)
-        ],
-        "features_extractor_hexes": [
-            # => (B, 10725)
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 165*65]},
-            # => (B, 1, 10725)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 65, "stride": 65},
-            {"t": "Flatten"},
-            {"t": "LeakyReLU"},
-            # => (B, 660)
-        ],
         "lstm": {
-            "input_shape": [820],
+            "input_shape": [12685],
             "bidirectional": False,
             "num_layers": 1,
             "hidden_size": 512,
             "proj_size": 0,
             "seq_len": 5
         },
-        "actor": {"t": "Linear", "in_features": 512, "out_features": 2311},
+        "features_extractor": [
+            # => (B, 820)
+            {"t": "Linear", "in_features": 512, "out_features": 512},
+            {"t": "LeakyReLU"},
+        ],
+        "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},
         "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
     },
 

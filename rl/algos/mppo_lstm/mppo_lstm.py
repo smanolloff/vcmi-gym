@@ -997,7 +997,7 @@ def debug_args():
                 dict(t="Linear", in_features=512, out_features=512),
                 dict(t="LeakyReLU"),
             ],
-            actor=dict(t="Linear", in_features=512, out_features=2311),
+            actor=dict(t="Linear", in_features=512, out_features=2312),
             critic=dict(t="Linear", in_features=512, out_features=1)
         )
     )
