@@ -108,10 +108,7 @@ def get_templates():
     with open(os.path.join(current_dir, "templates", "4096", "surface_terrain.json"), "r") as f:
         surface_terrain = json.load(f)
 
-    with open(os.path.join(current_dir, "templates", "4096", "hero_mapping.json"), "r") as f:
-        hero_mapping = json.load(f)
-
-    return header, objects, surface_terrain, hero_mapping
+    return header, objects, surface_terrain
 
 
 def build_army_with_retry(*args, verbose, **kwargs):
@@ -252,7 +249,7 @@ if __name__ == "__main__":
 
     for mapid in range(MAP_ID_START, MAP_ID_END + 1):
         print(f"*** Generating map #{mapid}")
-        header, objects, surface_terrain0, hero_mapping = get_templates()
+        header, objects, surface_terrain0 = get_templates()
         value = random.choice(all_values)
 
         header["name"] = MAP_NAME_TEMPLATE.format(id=mapid)
@@ -275,6 +272,8 @@ if __name__ == "__main__":
             buildings = list(reversed(fortnames[:fortlvl]))
             objects[f"town_{i}"]["options"]["buildings"]["allOf"] = buildings
 
+        colornames = ["red", "blue", "tan", "green", "orange", "purple", "teal", "pink"]
+
         for y in range(2, 66):  # 64 rows
             for x in range(5, 69):  # 64 columns (heroes are 2 tiles for some reason)
                 print(f"* Generating army for hero #{oid}")
@@ -285,9 +284,17 @@ if __name__ == "__main__":
                     hero_army[slot] = dict(amount=number, type=f"core:{vcminame}")
 
                 random.shuffle(hero_army)
-                values = dict(hero_mapping[(x-2) % 8], id=oid, x=x, y=y)
+                values = dict(
+                    color=colornames[(x-2) % 8],
+                    name=f"hero_{oid}",
+                    type=f"ml:hero_{oid}",
+                    animation="AH01",
+                    id=oid,
+                    x=x,
+                    y=y
+                )
                 color = values["color"]
-                header["players"][color]["heroes"][f"hero_{oid}"] = dict(type=f"core:{values['name']}")
+                header["players"][color]["heroes"][values["name"]] = dict(type=f"core:{values['name']}")
 
                 primary_skills = {"knowledge": 20}  # no effect due VCMI mana randomization
                 primary_skills["spellpower"] = random.randint(5, 15)
@@ -313,11 +320,11 @@ if __name__ == "__main__":
                     "core:airElemental"
                 ]
 
-                objects[f"hero_{oid}"] = dict(
+                objects[values["name"]] = dict(
                     type="hero", subtype=values["type"], x=x, y=y, l=0,
                     options=dict(
                         experience=oid,
-                        name=f"hero_{oid}",
+                        name=values["name"],
                         formation="wide",
                         gender=1,
                         owner=values["color"],
@@ -329,8 +336,8 @@ if __name__ == "__main__":
                         spellBook=spell_book
                     ),
                     template=dict(
-                        animation=f"{values['animation']}_.def",
-                        editorAnimation=f"{values['animation']}_E.def",
+                        animation=f"{values['animation']}_",
+                        editorAnimation=f"{values['animation']}_E",
                         mask=["VVV", "VAV"],
                         visitableFrom=["+++", "+-+", "+++"],
                     )

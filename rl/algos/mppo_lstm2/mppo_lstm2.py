@@ -694,7 +694,6 @@ def main(args, agent_cls=Agent):
                 # Reset LSTM states on episode end
                 next_lstm_hstate[next_done] = torch.zeros_like(next_lstm_hstate[0])
                 next_lstm_cstate[next_done] = torch.zeros_like(next_lstm_cstate[0])
-
                 rewards[step] = torch.as_tensor(reward, device=device).view(-1)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
 
@@ -787,6 +786,7 @@ def main(args, agent_cls=Agent):
                         b_masks[mb_inds],
                         action=b_actions.long()[mb_inds]
                     )
+                    breakpoint()
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 

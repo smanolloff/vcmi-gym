@@ -2,7 +2,6 @@ import json
 import sys
 import zipfile
 import io
-import random
 
 # Usage:
 # python maps/mapgen/add_hero_names.py path/to/map.vmap
@@ -23,17 +22,20 @@ if __name__ == "__main__":
             surface_terrain = json.load(file)
 
     for k, v in objects.items():
-        if k.startswith("hero_"):
-            sp = random.randint(5, 15)
-            # mana is randomized before each battle => knowledge is irrelevant
-            v["options"]["primarySkills"] = {"knowledge": 1, "spellpower": sp}
-            v["options"]["spellBook"] = [
-                "preset",
-                "core:fireElemental",
-                "core:earthElemental",
-                "core:waterElemental",
-                "core:airElemental"
-            ]
+        if not k.startswith("hero_"):
+            continue
+
+        v["options"]["type"] = "ml:%s" % k
+        v["subtype"] = "core:cleric"
+        v["template"]["animation"] = "AH01_.def"
+        v["template"]["editorAnimation"] = "AH01_E.def"
+        del v["options"]["formation"]
+        del v["options"]["gender"]
+        del v["options"]["portrait"]
+
+    for v0 in header["players"].values():
+        for k1, v1 in v0["heroes"].items():
+            v1["type"] = "ml:%s" % k1
 
     memory_zip = io.BytesIO()
     with zipfile.ZipFile(memory_zip, 'w') as zipf:

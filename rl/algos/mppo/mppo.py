@@ -15,6 +15,7 @@
 # =============================================================================
 # This file contains a modified version of CleanRL's PPO implementation:
 # https://github.com/vwxyzjn/cleanrl/blob/e421c2e50b81febf639fced51a69e2602593d50d/cleanrl/ppo.py
+import os
 import sys
 import random
 import logging
@@ -155,7 +156,7 @@ class Args:
     lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
     weight_decay: float = 0.0
     num_envs: int = 0  # DEPRECATED (envmaps determines number of envs now)
-    envmaps: list = field(default_factory=lambda: ["gym/A1.vmap"])
+    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-v3-100K-sand.vmap"])
     num_steps: int = 128
     gamma: float = 0.99
     stats_buffer_size: int = 100
@@ -439,6 +440,10 @@ def main(args, agent_cls=Agent):
     # Re-initialize to prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
     args = Args(**vars(args))
+
+    if os.getenv("NO_WANDB") == "true":
+        args.wandb_project = None
+
     printargs = asdict(args).copy()
 
     # Logger
@@ -861,7 +866,7 @@ def debug_args():
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
-        mapside="attacker",
+        mapside="defender",
         # save_every=2000000000,  # greater than time.time()
         save_every=2,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
@@ -947,7 +952,6 @@ def debug_args():
             critic=dict(t="Linear", in_features=512, out_features=1)
         )
     )
-
 
 if __name__ == "__main__":
     # To run from vcmi-gym root:

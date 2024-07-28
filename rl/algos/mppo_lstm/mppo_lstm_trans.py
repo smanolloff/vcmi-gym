@@ -314,15 +314,7 @@ class AgentNN(nn.Module):
 
     # Inference (deterministic)
     def predict(self, obs, mask):
-        if obs.shape != self.observation_space.shape:
-            # If observation is batched, only a single batch is supported
-            assert obs.shape[1:] == self.observation_space.shape, "bad input shape: %s, expected: %s or %s" % (
-                obs.shape, self.observation_space.shape, (1, *self.observation_space.shape))
-
-            assert obs.shape[0] == 1, "batched input is supported only if B=1, got: %s" % obs.shape
-
-            obs = obs[1:]
-            assert obs.shape == self.observation_space.shape
+        assert obs.shape == self.observation_space.shape, "expects unbatched input with shape: %s, got: %s" % (obs.shape, self.observation_space.shape)
 
         with torch.no_grad():
             obs = torch.as_tensor(obs, device='cpu')
@@ -629,8 +621,8 @@ def main(args, agent_cls=Agent):
         # XXX: storing hstates and cstates as batch-first
         #      see comments in get_action_and_value()
         lstm_obs_seqs = torch.zeros((args.num_steps, num_envs, lstm.seq_len, *obs_space.shape), device=device)
-        lstm_hstates = torch.zeros((args.num_steps, num_envs, lstm_d * lstm.num_layers, lstm.proj_size or lstm.hidden_size), device=device)
-        lstm_cstates = torch.zeros((args.num_steps, num_envs, lstm_d * lstm.num_layers, lstm.hidden_size), device=device)
+        lstm_hstates = torch.zeros((args.num_steps, lstm_d * lstm.num_layers, num_envs, lstm.proj_size or lstm.hidden_size), device=device)
+        lstm_cstates = torch.zeros((args.num_steps, lstm_d * lstm.num_layers, num_envs, lstm.hidden_size), device=device)
         actions = torch.zeros((args.num_steps, num_envs, *act_space.shape), device=device)
         logprobs = torch.zeros((args.num_steps, num_envs), device=device)
         rewards = torch.zeros((args.num_steps, num_envs), device=device)
@@ -701,8 +693,8 @@ def main(args, agent_cls=Agent):
                 # ...
                 next_lstm_obs_seq[:, -1] = next_obs
                 # Reset LSTM states on episode end
-                next_lstm_hstate[next_done] = torch.zeros_like(next_lstm_hstate[0])
-                next_lstm_cstate[next_done] = torch.zeros_like(next_lstm_cstate[0])
+                next_lstm_hstate[:, next_done] = torch.zeros_like(next_lstm_hstate[0][0])
+                next_lstm_cstate[:, next_done] = torch.zeros_like(next_lstm_cstate[0][0])
 
                 rewards[step] = torch.as_tensor(reward, device=device).view(-1)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)

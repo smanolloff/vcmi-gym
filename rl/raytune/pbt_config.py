@@ -164,12 +164,12 @@ config = {
 
     # "agent_load_file": None,
     "tags": ["Map-v3", "StupidAI", "obstacles-random", "v3"],
-    "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
+    "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
         # "gym/generated/4096/4096-mixstack-300K-01.vmap",
         # "gym/generated/4096/4096-mixstack-100K-01.vmap",
         # "gym/generated/4096/4096-mixstack-5K-01.vmap"
-        "gym/generated/4096/4096-v3-100K.vmap",
+        "gym/generated/4096/4096-v3-100K-mod.vmap",
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -213,17 +213,28 @@ config = {
 
     # NN arch
     "network": {
-        "lstm": {
-            "input_shape": [12685],
-            "bidirectional": False,
-            "num_layers": 1,
-            "hidden_size": 512,
-            "proj_size": 0,
-            "seq_len": 5
-        },
-        "features_extractor": [
+        "attention": None,
+        "features_extractor1_stacks": [
+            # => (B, 1960)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*98]},
+            # => (B, 1, 1960)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 98, "stride": 98},
+            {"t": "Flatten"},
+            {"t": "LeakyReLU"},
+            # => (B, 160)
+        ],
+        "features_extractor1_hexes": [
+            # => (B, 10725)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 165*65]},
+            # => (B, 1, 10725)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 65, "stride": 65},
+            {"t": "Flatten"},
+            {"t": "LeakyReLU"},
+            # => (B, 660)
+        ],
+        "features_extractor2": [
             # => (B, 820)
-            {"t": "Linear", "in_features": 512, "out_features": 512},
+            {"t": "Linear", "in_features": 820, "out_features": 512},
             {"t": "LeakyReLU"},
         ],
         "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},
