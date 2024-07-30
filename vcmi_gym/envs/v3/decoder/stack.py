@@ -14,28 +14,24 @@
 # limitations under the License.
 # =============================================================================
 
-class Battlefield():
+from collections import namedtuple
+
+from ..pyconnector import STACKATTRMAP
+
+
+class Stack(namedtuple("Stack", STACKATTRMAP.keys())):
     def __repr__(self):
-        return "Battlefield(11x15)"
+        return f'Stack(id={self.ID} side={self.SIDE} y={self.Y_COORD} x={self.X_COORD})'
 
-    def __init__(self):
-        self.hexes = []
-        self.stacks = []
+    def dump(self, compact=True):
+        maxlen = 0
+        lines = []
+        for field in self._fields:
+            value = getattr(self, field)
+            maxlen = max(maxlen, len(field))
 
-    def get_hex(self, y_or_n, x=None):
-        if x is not None:
-            y = y_or_n
-        else:
-            y = y_or_n // 15
-            x = y_or_n % 15
+            if value is None and compact:
+                continue
 
-        if y >= 0 and y < len(self.hexes) and x >= 0 and x < len(self.hexes[y]):
-            return self.hexes[y][x]
-        else:
-            print("Invalid hex (y=%s x=%s)" % (y, x))
-
-    def get_stack(self, i):
-        if i >= 0 and i < len(self.stacks):
-            return self.stacks[i]
-        else:
-            print("Invalid stack (ID=%s)" % i)
+            lines.append((field, value))
+        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))

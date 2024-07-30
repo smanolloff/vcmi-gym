@@ -278,7 +278,6 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "true_rng": False,
     },
     "seed": 0,
     "env_version": 3,

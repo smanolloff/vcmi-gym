@@ -20,7 +20,6 @@ import numpy as np
 from .other import (HexAction)
 from ..pyconnector import (
     HEXATTRMAP,
-    STACKATTRMAP,
     HEXACTMAP,
     HEXSTATEMAP,
     N_NONHEX_ACTIONS,
@@ -30,7 +29,7 @@ from ..pyconnector import (
 
 class Hex(namedtuple("Hex", HEXATTRMAP.keys())):
     def __repr__(self):
-        return f'Hex(y={self.HEX_Y_COORD} x={self.HEX_X_COORD})'
+        return f'Hex(y={self.Y_COORD} x={self.X_COORD})'
 
     def dump(self, compact=True):
         maxlen = 0
@@ -39,21 +38,19 @@ class Hex(namedtuple("Hex", HEXATTRMAP.keys())):
             value = getattr(self, field)
             maxlen = max(maxlen, len(field))
 
-            if field.startswith("HEX_ACTION_MASK_FOR_"):
-                names = list(HEXACTMAP.keys())
-                indexes = np.where(value)[0]
-                value = None if not any(indexes) else ", ".join([names[i] for i in indexes])
-            elif field.startswith("HEX_STATE"):
-                value = None if not value else list(HEXSTATEMAP.keys())[value]
-            elif field.startswith("HEX_MELEE_DISTANCE_FROM"):
-                value = None if not value else list(MELEEDISTMAP.keys())[value]
-            elif field.startswith("HEX_SHOOT_DISTANCE_FROM"):
-                value = None if not value else list(SHOOTDISTMAP.keys())[value]
-            elif field.startswith("HEX_MELEEABLE_BY"):
-                value = None if not value else list(DMGMODMAP.keys())[value]
-
-            if value is None and compact:
+            if value is not None:
+                match field:
+                    case "STATE_MASK":
+                        names = list(HEXSTATEMAP.keys())
+                        indexes = np.where(value)[0]
+                        value = ", ".join([names[i] for i in indexes])
+                    case "ACTION_MASK":
+                        names = list(HEXACTMAP.keys())
+                        indexes = np.where(value)[0]
+                        value = ", ".join([names[i] for i in indexes])
+            elif compact:
                 continue
+
             lines.append((field, value))
         print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))
 
@@ -64,14 +61,12 @@ class Hex(namedtuple("Hex", HEXATTRMAP.keys())):
         if hexaction not in HEXACTMAP.values():
             return None
 
-        if not self.HEX_ACTION_MASK_FOR_ACT_STACK[hexaction]:
+        if not self.ACTION_MASK[hexaction]:
             print("Action not possible for this hex")
             return None
 
-        n = 15*self.HEX_Y_COORD + self.HEX_X_COORD
+        n = 15*self.Y_COORD + self.X_COORD
         return N_NONHEX_ACTIONS + n*N_HEX_ACTIONS + hexaction
 
     def actions(self):
-        return [k for k, v in HexAction.__dict__.items() if self.HEX_ACTION_MASK_FOR_ACT_STACK[v]]
-
-
+        return [k for k, v in HexAction.__dict__.items() if self.ACTION_MASK[v]]

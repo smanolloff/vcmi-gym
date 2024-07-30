@@ -38,7 +38,10 @@ N_HEX_ACTIONS = EXPORTER.get_n_hex_actions()
 N_ACTIONS = EXPORTER.get_n_actions()
 
 STATE_SIZE = EXPORTER.get_state_size()
+STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
+STATE_SIZE_STACKS = EXPORTER.get_state_size_stacks()
 STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
+STATE_SIZE_ONE_STACK = EXPORTER.get_state_size_one_stack()
 STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
 HEXATTRMAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
@@ -247,6 +250,7 @@ class PyConnector():
         del self.v_command_type
         del self.cond
         del self.proc
+        del self.deathwatch_thread
 
         # attempt to prevent log duplication from ray PB2 training
         # Close logger last (because of the "Resources released" message)

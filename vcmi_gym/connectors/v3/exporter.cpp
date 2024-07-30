@@ -206,7 +206,7 @@ namespace Connector::V3 {
             .def("get_state_size_hexes", &Exporter::getStateSizeAllHexes)
             .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)
             .def("get_state_size_stacks", &Exporter::getStateSizeAllStacks)
-            .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)
+            .def("get_state_size_one_stack", &Exporter::getStateSizeOneStack)
             .def("get_state_value_na", &Exporter::getStateValueNa)
             .def("get_side_left", &Exporter::getSideLeft)
             .def("get_side_right", &Exporter::getSideRight)

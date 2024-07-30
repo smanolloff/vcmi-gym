@@ -60,7 +60,7 @@ class EnvArgs:
     step_reward_fixed: int = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
-    consecutive_error_reward_factor: Optional[int] = None
+    consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
     user_timeout: int = 30
     vcmi_timeout: int = 30
     boot_timeout: int = 30
@@ -73,7 +73,12 @@ class EnvArgs:
     swap_sides: int = 0
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
-    true_rng: bool = True
+    true_rng: bool = True  # DEPRECATED
+    deprecated_args: list[dict] = field(default_factory=lambda: [
+        "encoding_type",
+        "consecutive_error_reward_factor",
+        "true_rng"
+    ])
 
     def __post_init__(self):
         common.coerce_dataclass_ints(self)
