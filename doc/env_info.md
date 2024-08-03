@@ -3,7 +3,7 @@
 
 Here you will find documentation for the VCMI environment.
 
-> [!WARNING]
+> [!NOTE]
 > Note that this document is about the `VCMI-v3` gym environment, which (as of
 > Aug 2024) is the newest available version. Other environment versions may use
 > different actions, observations and rewards, so please refer to the source
@@ -15,12 +15,14 @@ Here you will find documentation for the VCMI environment.
 ## Starting
 
 VCMI is written in C++ and has an ML extension which must be compiled as a
-dynamic library (`libmlclient`). This library is linked to the main python
+dynamic library `libmlclient` (compilation instructions
+[here](https://github.com/smanolloff/vcmi)). This library is linked to the main python
 process at runtime as part of the gym environment's boot process.
 
-Starting the RL environment automatically starts a VCMI in a separate thread.
+Starting the RL environment automatically starts VCMI in a separate thread.
 Communication between the two threads is made possible via the `connector`
-component (refer to the [Connector](TODO:link) docs for more details).
+component (for details on how it works, [Connector](TODO:link) documentation will
+be published soon).
 
 Starting the environment is as simple as:
 
@@ -33,21 +35,21 @@ env = gym.make("VCMI-v3", mapname="gym/A1.vmap")
 
 There are more than 30 optional startup arguments which can be used to
 customize the environment. Information about them can be found in `VcmiEnv`'s
-`__init__` method docstring [here](../vcmi_gym/envs/v3/vcmi_env.py).
+`__init__` docstring [here](../vcmi_gym/envs/v3/vcmi_env.py).
 
 ## <a id="observations"></a> 👁️ Observations
 
-A flat (1-D) [`Box`](https://gymnasium.farama.org/api/spaces/fundamental/#box)
-observation space with a total of 12685 floats is returned on each timestep.
+On each timestep, a flat (1-D) [`Box`](https://gymnasium.farama.org/api/spaces/fundamental/#box)
+observation space with a total of 12685 floats is returned.
 
 These floats represent the encoded equivalents of various aspects of the
-current environment state. Three main encoding types used in the observation:
+current environment state. Three main encoding types are used in the observation:
 * Normalized - input value is normalized between `0` and `1`
 * categorical - input value is [one-hot](https://en.wikipedia.org/wiki/One-hot) encoded
 * binary - input value is represented as a [binary number](https://en.wikipedia.org/wiki/Binary_number)
 
 Depending on how NULL values are handled, there can be different variations of
-those encodings. The below table summarizes the encodings used here:
+those encodings. The below table contains examples which should explain the differences:
 
 <table>
     <thead>
@@ -58,8 +60,8 @@ those encodings. The below table summarizes the encodings used here:
             <th colspan=2>Example attribute<br><code>vmax=5</code></th>
         </tr>
         <tr>
-            <th>Unencoded</th>
-            <th>Encoded</th>
+            <th>Input</th>
+            <th>Output</th>
         </tr>
     </thead>
     <tbody>
@@ -460,6 +462,8 @@ by the `reward_clip_tanh_army_frac` parameter:
 
 ```math
 C = p_5 * V_{mean}
+```
+```math
 R_{clip} = C * \tanh(R_{base} / C)
 ```
 where:
@@ -484,9 +488,9 @@ where:
 - **R<sub>clip</sub>** is the clipped reward (see above)
 - **p<sub>6</sub>** is a configurable parameter `reward_army_value_ref`
 
-The effect of scaled rewards can be explained via an example.
+The effect of scaled rewards can be explained via an example:
 
-Example: consider these two VCMI battles:
+Consider these two VCMI battles:
   * (A) armies with total starting army value = 1K (early game army)
   * (B) armies with total starting army value = 100K (late game army)
 
