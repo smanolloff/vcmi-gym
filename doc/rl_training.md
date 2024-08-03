@@ -22,13 +22,13 @@ The implementations are inspired by
 them, which significantly imroved the training performance, hence they are all
 prefixed with an "M" for clarity (MPPO, MQRDQN, etc.). They are also wired to
 push metrics to [W&B](https://wandb.ai/site) where their training performance
-training can be observed.
+can be monitored.
 
 Other RL algorithm implementations would make a fine addition to the project.
 For example, opendilab's
 [LightZero](https://github.com/opendilab/LightZero), which I was unable to
-successfully integrate with vcmi-gym myself, but would still love to see it
-done. Contributions for this and any other RL algo implementations are most
+successfully integrate with vcmi-gym myself, but would still like to see here.
+Contributions for this and any other RL algo implementations are most
 welcome.
 
 ### Neural Network Architectures
@@ -49,7 +49,7 @@ Agents trained with
 networks achieved an overall worse performance than the simpler NNs described
 above. This
 [W&B report](https://wandb.ai/s-manolloff/vcmi-gym/reports/Network-architectures--Vmlldzo3OTQ1OTkw)
-offers a brief overview on the topic (and a bit outdated, as LSTM is not even
+offers a brief overview on the topic, although a bit outdated (LSTM is not even
 included there), but the general idea still stands.
 
 [Transformer](https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture))
@@ -70,7 +70,7 @@ to make a "one size fits all" algorithm implementation without introducing too
 much code complexity. For example, `rl/algos/mppo_lstm` uses the same
 algorithm (MPPO) as `rl/algos/mppo`, but the two are independent of each other
 for the sake of keeping them self-contained and easier to work with (at the
-cost of some code duplication, of course).
+cost of some code duplication).
 
 ### Hyperparameter optimization
 
@@ -85,8 +85,8 @@ for more details).
 
 A reportedly better version of PBT is ray's
 [PB2](https://www.anyscale.com/blog/population-based-bandits)
-(Population Based Bandits)
-(especially for small population sizes), but it was quite slow in practice
+(Population Based Bandits),
+especially for small population sizes, but it was quite slow in practice
 and seemed to only "explore" hyperparameter values at the boundary regions, so
 I stopped using it. The PB2 entrypoint for vcmi-gym can still be found in
 `rl/raytune/pb2.py`, but it hasn't been used in a while and might require some
@@ -99,7 +99,7 @@ entrypoint if needed.
 
 ### Model evaluation
 
-Although various metrics like win rate and mean episode reward are recorded
+Although various metrics like win rate and mean episodic reward are recorded
 during training, assessing the agent's performance in an environment other than
 the one it is trained on is cruicial.
 
