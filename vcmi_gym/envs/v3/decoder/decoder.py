@@ -52,7 +52,7 @@ class Decoder:
         for attr, (enctype, offset, n, vmax) in pyconnector.STACKATTRMAP.items():
             attrdata = stackdata[offset:][:n]
             res[attr] = cls.decode_attribute(attrdata, enctype, vmax)
-        return Stack(**res)
+        return Stack(**dict(res, data=stackdata))
 
     @classmethod
     def decode_hex(cls, hexdata):
@@ -60,7 +60,7 @@ class Decoder:
         for attr, (enctype, offset, n, vmax) in pyconnector.HEXATTRMAP.items():
             attrdata = hexdata[offset:][:n]
             res[attr] = cls.decode_attribute(attrdata, enctype, vmax)
-        return Hex(**res)
+        return Hex(**dict(res, data=hexdata))
 
     @classmethod
     def decode_attribute(cls, data, enctype, vmax):

@@ -447,7 +447,7 @@ class VcmiEnv(gym.Env):
 
         res = self.connector.act(action)
         if res.errcode > 0 and not self.allow_invalid_actions:
-            self.logger.warn("errcode=%d" % res.errcode)
+            self.logger.warn("Attempted an invalid action (errcode=%d)" % res.errcode)
 
         analysis = self.analyzer.analyze(action, res)
         term = res.is_battle_over

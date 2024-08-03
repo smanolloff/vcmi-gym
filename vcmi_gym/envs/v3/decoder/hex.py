@@ -27,7 +27,7 @@ from ..pyconnector import (
 )
 
 
-class Hex(namedtuple("Hex", HEXATTRMAP.keys())):
+class Hex(namedtuple("Hex", ["data"] + list(HEXATTRMAP.keys()))):
     def __repr__(self):
         return f'Hex(y={self.Y_COORD} x={self.X_COORD})'
 
@@ -35,6 +35,9 @@ class Hex(namedtuple("Hex", HEXATTRMAP.keys())):
         maxlen = 0
         lines = []
         for field in self._fields:
+            if field == "data":
+                continue
+
             value = getattr(self, field)
             maxlen = max(maxlen, len(field))
 

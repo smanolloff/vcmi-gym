@@ -16,22 +16,34 @@
 
 from collections import namedtuple
 
-from ..pyconnector import STACKATTRMAP
+from ..pyconnector import STACKATTRMAP, SIDEMAP
 
 
-class Stack(namedtuple("Stack", STACKATTRMAP.keys())):
+class Stack(namedtuple("Stack", ["data"] + list(STACKATTRMAP.keys()))):
     def __repr__(self):
-        return f'Stack(id={self.ID} side={self.SIDE} y={self.Y_COORD} x={self.X_COORD})'
+        return f'Stack(id={self.ID} side={self._side()} y={self.Y_COORD} x={self.X_COORD})'
 
     def dump(self, compact=True):
         maxlen = 0
         lines = []
         for field in self._fields:
+            if field == "data":
+                continue
+
             value = getattr(self, field)
             maxlen = max(maxlen, len(field))
 
-            if value is None and compact:
+            if value is not None:
+                match field:
+                    case "SIDE":
+                        value = self._side()
+            elif compact:
                 continue
 
             lines.append((field, value))
         print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))
+
+    def _side(self):
+        if self.SIDE is None:
+            return None
+        return list(SIDEMAP)[self.SIDE]
