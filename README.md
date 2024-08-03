@@ -12,12 +12,12 @@ needed to produce VCMI combat AI models.
 
 The project is in a late stage of active development. The gym environment
 is stable and AIs can be successfully trained, although the optimal NN
-architecture and RL algorithm for the task are yet to be discovered (this
+architecture and RL algorithm for the task are yet to be discovered (a
 process which involves a *lot* of experimentation).
 
 An RL model is [currently in training](https://wandb.ai/s-manolloff/vcmi-gym),
-but the progress is slow due to the resource-constrained harware environment I
-am using.
+but the progress is slow due to the resource-constrained harware environment it
+is trained on.
 
 ### Future plans
 
@@ -30,7 +30,7 @@ a strategy for rolling out pre-trained AI models (e.g. as a VCMI mod).
 
 A high-level overview of the `vcmi-gym` project is given in the below diagram:
 
-<img src="doc/components.png" alt="components">
+<img src="doc/components.png" alt="components" height="500px">
 
 The W&B external component is optional. VCMI (the game itself) is required --
 it is a fork of VCMI with some modifications for RL training purposes and is
@@ -84,7 +84,7 @@ happened.
 
 ### RL training contributions
 
-If you have good spare hardware, please
+If you have spare hardware and would like to help with this project, please
 <a href="mailto:smanolloff@gmail.com">reach out</a> so we can work together
 on putting it to good use: e.g. for training new models (GPU-bound task),
 evaluating existing models (CPU-bound task), or creating and rebalancing
