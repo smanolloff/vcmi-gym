@@ -782,8 +782,8 @@ def main(args):
 
 def debug_args():
     return Args(
-        "debug-crl",
-        "debug-crl",
+        "mppg-test",
+        "mppg-test",
         loglevel=logging.DEBUG,
         run_name=None,
         wandb_project=None,
@@ -806,7 +806,7 @@ def debug_args():
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=0,
-        out_dir_template="data/debug-crl/debug-crl",
+        out_dir_template="data/mppg-test/mppg-test",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,

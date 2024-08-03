@@ -1,0 +1,119 @@
+@startuml "rl-mapgen"
+
+!include <C4/C4_Container>
+!include <tupadr3/devicons2/cplusplus>
+!include <tupadr3/devicons2/python>
+!include <tupadr3/font-awesome/bar_chart>
+!include <tupadr3/font-awesome/database>
+
+skinparam DefaultFontName monospaced
+<style>
+note {  MaximumWidth 500 }
+</style>
+
+' Used in place of " " where line wrapping is undesired
+!$nbsp = "<U+00A0>"
+
+HIDE_STEREOTYPE()
+' LAYOUT_LEFT_RIGHT()
+' LAYOUT_WITH_LEGEND()
+SetDefaultLegendEntries("")
+
+' Prevent confusing text color in legend by setting it to the default color
+!$LEGEND_DARK_COLOR=$ELEMENT_FONT_COLOR
+!$LEGEND_LIGHT_COLOR=$ELEMENT_FONT_COLOR
+
+AddElementTag("local", $bgColor="SteelBlue", $borderColor="SteelBlue", $legendText="local component")
+AddElementTag("ext", $bgColor="#aaa", $borderColor="#aaa", $legendText="external component")
+
+AddRelTag("dashed", $lineThickness="1", $lineStyle="dashed")
+AddRelTag("async", $textColor="#1400c9", $lineColor="#1400c9", $lineThickness="1", $lineStyle="dashed", $legendText="-")
+
+UpdateElementStyle(person, $bgColor="white", $borderColor="white", $fontColor="black")
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''' FUNCTIONS
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' Replace $search with $repl within $txt
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+' Allows to define a string in multiple lines, replacing "\n"
+' with actual newlines (note: all literal newlines must be escaped)
+!function $str($txt)
+  !return $replace($txt, "\n", %newline())
+!endfunction
+
+!function $oneline($txt)
+  !return $replace($txt, " ", $nbsp)
+!endfunction
+
+!function $loc($dir)
+  !return "<color:yellow>" + $dir + "</color>"
+!endfunction
+
+!function $desc($txt)
+  !return "<i><font:Arial><size:10>" + $txt + "</size></font></i>"
+!endfunction
+
+!function $desc2($txt, $dir)
+  !return $desc($txt) + "\n\n" + $loc($dir)
+!endfunction
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Person(User, "User")
+Container(MapGenerator, "Map generator", "Python", $loc("./maps/mapgen/mapgen_4096.py"), $sprite="python", $tags="local")
+Container(VCMI, "\nVCMI", "C++", $sprite="vcmi", $tags="ext")
+Container(MapRebalancer, "Map rebalancer", "Python", $loc("./maps/mapgen/rebalance.py"), $sprite="python", $tags="local")
+Container(DB, "Stats DB", "sqlite3", $sprite="database", $tags="ext")
+
+Rel(User, MapGenerator, "Configures")
+Rel(User, VCMI, "Configures")
+Rel(VCMI, DB, "Writes")
+Rel(User, MapRebalancer, "Configures")
+Rel(MapRebalancer, DB, "Reads")
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''' Sprites
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+sprite $vcmi [64x64/4] {
+0000000000000000000000000000000061000000000000000000000000000000
+000000000000000000000000000014G0QxU72000000000000000000000000000
+000000000000000000000001144M2000g-ggggE7321000000000000000000000
+000000000000000000006I1000GmI6TqglggggggggwggUUEEEEEDK0000000000
+0000000000004O000000XH2698aqGG00g_gxggggggggwwggggcgP10000000000
+000000000000000ULWWWGG0000000000g_hkggggggggllg_Lb_lML0000000000
+00000000000L550gL000000000000000g_ggggggggghhwg_LL_hgL0000000000
+02222210127N721gL012222222222200g_x_xx_xl__l_ll_NN__hM0122222000
+LxGGGbg1gbGGGxLgRBlbGGGGGGGGG-R7h_xHGGGHw_x___-LHLLL_h0gwLbb_L00
+Lx110GqgqG011lLg_L000UTOOPUM11Hh__gLHLLLrv___vrLMLLL__0ggLLL_L00
+0Wrx000g000xwrLL_L001-N222IcYYYXvzlLLLwLLLk-kLLLwLLL_w0ggLLL_L00
+00L_110a011xgkfL_L05Lx_hhh_vrrr_LL_LLLlkULLLLLlllLLL_b0ggLLL_L00
+000Wr_40L_ra-gPQ-R7NLLbLbLbLLNR_LL_LLL_gkQQQQQ-__LLL_K0ggLLL_L00
+0000GuOOOuG0Gfgfff-_lUkkkkkkk-ggKKvffeuKGGGGGLgw-kljq00aueeeuG00
+00000000000000aQLLbv_hkggggggggg100000000001MfMggga0000000000000
+000000000000000GeMLMbv__gggggggg00000000016LMggQeG00000000000000
+00000000000000000GaMLLbv-lhgggggG0000001LbLLLPaG0000000000000000
+00000000000000000000WPLLLbv-lhhg000015LLLLMKG0000000000000000000
+0000000000000000000000GaLLLLbrv-155LLLLLOW0000000000000000000000
+0000000000000000000000000GKLLLLLLLPPLKG0000000000000000000000000
+0000000000000000000000000000GaPMMPKG0000000000000000000000000000
+0000000000000000000000000000000GG0000000000000000000000000000000
+}
+
+@enduml

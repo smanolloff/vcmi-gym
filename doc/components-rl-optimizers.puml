@@ -1,0 +1,89 @@
+@startuml "rl-optimizers"
+
+!include <C4/C4_Container>
+!include <tupadr3/devicons2/cplusplus>
+!include <tupadr3/devicons2/python>
+!include <tupadr3/font-awesome/bar_chart>
+!include <tupadr3/font-awesome/database>
+
+skinparam DefaultFontName monospaced
+<style>
+note {  MaximumWidth 500 }
+</style>
+
+' Used in place of " " where line wrapping is undesired
+!$nbsp = "<U+00A0>"
+
+HIDE_STEREOTYPE()
+' LAYOUT_LEFT_RIGHT()
+' LAYOUT_WITH_LEGEND()
+
+' Prevent confusing text color in legend by setting it to the default color
+!$LEGEND_DARK_COLOR=$ELEMENT_FONT_COLOR
+!$LEGEND_LIGHT_COLOR=$ELEMENT_FONT_COLOR
+
+AddElementTag("local", $bgColor="SteelBlue", $borderColor="SteelBlue", $legendText="local component")
+AddElementTag("ext", $bgColor="#aaa", $borderColor="#aaa", $legendText="external component")
+
+AddRelTag("dashed", $lineThickness="1", $lineStyle="dashed")
+AddRelTag("async", $textColor="#1400c9", $lineColor="#1400c9", $lineThickness="1", $lineStyle="dashed", $legendText="-")
+
+UpdateElementStyle(person, $bgColor="white", $borderColor="white", $fontColor="black")
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+' Replace $search with $repl within $txt
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+' Allows to define a string in multiple lines, replacing "\n"
+' with actual newlines (note: all literal newlines must be escaped)
+!function $str($txt)
+  !return $replace($txt, "\n", %newline())
+!endfunction
+
+!function $oneline($txt)
+  !return $replace($txt, " ", $nbsp)
+!endfunction
+
+!function $loc($dir)
+  !return "<color:yellow>" + $dir + "</color>"
+!endfunction
+
+!function $desc($txt)
+  !return "<i><font:Arial><size:10>" + $txt + "</size></font></i>"
+!endfunction
+
+!function $desc2($txt, $dir)
+  !return $desc($txt) + "\n\n" + $loc($dir)
+!endfunction
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Person(User, "User")
+Container(wandb, "Weights & Biases", "HTTP API", $loc("wandb.ai/s-manolloff/vcmi-gym"), $sprite="bar_chart", $tags="ext")
+Container(Optimizer, "Hyperparameter optimizer", "Python/ray", $desc2("e.g. PBT or PB2", "./rl/raytune/"), $sprite="python", $tags="local")
+Boundary(pool, "") {
+Container(RL1, "RL Algorithm", "", $desc("Agent #1"), $tags="ext")
+Container(RL2, "RL Algorithm", "", $desc("Agent #2"), $tags="ext")
+Container(RLN, "RL Algorithm", "", $desc("Agent #N"), $tags="ext")
+}
+
+Rel(User, Optimizer, "Configures")
+Rel(User, wandb, "Observes")
+Rel_R(Optimizer, wandb, "Stores models")
+Rel(Optimizer, RL1, "")
+Rel(Optimizer, RL2, "Orchestrates")
+Rel(Optimizer, RLN, "")
+
+@enduml

@@ -922,8 +922,8 @@ def main(args, agent_cls=Agent):
 
 def debug_args():
     return Args(
-        "debug-crl",
-        "debug-crl",
+        "mppo_lstm-test",
+        "mppo_lstm-test",
         loglevel=logging.DEBUG,
         run_name=None,
         trial_id=None,
@@ -931,8 +931,8 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="data/debug-crl/debug-crl/agent-1718753136.pt",
-        # agent_load_file="data/debug-crl/debug-crl/agent-1718752596.pt",
+        # agent_load_file="data/mppo_lstm-test/mppo_lstm-test/agent-1718753136.pt",
+        # agent_load_file="data/mppo_lstm-test/mppo_lstm-test/agent-1718752596.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -947,7 +947,7 @@ def debug_args():
         save_every=2,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=1,
-        out_dir_template="data/debug-crl/debug-crl",
+        out_dir_template="data/mppo_lstm-test/mppo_lstm-test",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,

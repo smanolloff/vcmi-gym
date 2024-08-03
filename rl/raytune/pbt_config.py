@@ -167,9 +167,9 @@ config = {
     "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
         # "gym/generated/4096/4096-mixstack-300K-01.vmap",
-        # "gym/generated/4096/4096-mixstack-100K-01.vmap",
+        "gym/generated/4096/4096-mixstack-100K-01.vmap",
         # "gym/generated/4096/4096-mixstack-5K-01.vmap"
-        "gym/generated/4096/4096-v3-100K-mod.vmap",
+        # "gym/generated/4096/4096-v3-100K-mod.vmap",
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -270,10 +270,10 @@ config = {
         "reward_army_value_ref": 500,
         "random_heroes": 1,
         "random_obstacles": 1,
-        "town_chance": 10,
+        "town_chance": 0,
         "warmachine_chance": 40,
         "mana_min": 0,
-        "mana_max": 100,
+        "mana_max": 0,
         "swap_sides": 0,
         "user_timeout": 60,
         "vcmi_timeout": 60,

@@ -62,21 +62,9 @@ bgjob() {
 
 function run_mlclient() {
     #
-    # Measured values with 20K battles, 36 workers, 5.4K RPM HDD:
+    # Measured values with 20K battles, 36 workers, 64 CPU cores, 5.4K RPM HDD:
     # * 1 worker gathers data for 14min
     # * 36 workers need a total of 15min for dbupdate (~25s per worker)
-    #
-    # This is problematic as the 1st worker finishes a 2nd round
-    # of data gathering, while the 36th worker still waits for dbupdate
-    # from the 1st round.
-    #
-    # Increasing the number of battles causes a greater increase in data
-    # gathering time compared to the increase in dbupdate time
-    # => increase battles such that dbupdate time becomes the smaller value
-    #
-    # Expected values with 26K battles:
-    # * 36 workers should need a total of 17min (+3s per per dbupdate)
-    # * 1 worker should gather data for 19min
     #
     timeout_minutes=20  # XXX: ensure watchdog has bigger timeout
 

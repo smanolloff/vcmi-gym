@@ -31,15 +31,15 @@ class TestHelper:
         self.auto_render = auto_render
         self.env.reset()
         self.battlefield = self.env.decode()
-        self.env.render()
+        self.render()
 
     def render(self):
-        self.env.render()
+        print(self.env.render())
 
     def reset(self):
         self.env.reset()
         self.battlefield = self.env.decode()
-        self.env.render()
+        self.render()
 
     def _maybe_render(self, action):
         if action is None:
@@ -47,19 +47,19 @@ class TestHelper:
 
         obs, rew, self.term, trunc, info = self.env.step(action)
         self.battlefield = self.env.decode()
-        self.env.render()
+        self.render()
 
     def wait(self):
-        self._maybe_render(0)
+        self._maybe_render(1)
 
     # x: 1..15
     # y: 1..11
     def move(self, y, x):
-        a = self.battlefield.get(y, x).action(HexAction.MOVE)
+        a = self.battlefield.get_hex(y, x).action(HexAction.MOVE)
         self._maybe_render(a)
 
     def shoot(self, y, x):
-        a = self.battlefield.get(y, x).action(HexAction.SHOOT)
+        a = self.battlefield.get_hex(y, x).action(HexAction.SHOOT)
         self._maybe_render(a)
 
     def melee(self, y, x, direction):
@@ -68,20 +68,25 @@ class TestHelper:
         else:
             amove = direction
 
-        a = self.battlefield.get(y, x).action(amove)
+        a = self.battlefield.get_hex(y, x).action(amove)
         self._maybe_render(a)
 
     def amove(self, *args, **kwargs):
         return self.melee(*args, **kwargs)
 
     def defend(self):
-        for row in self.battlefield:
-            for x in row:
-                if x.STACK_IS_ACTIVE:
-                    if x.STACK_IS_WIDE and x.STACK_SIDE == 0:
-                        x = self.battlefield.get(x.HEX_Y_COORD, x.HEX_X_COORD + 1)
-                    self._maybe_render(x.action(HexAction.MOVE))
-                    return
+        astack = None
+        for stack in self.battlefield.stacks:
+            if stack.QUEUE_POS == 0:
+                astack = stack
+                break
+
+        if not astack:
+            raise Exception("Could not find active stack")
+
+        # Moving to self results in a defend action
+        h = self.battlefield.get_hex(astack.Y_COORD, astack.X_COORD)
+        self._maybe_render(h.action(HexAction.MOVE))
 
     def random(self):
         actions = np.where(self.env.action_mask())[0]

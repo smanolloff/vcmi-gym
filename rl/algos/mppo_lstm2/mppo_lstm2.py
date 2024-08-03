@@ -15,6 +15,9 @@
 # =============================================================================
 # This file contains a modified version of CleanRL's PPO implementation:
 # https://github.com/vwxyzjn/cleanrl/blob/e421c2e50b81febf639fced51a69e2602593d50d/cleanrl/ppo.py
+#
+# It is similar to mppo_lstm, but is designed to 
+
 import sys
 import random
 import logging
@@ -786,7 +789,7 @@ def main(args, agent_cls=Agent):
                         b_masks[mb_inds],
                         action=b_actions.long()[mb_inds]
                     )
-                    breakpoint()
+                    # breakpoint()
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 

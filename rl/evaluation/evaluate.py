@@ -159,7 +159,9 @@ def create_venv(env_cls, agent, mapname, role, opponent, wrappers):
             defender=opponent
         )
 
-        env_kwargs.pop("encoding_type", None)  # deprecated arg
+        for a in env_kwargs.pop("deprecated_args", ["encoding_type"]):
+            env_kwargs.pop(a, None)
+
         env_kwargs[role] = "MMAI_USER"
         # LOG.debug("Env kwargs: %s" % env_kwargs)
         env = env_cls(**env_kwargs)

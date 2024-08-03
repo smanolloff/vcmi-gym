@@ -766,8 +766,8 @@ def main(args, agent_cls=Agent):
 
 def debug_args():
     return Args(
-        "debug-crl",
-        "debug-crl",
+        "mppo-dual-test",
+        "mppo-dual-test",
         loglevel=logging.DEBUG,
         run_name=None,
         trial_id=None,
@@ -775,7 +775,7 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="data/debug-crl/debug-crl/agent-permasave-1713526737.pt",
+        # agent_load_file="data/mppo-dual-test/mppo-dual-test/agent-permasave-1713526737.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -789,7 +789,7 @@ def debug_args():
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=0,
-        out_dir_template="data/debug-crl/debug-crl",
+        out_dir_template="data/mppo-dual-test/mppo-dual-test",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
