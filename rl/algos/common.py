@@ -330,7 +330,7 @@ def maybe_resume(agent_cls, args, device="cpu"):
     return agent, args
 
 
-def setup_wandb(args, agent, src_file):
+def setup_wandb(args, agent, src_file, watch=True):
     import wandb
 
     if args.skip_wandb_init:
@@ -381,7 +381,10 @@ def setup_wandb(args, agent, src_file):
     #      However, no model is logged at all if using just `agent`
     #      => proper fix would be to accept a list of NNs and call wandb.watch
     #         on each of them
-    return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
+    if watch:
+        return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
+    else:
+        return None
 
 
 def schedule_fn(schedule):

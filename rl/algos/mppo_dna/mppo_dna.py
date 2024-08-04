@@ -159,14 +159,17 @@ class Args:
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
-    lr_schedule_shared: ScheduleArgs = ScheduleArgs()
-    lr_schedule_value: ScheduleArgs = ScheduleArgs()
-    lr_schedule_policy: ScheduleArgs = ScheduleArgs()
-    lr_schedule_distill: ScheduleArgs = ScheduleArgs()
+
+    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())  # used if lr_schedule-specific values is 0
+    lr_schedule_value: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
+    lr_schedule_policy: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
+    lr_schedule_distill: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
     clip_coef: float = 0.2
     clip_vloss: bool = False
     distill_beta: float = 1.0
     ent_coef: float = 0.01
+    vf_coef: float = 1.2,  # not used
+    gae_lambda: float = 0.95
     gae_lambda_policy: float = 0.95
     gae_lambda_value: float = 0.95
     gamma: float = 0.99
@@ -174,13 +177,15 @@ class Args:
     norm_adv: bool = True
     num_envs: int = 1
     envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-mixstack-100K-01.vmap"])
-    num_minibatches_shared: int = 4
+
+    num_minibatches: int = 4  # used if num_minibatches-specific values is 0
     num_minibatches_distill: int = 0
     num_minibatches_policy: int = 0
     num_minibatches_value: int = 0
     num_steps: int = 128
     stats_buffer_size: int = 100
-    update_epochs_shared: int = 4
+
+    update_epochs: int = 4  # used if update_epochs-specific values is 0
     update_epochs_distill: int = 0
     update_epochs_policy: int = 0
     update_epochs_value: int = 0
@@ -193,16 +198,16 @@ class Args:
     skip_wandb_init: bool = False
     skip_wandb_log_code: bool = False
 
-    env: EnvArgs = EnvArgs()
+    env: EnvArgs = field(default_factory=lambda: EnvArgs())
     env_version: int = 0
     env_wrappers: list = field(default_factory=list)
-    network: NetworkArgs = NetworkArgs()
+    network: NetworkArgs = field(default_factory=lambda: NetworkArgs())
 
     def __post_init__(self):
         if not isinstance(self.env, EnvArgs):
             self.env = EnvArgs(**self.env)
-        if not isinstance(self.lr_schedule_shared, ScheduleArgs):
-            self.lr_schedule_shared = ScheduleArgs(**self.lr_schedule_shared)
+        if not isinstance(self.lr_schedule, ScheduleArgs):
+            self.lr_schedule = ScheduleArgs(**self.lr_schedule)
         if not isinstance(self.lr_schedule_value, ScheduleArgs):
             self.lr_schedule_value = ScheduleArgs(**self.lr_schedule_value)
         if not isinstance(self.lr_schedule_policy, ScheduleArgs):
@@ -214,19 +219,16 @@ class Args:
 
         for a in ["distill", "policy", "value"]:
             if getattr(self, f"update_epochs_{a}") == 0:
-                setattr(self, f"update_epochs_{a}" == self.update_epochs_shared)
+                setattr(self, f"update_epochs_{a}", self.update_epochs)
 
             if getattr(self, f"num_minibatches_{a}") == 0:
-                setattr(self, f"num_minibatches_{a}" == self.num_minibatches_shared)
+                setattr(self, f"num_minibatches_{a}", self.num_minibatches)
+
+            if a != "distill" and getattr(self, f"gae_lambda_{a}") == 0:
+                setattr(self, f"gae_lambda_{a}", self.gae_lambda)
 
             if getattr(self, f"lr_schedule_{a}").start == 0:
-                setattr(self, f"lr_schedule_{a}" == self.lr_schedule_shared)
-
-        if self.update_epochs_policy == 0:
-            self.update_epochs_policy = self.update_epochs_all
-
-        if self.update_epochs_value == 0:
-            self.update_epochs_value = self.update_epochs_all
+                setattr(self, f"lr_schedule_{a}", self.lr_schedule)
 
         common.coerce_dataclass_ints(self)
 
@@ -618,7 +620,8 @@ def main(args):
 
         if args.wandb_project:
             import wandb
-            common.setup_wandb(args, agent, __file__)
+            common.setup_wandb(args, agent, __file__, watch=False)
+            wandb.watch(agent.NN_policy, log="all", log_graph=True, log_freq=1000)
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
@@ -1031,17 +1034,21 @@ def debug_args():
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
+        lr_schedule=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
         num_envs=1,
         num_steps=8,
         gamma=0.8,
+        gae_lambda=0.9,
         gae_lambda_policy=0.95,
         gae_lambda_value=0.95,
+        num_minibatches=4,
         num_minibatches_value=4,
         num_minibatches_policy=4,
         num_minibatches_distill=4,
+        update_epochs=2,
         update_epochs_value=2,
         update_epochs_policy=2,
         update_epochs_distill=2,
