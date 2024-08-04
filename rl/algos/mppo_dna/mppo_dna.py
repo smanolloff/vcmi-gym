@@ -159,6 +159,7 @@ class Args:
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
+    lr_schedule_shared: ScheduleArgs = ScheduleArgs()
     lr_schedule_value: ScheduleArgs = ScheduleArgs()
     lr_schedule_policy: ScheduleArgs = ScheduleArgs()
     lr_schedule_distill: ScheduleArgs = ScheduleArgs()
@@ -173,15 +174,16 @@ class Args:
     norm_adv: bool = True
     num_envs: int = 1
     envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-mixstack-100K-01.vmap"])
-    num_minibatches_distill: int = 4
-    num_minibatches_policy: int = 4
-    num_minibatches_value: int = 4
+    num_minibatches_shared: int = 4
+    num_minibatches_distill: int = 0
+    num_minibatches_policy: int = 0
+    num_minibatches_value: int = 0
     num_steps: int = 128
     stats_buffer_size: int = 100
-    update_epochs_distill: int = 4
-    update_epochs_policy: int = 4
-    update_epochs_value: int = 4
-    vf_coef: float = 0.5
+    update_epochs_shared: int = 4
+    update_epochs_distill: int = 0
+    update_epochs_policy: int = 0
+    update_epochs_value: int = 0
     weight_decay: float = 0.0
     target_kl: float = None
 
@@ -199,6 +201,8 @@ class Args:
     def __post_init__(self):
         if not isinstance(self.env, EnvArgs):
             self.env = EnvArgs(**self.env)
+        if not isinstance(self.lr_schedule_shared, ScheduleArgs):
+            self.lr_schedule_shared = ScheduleArgs(**self.lr_schedule_shared)
         if not isinstance(self.lr_schedule_value, ScheduleArgs):
             self.lr_schedule_value = ScheduleArgs(**self.lr_schedule_value)
         if not isinstance(self.lr_schedule_policy, ScheduleArgs):
@@ -207,6 +211,22 @@ class Args:
             self.lr_schedule_distill = ScheduleArgs(**self.lr_schedule_distill)
         if not isinstance(self.network, NetworkArgs):
             self.network = NetworkArgs(**self.network)
+
+        for a in ["distill", "policy", "value"]:
+            if getattr(self, f"update_epochs_{a}") == 0:
+                setattr(self, f"update_epochs_{a}" == self.update_epochs_shared)
+
+            if getattr(self, f"num_minibatches_{a}") == 0:
+                setattr(self, f"num_minibatches_{a}" == self.num_minibatches_shared)
+
+            if getattr(self, f"lr_schedule_{a}").start == 0:
+                setattr(self, f"lr_schedule_{a}" == self.lr_schedule_shared)
+
+        if self.update_epochs_policy == 0:
+            self.update_epochs_policy = self.update_epochs_all
+
+        if self.update_epochs_value == 0:
+            self.update_epochs_value = self.update_epochs_all
 
         common.coerce_dataclass_ints(self)
 
@@ -1029,7 +1049,6 @@ def debug_args():
         clip_coef=0.3,
         clip_vloss=True,
         ent_coef=0.01,
-        vf_coef=1.2,
         max_grad_norm=0.5,
         distill_beta=1.0,
         target_kl=None,
