@@ -316,7 +316,15 @@ class AgentNN(nn.Module):
 
     # Inference (deterministic)
     def predict(self, obs, mask):
-        assert obs.shape == self.observation_space.shape, "expects unbatched input with shape: %s, got: %s" % (obs.shape, self.observation_space.shape)
+        if obs.shape != self.observation_space.shape:
+            # If observation is batched, only a single batch is supported
+            assert obs.shape[1:] == self.observation_space.shape, "bad input shape: %s, expected: %s or %s" % (
+                obs.shape, self.observation_space.shape, (1, *self.observation_space.shape))
+
+            assert obs.shape[0] == 1, "batched input is supported only if B=1, got: %s" % obs.shape
+
+            obs = obs[1:]
+            assert obs.shape == self.observation_space.shape
 
         with torch.no_grad():
             obs = torch.as_tensor(obs, device='cpu')

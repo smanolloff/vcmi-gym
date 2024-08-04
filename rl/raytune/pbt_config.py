@@ -227,14 +227,14 @@ config = {
             # => (B, 10725)
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 165*65]},
             # => (B, 1, 10725)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 65, "stride": 65},
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 65, "stride": 65},
             {"t": "Flatten"},
             {"t": "LeakyReLU"},
-            # => (B, 660)
+            # => (B, 1320)
         ],
         "features_extractor2": [
-            # => (B, 820)
-            {"t": "Linear", "in_features": 820, "out_features": 512},
+            # => (B, 1480)
+            {"t": "Linear", "in_features": 1480, "out_features": 512},
             {"t": "LeakyReLU"},
         ],
         "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},

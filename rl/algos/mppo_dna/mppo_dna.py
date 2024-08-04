@@ -15,6 +15,7 @@
 # =============================================================================
 # This file contains a modified version of CleanRL's PPO-DNA implementation:
 # https://github.com/vwxyzjn/cleanrl/blob/caabea4c5b856f429baa2af8bc973d4994d4c330/cleanrl/ppo_dna_atari_envpool.py
+import os
 import sys
 import random
 import logging
@@ -30,7 +31,6 @@ import torch
 import torch.nn as nn
 # import tyro
 
-from vcmi_gym import VcmiEnv
 from .. import common
 
 ENVS = []  # debug
@@ -51,7 +51,7 @@ class ScheduleArgs:
 
 @dataclass
 class EnvArgs:
-    encoding_type: str = "default"
+    encoding_type: str = ""  # DEPRECATED
     max_steps: int = 500
     reward_dmg_factor: int = 5
     vcmi_loglevel_global: str = "error"
@@ -61,12 +61,25 @@ class EnvArgs:
     step_reward_fixed: int = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
-    consecutive_error_reward_factor: Optional[int] = None
-    vcmi_timeout: int = 5
+    consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
+    user_timeout: int = 30
+    vcmi_timeout: int = 30
+    boot_timeout: int = 30
     random_heroes: int = 1
     random_obstacles: int = 1
+    town_chance: int = 0
+    warmachine_chance: int = 0
+    mana_min: int = 0
+    mana_max: int = 0
+    swap_sides: int = 0
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
+    true_rng: bool = True  # DEPRECATED
+    deprecated_args: list[dict] = field(default_factory=lambda: [
+        "encoding_type",
+        "consecutive_error_reward_factor",
+        "true_rng"
+    ])
 
     def __post_init__(self):
         common.coerce_dataclass_ints(self)
@@ -74,21 +87,27 @@ class EnvArgs:
 
 @dataclass
 class NetworkArgs:
-    features_extractor: list[dict] = field(default_factory=list)
+    attention: dict = field(default_factory=dict)
+    features_extractor1_stacks: list[dict] = field(default_factory=list)
+    features_extractor1_hexes: list[dict] = field(default_factory=list)
+    features_extractor2: list[dict] = field(default_factory=list)
     actor: dict = field(default_factory=dict)
     critic: dict = field(default_factory=dict)
 
 
 @dataclass
 class State:
+    seed: int = -1
     resumes: int = 0
-    map_swaps: int = 0
+    map_swaps: int = 0  # DEPRECATED
     global_timestep: int = 0
     current_timestep: int = 0
     current_vstep: int = 0
     current_rollout: int = 0
     global_second: int = 0
     current_second: int = 0
+    global_episode: int = 0
+    current_episode: int = 0
 
     ep_length_queue: deque = field(default_factory=lambda: deque(maxlen=100))
 
@@ -113,6 +132,7 @@ class Args:
     run_id: str
     group_id: str
     run_name: Optional[str] = None
+    trial_id: Optional[str] = None
     wandb_project: Optional[str] = None
     resume: bool = False
     overwrite: list = field(default_factory=list)
@@ -130,7 +150,7 @@ class Args:
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
     mapside: str = "both"
-    mapmask: str = "gym/A1.vmap"
+    mapmask: str = ""  # DEPRECATED
     randomize_maps: bool = False
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
@@ -152,12 +172,12 @@ class Args:
     max_grad_norm: float = 0.5
     norm_adv: bool = True
     num_envs: int = 1
+    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-mixstack-100K-01.vmap"])
     num_minibatches_distill: int = 4
     num_minibatches_policy: int = 4
     num_minibatches_value: int = 4
     num_steps: int = 128
     stats_buffer_size: int = 100
-    switch_train_eval: bool = True
     update_epochs_distill: int = 4
     update_epochs_policy: int = 4
     update_epochs_value: int = 4
@@ -172,6 +192,7 @@ class Args:
     skip_wandb_log_code: bool = False
 
     env: EnvArgs = EnvArgs()
+    env_version: int = 0
     env_wrappers: list = field(default_factory=list)
     network: NetworkArgs = NetworkArgs()
 
@@ -195,13 +216,6 @@ class ChanFirst(nn.Module):
         return x.permute(0, 3, 1, 2)
 
 
-class SelfAttention(nn.MultiheadAttention):
-    def forward(self, x):
-        # TODO: attn_mask
-        res, _weights = super().forward(x, x, x, need_weights=False, attn_mask=None)
-        return res
-
-
 class ResBlock(nn.Module):
     def __init__(self, channels, activation="LeakyReLU"):
         super().__init__()
@@ -213,6 +227,27 @@ class ResBlock(nn.Module):
 
     def forward(self, x):
         return x + self.block(x)
+
+
+class SelfAttention(nn.Module):
+    def __init__(self, edim):
+        super().__init__()
+        self.edim = edim
+        self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=1, batch_first=True)
+
+    def forward(self, b_obs, b_masks=None):
+        assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong obs shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
+        if b_masks is None:
+            b_obs = b_obs.flatten(start_dim=1, end_dim=2)
+            # => (B, 165, e)
+            res, _ = self.mha(b_obs, b_obs, b_obs, need_weights=False)
+            return res
+        else:
+            assert b_masks.shape == (b_masks.shape[0], 165, 165), f"wrong b_masks shape: {b_masks.shape} != ({b_masks.shape[0]}, 165, 165)"
+            b_obs = b_obs.flatten(start_dim=1, end_dim=2)
+            # => (B, 165, e)
+            res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
+            return res
 
 
 class AgentNN(nn.Module):
@@ -229,22 +264,50 @@ class AgentNN(nn.Module):
         self.observation_space = observation_space
         self.action_space = action_space
 
-        # 1 nonhex action (RETREAT) + 165 hexes*14 actions each
-        assert action_space.n == 1 + (165*14)
+        # 2 nonhex actions (RETREAT, WAIT) + 165 hexes*14 actions each
+        # Commented assert due to false positives on legacy models
+        # assert action_space.n == 2 + (165*14)
 
-        self.features_extractor = torch.nn.Sequential()
-        for spec in network.features_extractor:
+        if network.attention:
+            layer = AgentNN.build_layer(network.attention)
+            self.attention = common.layer_init(layer)
+        else:
+            self.attention = None
+
+        self.features_extractor1_stacks = torch.nn.Sequential()
+        for spec in network.features_extractor1_stacks:
             layer = AgentNN.build_layer(spec)
-            self.features_extractor.append(common.layer_init(layer))
+            self.features_extractor1_stacks.append(common.layer_init(layer))
+
+        self.features_extractor1_hexes = torch.nn.Sequential()
+        for spec in network.features_extractor1_hexes:
+            layer = AgentNN.build_layer(spec)
+            self.features_extractor1_hexes.append(common.layer_init(layer))
+
+        self.features_extractor2 = torch.nn.Sequential()
+        for spec in network.features_extractor2:
+            layer = AgentNN.build_layer(spec)
+            self.features_extractor2.append(common.layer_init(layer))
 
         self.actor = common.layer_init(AgentNN.build_layer(network.actor), gain=0.01)
         self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
-    def get_value(self, x):
-        return self.critic(self.features_extractor(x))
+    def extract_features(self, x):
+        stacks, hexes = x.split([1960, 10725], dim=1)
+        fstacks = self.features_extractor1_stacks(stacks)
+        fhexes = self.features_extractor1_hexes(hexes)
+        fcat = torch.cat((fstacks, fhexes), dim=1)
+        return self.features_extractor2(fcat)
 
-    def get_action_and_value(self, x, mask, action=None, deterministic=False):
-        features = self.features_extractor(x)
+    def get_value(self, x, attn_mask=None):
+        if self.attention:
+            x = self.attention(x, attn_mask)
+        return self.critic(self.extract_features(x))
+
+    def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
+        if self.attention:
+            x = self.attention(x, attn_mask)
+        features = self.extract_features(x)
         value = self.critic(features)
         action_logits = self.actor(features)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
@@ -256,19 +319,20 @@ class AgentNN(nn.Module):
         return action, dist.log_prob(action), dist.entropy(), dist, value
 
     # Inference (deterministic)
+    # XXX: attention is not handled here
     def predict(self, b_obs, b_mask):
         with torch.no_grad():
-            b_obs = torch.as_tensor(b_obs).cpu()
-            b_mask = torch.as_tensor(b_mask).cpu()
+            b_obs = torch.as_tensor(b_obs, device='cpu')
+            b_mask = torch.as_tensor(b_mask, device='cpu')
 
             # Return unbatched action if input was unbatched
             if b_obs.shape == self.observation_space.shape:
                 b_obs = b_obs.unsqueeze(dim=0)
                 b_mask = b_mask.unsqueeze(dim=0)
-                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
                 return b_env_action[0].cpu().item()
             else:
-                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
                 return b_env_action.cpu().numpy()
 
 
@@ -279,7 +343,7 @@ class Agent(nn.Module):
     This prevents issues if the agent contains wandb hooks at save time.
     """
     @staticmethod
-    def save(agent, agent_file, nn_file=None):
+    def save(agent, agent_file):
         print("Saving agent to %s" % agent_file)
         attrs = ["args", "observation_space", "action_space", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
@@ -292,23 +356,100 @@ class Agent(nn.Module):
         torch.save(clean_agent, agent_file)
 
     @staticmethod
-    def load(agent_file):
-        print("Loading agent from %s" % agent_file)
-        return torch.load(agent_file)
+    def jsave(agent, jagent_file):
+        print("Saving JIT agent to %s" % jagent_file)
+        attrs = ["args", "observation_space", "action_space", "state"]
+        data = {k: agent.__dict__[k] for k in attrs}
+        clean_agent = agent.__class__(**data)
+        clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
+        clean_agent.NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
+        clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
+        clean_agent.optimizer_policy.load_state_dict(agent.optimizer_policy.state_dict())
+        clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
+        jagent = JitAgent()
+        jagent.env_version = clean_agent.env_version
 
-    def __init__(self, args, observation_space, action_space, state=None):
+        # v1, v2
+        # jagent.features_extractor = clean_agent.NN.features_extractor
+
+        # v3
+        jagent.features_extractor1_stacks = clean_agent.NN.features_extractor1_stacks
+        jagent.features_extractor1_hexes = clean_agent.NN.features_extractor1_hexes
+        jagent.features_extractor2 = clean_agent.NN.features_extractor2
+
+        # common
+        jagent.actor = clean_agent.NN.actor
+        jagent.critic = clean_agent.NN.critic
+        torch.jit.save(torch.jit.script(jagent), jagent_file)
+
+    @staticmethod
+    def load(agent_file, device="cpu"):
+        print("Loading agent from %s" % agent_file)
+        return torch.load(agent_file, map_location=device)
+
+    def __init__(self, args, observation_space, action_space, state=None, device="cpu"):
         super().__init__()
         self.args = args
+        self.env_version = args.env_version
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
         self._optimizer_state = None  # needed for save/load
         self.NN_value = AgentNN(args.network, action_space, observation_space)
         self.NN_policy = AgentNN(args.network, action_space, observation_space)
+        self.NN_value.to(device)
+        self.NN_policy.to(device)
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
         self.optimizer_policy = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
         self.optimizer_distill = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
         self.predict = self.NN_policy.predict
         self.state = state or State()
+
+
+class JitAgent(nn.Module):
+    """ TorchScript version of Agent (inference only) """
+
+    def __init__(self):
+        super().__init__()
+        # XXX: these are overwritten after object is initialized
+        self.features_extractor = nn.Identity()
+        self.actor = nn.Identity()
+        self.critic = nn.Identity()
+        self.env_version = 0
+
+    # Inference (deterministic)
+    # XXX: attention is not handled here
+    @torch.jit.export
+    def predict(self, obs, mask) -> int:
+        with torch.no_grad():
+            b_obs = torch.as_tensor(obs, device='cpu').unsqueeze(dim=0)
+            b_mask = torch.as_tensor(mask, device='cpu').unsqueeze(dim=0)
+
+            # v1, v2
+            # features = self.features_extractor(b_obs)
+
+            # v3
+            stacks, hexes = b_obs.split([1960, 10725], dim=1)
+            fstacks = self.features_extractor1_stacks(stacks)
+            fhexes = self.features_extractor1_hexes(hexes)
+            fcat = torch.cat((fstacks, fhexes), dim=1)
+            features = self.features_extractor2(fcat)
+
+            action_logits = self.actor(features)
+            dist = common.SerializableCategoricalMasked(logits=action_logits, mask=b_mask)
+            action = torch.argmax(dist.probs, dim=1)
+            return action.int().item()
+
+    @torch.jit.export
+    def get_value(self, obs) -> float:
+        with torch.no_grad():
+            b_obs = torch.as_tensor(obs).cpu().unsqueeze(dim=0)
+            features = self.features_extractor(b_obs)
+            value = self.critic(features)
+            return value.float().item()
+
+    @torch.jit.export
+    def get_version(self) -> int:
+        return self.env_version
 
 
 def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda):
@@ -329,12 +470,14 @@ def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae
 
 
 def main(args):
-    LOG = logging.getLogger("mppo_conv")
+    LOG = logging.getLogger("mppo_dna")
     LOG.setLevel(args.loglevel)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     assert isinstance(args, Args)
 
-    agent, args = common.maybe_resume(Agent, args)
+    agent, args = common.maybe_resume(Agent, args, device=device)
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
@@ -345,6 +488,10 @@ def main(args):
     # Re-initialize to prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
     args = Args(**vars(args))
+
+    if os.getenv("NO_WANDB") == "true":
+        args.wandb_project = None
+
     printargs = asdict(args).copy()
 
     # Logger
@@ -361,38 +508,31 @@ def main(args):
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     LOG.info("Out dir: %s" % out_dir)
 
+    num_envs = len(args.envmaps)
+
     lr_schedule_fn_value = common.schedule_fn(args.lr_schedule_value)
     lr_schedule_fn_policy = common.schedule_fn(args.lr_schedule_policy)
     lr_schedule_fn_distill = common.schedule_fn(args.lr_schedule_distill)
 
-    batch_size_policy = int(args.num_envs * args.num_steps)
-    batch_size_value = int(args.num_envs * args.num_steps)
-    batch_size_distill = int(args.num_envs * args.num_steps)
+    batch_size_policy = int(num_envs * args.num_steps)
+    batch_size_value = int(num_envs * args.num_steps)
+    batch_size_distill = int(num_envs * args.num_steps)
     minibatch_size_policy = int(batch_size_policy // args.num_minibatches_policy)
     minibatch_size_value = int(batch_size_value // args.num_minibatches_value)
     minibatch_size_distill = int(batch_size_distill // args.num_minibatches_distill)
 
-    # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = True  # args.torch_deterministic
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     save_ts = None
     permasave_ts = None
-    agent = None
-    start_map_swaps = 0
 
     if args.agent_load_file and not agent:
         f = args.agent_load_file
-        agent = Agent.load(f)
+        agent = Agent.load(f, device=device)
         agent.args = args
-        start_map_swaps = agent.state.map_swaps
         agent.state.current_timestep = 0
         agent.state.current_vstep = 0
         agent.state.current_rollout = 0
         agent.state.current_second = 0
+        agent.state.current_episode = 0
 
         # backup = "%s/loaded-%s" % (os.path.dirname(f), os.path.basename(f))
         # with open(f, 'rb') as fsrc:
@@ -402,26 +542,58 @@ def main(args):
 
     common.validate_tags(args.tags)
 
-    try:
-        envs, _ = common.create_venv(VcmiEnv, args, start_map_swaps)
-        [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
+    if args.seed >= 0:
+        seed = args.seed
+    elif agent and agent.state.seed >= 0:
+        seed = agent.state.seed
+    else:
+        seed = np.random.randint(2**31)
 
-        obs_space = envs.unwrapped.single_observation_space
-        act_space = envs.unwrapped.single_action_space
+    wrappers = args.env_wrappers
+
+    if args.env_version == 1:
+        from vcmi_gym import VcmiEnv_v1 as VcmiEnv
+    elif args.env_version == 2:
+        from vcmi_gym import VcmiEnv_v2 as VcmiEnv
+    elif args.env_version == 3:
+        from vcmi_gym import VcmiEnv_v3 as VcmiEnv
+    else:
+        raise Exception("Unsupported env version: %d" % args.env_version)
+
+    obs_space = VcmiEnv.OBSERVATION_SPACE
+    act_space = VcmiEnv.ACTION_SPACE
+
+    if agent is None:
+        agent = Agent(args, obs_space, act_space, device=device)
+
+    # Legacy models with offset actions
+    if agent.NN_policy.actor.out_features == 2311:
+        print("Using legacy model with 2311 actions")
+        wrappers.append(dict(module="vcmi_gym", cls="LegacyActionSpaceWrapper"))
+        n_actions = 2311
+    else:
+        print("Using new model with 2312 actions")
+        n_actions = 2312
+
+    # TRY NOT TO MODIFY: seeding
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = True  # args.torch_deterministic
+
+    try:
+        envs = common.create_venv(VcmiEnv, args, seed=np.random.randint(2**31))
+
+        [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         assert isinstance(act_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-        if agent is None:
-            agent = Agent(args, obs_space, act_space)
-
-        agent = agent.to(device)
+        agent.state.seed = seed
 
         # these are used by gym's RecordEpisodeStatistics wrapper
         envs.return_queue = agent.state.ep_rew_queue
         envs.length_queue = agent.state.ep_length_queue
 
-        # XXX: the start=0 requirement is needed for SB3 compat
-        assert act_space.start == 0
         assert act_space.shape == ()
 
         if args.wandb_project:
@@ -446,23 +618,28 @@ def main(args):
 
         assert act_space.shape == ()
 
-        # ALGO Logic: Storage setup
-        obs = torch.zeros((args.num_steps, args.num_envs) + obs_space.shape).to(device)
-        actions = torch.zeros((args.num_steps, args.num_envs) + act_space.shape).to(device)
-        logprobs = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
-        values = torch.zeros((args.num_steps, args.num_envs)).to(device)
+        # attn = agent.NN.attention is not None
+        attn = False
 
-        # XXX: the start=0 requirement is needed for SB3 compat
-        assert act_space.start == 0
-        masks = torch.zeros((args.num_steps, args.num_envs, act_space.n), dtype=torch.bool).to(device)
+        # ALGO Logic: Storage setup
+        obs = torch.zeros((args.num_steps, num_envs) + obs_space.shape).to(device)
+        actions = torch.zeros((args.num_steps, num_envs) + act_space.shape).to(device)
+        logprobs = torch.zeros((args.num_steps, num_envs)).to(device)
+        rewards = torch.zeros((args.num_steps, num_envs)).to(device)
+        dones = torch.zeros((args.num_steps, num_envs)).to(device)
+        values = torch.zeros((args.num_steps, num_envs)).to(device)
+
+        masks = torch.zeros((args.num_steps, num_envs, n_actions), dtype=torch.bool).to(device)
+        attnmasks = torch.zeros((args.num_steps, num_envs, 165, 165)).to(device)
 
         # TRY NOT TO MODIFY: start the game
         next_obs, _ = envs.reset(seed=args.seed)
-        next_obs = torch.Tensor(next_obs).to(device)
-        next_done = torch.zeros(args.num_envs).to(device)
-        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
+        next_obs = torch.Tensor(next_obs, device=device)
+        next_done = torch.zeros(num_envs, device=device)
+        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
+
+        if attn:
+            next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask"))).to(device)
 
         progress = 0
         map_rollouts = 0
@@ -481,18 +658,27 @@ def main(args):
             agent.optimizer_policy.param_groups[0]["lr"] = lr_schedule_fn_policy(progress)
             agent.optimizer_distill.param_groups[0]["lr"] = lr_schedule_fn_distill(progress)
 
-            if args.switch_train_eval:
-                agent.eval()
+            # XXX: eval during experience collection
+            agent.eval()
 
             for step in range(0, args.num_steps):
                 obs[step] = next_obs
                 dones[step] = next_done
                 masks[step] = next_mask
 
+                if attn:
+                    attnmasks[step] = next_attnmask
+
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    action, logprob, _, _, _ = agent.NN_policy.get_action_and_value(next_obs, next_mask)
-                    value = agent.NN_value.get_value(next_obs)
+                    attn_mask = next_attnmask if attn else None
+                    action, logprob, _, _, _ = agent.NN_policy.get_action_and_value(
+                        next_obs,
+                        next_mask,
+                        attn_mask=attn_mask
+                    )
+
+                    value = agent.NN_value.get_value(next_obs, attn_mask=attn_mask)
                     values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
@@ -500,9 +686,12 @@ def main(args):
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
                 next_done = np.logical_or(terminations, truncations)
-                rewards[step] = torch.tensor(reward).to(device).view(-1)
-                next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
-                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
+                rewards[step] = torch.tensor(reward, device=device).view(-1)
+                next_obs, next_done = torch.Tensor(next_obs, device=device), torch.Tensor(next_done, device=device)
+                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
+
+                if attn:
+                    next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask")), device=device)
 
                 # XXX SIMO: SB3 does bootstrapping for truncated episodes here
                 # https://github.com/DLR-RM/stable-baselines3/pull/658
@@ -514,16 +703,22 @@ def main(args):
                         assert final_info is not None, "has_final_info=True, but final_info=None"
                         agent.state.ep_net_value_queue.append(final_info["net_value"])
                         agent.state.ep_is_success_queue.append(final_info["is_success"])
+                        agent.state.current_episode += 1
+                        agent.state.global_episode += 1
 
                 agent.state.current_vstep += 1
-                agent.state.current_timestep += args.num_envs
-                agent.state.global_timestep += args.num_envs
+                agent.state.current_timestep += num_envs
+                agent.state.global_timestep += num_envs
                 agent.state.current_second = int(time.time() - start_time)
                 agent.state.global_second = global_start_second + agent.state.current_second
 
             # bootstrap value if not done
             with torch.no_grad():
-                next_value = agent.NN_value.get_value(next_obs).reshape(1, -1)
+                next_value = agent.NN_value.get_value(
+                    next_obs,
+                    attn_mask=next_attnmask if attn else None
+                ).reshape(1, -1)
+
                 advantages, _ = compute_advantages(
                     rewards, dones, values, next_done, next_value, args.gamma, args.gae_lambda_policy
                 )
@@ -533,18 +728,19 @@ def main(args):
             b_obs = obs.reshape((-1,) + obs_space.shape)
             b_logprobs = logprobs.reshape(-1)
             b_actions = actions.reshape((-1,) + act_space.shape)
-            b_masks = masks.reshape((-1,) + (act_space.n,))
+            b_masks = masks.reshape((-1,) + (n_actions,))
             b_advantages = advantages.reshape(-1)
             b_returns = returns.reshape(-1)
             b_values = values.reshape(-1)
+
+            if attn:
+                b_attn_masks = attnmasks.reshape((-1,) + (165, 165))
 
             # Policy network optimization
             b_inds = np.arange(batch_size_policy)
             clipfracs = []
 
-            if args.switch_train_eval:
-                agent.train()
-
+            agent.train()
             for epoch in range(args.update_epochs_policy):
                 np.random.shuffle(b_inds)
                 for start in range(0, batch_size_policy, minibatch_size_policy):
@@ -554,7 +750,8 @@ def main(args):
                     _, newlogprob, entropy, _, _ = agent.NN_policy.get_action_and_value(
                         b_obs[mb_inds],
                         b_masks[mb_inds],
-                        b_actions.long()[mb_inds]
+                        action=b_actions.long()[mb_inds],
+                        attn_mask=b_attn_masks[mb_inds] if attn else None,
                     )
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
@@ -592,7 +789,10 @@ def main(args):
                     end = start + minibatch_size_value
                     mb_inds = b_inds[start:end]
 
-                    newvalue = agent.NN_value.get_value(b_obs[mb_inds])
+                    newvalue = agent.NN_value.get_value(
+                        b_obs[mb_inds],
+                        attn_mask=b_attn_masks[mb_inds] if attn else None,
+                    )
                     newvalue = newvalue.view(-1)
 
                     # Value loss
@@ -612,13 +812,20 @@ def main(args):
                 for start in range(0, batch_size_distill, minibatch_size_distill):
                     end = start + minibatch_size_distill
                     mb_inds = b_inds[start:end]
-
+                    mb_attn_masks = b_attn_masks[mb_inds] if attn else None
                     # Compute policy and value targets
                     with torch.no_grad():
                         _, _, _, old_action_dist, _ = old_NN_policy.get_action_and_value(b_obs[mb_inds], b_masks[mb_inds])
-                        value_target = agent.NN_value.get_value(b_obs[mb_inds])
+                        value_target = agent.NN_value.get_value(
+                            b_obs[mb_inds],
+                            attn_mask=mb_attn_masks
+                        )
 
-                    _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(b_obs[mb_inds], b_masks[mb_inds])
+                    _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(
+                        b_obs[mb_inds],
+                        b_masks[mb_inds],
+                        attn_mask=mb_attn_masks
+                    )
 
                     # Distillation loss
                     policy_kl_loss = torch.distributions.kl_divergence(old_action_dist, new_action_dist).mean()
@@ -637,6 +844,47 @@ def main(args):
             ep_rew_mean = common.safe_mean(agent.state.ep_rew_queue)
             ep_value_mean = common.safe_mean(agent.state.ep_net_value_queue)
             ep_is_success_mean = common.safe_mean(agent.state.ep_is_success_queue)
+
+            if envs.episode_count > 0:
+                assert ep_rew_mean is not np.nan
+                assert ep_value_mean is not np.nan
+                assert ep_is_success_mean is not np.nan
+                agent.state.rollout_rew_queue_100.append(ep_rew_mean)
+                agent.state.rollout_rew_queue_1000.append(ep_rew_mean)
+                agent.state.rollout_net_value_queue_100.append(ep_value_mean)
+                agent.state.rollout_net_value_queue_1000.append(ep_value_mean)
+                agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
+                agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
+
+            wandb_log({"params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"]})
+            wandb_log({"params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"]})
+            wandb_log({"losses/value_loss": v_loss.item()})
+            wandb_log({"losses/policy_loss": pg_loss.item()})
+            wandb_log({"losses/value_loss": v_loss.item()})
+            wandb_log({"losses/policy_loss": pg_loss.item()})
+            wandb_log({"losses/entropy": entropy_loss.item()})
+            wandb_log({"losses/old_approx_kl": old_approx_kl.item()})
+            wandb_log({"losses/approx_kl": approx_kl.item()})
+            wandb_log({"losses/clipfrac": np.mean(clipfracs)})
+            wandb_log({"losses/explained_variance": explained_var})
+            wandb_log({"rollout/ep_count": envs.episode_count})
+            wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
+
+            if envs.episode_count > 0:
+                wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
+                wandb_log({"rollout/ep_value_mean": ep_value_mean})
+                wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
+
+            wandb_log({"rollout100/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_100)})
+            wandb_log({"rollout1000/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_1000)})
+            wandb_log({"rollout100/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_100)})
+            wandb_log({"rollout1000/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_1000)})
+            wandb_log({"rollout100/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_100)})
+            wandb_log({"rollout1000/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_1000)})
+            wandb_log({"global/num_rollouts": agent.state.current_rollout})
+            wandb_log({"global/num_timesteps": agent.state.current_timestep})
+            wandb_log({"global/num_seconds": agent.state.current_second})
+            wandb_log({"global/num_episode": agent.state.current_episode})
 
             if envs.episode_count > 0:
                 assert ep_rew_mean is not np.nan
@@ -678,6 +926,7 @@ def main(args):
             wandb_log({"global/num_rollouts": agent.state.current_rollout})
             wandb_log({"global/num_timesteps": agent.state.current_timestep})
             wandb_log({"global/num_seconds": agent.state.current_second})
+            wandb_log({"global/num_episode": agent.state.current_episode})
 
             envs.episode_count = 0
 
@@ -704,17 +953,6 @@ def main(args):
                 else:
                     raise Exception("Not implemented: map change on target")
 
-            if args.rollouts_per_mapchange and map_rollouts % args.rollouts_per_mapchange == 0:
-                map_rollouts = 0
-                agent.state.map_swaps += 1
-                wandb_log({"global/map_swaps": agent.state.map_swaps})
-                envs.close()
-                envs, _ = common.create_venv(VcmiEnv, args, agent.state.map_swaps)
-                next_obs, _ = envs.reset(seed=args.seed)
-                next_obs = torch.Tensor(next_obs).to(device)
-                next_done = torch.zeros(args.num_envs).to(device)
-                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
-
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
                 wandb_log({
                     "global/global_num_timesteps": agent.state.global_timestep,
@@ -737,10 +975,11 @@ def main(args):
 
     finally:
         common.maybe_save(0, 10e9, args, agent, out_dir)
-        envs.close()
+        if "envs" in locals():
+            envs.close()
 
     # Needed by PBT to save model after iteration ends
-    return agent, common.safe_mean(agent.state.rollout_rew_queue_1000)
+    return agent, common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-agent.state.current_rollout:])
 
 
 def debug_args():
@@ -749,6 +988,7 @@ def debug_args():
         "mppo_dna-test",
         loglevel=logging.DEBUG,
         run_name=None,
+        trial_id=None,
         wandb_project=None,
         resume=False,
         overwrite=[],
@@ -763,9 +1003,7 @@ def debug_args():
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
-        mapside="both",
-        mapmask="gym/A1.vmap",
-        randomize_maps=False,
+        mapside="defender",
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=0,
@@ -794,7 +1032,6 @@ def debug_args():
         vf_coef=1.2,
         max_grad_norm=0.5,
         distill_beta=1.0,
-        switch_train_eval=True,
         target_kl=None,
         logparams={},
         cfg_file=None,
@@ -802,7 +1039,6 @@ def debug_args():
         skip_wandb_init=False,
         skip_wandb_log_code=False,
         env=EnvArgs(
-            encoding_type="float",
             max_steps=500,
             reward_dmg_factor=5,
             vcmi_loglevel_global="error",
@@ -815,23 +1051,47 @@ def debug_args():
             term_reward_mult=0,
             random_heroes=0,
             random_obstacles=0,
+            town_chance=0,
+            warmachine_chance=0,
+            mana_min=0,
+            mana_max=0,
+            swap_sides=0,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
+            user_timeout=0,
+            vcmi_timeout=0,
+            boot_timeout=0,
 
         ),
         env_wrappers=[],
+        env_version=3,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
-            features_extractor=[
-                dict(t="Flatten", start_dim=2),
-                dict(t="Unflatten", dim=1, unflattened_size=[1, 11]),
-                dict(t="Conv2d", in_channels=1, out_channels=32, kernel_size=[1, 86], stride=[1, 86], padding=0),
-                dict(t="LeakyReLU"),
+            attention=None,
+            features_extractor1_stacks=[
+                # => (B, 1960)
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 20*98]),
+                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=98, stride=98),
                 dict(t="Flatten"),
-                dict(t="Linear", in_features=5280, out_features=1024),
+                dict(t="LeakyReLU"),
+                # => (B, 160)
             ],
-            actor=dict(t="Linear", in_features=1024, out_features=2311),
-            critic=dict(t="Linear", in_features=1024, out_features=1)
+            features_extractor1_hexes=[
+                # => (B, 10725)
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 165*65]),
+                # => (B, 1, 10725)
+                dict(t="Conv1d", in_channels=1, out_channels=4, kernel_size=65, stride=65),
+                dict(t="Flatten"),
+                dict(t="LeakyReLU"),
+                # => (B, 660)
+            ],
+            features_extractor2=[
+                # => (B, 820)
+                dict(t="Linear", in_features=820, out_features=512),
+                dict(t="LeakyReLU"),
+            ],
+            actor=dict(t="Linear", in_features=512, out_features=2312),
+            critic=dict(t="Linear", in_features=512, out_features=1)
         )
     )
 

@@ -429,7 +429,7 @@ class JitAgent(nn.Module):
 
 
 def main(args, agent_cls=Agent):
-    LOG = logging.getLogger("mppo_conv")
+    LOG = logging.getLogger("mppo")
     LOG.setLevel(args.loglevel)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
