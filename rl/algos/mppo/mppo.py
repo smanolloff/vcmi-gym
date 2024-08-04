@@ -161,7 +161,7 @@ class Args:
     lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
     weight_decay: float = 0.0
     num_envs: int = 0  # DEPRECATED (envmaps determines number of envs now)
-    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-v3-100K-sand.vmap"])
+    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-mixstack-100K-01.vmap"])
     num_steps: int = 128
     gamma: float = 0.99
     stats_buffer_size: int = 100
@@ -286,7 +286,9 @@ class AgentNN(nn.Module):
         fcat = torch.cat((fstacks, fhexes), dim=1)
         return self.features_extractor2(fcat)
 
-    def get_value(self, x):
+    def get_value(self, x, attn_mask=None):
+        if self.attention:
+            x = self.attention(x, attn_mask)
         return self.critic(self.extract_features(x))
 
     def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
@@ -543,7 +545,6 @@ def main(args, agent_cls=Agent):
         envs.return_queue = agent.state.ep_rew_queue
         envs.length_queue = agent.state.ep_length_queue
 
-        # XXX: the start=0 requirement is needed for SB3 compat
         assert act_space.shape == ()
 
         if args.wandb_project:
@@ -589,7 +590,7 @@ def main(args, agent_cls=Agent):
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
 
         if attn:
-            next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask"))).to(device)
+            next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask")), device=device)
 
         progress = 0
         map_rollouts = 0
@@ -630,12 +631,12 @@ def main(args, agent_cls=Agent):
                 # TRY NOT TO MODIFY: execute the game and log data.
                 next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
                 next_done = np.logical_or(terminations, truncations)
-                rewards[step] = torch.tensor(reward).to(device).view(-1)
-                next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
-                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
+                rewards[step] = torch.tensor(reward, device=device).view(-1)
+                next_obs, next_done = torch.Tensor(next_obs, device=device), torch.Tensor(next_done, device=device)
+                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
 
                 if attn:
-                    next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask"))).to(device)
+                    next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask")), device=device)
 
                 # XXX SIMO: SB3 does bootstrapping for truncated episodes here
                 # https://github.com/DLR-RM/stable-baselines3/pull/658
@@ -658,8 +659,11 @@ def main(args, agent_cls=Agent):
 
             # bootstrap value if not done
             with torch.no_grad():
-                next_value = agent.NN.get_value(next_obs).reshape(1, -1)
-                advantages = torch.zeros_like(rewards).to(device)
+                next_value = agent.NN.get_value(
+                    next_obs,
+                    attn_mask=next_attnmask if attn else None
+                ).reshape(1, -1)
+                advantages = torch.zeros_like(rewards, device=device)
                 lastgaelam = 0
                 for t in reversed(range(args.num_steps)):
                     if t == args.num_steps - 1:
@@ -955,6 +959,7 @@ def debug_args():
             critic=dict(t="Linear", in_features=512, out_features=1)
         )
     )
+
 
 if __name__ == "__main__":
     # To run from vcmi-gym root:
