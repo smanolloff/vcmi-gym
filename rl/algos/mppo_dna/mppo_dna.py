@@ -657,7 +657,7 @@ def main(args):
 
         # TRY NOT TO MODIFY: start the game
         next_obs, _ = envs.reset(seed=args.seed)
-        next_obs = torch.Tensor(next_obs, device=device)
+        next_obs = torch.as_tensor(next_obs, device=device)
         next_done = torch.zeros(num_envs, device=device)
         next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
 
@@ -710,7 +710,8 @@ def main(args):
                 next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
                 next_done = np.logical_or(terminations, truncations)
                 rewards[step] = torch.tensor(reward, device=device).view(-1)
-                next_obs, next_done = torch.Tensor(next_obs, device=device), torch.Tensor(next_done, device=device)
+                next_obs = torch.as_tensor(next_obs, device=device)
+                next_done = torch.as_tensor(next_done, device=device, dtype=torch.float32)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
 
                 if attn:
@@ -828,7 +829,7 @@ def main(args):
 
             # Value network to policy network distillation
             agent.NN_policy.zero_grad(True)  # don't clone gradients
-            old_NN_policy = copy.deepcopy(agent.NN_policy)
+            old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
             old_NN_policy.eval()
             for epoch in range(args.update_epochs_distill):
                 np.random.shuffle(b_inds)

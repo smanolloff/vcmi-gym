@@ -223,10 +223,10 @@ class SelfAttention(nn.Module):
         self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=1, batch_first=True)
 
     def forward(self, b_obs, b_masks=None):
-        assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong obs shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
+        assert len(b_obs.shape) == 3
+        assert b_obs.shape[2] == self.edim, f"wrong obs shape: {b_obs.shape} (edim={self.edim})"
+
         if b_masks is None:
-            b_obs = b_obs.flatten(start_dim=1, end_dim=2)
-            # => (B, 165, e)
             res, _ = self.mha(b_obs, b_obs, b_obs, need_weights=False)
             return res
         else:
@@ -632,7 +632,8 @@ def main(args, agent_cls=Agent):
                 next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
                 next_done = np.logical_or(terminations, truncations)
                 rewards[step] = torch.tensor(reward, device=device).view(-1)
-                next_obs, next_done = torch.Tensor(next_obs, device=device), torch.Tensor(next_done, device=device)
+                next_obs = torch.as_tensor(next_obs, device=device)
+                next_done = torch.as_tensor(next_done, device=device, dtype=torch.float32)
                 next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
 
                 if attn:
@@ -940,6 +941,10 @@ def debug_args():
                 dict(t="Flatten"),
                 dict(t="LeakyReLU"),
                 # => (B, 160)
+                dict(t="Unflatten", dim=1, unflattened_size=[20, 8]),
+                dict(t="SelfAttention", edim=8),
+                dict(t="Flatten"),
+                # => (B, 160)
             ],
             features_extractor1_hexes=[
                 # => (B, 10725)
@@ -948,6 +953,10 @@ def debug_args():
                 dict(t="Conv1d", in_channels=1, out_channels=4, kernel_size=65, stride=65),
                 dict(t="Flatten"),
                 dict(t="LeakyReLU"),
+                # => (B, 660)
+                dict(t="Unflatten", dim=1, unflattened_size=[165, 4]),
+                dict(t="SelfAttention", edim=4),
+                dict(t="Flatten"),
                 # => (B, 660)
             ],
             features_extractor2=[
