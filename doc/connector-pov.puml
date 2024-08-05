@@ -1,0 +1,60 @@
+@startuml "pov-gym"
+title "POV: Connector"
+hide footbox
+
+<style>
+sequenceDiagram {
+  group {
+    LineThickness 1
+    LineColor gray
+  }
+  groupHeader {
+    LineThickness 1
+    FontColor gray
+    LineColor gray
+  }
+}
+</style>
+
+skinparam sequenceBoxBorderColor #FFF
+!pragma teoz true
+
+participant "//Gym Env//" as env
+
+box #ffc
+participant "**PyConnector**" as pyconn
+participant "**CppConnector**" as cppconn
+end box
+
+participant "VCMI\n//Battle Interface//" as iface
+
+activate pyconn
+activate env
+
+]-> iface ++ : activeStack(stack)
+iface -> cppconn ++ : getAction(state)
+& cppconn --[#cyan]\\o pyconn :
+
+skinparam ArrowHeadColor yellow
+
+
+& pyconn -> env -- : state
+env ->[ -- : obs, rew
+
+== step start ==
+
+[-> env ++ : step(action)
+env -> pyconn ++ : action
+& pyconn --[#cyan]\\o cppconn :
+& cppconn --> iface -- : action
+iface -->] -- : makeAction(action)
+
+]-> iface ++ : activeStack(stack)
+iface -> cppconn ++ : getAction(state)
+& cppconn --[#cyan]\\o pyconn :
+& pyconn -> env -- : state
+env ->[ -- : obs, rew
+
+== step end ==
+
+@enduml

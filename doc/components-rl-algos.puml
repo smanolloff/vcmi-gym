@@ -75,10 +75,10 @@ UpdateElementStyle(person, $bgColor="white", $borderColor="white", $fontColor="b
 ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 Person(User, "User")
-Container(wandb, "Weights & Biases", "HTTP API", $loc("wandb.ai/s-manolloff/vcmi-gym"), $sprite="bar_chart", $tags="ext")
+Container(wandb, "Weights & Biases", $sprite="bar_chart", $tags="ext")
 Container(RL, "RL Algorithm", "Python", $desc2("e.g. PPO or DQN", "./rl/algos/"), $sprite="python", $tags="local")
-Container(HDD, "Local disk", "", $loc("./data/"), $sprite="database", $tags="ext")
-Container(GymEnv, "GymEnv", "Python/gymnasium", $desc2("e.g. VCMI-v3", "./vcmi_gym/envs/v3/"), $sprite="python", $tags="ext")
+Container(HDD, "Local disk", "", $loc("./data/"), $sprite="database", $tags="local")
+Container(GymEnv, "GymEnv", $sprite="python", $tags="ext")
 
 Rel(User, RL, "Configures")
 Rel(User, wandb, "Observes\n(optional)", $tags="dashed")

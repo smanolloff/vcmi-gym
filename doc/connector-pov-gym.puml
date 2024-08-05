@@ -1,0 +1,43 @@
+@startuml "pov-gym"
+
+title "POV: Gym"
+hide footbox
+
+<style>
+sequenceDiagram {
+  group {
+    LineThickness 1
+    LineColor gray
+  }
+  groupHeader {
+    LineThickness 1
+    FontColor gray
+    LineColor gray
+  }
+}
+</style>
+
+skinparam sequenceBoxBorderColor #FFF
+
+participant "//RL Algorithm//" as rl
+participant "//Gym Env//" as env
+participant "//VCMI//" as vcmi
+
+!pragma teoz true
+
+[-> rl ++ : train
+
+group Train (N rollouts)
+  group Rollout (M steps)
+    rl -> env ++ : step(action)
+    env -> vcmi ++ : get_state(action)
+    vcmi --> env -- : state
+    env --> rl -- : observation, reward
+  end
+  rl -> rl : update
+end
+
+[<-- rl -- :
+
+
+@enduml

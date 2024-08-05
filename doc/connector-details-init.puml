@@ -1,0 +1,142 @@
+@startuml "connector-details-init"
+
+title "Connector details: VCMI init"
+
+skinparam sequenceBoxBorderColor #FFF
+
+!$nbsp = "<U+00A0>"
+
+' workaround the fact that text alignment can only be
+' set globally. Using hspace(n) returns N monospaced
+' $nbsp chars
+!function $hspace($length)
+  !$res = ""
+  !$i = $length
+  !while $i > 0
+    !$res = $res + $nbsp
+    !$i = $i - 1
+  !endwhile
+  !return "<font:monospaced>"+$res+"</font>"
+!endfunction
+
+!function $desc($txt)
+  !return "<font:Arial><color:Gray><i>// "+$txt+"</i></color></font>"
+!endfunction
+
+!function $lock_acq_fail_text()
+  !return "<back:yellow><color:red>acquire lock</color></back>"
+!endfunction
+
+!procedure $lock_acq_fail($node)
+  $node -> $node : $lock_acq_fail_text()
+  activate $node #red
+!endprocedure
+
+!procedure $lock_acq_direct($node)
+  $node -> $node : <back:yellow><color:black>acquire lock</color></back>
+!endprocedure
+
+!procedure $lock_acq_latent($node)
+  $lock_acq_direct($node)
+  deactivate $node
+!endprocedure
+
+!procedure $cond_wait($node)
+  $node -> $node : <back:red><color:black>cond.wait</color></back>\n<color:yellow><back:black>release lock</back></color>
+  activate $node #red
+!endprocedure
+
+!procedure $cond_notify($NodeA, $NodeB)
+  $NodeA --[#blue]> $NodeB : <color:blue>cond.notify</color>
+  $NodeB --[#red]> $NodeB : $lock_acq_fail_text()
+!endfunction
+
+!procedure $cond_switch($NodeA, $NodeB)
+  $cond_notify($NodeA, $NodeB)
+  $cond_wait($NodeA)
+  $lock_acq_latent($NodeB)
+!endfunction
+
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+!procedure $sharevar($node1, $node2, $txt)
+  $node1 <--[#gray]> $node2 : <color:gray>$replace($txt,"\n","</color>\n<color:gray>")</color>
+!endfunction
+
+!procedure $sharevar($txt)
+  $sharevar(cpp1, cpp2, $txt)
+!endfunction
+
+' avoids super long note lines in the diagram
+!function $str($txt)
+  !return $replace($txt, "\n", %newline())
+!endfunction
+
+box T1
+participant "//Gym Env//" as env
+participant "//pyconnector//" as py
+participant "//cppconnector//\n$desc(T1)" as cpp1
+participant "//VCMI//\n$desc('T1')" as vcmi1
+end box
+
+box T2
+participant "//cppconnector//\n$desc(T2)" as cpp2
+participant "VCMI\n//Battle Interface (BAI)//" as bai
+participant "VCMI\n//Adventure Interface (AAI)//" as aai
+participant "//VCMI Client//\n$desc('T2')" as vcmiclient
+end box
+
+box T3
+participant "//VCMI Server//\n$desc('T3')" as vcmi3
+end box
+
+== init start ==
+
+-> env ++ : <<new>>
+env -> py ++ : start
+py -> cpp1 ++ : start
+$lock_acq_direct(cpp1)
+cpp1 -> vcmi1 ++ : init
+|||
+vcmi1 --> cpp1 -- :
+cpp1 --> vcmi3 ++ : start(baggage)
+
+$cond_wait(cpp1)
+
+vcmi3 -> vcmiclient ++ : start(baggage)
+vcmiclient -> aai ** : <<new>>(baggage)
+vcmiclient -> aai ++ : initGameInterface
+|||
+aai --> vcmiclient -- :
+vcmiclient --> vcmi3 -- :
+
+vcmi3 -> vcmiclient ++ : battleStart
+vcmiclient -> aai ++ : battleStart
+|||
+aai -> bai ** : <<new>>(baggage)
+
+aai -> bai ++ : battleStart
+bai --> aai -- :
+aai --> vcmiclient -- :
+vcmiclient --> vcmi3 -- :
+vcmi3 -> vcmiclient ++ : activeStack
+vcmiclient -> bai ++ : activeStack
+bai -> cpp2 ++ : baggage.GetAction(Result)
+$lock_acq_direct(cpp2)
+$sharevar(P_Result)
+$cond_switch(cpp2, cpp1)
+cpp1 --> py -- :
+py --> env -- : <<obs>>
+[<-- env -- : obs
+
+== init end ==
+
+@enduml

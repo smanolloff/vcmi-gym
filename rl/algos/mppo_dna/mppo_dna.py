@@ -351,10 +351,10 @@ class AgentNN(nn.Module):
             if b_obs.shape == self.observation_space.shape:
                 b_obs = b_obs.unsqueeze(dim=0)
                 b_mask = b_mask.unsqueeze(dim=0)
-                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
                 return b_env_action[0].cpu().item()
             else:
-                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
                 return b_env_action.cpu().numpy()
 
 
@@ -406,7 +406,7 @@ class Agent(nn.Module):
 
     @staticmethod
     def load(agent_file, device="cpu"):
-        print("Loading agent from %s" % agent_file)
+        print("Loading agent from %s (device: %s)" % (agent_file, device))
         return torch.load(agent_file, map_location=device)
 
     def __init__(self, args, observation_space, action_space, state=None, device="cpu"):

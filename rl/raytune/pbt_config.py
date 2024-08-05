@@ -222,6 +222,10 @@ config = {
             {"t": "Flatten"},
             {"t": "LeakyReLU"},
             # => (B, 160)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [20, 8]},
+            {"t": "SelfAttention", "edim": 8},
+            {"t": "Flatten"},
+            # => (B, 160)
         ],
         "features_extractor1_hexes": [
             # => (B, 10725)
@@ -230,6 +234,10 @@ config = {
             {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 65, "stride": 65},
             {"t": "Flatten"},
             {"t": "LeakyReLU"},
+            # => (B, 1320)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [165, 8]},
+            {"t": "SelfAttention", "edim": 8},
+            {"t": "Flatten"},
             # => (B, 1320)
         ],
         "features_extractor2": [

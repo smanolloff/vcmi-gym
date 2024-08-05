@@ -274,7 +274,7 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
 
                         # add timezone information to dt for printing correct time
                         dt = dt.replace(tzinfo=datetime.timezone.utc).astimezone()
-                        LOG.info(f"Downloading artifact {artifact.name} from {time.ctime(dt.timestamp())}")
+                        LOG.info(f"Downloading artifact {artifact.name} from {time.ctime(dt.timestamp())}, step={md.get("step", "?")})")
 
                         f = files[0].download(tmpdir, replace=True)
 
@@ -377,8 +377,11 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 agent = load_agent(agent_file=agent_load_file, run_id=run.id)
                 agent.eval()
 
+                nn = getattr(agent, "NN", getattr(agent, "NN_policy", None))
+                assert nn, "agent has neighter .NN nor .NN_policy properties"
+
                 # XXX: backport for models with old action space
-                if agent.NN.actor.out_features == 2311:
+                if nn.actor.out_features == 2311:
                     print("Legacy model detected -- using LegacyActionSpaceWrapper")
                     env_version = 3
                     wrappers = [vcmi_gym.LegacyActionSpaceWrapper]

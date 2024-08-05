@@ -950,18 +950,18 @@ def debug_args():
                 # => (B, 10725)
                 dict(t="Unflatten", dim=1, unflattened_size=[1, 165*65]),
                 # => (B, 1, 10725)
-                dict(t="Conv1d", in_channels=1, out_channels=4, kernel_size=65, stride=65),
+                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=65, stride=65),
                 dict(t="Flatten"),
                 dict(t="LeakyReLU"),
-                # => (B, 660)
+                # => (B, 1320)
                 dict(t="Unflatten", dim=1, unflattened_size=[165, 4]),
                 dict(t="SelfAttention", edim=4),
                 dict(t="Flatten"),
-                # => (B, 660)
+                # => (B, 1320)
             ],
             features_extractor2=[
-                # => (B, 820)
-                dict(t="Linear", in_features=820, out_features=512),
+                # => (B, 1480)
+                dict(t="Linear", in_features=1480, out_features=512),
                 dict(t="LeakyReLU"),
             ],
             actor=dict(t="Linear", in_features=512, out_features=2312),

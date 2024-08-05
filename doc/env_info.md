@@ -1,6 +1,5 @@
 # Environment documentation
 
-
 Here you will find documentation for the VCMI environment.
 
 > [!NOTE]
@@ -21,8 +20,8 @@ process at runtime as part of the gym environment's boot process.
 
 Starting the RL environment automatically starts VCMI in a separate thread.
 Communication between the two threads is made possible via the `connector`
-component (for details on how it works, [Connector](TODO:link) documentation will
-be published soon).
+component (for details on how it works, see the [Connector](./connector.md)
+doc).
 
 Starting the environment is as simple as:
 

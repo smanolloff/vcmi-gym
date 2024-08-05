@@ -1,0 +1,127 @@
+@startuml "vcmi-1.32-connector-v2-render"
+
+title "Connector details: render"
+
+skinparam sequenceBoxBorderColor #FFF
+
+!$nbsp = "<U+00A0>"
+
+' workaround the fact that text alignment can only be
+' set globally. Using hspace(n) returns N monospaced
+' $nbsp chars
+!function $hspace($length)
+  !$res = ""
+  !$i = $length
+  !while $i > 0
+    !$res = $res + $nbsp
+    !$i = $i - 1
+  !endwhile
+  !return "<font:monospaced>"+$res+"</font>"
+!endfunction
+
+!function $lock_acq_fail_text()
+  !return "<back:yellow><color:red>acquire lock</color></back>"
+!endfunction
+
+!procedure $lock_acq_fail($node)
+  $node -> $node : $lock_acq_fail_text()
+  activate $node #red
+!endprocedure
+
+!procedure $lock_acq_direct($node)
+  $node -> $node : <back:yellow>acquire lock</back>
+!endprocedure
+
+!procedure $lock_acq_latent($node)
+  $lock_acq_direct($node)
+  deactivate $node
+!endprocedure
+
+!procedure $cond_wait($node)
+  $node -> $node : <back:red>cond.wait</back>\n<color:yellow><back:black>release lock</back></color>
+  activate $node #red
+!endprocedure
+
+!procedure $cond_notify($NodeA, $NodeB)
+  $NodeA --[#blue]> $NodeB : <color:blue>cond.notify</color>
+  $NodeB --[#red]> $NodeB : $lock_acq_fail_text()
+!endfunction
+
+!procedure $cond_switch($NodeA, $NodeB)
+  $cond_notify($NodeA, $NodeB)
+  $cond_wait($NodeA)
+  $lock_acq_latent($NodeB)
+!endfunction
+
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+!procedure $sharevar($node1, $node2, $txt)
+  $node1 <--[#gray]> $node2 : <color:gray>$replace($txt,"\n","</color>\n<color:gray>")</color>
+!endfunction
+
+!procedure $sharevar($txt)
+  $sharevar(cpp1, cpp2, $txt)
+!endfunction
+
+' avoids super long note lines in the diagram
+!function $str($txt)
+  !return $replace($txt, "\n", %newline())
+!endfunction
+
+!function $desc($txt)
+  !return "<font:Arial><color:Gray><i>// "+$txt+"</i></color></font>"
+!endfunction
+
+
+box T1
+participant "//Gym Env//" as env
+participant "//pyconnector//" as py
+participant "//cppconnector//\n$desc(T1)" as cpp1
+end box
+
+box T2
+participant "//cppconnector//\n$desc(T2)" as cpp2
+participant "VCMI\n//Battle Interface (BAI)//" as bai
+end box
+
+activate cpp1
+activate py
+activate env
+
+]--> bai ++ : activeStack
+activate cpp1 #red
+bai -> cpp2 ++ : baggage.GetAction(Result)
+$cond_wait(cpp2)
+$lock_acq_latent(cpp1)
+cpp1 --> py -- : <<P_InitResult>>
+py --> env -- : <<obs>>
+[<-- env -- : obs
+
+== render start ==
+
+[-> env ++ : render
+env -> py ++ : render
+py -> cpp1 ++ : render
+$lock_acq_direct(cpp1)
+$sharevar(Action)
+$cond_switch(cpp1, cpp2)
+cpp2 --> bai -- : <<Action>>\n$desc("render")
+bai --> cpp2 ++ : baggage.GetAction(Result)\n$desc("contains render data")
+$lock_acq_direct(cpp2)
+cpp2 <--[#gray]> cpp1 : $sharevar(P_Result)
+$cond_switch(cpp2, cpp1)
+cpp1 --> py -- : <<P_result>>
+py --> env -- : <<string>>
+[<-- env -- : string
+
+== render end ==
+
+@enduml

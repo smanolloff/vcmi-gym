@@ -57,12 +57,20 @@ the RL environment.
 Please refer to [this document](./doc/rl_training.md) for information about 
 the RL training setup and tools used in this project.
 
+### Connector docs
+
+Please refer to [this document](./doc/rl_training.md) for information about 
+the Connector component.
+
 ## Contributing
 
 Fellow HOMM3 AI enthusiasts are more than welcome to help with this project.
 There is a lot of headroom for improvement, be it in the form of NN
 architectures, RL algorithm implementations, hyperparameter search, reward
-shaping, etc.
+shaping, etc. The preferred approach is to submit a Pull request, but if you
+have stumbled upon a bug which you can't fix yourself, submitting an issue can
+help me (and others) fix it. You can also help with the ongoing AI training
+process by "plugging in" your own piece of hardware into the mix. 
 
 ### Submitting an issue
 
@@ -82,10 +90,10 @@ happened.
 1. Branch out from latest `main` and organize your code changes there.
 1. Commit, push to your branch and submit a PR to `main`.
 
-### RL training contributions
+### Contributing with RL training
 
 If you have spare hardware and would like to help with this project, please
-<a href="mailto:smanolloff@gmail.com">reach out</a> so we can work together
-on putting it to good use: e.g. for training new models (GPU-bound task),
-evaluating existing models (CPU-bound task), or creating and rebalancing
+<a href="mailto:smanolloff@gmail.com">reach out</a> to me - together, we can
+ponder on putting it to good use: e.g. for training new models (GPU-bound
+task), evaluating existing models (CPU-bound task), or creating and rebalancing
 new training maps (CPU and HDD-bound task).
