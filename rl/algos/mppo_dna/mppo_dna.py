@@ -160,32 +160,32 @@ class Args:
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
 
-    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())  # used if lr_schedule-specific values is 0
-    lr_schedule_value: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
-    lr_schedule_policy: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
-    lr_schedule_distill: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
+    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())  # used if nn-specific lr_schedule["start"] is 0
+    lr_schedule_value: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
+    lr_schedule_policy: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
+    lr_schedule_distill: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
     clip_coef: float = 0.2
     clip_vloss: bool = False
     distill_beta: float = 1.0
     ent_coef: float = 0.01
-    vf_coef: float = 1.2,  # not used
-    gae_lambda: float = 0.95
-    gae_lambda_policy: float = 0.95
-    gae_lambda_value: float = 0.95
+    vf_coef: float = 1.2   # not used
+    gae_lambda: float = 0.95  # used if nn-specific gae_lambda is 0
+    gae_lambda_policy: float = 0
+    gae_lambda_value: float = 0
     gamma: float = 0.99
     max_grad_norm: float = 0.5
     norm_adv: bool = True
     num_envs: int = 1
     envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-mixstack-100K-01.vmap"])
 
-    num_minibatches: int = 4  # used if num_minibatches-specific values is 0
+    num_minibatches: int = 4  # used if nn-specific num_minibatches is 0
     num_minibatches_distill: int = 0
     num_minibatches_policy: int = 0
     num_minibatches_value: int = 0
     num_steps: int = 128
     stats_buffer_size: int = 100
 
-    update_epochs: int = 4  # used if update_epochs-specific values is 0
+    update_epochs: int = 4   # used if nn-specific update_epochs is 0
     update_epochs_distill: int = 0
     update_epochs_policy: int = 0
     update_epochs_value: int = 0
