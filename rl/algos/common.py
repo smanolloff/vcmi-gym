@@ -124,9 +124,9 @@ def create_venv(env_cls, args, seed):
         assert os.path.isfile(args.opponent_load_file)
 
     dist = Categorical(sbm_probs)
-    opponent = sbm[dist.sample()]
 
     def env_creator():
+        opponent = sbm[dist.sample()]
         with lock:
             assert state["n"] < len(all_maps)
             mapname = all_maps[state["n"]]

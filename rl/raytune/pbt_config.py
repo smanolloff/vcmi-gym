@@ -66,7 +66,7 @@ config = {
         #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         # """
-        "population_size": 5,
+        "population_size": 7,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -158,7 +158,7 @@ config = {
     "seconds_total": 1800,
 
     # Initial checkpoint to start from
-    # "agent_load_file": "rl/models/model-PBT-mppo-attacker-cont-20240517_134625.b6623_00000:v2/agent.pt",
+    # "agent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
     # "agent_load_file": "rl/models/model-PBT-mppo-defender-20240521_112358.79ad0_00000:v1/agent.pt",
     "agent_load_file": None,
 
@@ -171,9 +171,9 @@ config = {
         # "gym/generated/4096/4096-mixstack-5K-01.vmap"
         # "gym/generated/4096/4096-v3-100K-mod.vmap",
     ],
-    "opponent_sbm_probs": [1, 0, 0],
+    "opponent_sbm_probs": [2, 1, 0],
     "opponent_load_file": None,
-    # "opponent_load_file": "rl/models/Attacker model:v7/jit-agent.pt",
+    # "opponent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
 
     #
     # PPO hyperparams
@@ -222,10 +222,6 @@ config = {
             {"t": "Flatten"},
             {"t": "LeakyReLU"},
             # => (B, 160)
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [20, 8]},
-            {"t": "SelfAttention", "edim": 8},
-            {"t": "Flatten"},
-            # => (B, 160)
         ],
         "features_extractor1_hexes": [
             # => (B, 10725)
@@ -234,10 +230,6 @@ config = {
             {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 65, "stride": 65},
             {"t": "Flatten"},
             {"t": "LeakyReLU"},
-            # => (B, 1320)
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [165, 8]},
-            {"t": "SelfAttention", "edim": 8},
-            {"t": "Flatten"},
             # => (B, 1320)
         ],
         "features_extractor2": [
@@ -271,9 +263,9 @@ config = {
     "num_envs": 1,
     "env": {
         "reward_dmg_factor": 5,
-        "step_reward_fixed": -100,
+        "step_reward_fixed": -300,
         "step_reward_mult": 1,
-        "term_reward_mult": 0,
+        "term_reward_mult": 1,
         "reward_clip_tanh_army_frac": 1,
         "reward_army_value_ref": 500,
         "random_heroes": 1,

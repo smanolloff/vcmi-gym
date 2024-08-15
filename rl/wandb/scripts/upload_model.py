@@ -12,7 +12,7 @@ def main(file, mdfile=None):
     folder = os.path.dirname(file)
     jitfile = os.path.join(folder, f"jit-{os.path.basename(file)}")
 
-    agent = torch.load(file)
+    agent = torch.load(file, map_location=torch.device("cpu"))
 
     run = wandb.init(project="vcmi-gym", id=agent.args.run_id, resume="must", reinit=True)
     art = wandb.Artifact(
@@ -41,6 +41,7 @@ def main(file, mdfile=None):
     print(f"    metadata: {art.metadata}")
 
     run.log_artifact(art)
+    print(f"URL: https://wandb.ai/s-manolloff/vcmi-gym/artifacts/model/{art.name}")
 
 
 if __name__ == "__main__":

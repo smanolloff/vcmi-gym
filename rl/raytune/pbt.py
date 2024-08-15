@@ -2,6 +2,7 @@ import copy
 import ray.tune
 import ast
 from dataclasses import asdict
+import datetime
 from . import common
 from .pbt_config import config
 
@@ -32,6 +33,7 @@ def update_config_value(cfg, path, value):
     new_value = ast.literal_eval(value)
     print("Overwrite %s: %s -> %s" % (path, old_value, value))
     d[keys[-1]] = new_value
+    return old_value, new_value
 
 
 def extract_initial_hyperparams(runtime_cfg, hyperparam_mutations, res=None):
@@ -52,7 +54,6 @@ def extract_initial_hyperparams(runtime_cfg, hyperparam_mutations, res=None):
 
 def main(alg, exp_name, resume_path, config_overrides=[]):
     cfg = copy.deepcopy(config)
-    cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
 
     if resume_path:
         import torch
@@ -63,9 +64,6 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
         cfg["agent_load_file"] = resume_path
         alg = cfg["_raytune"]["algo"]
         exp_name = cfg["_raytune"]["experiment_name"]
-        cfg["_raytune"]["resumed_run_id"] = agent.args.run_id
-        cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
-        cfg["_raytune"]["resumes"].append(getattr(agent.args, "trial_id", "(no trial_id)"))
 
         cfg["_raytune"]["initial_hyperparams"] = extract_initial_hyperparams(
             asdict(agent.args),
@@ -74,10 +72,23 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
 
         print("Using initial hyperparams: %s" % cfg["_raytune"]["initial_hyperparams"])
 
+        cfg["_raytune"]["resumes"] = cfg["_raytune"].get("resumes", [])
+
+        resume = {
+            "resumed_at": datetime.datetime.now().astimezone().isoformat(),
+            "resume_path": resume_path,
+            "prev_run_id": agent.args.run_id,
+            "prev_trial_id": getattr(agent.args, "trial_id", "(no trial_id)"),
+            "overrides": {}
+        }
+
         # config_overrides is a list of "path.to.key=value"
         for co in config_overrides:
             name, value = co.split("=")
-            update_config_value(cfg, name, value)
+            oldvalue, _newvalue = update_config_value(cfg, name, value)
+            resume["overrides"][name] = [oldvalue, value]
+
+        cfg["_raytune"]["resumes"].append(resume)
 
     mutations = cfg["_raytune"]["hyperparam_mutations"]
 

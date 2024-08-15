@@ -395,13 +395,17 @@ class Agent(nn.Module):
         # jagent.features_extractor = clean_agent.NN.features_extractor
 
         # v3
-        jagent.features_extractor1_stacks = clean_agent.NN.features_extractor1_stacks
-        jagent.features_extractor1_hexes = clean_agent.NN.features_extractor1_hexes
-        jagent.features_extractor2 = clean_agent.NN.features_extractor2
+        jagent.features_extractor1_policy_stacks = clean_agent.NN_policy.features_extractor1_stacks
+        jagent.features_extractor1_policy_hexes = clean_agent.NN_policy.features_extractor1_hexes
+        jagent.features_extractor2_policy = clean_agent.NN_policy.features_extractor2
+
+        jagent.features_extractor1_value_stacks = clean_agent.NN_value.features_extractor1_stacks
+        jagent.features_extractor1_value_hexes = clean_agent.NN_value.features_extractor1_hexes
+        jagent.features_extractor2_value = clean_agent.NN_value.features_extractor2
 
         # common
-        jagent.actor = clean_agent.NN.actor
-        jagent.critic = clean_agent.NN.critic
+        jagent.actor = clean_agent.NN_policy.actor
+        jagent.critic = clean_agent.NN_value.critic
         torch.jit.save(torch.jit.script(jagent), jagent_file)
 
     @staticmethod
@@ -433,7 +437,8 @@ class JitAgent(nn.Module):
     def __init__(self):
         super().__init__()
         # XXX: these are overwritten after object is initialized
-        self.features_extractor = nn.Identity()
+        self.features_extractor_policy = nn.Identity()
+        self.features_extractor_value = nn.Identity()
         self.actor = nn.Identity()
         self.critic = nn.Identity()
         self.env_version = 0
@@ -443,18 +448,18 @@ class JitAgent(nn.Module):
     @torch.jit.export
     def predict(self, obs, mask) -> int:
         with torch.no_grad():
-            b_obs = torch.as_tensor(obs, device='cpu').unsqueeze(dim=0)
-            b_mask = torch.as_tensor(mask, device='cpu').unsqueeze(dim=0)
+            b_obs = obs.unsqueeze(dim=0)
+            b_mask = mask.unsqueeze(dim=0)
 
             # v1, v2
             # features = self.features_extractor(b_obs)
 
             # v3
             stacks, hexes = b_obs.split([1960, 10725], dim=1)
-            fstacks = self.features_extractor1_stacks(stacks)
-            fhexes = self.features_extractor1_hexes(hexes)
+            fstacks = self.features_extractor1_policy_stacks(stacks)
+            fhexes = self.features_extractor1_policy_hexes(hexes)
             fcat = torch.cat((fstacks, fhexes), dim=1)
-            features = self.features_extractor2(fcat)
+            features = self.features_extractor2_policy(fcat)
 
             action_logits = self.actor(features)
             dist = common.SerializableCategoricalMasked(logits=action_logits, mask=b_mask)
@@ -464,8 +469,12 @@ class JitAgent(nn.Module):
     @torch.jit.export
     def get_value(self, obs) -> float:
         with torch.no_grad():
-            b_obs = torch.as_tensor(obs).cpu().unsqueeze(dim=0)
-            features = self.features_extractor(b_obs)
+            b_obs = obs.unsqueeze(dim=0)
+            stacks, hexes = b_obs.split([1960, 10725], dim=1)
+            fstacks = self.features_extractor1_value_stacks(stacks)
+            fhexes = self.features_extractor1_value_hexes(hexes)
+            fcat = torch.cat((fstacks, fhexes), dim=1)
+            features = self.features_extractor2_value(fcat)
             value = self.critic(features)
             return value.float().item()
 
