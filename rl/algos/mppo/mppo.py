@@ -397,8 +397,8 @@ class JitAgent(nn.Module):
     @torch.jit.export
     def predict(self, obs, mask) -> int:
         with torch.no_grad():
-            b_obs = torch.as_tensor(obs).cpu().unsqueeze(dim=0)
-            b_mask = torch.as_tensor(mask).cpu().unsqueeze(dim=0)
+            b_obs = obs.unsqueeze(dim=0)
+            b_mask = mask.unsqueeze(dim=0)
 
             # v1, v2
             # features = self.features_extractor(b_obs)
@@ -418,8 +418,12 @@ class JitAgent(nn.Module):
     @torch.jit.export
     def get_value(self, obs) -> float:
         with torch.no_grad():
-            b_obs = torch.as_tensor(obs).cpu().unsqueeze(dim=0)
-            features = self.features_extractor(b_obs)
+            b_obs = obs.unsqueeze(dim=0)
+            stacks, hexes = b_obs.split([1960, 10725], dim=1)
+            fstacks = self.features_extractor1_stacks(stacks)
+            fhexes = self.features_extractor1_hexes(hexes)
+            fcat = torch.cat((fstacks, fhexes), dim=1)
+            features = self.features_extractor2(fcat)
             value = self.critic(features)
             return value.float().item()
 

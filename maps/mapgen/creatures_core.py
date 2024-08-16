@@ -6,7 +6,7 @@
 #
 # NOTE: the above will generate names like "creatures.core.XXX.name.plural"
 #       => all text except XXX must be manually removed
-# NOTE: The 4 "NOT USED" creatures and the arrow tower are commented out
+# NOTE: The 4 "NOT USED" creatures, warmachines and arrow tower are commented out
 #
 
 ALL_CREATURES = [
@@ -1025,34 +1025,34 @@ ALL_CREATURES = [
         "value": 1024,
         "power": 1024
     },
-    {
-        "id": 145,
-        "vcminame": "catapult",
-        "name": "Catapult",
-        "value": 500,
-        "power": 10
-    },
-    {
-        "id": 146,
-        "vcminame": "ballista",
-        "name": "Ballista",
-        "value": 600,
-        "power": 650
-    },
-    {
-        "id": 147,
-        "vcminame": "firstAidTent",
-        "name": "First Aid Tent",
-        "value": 300,
-        "power": 10
-    },
-    {
-        "id": 148,
-        "vcminame": "ammoCart",
-        "name": "Ammo Cart",
-        "value": 400,
-        "power": 5
-    },
+    # {
+    #     "id": 145,
+    #     "vcminame": "catapult",
+    #     "name": "Catapult",
+    #     "value": 500,
+    #     "power": 10
+    # },
+    # {
+    #     "id": 146,
+    #     "vcminame": "ballista",
+    #     "name": "Ballista",
+    #     "value": 600,
+    #     "power": 650
+    # },
+    # {
+    #     "id": 147,
+    #     "vcminame": "firstAidTent",
+    #     "name": "First Aid Tent",
+    #     "value": 300,
+    #     "power": 10
+    # },
+    # {
+    #     "id": 148,
+    #     "vcminame": "ammoCart",
+    #     "name": "Ammo Cart",
+    #     "value": 400,
+    #     "power": 5
+    # },
     # {
     #     "id": 149,
     #     "vcminame": "arrowTower",
