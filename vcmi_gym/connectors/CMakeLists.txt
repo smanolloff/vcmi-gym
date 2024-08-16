@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(VCMI_DIR "${CMAKE_SOURCE_DIR}/../../vcmi")
 
 find_package(pybind11 REQUIRED)
+find_package(Boost REQUIRED COMPONENTS core format)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(DEBUG_BUILD 1)
@@ -46,9 +47,11 @@ target_include_directories(connector_v3 PUBLIC "${VCMI_DIR}")
 target_include_directories(exporter_v1 PUBLIC "${VCMI_DIR}")
 target_include_directories(exporter_v2 PUBLIC "${VCMI_DIR}")
 target_include_directories(exporter_v3 PUBLIC "${VCMI_DIR}")
-target_link_libraries(connector_v1 PRIVATE ${LIBMLCLIENT})
-target_link_libraries(connector_v2 PRIVATE ${LIBMLCLIENT})
-target_link_libraries(connector_v3 PRIVATE ${LIBMLCLIENT})
+target_link_libraries(connector_v1 PRIVATE ${LIBMLCLIENT} "${Boost_LIBRARIES}")
+target_link_libraries(connector_v2 PRIVATE ${LIBMLCLIENT} "${Boost_LIBRARIES}")
+target_link_libraries(connector_v3 PRIVATE ${LIBMLCLIENT} "${Boost_LIBRARIES}")
+
+include_directories(SYSTEM ${Boost_INCLUDE_DIR})
 
 if(DEBUG_BUILD)
     target_compile_definitions(connector_v1 PRIVATE DEBUG_BUILD)

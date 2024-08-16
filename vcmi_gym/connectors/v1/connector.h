@@ -21,6 +21,7 @@
 #include <thread>
 #include <cstdio>
 #include <iostream>
+#include <string>
 
 #include "AI/MMAI/schema/base.h"
 #include "AI/MMAI/schema/v1/types.h"
@@ -59,7 +60,8 @@ namespace Connector::V1 {
         const bool trueRng;
 
         std::thread vcmithread;
-        std::unique_ptr<MMAI::Schema::Baggage> baggage;
+        MMAI::Schema::IModel* leftModel;
+        MMAI::Schema::IModel* rightModel;
         MMAI::Schema::Action action;
         const MMAI::Schema::IState * state;
 
@@ -68,7 +70,6 @@ namespace Connector::V1 {
         const MMAI::Schema::Action getActionDummy(MMAI::Schema::IState);
         const MMAI::Schema::V1::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
 
-        std::unique_ptr<MMAI::Schema::Baggage> createBaggage();
     public:
         Connector(
             const std::string mapname,

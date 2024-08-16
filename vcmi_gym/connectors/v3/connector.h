@@ -60,7 +60,8 @@ namespace Connector::V3 {
         const int statsPersistFreq;
 
         std::thread vcmithread;
-        std::unique_ptr<MMAI::Schema::Baggage> baggage;
+        MMAI::Schema::IModel* leftModel;
+        MMAI::Schema::IModel* rightModel;
         MMAI::Schema::Action action;
         const MMAI::Schema::IState * state;
 
@@ -68,8 +69,6 @@ namespace Connector::V3 {
         MMAI::Schema::Action getAction(const MMAI::Schema::IState * r);
         const MMAI::Schema::Action getActionDummy(MMAI::Schema::IState);
         const MMAI::Schema::V3::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
-
-        std::unique_ptr<MMAI::Schema::Baggage> createBaggage();
     public:
         Connector(
             const std::string mapname,

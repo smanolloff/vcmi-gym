@@ -17,7 +17,10 @@
 #include "connector.h"
 #include "AI/MMAI/schema/v1/constants.h"
 #include "AI/MMAI/schema/v1/types.h"
-#include "client/ML/MLClient.h"
+#include "ML/MLClient.h"
+#include "ML/model_wrappers/function.h"
+#include "ML/model_wrappers/scripted.h"
+#include "MMAILoader/TorchModel.h"
 #include <algorithm>
 #include <pybind11/detail/common.h>
 #include <stdexcept>
@@ -64,15 +67,6 @@ namespace Connector::V1 {
 
     const int Connector::version() {
         return 1;
-    }
-
-    std::unique_ptr<MMAI::Schema::Baggage> Connector::createBaggage() {
-        printf("VCMI Connector v%d initialized\n", version());
-        return std::make_unique<MMAI::Schema::Baggage>(
-            mapname,
-            [this](const MMAI::Schema::IState* s) { return this->getAction(s); },
-            version()
-        );
     }
 
     const MMAI::Schema::V1::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
@@ -241,8 +235,7 @@ namespace Connector::V1 {
 
     const P_State Connector::start() {
         assert(connstate == ConnectorState::NEW);
-
-        baggage = createBaggage();
+        printf("VCMI Connector v%d initialized\n", version());
 
         setvbuf(stdout, NULL, _IONBF, 0);
         LOG("start");
@@ -251,35 +244,64 @@ namespace Connector::V1 {
         std::unique_lock lock(m);
         LOG("obtain lock: done");
 
+        auto f_getAction = [this](const MMAI::Schema::IState* s) {
+            return this->getAction(s);
+        };
+
+        auto f_getValueDummy = [](const MMAI::Schema::IState* s) {
+            throw std::runtime_error("getValue not implemented in connector");
+            return 0.0;
+        };
+
+        std::function<int(const MMAI::Schema::IState* s)> getActionRed;
+        std::function<int(const MMAI::Schema::IState* s)> getActionBlue;
+        std::function<double(const MMAI::Schema::IState* s)> getValueRed;
+        std::function<double(const MMAI::Schema::IState* s)> getValueBlue;
+
+        if (red == "MMAI_USER") {
+            leftModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
+        } else if (red == "MMAI_MODEL") {
+            leftModel = new MMAI::TorchModel(redModel, false);
+        } else {
+            leftModel = new ML::ModelWrappers::Scripted(redModel);
+        }
+
+        if (blue == "MMAI_USER") {
+            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
+        } else if (blue == "MMAI_MODEL") {
+            rightModel = new MMAI::TorchModel(blueModel, false);
+        } else {
+            rightModel = new ML::ModelWrappers::Scripted(blueModel);
+        }
+
         // auto oldcwd = std::filesystem::current_path();
 
         // This must happen in the main thread (SDL requires it)
-        LOG("call init_vcmi(...)");
-        init_vcmi(
-            baggage.get(),
-            0,  // maxbattles
-            seed,
-            randomHeroes,
-            randomObstacles,
-            0,
-            0,
-            0,
-            0,
-            swapSides,
-            loglevelGlobal,
-            loglevelAI,
-            loglevelStats,
-            red,
-            blue,
-            redModel,
-            blueModel,
-            statsMode,
-            statsStorage,
-            60000,  // statsTimeout
-            statsPersistFreq,
-            false,  // printModelPredictions
-            true  // headless (disable the GUI, as it cannot run in a non-main thread)
+        auto initargs = ML::InitArgs(
+            mapname,            // mapname
+            leftModel,          // leftModel
+            rightModel,         // rightModel
+            0,                  // maxBattles
+            seed,               // seed
+            randomHeroes,       // randomHeroes
+            randomObstacles,    // randomObstacles
+            0,                  // townChance
+            0,                  // warmachineChance
+            0,                  // manaMin
+            0,                  // manaMax
+            swapSides,          // swapSides
+            loglevelGlobal,     // loglevelGlobal
+            loglevelAI,         // loglevelAI
+            loglevelStats,      // loglevelStats
+            statsMode,          // statsMode
+            statsStorage,       // statsStorage
+            60000,              // statsTimeout
+            statsPersistFreq,   // statsPersistFreq
+            true                // headless (disable the GUI, as it cannot run in a non-main thread)
         );
+
+        LOG("call init_vcmi(...)");
+        init_vcmi(initargs);
 
         LOG("set connstate = AWAITING_STATE");
         connstate = ConnectorState::AWAITING_STATE;
@@ -287,7 +309,7 @@ namespace Connector::V1 {
         LOG("launch new thread");
         vcmithread = std::thread([] {
             LOG("[thread] Start VCMI");
-            start_vcmi();
+            ML::start_vcmi();
             assert(false); // should never happen
         });
 
