@@ -9,21 +9,34 @@ set(CMAKE_CXX_STANDARD 17)
 set(VCMI_DIR "${CMAKE_SOURCE_DIR}/../../vcmi")
 
 find_package(pybind11 REQUIRED)
-find_package(Boost REQUIRED COMPONENTS core format)
+
+if(APPLE)
+    find_package(Boost REQUIRED COMPONENTS core format)
+else()
+    find_package(Boost REQUIRED system)
+endif()
+
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(DEBUG_BUILD 1)
-    set(MLCLIENT_PATH "${VCMI_DIR}/build/bin")
+    set(VCMI_BIN_PATH "${VCMI_DIR}/build/bin")
 else()
-    set(MLCLIENT_PATH "${VCMI_DIR}/rel/bin")
+    set(VCMI_BIN_PATH "${VCMI_DIR}/rel/bin")
 endif()
 
-find_library(LIBMLCLIENT NAMES mlclient PATHS "${MLCLIENT_PATH}" NO_DEFAULT_PATH)
+find_library(LIBMLCLIENT NAMES mlclient PATHS "${VCMI_BIN_PATH}" NO_DEFAULT_PATH)
+find_library(LIBMMAILOADER NAMES mmailoader PATHS "${VCMI_BIN_PATH}" NO_DEFAULT_PATH)
 
 if(LIBMLCLIENT)
     message(STATUS "Found libmlclient: ${LIBMLCLIENT}")
 else()
-    message(FATAL_ERROR "libmlclient not found (searched in \"${MLCLIENT_PATH}\")")
+    message(FATAL_ERROR "libmlclient not found (searched in \"${VCMI_BIN_PATH}\")")
+endif()
+
+if(LIBMMAILOADER)
+    message(STATUS "Found libmmailoader: ${LIBMMAILOADER}")
+else()
+    message(FATAL_ERROR "libmmailoader not found (searched in \"${VCMI_BIN_PATH}\")")
 endif()
 
 # Using variables for the file lists make it easier to define new targets
@@ -47,10 +60,12 @@ target_include_directories(connector_v3 PUBLIC "${VCMI_DIR}")
 target_include_directories(exporter_v1 PUBLIC "${VCMI_DIR}")
 target_include_directories(exporter_v2 PUBLIC "${VCMI_DIR}")
 target_include_directories(exporter_v3 PUBLIC "${VCMI_DIR}")
-target_link_libraries(connector_v1 PRIVATE ${LIBMLCLIENT} "${Boost_LIBRARIES}")
-target_link_libraries(connector_v2 PRIVATE ${LIBMLCLIENT} "${Boost_LIBRARIES}")
-target_link_libraries(connector_v3 PRIVATE ${LIBMLCLIENT} "${Boost_LIBRARIES}")
-
+target_link_libraries(connector_v1 PRIVATE "${Boost_LIBRARIES}")
+target_link_libraries(connector_v2 PRIVATE "${Boost_LIBRARIES}")
+target_link_libraries(connector_v3 PRIVATE "${Boost_LIBRARIES}")
+target_link_libraries(connector_v1 PUBLIC ${LIBMLCLIENT} ${LIBMMAILOADER})
+target_link_libraries(connector_v2 PUBLIC ${LIBMLCLIENT} ${LIBMMAILOADER})
+target_link_libraries(connector_v3 PUBLIC ${LIBMLCLIENT} ${LIBMMAILOADER})
 include_directories(SYSTEM ${Boost_INCLUDE_DIR})
 
 if(DEBUG_BUILD)
