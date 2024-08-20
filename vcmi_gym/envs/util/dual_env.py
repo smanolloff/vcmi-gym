@@ -17,10 +17,12 @@
 import gymnasium as gym
 import threading
 import enum
-import collections
+import numpy as np
+import sys
+from typing import NamedTuple
+import warnings
 
 from . import log
-from . import wrappers
 
 
 DEBUG = True
@@ -29,9 +31,16 @@ MAXLEN = 100
 
 def withcond(func):
     def wrapper(self, *args, **kwargs):
+        self._debug("obtaining lock...")
         with self.cond:
-            return func(self, *args, **kwargs)
-
+            self._debug("lock obtained")
+            try:
+                retval = func(self, *args, **kwargs)
+            except Exception:
+                print("DUMP: state=%s, clients=%s, result=%s, stored_result=%s" % (self.state, self.clients, self.result, self.stored_result))
+                raise
+        self._debug("lock released")
+        return retval
     return wrapper
 
 
@@ -51,12 +60,11 @@ def tracelog(func):
 
 class State(enum.Enum):
     RESET = enum.auto()
-    REG_A = enum.auto()
-    REG_B = enum.auto()
+    REG = enum.auto()
     OBS_A = enum.auto()
     OBS_B = enum.auto()
-    DEREG = enum.auto()
     BATTLE_END = enum.auto()
+    MIDBATTLE_RESET = enum.auto()
 
 
 class Side(enum.Enum):
@@ -75,98 +83,161 @@ class Clients:
         return "Clients(A=%s, B=%s)" % (self.A, self.B)
 
 
-Client = collections.namedtuple("Client", ["side"])
-StepResult = collections.namedtuple("StepResult", ["obs", "rew", "term", "trunc", "info"])
-ResetResult = collections.namedtuple("ResetResult", ["obs", "info"])
+class Client(NamedTuple):
+    side: Side
+
+
+class ResetResult(NamedTuple):
+    obs: np.ndarray
+    info: bool
+
+
+class StepResult(NamedTuple):
+    obs: np.ndarray
+    rew: float
+    term: bool
+    trunc: bool
+    info: dict
 
 
 class DualEnvController:
-    def __init__(self, env, loglevel="DEBUG"):
+    def __init__(self, env, timeout=5, loglevel="DEBUG"):
+        # See note in flow_battle_end
+        assert env.allow_retreat, "Retreats must be allowed"
         self.env = env
+        self.timeout = timeout
+        self._timeout = timeout  # modified at quit
         self.clients = Clients()
         self.state = State.RESET
         self.cond = threading.Condition()
         self.logger = log.get_logger("Controller", loglevel)
+        self.termresults = {Side.ATTACKER: None, Side.DEFENDER: None}
+        self.stored_result = None
+        self.aside = None  # side to use for client "A"
+        self.quit_requested = False
 
-    #
-    # XXX:
-    # After a regular battle end, the terminal result is received twice.
-    # (once for RED and once for BLUE)
-    # In case of BATTLE_END, self.result holds the first of those results,
-    # and the second one is queued to be returned immediately, on any action.
-    # Since AAI expects the action to be RESET, we do a pre-reset in order to
-    # obtain the second non-terminal result.
-    # The "regular" reset afterwards (in flow_reg_a) will work as expected.
-    #
-    # NOTE: There are 2 calls to env.reset(), but only 1 restart occurs!
-    # (because the defending client does nothing with the reset action)
-    #
     @withcond
     @tracelog
-    def reset(self, *args, **kwargs):
-        if self.state == State.BATTLE_END:
-            self.env.reset(*args, **kwargs)
-            self._transition(State.RESET)
+    def reset(self, side, desired_side):
+        assert desired_side in [None, Side.ATTACKER, Side.DEFENDER]
 
         match self.state:
             case State.RESET:
-                self._flow_reg_a(args, kwargs)
-                return self.clients.A.side, tuple(self.result)
-            case State.REG_A:
-                self._flow_reg_b()
+                self._flow_reg_a(desired_side)
+                # the result here may be a StepResult => extract only obs&info
+                return self.clients.A.side, (self.result.obs, self.result.info)
+            case State.REG:
+                self._flow_reg_b(desired_side)
                 # the result here may be a StepResult => extract only obs&info
                 return self.clients.B.side, (self.result.obs, self.result.info)
+            case State.BATTLE_END:
+                self._info("flow STORED")
+                assert self.result.info["side"] == side.value  # side should not change
+                name, _ = self._infer_client_names(side)
+                self._transition(State.OBS_A if name == "A" else State.OBS_B)
+                return side, tuple(self.result)
             case State.OBS_A | State.OBS_B:
-                # Can't reset mid-battle --  what are we to return to the
-                # other client? (which called .step(), expecting a StepResult)
-                # We must somehow return a terminal StepResult, but we only
-                # have a ResetResult when resetting.
-                # => just re-return the last result
-                self.logger.warn("Ignoring mid-battle reset!")
-                return Side(self.result.info["side"]), (self.result.obs, self.result.info)
+                self._flow_midbattle_reset(side)
+                assert self.result.info["side"] == side.value  # side should not change
+                return side, (self.result.obs, self.result.info)
             case _:
                 raise Exception("Cannot reset while in state: %s" % self.state)
 
     @withcond
     @tracelog
-    def step(self, side, *args, **kwargs):
+    def step(self, side, action):
         assert self.result.info["side"] == side.value, "expected last res side %s, got: %s" % (self.result.info["side"], side.value)  # noqa: E501
 
-        # XXX: "B" can still be None here (waiting to complete registration)
+        name, other_name = self._infer_client_names(side)
 
-        match side:
-            case self.clients.A.side:
-                name, other_name = "A", "B"
-                state, other_state = State.OBS_A, State.OBS_B
-            case self.clients.B.side:
-                name, other_name = "B", "A"
-                state, other_state = State.OBS_B, State.OBS_A
-            case _:
-                raise Exception("Unexpected side: %s" % side)
+        if name == "A":
+            state, other_state = State.OBS_A, State.OBS_B
+        else:
+            state, other_state = State.OBS_B, State.OBS_A
 
-        assert getattr(self.clients, name).side == side, "expected side %s, got: %s" % (getattr(self.clients, name).side, side)  # noqa: E501
+        assert self._get_client(name).side == side, "expected side %s, got: %s" % (self._get_client(name).side, side)  # noqa: E501
         self._assert_state(state)
-        self.result = StepResult(*self.env.step(*args, **kwargs))
+        self.result = StepResult(*self._env_step(action))
 
-        if self.result.term or self.result.trunc:
-            self._flow_dereg(name, other_name, state, other_state)
+        if self.result.term:
+            self._flow_battle_end(name, other_name, state, other_state)
         elif self.result.info["side"] != side.value:
             self._flow_other(name, other_name, state, other_state)
         else:
             # nothing to do - flow = same
+            self._info("flow SAME")
             pass
 
         return tuple(self.result)
 
+    @tracelog
+    def close(self, *args, **kwargs):
+        self._timeout = 0
+        self.quit_requested = True
+
+        if self.cond.acquire(timeout=self.timeout):
+            self.cond.notify_all()
+            self.cond.release()
+
+        return self.env.close(*args, **kwargs)
     #
     # private
     #
 
+    def _log(self, level, msg):
+        getattr(self.logger, level)("[%s] %s" % (getattr(self.state, "name", ""), msg))
+
     def _debug(self, msg):
-        self.logger.debug("[%s] %s" % (getattr(self.state, "name", ""), msg))
+        self._log("debug", msg)
+
+    def _info(self, msg):
+        self._log("info", msg)
+
+    def _warn(self, msg):
+        self._log("warn", msg)
+
+    def _error(self, msg):
+        self._log("error", msg)
+
+    def _infer_client_names(self, side):
+        match side:
+            case self.clients.A.side:
+                return "A", "B"
+            case self.clients.B.side:
+                return "B", "A"
+            case _:
+                raise Exception("Unexpected side: %s" % side)
+
+    def _cond_notify(self):
+        self._info("cond.notify()...")
+        self.cond.notify()
+
+    @tracelog
+    def _env_step(self, action):
+        obs, rew, term, trunc, info = self.env.step(action)
+        self._info(f"Step ({action}): term={term}, trunc={trunc}, side={info['side']}")
+        return obs, rew, term, trunc, info
+
+    @tracelog
+    def _cond_wait(self, wait_name):
+        self._info("waiting %s ..." % wait_name)
+        if self.cond.wait(timeout=self._timeout):
+            self._info("waited %s" % wait_name)
+            # notification received on time, all is good
+            if not self.quit_requested:
+                return
+
+            sys.exit(0)
+
+        if self.quit_requested:
+            self._info("Cond wait timeout (quit_requested=%s)" % self.quit_requested)
+            sys.exit(0)
+        else:
+            self._error("Cond wait timeout (quit_requested=%s)" % self.quit_requested)
+            sys.exit(1)
 
     def _transition(self, newstate):
-        self._debug("%s => %s" % (self.state, newstate))
+        self._info("%s => %s" % (self.state, newstate))
         self.state = newstate
 
     def _assert_state(self, state):
@@ -175,72 +246,178 @@ class DualEnvController:
     def _assert_any_state(self, states):
         assert any(self.state == state for state in states), "expected one of: %s, got: %s" % (states, self.state)
 
+    @tracelog
+    def _set_termresult(self, res):
+        self.termresults[Side(res.info["side"])] = res
+
     def _assert_client(self, name, client):
-        assert getattr(self.clients, name) == client, "client %s != %s: %s" % (name, client, self.clients)
+        assert self._get_client(name) == client, "client %s != %s: %s" % (name, client, self.clients)
 
-    def _flow_reg_a(self, env_args, env_kwargs):
+    def _get_client(self, name):
+        return getattr(self.clients, name)
+
+    def _flow_reg_a(self, desired_side):
+        self._info("flow REG_A")
         self._assert_client("A", None)
-        self._transition(State.REG_A)
+        self._transition(State.REG)
+        self.aside = desired_side
+        self._cond_notify()  # for wait-4
+        self._cond_wait("wait-1 (flow REG_A)")  # wait-1
+        self._assert_state(State.OBS_A)
 
-        self.cond.wait()  # wait-1
-
-        self._assert_state(State.REG_B)
-        self.result = ResetResult(*self.env.reset(*env_args, **env_kwargs))
-        self.clients.A = Client(side=Side(self.result.info["side"]))
-        self._transition(State.OBS_A)
-
-    def _flow_reg_b(self):
+    def _flow_reg_b(self, desired_side):
+        self._info("flow REG_B")
         self._assert_client("B", None)
-        self._transition(State.REG_B)
 
-        self.cond.notify()  # for wait-1 or wait-3
-        self.cond.wait()  # wait-2
+        if desired_side == Side.ATTACKER:
+            assert self.aside in [None, Side.DEFENDER], "desired_side conflict: %s" % self.aside
+            self.clients.A = Client(side=Side.DEFENDER)
+            self.clients.B = Client(side=Side.ATTACKER)
+        elif desired_side == Side.DEFENDER:
+            assert self.aside in [None, Side.ATTACKER], "desired_side conflict: %s" % self.aside
+            self.clients.A = Client(side=Side.ATTACKER)
+            self.clients.B = Client(side=Side.DEFENDER)
+        elif self.aside is Side.DEFENDER:
+            self.clients.A = Client(side=Side.DEFENDER)
+            self.clients.B = Client(side=Side.ATTACKER)
+        else:  # self.aside in [None, Side.ATTACKER]
+            self.clients.A = Client(side=Side.ATTACKER)
+            self.clients.B = Client(side=Side.DEFENDER)
 
-        # Technically, the state here could also be DEREG
-        # (if the battle ended without "B" ever receiving a move)
-        # This, however, is unsupported (no "terminated" in reset's result)
-        # => assert OBS_B
-        self._assert_state(State.OBS_B)
-        self.clients.B = Client(side=Side(self.result.info["side"]))
-        assert self.clients.B != self.clients.A, "same clients: %s" % self.clients
+        self.result = ResetResult(*self.env.reset())
+
+        if self.result.info["side"] == self.clients.B.side.value:
+            self._transition(State.OBS_B)
+        else:
+            self._transition(State.OBS_A)
+            self._cond_notify()  # for wait-1
+            self._cond_wait("wait-2 (flow REG_B)")
 
     def _flow_other(self, name, other_name, state, other_state):
+        self._info("flow OTHER")
         self._transition(other_state)
-        self.cond.notify()  # for wait-2 or wait-4
-        self.cond.wait()  # wait-4
+        self._cond_notify()  # for wait-1, wait-2 or wait-3
+        self._cond_wait("wait-3 (flow OTHER)")
 
-        if self.state == State.DEREG:
+        if self.state == State.BATTLE_END:
             self._assert_client(other_name, None)
+            client_side = self._get_client(name).side
+            assert self.termresults[client_side], "missing term result for %s: %s" % (client_side, self.termresults)
+            self.result = self.termresults[client_side]
+            self.termresults[client_side] = None
             setattr(self.clients, name, None)
-            self._transition(State.BATTLE_END)
-            self.cond.notify()  # for wait-5
+            self._transition(State.RESET)
         else:
             self._assert_state(state)
 
-    def _flow_dereg(self, name, _other_name, _state, _other_state):
-        self._transition(State.DEREG)
+    #
+    # XXX:
+    # After a regular battle end, the terminal result is received twice:
+    # once for ATTACKER and once for DEFENDER. Both BAI send it, but
+    # in UNDEFINED order.
+    #
+    # Currently, self.result holds the first of those results and its BAI
+    # expects ACTION_RESET. The result itself may be for the other side.
+    # => we will call step(ACTION_RESET). The first BAI is then destroyed.
+    #    NOTE: we don't call reset() here, as we need a StepResult.
+    # As soon as the BAI is destroyed, VCMI client calls battleEnd() on the
+    # other BAI, which calls getAction() with its own terminal result.
+    # => our reset() will receive the 2nd terminal result.
+    # Now we have both term results, and we must return the one matching our
+    # client's side.
+    #
+    # The RL algo/models of both clients will then call reset() but
+    # the controller will call env.reset() only once (the regular REG flow).
+    #
+    # This means there will be 2 ACTION_RESETs sent to VCMI after battle end,
+    # but only 1 restart will occur!
+    # (because the defending BAI does nothing with the reset action)
+    #
+    def _flow_battle_end(self, name, other_name, state, other_state):
+        self._info("flow BATTLE_END")
+
+        client_side = self._get_client(name).side
+
         setattr(self.clients, name, None)
 
-        self.cond.notify()  # for wait-2 or wait-4
-        self.cond.wait()  # wait-5
-        # XXX: no assert here - race cond (other thread may have called reset)
+        assert not self.termresults[Side.ATTACKER], "expected no term results, have: %s" % self.termresults
+        assert not self.termresults[Side.DEFENDER], "expected no term results, have: %s" % self.termresults
+        self._set_termresult(self.result)
+        self.result = StepResult(*self._env_step(-1))  # -1 is ACTION_RESET
+
+        if self.result.term:
+            # BATTLE_END: case 1 of 3
+            self._transition(State.BATTLE_END)
+            self._set_termresult(self.result)
+            assert self.termresults[Side.ATTACKER], "missing term result: %s" % self.termresults
+            assert self.termresults[Side.DEFENDER], "missing term result: %s" % self.termresults
+
+            self.result = self.termresults[client_side]
+            self._cond_notify()  # for wait-2 or wait-4
+            self._cond_wait("wait-4 (flow BATTLE_END)")
+
+            self.termresults[client_side] = None
+        elif self.result.info["side"] == client_side.value:
+            # BATTLE_END: case 2 of 3
+            self._transition(State.BATTLE_END)
+            self.stored_result = self.result
+            self.result = self.termresults[client_side]
+        else:
+            # BATTLE_END: case 3 of 3
+            self._flow_other(name, other_name, state, other_state)
+
+    def _flow_midbattle_reset(self, side):
+        self._info("flow MIDBATTLE_RESET")
+        self.result = StepResult(*self._env_step(-1))  # -1 is ACTION_RESET
+
+        if self.result.info["side"] == side.value:
+            # MIDBATTLE_RESET: case 1
+            self._info("flow SAME")
+        else:
+            # MIDBATTLE_RESET: case 2
+            name, other_name = self._infer_client_names(side)
+
+            if name == "A":
+                state, other_state = State.OBS_A, State.OBS_B
+            else:
+                state, other_state = State.OBS_B, State.OBS_A
+
+            self._flow_other(name, other_name, state, other_state)
 
 
 class DualEnvClient(gym.Env):
-    def __init__(self, controller, name, loglevel="DEBUG"):
+    def __init__(self, controller, name, desired_side=None, loglevel="DEBUG"):
+        assert desired_side in [None, Side.ATTACKER, Side.DEFENDER], "invalid side: %s" % desired_side
         self.controller = controller
         self.side = None
+        self.desired_side = desired_side
         self.logger = log.get_logger(name, loglevel)
 
+        # VcmiEnv public attributes
+        self.action_space = controller.env.action_space
+        self.observation_space = controller.env.observation_space
+        self.render_mode = controller.env.render_mode
+
+    # XXX: args/kwargs not supported
+    #      (two envs will call reset with potentially different args)
     @tracelog
     def reset(self, *args, **kwargs):
-        self.side, result = self.controller.reset(*args, **kwargs)
+        if args:
+            warnings.warn("arguments for reset will be ignored: %s" % args)
+        if kwargs:
+            warnings.warn("keyword arguments for reset will be ignored: %s" % kwargs)
+
+        new_side, result = self.controller.reset(self.side, self.desired_side)
+
+        assert new_side == self.desired_side, "controller gave wrong side: want: %s, have: %s" % (self.desired_side, new_side)
+        self.side = new_side
+
         return result
 
     @tracelog
-    def step(self, *args, **kwargs):
+    def step(self, action):
         assert self.side is not None
-        result = self.controller.step(self.side, *args, **kwargs)
+        result = self.controller.step(self.side, action)
         return result
 
     @tracelog
@@ -250,20 +427,28 @@ class DualEnvClient(gym.Env):
 
     @tracelog
     def close(self, *args, **kwargs):
-        # call env directly
-        return self.controller.env.close(*args, **kwargs)
+        return self.controller.close(*args, **kwargs)
 
     @tracelog
     def action_mask(self):
-        # call env directly
         return self.controller.env.action_mask()
+
+    @tracelog
+    def attn_mask(self):
+        return self.controller.env.attn_mask()
+
+    def decode(self):
+        return self.controller.env.decode()
 
     #
     # private
     #
 
+    def _log(self, level, msg):
+        getattr(self.logger, level)("[%s] %s" % (self.side, msg))
+
     def _debug(self, msg):
-        self.logger.debug("[%s] %s" % (self.side, msg))
+        self._log("debug", msg)
 
 
 if __name__ == "__main__":
@@ -271,7 +456,7 @@ if __name__ == "__main__":
     import numpy as np
     import time
     import logging
-    from ..v2.vcmi_env import VcmiEnv
+    from ..v3.vcmi_env import VcmiEnv
 
     def npstr(self):
         return f"ndarray{self.shape}"
@@ -288,14 +473,14 @@ if __name__ == "__main__":
             return model.predict(torch.as_tensor(obs[:, :, 1:]), torch.as_tensor(mask))
         return pred
 
-    attacker = legacy_predictor(torch.jit.load("rl/models/model-PBT-mppo-attacker-cont-20240517_134625.b6623_00000:v4/jit-agent.pt"))
-    defender = predictor(torch.jit.load("rl/models/agent.pt:v929/jit-agent.pt"))
+    attacker = predictor(torch.jit.load("rl/models/Attacker model:v9/jit-agent.pt"))
+    defender = predictor(torch.jit.load("rl/models/Defender Model:v5/jit-agent.pt"))
 
     steps = 0
 
-    def play(controller, predictors, games, name):
+    def play(controller, side, predictors, games, name):
         global steps
-        client = DualEnvClient(controller, name, logging.getLevelName(controller.logger.level))
+        client = DualEnvClient(controller, name, side, logging.getLevelName(controller.logger.level))
         pred_att, pred_def = predictors
         logger = log.get_logger(f"player-{name}", logging.getLevelName(controller.logger.level))
         counter = 0
@@ -315,21 +500,37 @@ if __name__ == "__main__":
             action = pred(obs, client.action_mask())
 
             while True:
+                # time.sleep(np.random.rand())
                 steps += 1
-                obs, _, term, trunc, _ = client.step(action)
+
+                if steps % 5 < 3:
+                    logger.info("Steps: %d, will restart" % steps)
+                    obs, info = client.reset()
+                    term = trunc = False
+                else:
+                    logger.info("Steps: %d, will step" % steps)
+                    obs, _, term, trunc, info = client.step(action)
+
                 if term or trunc:
+                    logger.info("Got terminal state. Side: %s" % info["side"])
                     break
                 action = pred(obs, client.action_mask())
 
         logger.info("Done.")
 
-    env = VcmiEnv("gym/A1.vmap", attacker="MMAI_USER", defender="MMAI_USER", max_steps=50)
-    env = wrappers.LegacyActionSpaceWrapper(env)
-    controller = DualEnvController(env, "ERROR")
+    env = VcmiEnv(
+        mapname="gym/A1.vmap",
+        attacker="MMAI_USER",
+        defender="MMAI_USER",
+        allow_retreat=True,
+        max_steps=50,
+        vcmi_loglevel_ai="debug"
+    )
+    controller = DualEnvController(env, timeout=1, loglevel="DEBUG")
 
-    kwargs = dict(controller=controller, predictors=(attacker, defender), games=10)
-    baba = threading.Thread(target=play, kwargs=dict(kwargs, name="baba"))
-    pena = threading.Thread(target=play, kwargs=dict(kwargs, name="pena"))
+    kwargs = dict(controller=controller, predictors=(attacker, defender), games=2)
+    baba = threading.Thread(target=play, kwargs=dict(kwargs, name="att", side=Side.ATTACKER))
+    pena = threading.Thread(target=play, kwargs=dict(kwargs, name="def", side=Side.DEFENDER))
 
     ts = time.time()
     baba.start()

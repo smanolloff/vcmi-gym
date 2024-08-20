@@ -22,6 +22,7 @@ Custom-made libraries that "connect" VCMI with the gym env:
 
 ```bash
 $ cd "$VCMIGYM/vcmi_gym/connectors"
+$ sudo apt install libboost-all-dev
 $ cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0

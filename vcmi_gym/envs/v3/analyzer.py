@@ -40,6 +40,9 @@ class ActionType(enum.IntEnum):
     assert N_NONHEX_ACTIONS == 2
     assert N_HEX_ACTIONS == 14
 
+    # Control actions
+    RESET = -1
+
     # Nonhex-actions
     RETREAT = 0
     WAIT = enum.auto()

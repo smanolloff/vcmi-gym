@@ -395,7 +395,7 @@ class VcmiEnv(gym.Env):
         self.allow_retreat = allow_retreat
         # </params>
 
-        self.logger = log.get_logger("VcmiEnv", vcmienv_loglevel)
+        self.logger = log.get_logger("VcmiEnv-v3", vcmienv_loglevel)
 
         self.connector = self.__class__.CONNECTOR_CLASS(
             vcmienv_loglevel,
@@ -438,7 +438,7 @@ class VcmiEnv(gym.Env):
 
     @tracelog
     def step(self, action):
-        if self.terminated or self.truncated:
+        if (self.terminated or self.truncated) and action != -1:
             raise Exception("Reset needed")
 
         # Prevent VCMI exceptions (mid-battle retreats are not handled)
@@ -446,6 +446,10 @@ class VcmiEnv(gym.Env):
             raise Exception("Retreat is not allowed")
 
         res = self.connector.act(action)
+
+        if action in [-1, 0]:
+            self._reset_vars(res)
+
         if res.errcode > 0 and not self.allow_invalid_actions:
             self.logger.warn("Attempted an invalid action (errcode=%d)" % res.errcode)
 

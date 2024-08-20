@@ -237,7 +237,8 @@ namespace Connector::V3 {
         ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         // Prevent control actions via `step`
-        assert(a > 0);
+        // XXX: commented-out because DualEnv resets the env via action(-1)
+        // assert(a > 0);
 
         LOG("obtain lock");
         std::unique_lock lock(m);
@@ -268,6 +269,47 @@ namespace Connector::V3 {
         LOG("release lock (return)");
         LOG("return P_State");
         return convertState(state);
+    }
+
+    MMAI::Schema::Action Connector::getAction(const MMAI::Schema::IState* s) {
+        LOG("acquire Python GIL");
+        py::gil_scoped_acquire acquire;
+
+        LOG("obtain lock");
+        std::unique_lock lock(m);
+        LOG("obtain lock: done");
+
+        ASSERT_STATE(ConnectorState::AWAITING_STATE);
+
+        LOG("set this->istate = s");
+        state = s;
+
+        LOG("set connstate = AWAITING_ACTION");
+        connstate = ConnectorState::AWAITING_ACTION;
+
+        LOG("cond.notify_one()");
+        cond.notify_one();
+
+        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
+
+        {
+            LOG("release Python GIL");
+            py::gil_scoped_release release;
+
+            // Now wait again (will unblock once step/reset have been called)
+            LOG("cond.wait(lock)");
+            cond.wait(lock);
+            LOG("cond.wait(lock): done");
+
+            LOG("acquire Python GIL (scope-auto)");
+            // py::gil_scoped_acquire acquire2;
+        }
+
+        ASSERT_STATE(ConnectorState::AWAITING_STATE);
+
+        LOG("release lock (return)");
+        LOGSTR("return Action: ", std::to_string(action));
+        return action;
     }
 
     const P_State Connector::start() {
@@ -380,47 +422,6 @@ namespace Connector::V3 {
         LOG("return P_Result");
 
         return convertState(state);
-    }
-
-    MMAI::Schema::Action Connector::getAction(const MMAI::Schema::IState* s) {
-        LOG("acquire Python GIL");
-        py::gil_scoped_acquire acquire;
-
-        LOG("obtain lock");
-        std::unique_lock lock(m);
-        LOG("obtain lock: done");
-
-        ASSERT_STATE(ConnectorState::AWAITING_STATE);
-
-        LOG("set this->istate = s");
-        state = s;
-
-        LOG("set connstate = AWAITING_ACTION");
-        connstate = ConnectorState::AWAITING_ACTION;
-
-        LOG("cond.notify_one()");
-        cond.notify_one();
-
-        ASSERT_STATE(ConnectorState::AWAITING_ACTION);
-
-        {
-            LOG("release Python GIL");
-            py::gil_scoped_release release;
-
-            // Now wait again (will unblock once step/reset have been called)
-            LOG("cond.wait(lock)");
-            cond.wait(lock);
-            LOG("cond.wait(lock): done");
-
-            LOG("acquire Python GIL (scope-auto)");
-            // py::gil_scoped_acquire acquire2;
-        }
-
-        ASSERT_STATE(ConnectorState::AWAITING_STATE);
-
-        LOG("release lock (return)");
-        LOGSTR("return Action: ", std::to_string(action));
-        return action;
     }
 
     PYBIND11_MODULE(connector_v3, m) {
