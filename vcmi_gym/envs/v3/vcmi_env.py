@@ -128,191 +128,191 @@ class VcmiEnv(gym.Env):
         Required parameters:
 
         * mapname (str)
-          Path to the VCMI map. Relative paths are resolved with respect
+            Path to the VCMI map. Relative paths are resolved with respect
             to the "maps/" directory.
-          Example: "gym/A1.vmap"
+            Example: "gym/A1.vmap"
 
         Optional parameters:
 
         * render_mode (str)
-          Gym render mode. Only "ansi" is supported.
-          Values: "ansi"
-          Default: "ansi"
+            Gym render mode. Only "ansi" is supported.
+            Values: "ansi"
+            Default: "ansi"
 
         * seed (int)
-          VCMI `--seed` option. Speficies the RNG seed to use.
-          A value of `0` will generate a random seed.
-          Values: 0 < seed < 2^31
-          Default: 0
+            VCMI `--seed` option. Speficies the RNG seed to use.
+            A value of `0` will generate a random seed.
+            Values: 0 < seed < 2^31
+            Default: 0
 
         * max_steps (int)
-          Max episode length in steps. A value of `0` means no limit.
-          Values: 0 < max_steps
-          Default: 500
+            Max episode length in steps. A value of `0` means no limit.
+            Values: 0 < max_steps
+            Default: 500
 
         * render_each_step (bool)
-          Automatically invoke render() after each step.
-          Default: False
+            Automatically invoke render() after each step.
+            Default: False
 
         * vcmi_loglevel_global (str)
-          VCMI `--loglevel-global` option.
-          Values: "trace" | "debug" | "info" | "warn" | "error"
-          Default: "error"
+            VCMI `--loglevel-global` option.
+            Values: "trace" | "debug" | "info" | "warn" | "error"
+            Default: "error"
 
         * vcmi_loglevel_ai (str)
-          VCMI `--loglevel-ai` option.
-          Values: "trace" | "debug" | "info" | "warn" | "error"
-          Default: "error"
+            VCMI `--loglevel-ai` option.
+            Values: "trace" | "debug" | "info" | "warn" | "error"
+            Default: "error"
 
         * vcmi_loglevel_stats (str)
-          VCMI `--loglevel-stats` option.
-          Values: "trace" | "debug" | "info" | "warn" | "error"
-          Default: "error"
+            VCMI `--loglevel-stats` option.
+            Values: "trace" | "debug" | "info" | "warn" | "error"
+            Default: "error"
 
         * vcmienv_loglevel (str)
-          The gym environment's log level.
-          Values: "DEBUG" | "INFO" | "WARN" | "ERROR"
-          Default: "WARN"
+            The gym environment's log level.
+            Values: "DEBUG" | "INFO" | "WARN" | "ERROR"
+            Default: "WARN"
 
         * attacker (str)
-          VCMI `--red-ai` option. Specifies the attacking player.
-          Values:
-          If "MMAI_USER" is given, VCMI will send attacking player's
+            VCMI `--red-ai` option. Specifies the attacking player.
+            Values:
+            - If "MMAI_USER" is given, VCMI will send attacking player's
             observations and request actions from this gym environment.
-          If "MMAI_MODEL" is given, VCMI will load a pre-trained model from a
-            file specified by the `attacker_model` parameter and will
+            - If "MMAI_MODEL" is given, VCMI will load a pre-trained model from
+            a file specified by the `attacker_model` parameter and will
             automatically act on behalf of the attacking player using the
             model's predictions.
-          If "MMAI_SCRIPT_SUMMONER", "StupidAI" or "BattleAI" is given, VCMI
-            will automatically act on behalf of the attacking player using the
-            corresponding scripted bot logic.
-          Values: "MMAI_USER" | "MMAI_MODEL" | "MMAI_SCRIPT_SUMMONER" | "StupidAI" | "BattleAI"
-          Default: "StupidAI"
+            - If "MMAI_SCRIPT_SUMMONER", "StupidAI" or "BattleAI" is given,
+            VCMI will automatically act on behalf of the attacking player using
+            the corresponding scripted bot logic.
+            Values: "MMAI_USER" | "MMAI_MODEL" | "MMAI_SCRIPT_SUMMONER" | "StupidAI" | "BattleAI"
+            Default: "StupidAI"
 
         * defender (str)
-          VCMI `--blue-ai` option.
-          Same as `attacker`, but for the defending player.
+            VCMI `--blue-ai` option.
+            Same as `attacker`, but for the defending player.
 
         * attacker_model (str)
-          Path to a pre-trained torch JIT model file.
-          Relative paths are resolved with respect the VCMI root dir.
-          Ignored unless `attacker` is "MMAI_MODEL".
-          Default: None
+            Path to a pre-trained torch JIT model file.
+            Relative paths are resolved with respect the VCMI root dir.
+            Ignored unless `attacker` is "MMAI_MODEL".
+            Default: None
 
         * defender_model (str)
-          Same as `attacker_model`, but for the defending player.
+            Same as `attacker_model`, but for the defending player.
 
         * vcmi_stats_mode (str)
-          VCMI `--stats-mode` option. Specifies whether per-hero statistics
+            VCMI `--stats-mode` option. Specifies whether per-hero statistics
             should be collected after each battle (wins, losses). Used for
             creating and rebalancing training maps.
-          Values: "disabled" | "red" | "blue"
-          Default: "disabled"
+            Values: "disabled" | "red" | "blue"
+            Default: "disabled"
 
         * vcmi_stats_storage (str)
-          VCMI `--stats-storage` option. Specifies the location of the sqlite3
-            database where statistics will be read from and written to. A value
-            of "-" means that an in-memory database will be created and used
-            instead.
-          Ignored if `vcmi_stats_mode` is "disabled".
-          Default: "-"
+            VCMI `--stats-storage` option. Specifies the location of the
+            sqlite3 database where statistics will be read from and written to.
+            A value of "-" means that an in-memory database will be created and
+            used instead.
+            Ignored if `vcmi_stats_mode` is "disabled".
+            Default: "-"
 
         * vcmi_stats_persist_freq (int)
-          VCMI `--stats-persist-freq` option. Specifies how often (in number of
-            battles) to write data to the database.
-          A value of `0` means never write to the database.
+            VCMI `--stats-persist-freq` option. Specifies how often (in number
+            of battles) to write data to the database.
+            A value of `0` means never write to the database.
 
         * true_rng (bool)
-          Deprecated; do not use.
+            Deprecated; do not use.
 
         * sparse_info (bool)
-          Whether to return a minimalistic `info` dict on non-terminal steps.
-          Default: True
+            Whether to return a minimalistic `info` dict on non-terminal steps.
+            Default: True
 
         * allow_invalid_actions (bool)
-          Whether to mute logged warnings when an attempted action is invalid.
-          Default: False
+            Whether to mute logged warnings when an attempted action is invalid.
+            Default: False
 
         * user_timeout (int)
-          Timeout in seconds while waiting for user input.
-          A value of 0 means no timeout.
-          Default: 0
+            Timeout in seconds while waiting for user input.
+            A value of 0 means no timeout.
+            Default: 0
 
         * vcmi_timeout (int)
-          Timeout in seconds while waiting for a response from VCMI.
-          A value of 0 means no timeout.
-          Default: 0
+            Timeout in seconds while waiting for a response from VCMI.
+            A value of 0 means no timeout.
+            Default: 0
 
         * boot_timeout (int)
-          Same as `vcmi_timeout`, but for during the first observation just
-          after the environment has started.
+            Same as `vcmi_timeout`, but for during the first observation just
+            after the environment has started.
 
         * random_heroes (int)
-          VCMI `--random-heroes` option. Specifies how often (in number of
+            VCMI `--random-heroes` option. Specifies how often (in number of
             battles) should heroes in the battle be changed, effectively
             changing the army compositions.
-          If `0`, all battles will use the same two heroes (and armies).
-          If `1`, each battle will use a different pair of heroes from a
+            If `0`, all battles will use the same two heroes (and armies).
+            If `1`, each battle will use a different pair of heroes from a
             randomized hero pool. When all possible hero pairs (combinations)
             are exhausted, the pool is randomized again and the process is
             repeated. The map must contain at least 4 heroes for this to
             have an effect.
-          Default: 0
+            Default: 0
 
         * random_obstacles (int)
-          VCMI `--random-obstacles` option. Specifies how often (in number of
+            VCMI `--random-obstacles` option. Specifies how often (in number of
             battles) should battlefield obstacles be changed.
-          If `0`, all battles will use the same obstacle layout.
-          If `1`, each battle will use random obstacle layout.
-          Default: 0
+            If `0`, all battles will use the same obstacle layout.
+            If `1`, each battle will use random obstacle layout.
+            Default: 0
 
         * town_chance (int)
-          VCMI `--town-chance` option. Specifies the chance (in percents) to
+            VCMI `--town-chance` option. Specifies the chance (in percents) to
             have a town battle.
-          If `0`, no town battles will be fought.
-          If `100`, all battles will be fought in a town. The map must contain
-            towns with forts for this to have an effect.
-          Default: 0
+            If `0`, no town battles will be fought.
+            If `100`, all battles will be fought in a town. The map must
+            contain towns with forts for this to have an effect.
+            Default: 0
 
         * warmachine_chance (int)
-          VCMI `--warmachine-chance` option. Specifies the chance (in percents)
+            VCMI `--warmachine-chance` option. Specifies the percentage chance
             to add one war machine to a hero army. This is checked separately
             for each war machine type (tent, cart or ballista) and each hero.
-          For example: a value of `50` means there is a 50% chance to add a
+            For example: a value of `50` means there is a 50% chance to add a
             ballista, a 50% chance to add a tent and a 50% chance to add a cart
             to each hero in the battle.
-          If `0`, no war machines will be included in any army.
-          If `100`, all 3 war machines will be included in each army.
-          Default: 0
+            If `0`, no war machines will be included in any army.
+            If `100`, all 3 war machines will be included in each army.
+            Default: 0
 
         * mana_min (int)
-          VCMI `--mana-min` option. At the start of a battle, heroes will be
-          given a random amount of mana no less than this value.
-          Cannot be greater than `mana_max`.
-          Default: 0
+            VCMI `--mana-min` option. At the start of a battle, heroes will be
+            given a random amount of mana no less than this value.
+            Cannot be greater than `mana_max`.
+            Default: 0
 
         * mana_max (int)
-          VCMI `--mana-max` option. At the start of a battle, heroes will be
-          given a random amount of mana no greater than this value.
-          Default: 0
+            VCMI `--mana-max` option. At the start of a battle, heroes will be
+            given a random amount of mana no greater than this value.
+            Default: 0
 
         * swap_sides (int)
-          VCMI `--swap-sides` option. Specifies how often (in number of
+            VCMI `--swap-sides` option. Specifies how often (in number of
             battles) the battle perspective is swapped, effectively swapping
             the values of `attacker` and `defender`.
-          If `0`, no swaps will occur.
-          If `1`, perspective will be swapped on each battle.
-          Default: 0
+            If `0`, no swaps will occur.
+            If `1`, perspective will be swapped on each battle.
+            Default: 0
 
         * allow_retreat (bool)
-          Whether to always mask the "0" action in order to prevent agents
+            Whether to always mask the "0" action in order to prevent agents
             from retreating.
-          Default: False
+            Default: False
 
         * step_reward_mult (int)
-          Reward calculation parameter, denoted `a` in the formula below:
+            Reward calculation parameter, denoted `a` in the formula below:
                 R0 = a * (b + c*D + Vk) + σ*d*Ve
-          where:
+            where:
             - `R0` is the reward before any global modificators are applied
               (see `reward_clip_tanh_army_frac` and `reward_army_value_ref`)
             - `a`, `b`, `c` and `d` are configurable parameters
@@ -320,43 +320,43 @@ class VcmiEnv(gym.Env):
             - `V` is the net value of units killed vs units lost
             - `Ve` is the difference in value of our army vs the enemy army
             - `σ` is a term which evaluates to 1 at battle end, 0 otherwise
-          Default: 1
+            Default: 1
 
         * step_reward_fixed (int)
-          Reward calculation parameter, denoted `b` in the formula in `step_reward_mult`.
-          This is usually a negative value representing a punishment for
+            Reward calculation parameter, denoted `b` in the formula in `step_reward_mult`.
+            This is usually a negative value representing a punishment for
             agents who keep running away from the enemy troops to avoid damage.
-          Default: 0
+            Default: 0
 
         * reward_dmg_factor (int)
-          Reward calculation parameter, denoted `c` in the formula in `step_reward_mult`.
-          Default: 5
+            Reward calculation parameter, denoted `c` in the formula in `step_reward_mult`.
+            Default: 5
 
         * term_reward_mult (int)
-          Reward calculation parameter, denoted `d` in the formula in `step_reward_mult`.
-          Default: 1
+            Reward calculation parameter, denoted `d` in the formula in `step_reward_mult`.
+            Default: 1
 
         * reward_clip_tanh_army_frac (float)
-          Reward modification parameter, denoted `t` in the formula below:
+            Reward modification parameter, denoted `t` in the formula below:
                 T = t * Vm
                 R1 = T * np.tanh(R0 / T)
-          where:
+            where:
             - `t` is a configurable parameter
             - `Vm` is the mean of the two starting total army values
             - `R1` is the reward after applying this modificator
             - `R0` is the calculated reward as per the formula in `reward_dmg_factor`
-          Used if soft clipping of rewards is desired.
-          Default: 1.0
+            Used if soft clipping of rewards is desired.
+            Default: 1.0
 
         * reward_army_value_ref (int)
-          Reward modification parameter, denoted `f` in the formula below:
+            Reward modification parameter, denoted `f` in the formula below:
                 R2 = R1 * f * Vm
-          where:
+            where:
             - `R2` is the reward after applying this modificator
             - `R1` is the calculated reward as per the formula in `reward_clip_tanh_army_frac`
             - `f` is a configurable parameter
             - `Vm` is the mean of the two starting total army values
-          Used to scale rewards based on the initial starting army values by
+            Used to scale rewards based on the initial starting army values by
             making all rewards relative to the starting army value.
             For example: consider these two VCMI battles:
               (A) armies with total starting army value = 1K (early game army)
@@ -367,7 +367,7 @@ class VcmiEnv(gym.Env):
             by 10 and 0.1, effectively negating this discrepancy and ensuring
             the RL agent perceives early-game and late-game battles as equally
             significant.
-          Default: 1000
+            Default: 1000
         """
         assert vcmi_loglevel_global in self.__class__.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in self.__class__.VCMI_LOGLEVELS
