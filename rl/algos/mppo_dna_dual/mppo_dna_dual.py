@@ -520,7 +520,7 @@ def autoplay(controller, client, model, logger):
         action = predict(obs, client.action_mask())
         obs, _, term, trunc, info = client.step(action)
         if term or trunc:
-            logger.info("Got terminal state. Side: %s" % info["side"])
+            logger.debug("Got terminal state. Side: %s" % info["side"])
             obs, _ = client.reset()
 
 
@@ -681,8 +681,8 @@ def main(args):
         #
 
         assert args.mapside in ["attacker", "defender"]
-        loglevel = "DEBUG"
-        controller = DualEnvController(env, timeout=5, loglevel=loglevel)
+        loglevel = "WARN"
+        controller = DualEnvController(env, timeout=30, loglevel=loglevel)
 
         bot_side = Side.DEFENDER if args.mapside == "attacker" else Side.ATTACKER
         bot_model = torch.jit.load(args.opponent_load_file, map_location="cpu")  # JIT models are a bit faster
