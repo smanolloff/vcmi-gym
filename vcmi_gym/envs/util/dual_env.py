@@ -25,7 +25,7 @@ import warnings
 from . import log
 
 
-DEBUG = True
+DEBUG = False
 MAXLEN = 100
 
 
