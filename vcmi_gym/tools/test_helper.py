@@ -45,7 +45,7 @@ class TestHelper:
         if action is None:
             return
 
-        obs, rew, self.term, trunc, info = self.env.step(action)
+        obs, self.rew, self.term, trunc, self.info = self.env.step(action)
         self.battlefield = self.env.decode()
         self.render()
 

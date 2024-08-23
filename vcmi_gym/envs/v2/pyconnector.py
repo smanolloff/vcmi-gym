@@ -16,9 +16,13 @@
 
 import types
 import ctypes
+import os
 from collections import OrderedDict
 
-from ...connectors.rel import exporter_v2
+if (os.getenv("VCMIGYM_DEBUG", None) == "1"):
+    from ...connectors.build import exporter_v2
+else:
+    from ...connectors.rel import exporter_v2
 
 # Re-exported vars
 from ..v1.pyconnector import (  # noqa: F401

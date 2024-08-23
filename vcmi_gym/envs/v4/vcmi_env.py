@@ -21,12 +21,15 @@ from typing import Optional
 from ..util import log
 from .analyzer import Analyzer, ActionType
 from .decoder.decoder import Decoder
-from .pyconnector import (
-    PyConnector,
+
+from .pyprocconnector import (
+    PyProcConnector,
     STATE_VALUE_NA,
     STATE_SIZE,
     N_ACTIONS,
 )
+
+from .pythreadconnector import PyThreadConnector
 
 TRACE = True
 
@@ -68,9 +71,8 @@ class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
-    ROLES = ["MMAI_USER", "MMAI_MODEL", "MMAI_SCRIPT_SUMMONER", "StupidAI", "BattleAI"]
-
-    CONNECTOR_CLASS = PyConnector
+    ROLES = ["attacker", "defender"]
+    OPPONENTS = ["StupidAI", "BattleAI", "MMAI_SCRIPT_SUMMONER", "MMAI_MODEL", "OTHER_ENV"]
 
     # NOTE: removing action=0 to prevent agents from freely retreating for now
     ACTION_SPACE = gym.spaces.Discrete(N_ACTIONS)
@@ -83,7 +85,7 @@ class VcmiEnv(gym.Env):
 
     def __init__(
         self,
-        mapname: str,
+        mapname: str = "gym/A1.vmap",
         seed: Optional[int] = None,
         render_mode: str = "ansi",
         max_steps: int = 500,
@@ -92,10 +94,9 @@ class VcmiEnv(gym.Env):
         vcmi_loglevel_ai: str = "error",
         vcmi_loglevel_stats: str = "error",
         vcmienv_loglevel: str = "WARN",
-        attacker: str = "MMAI_USER",
-        defender: str = "StupidAI",
-        attacker_model: Optional[str] = None,
-        defender_model: Optional[str] = None,
+        role: str = "attacker",
+        opponent: str = "StupidAI",
+        opponent_model: Optional[str] = None,
         vcmi_stats_mode: str = "disabled",
         vcmi_stats_storage: str = "-",
         vcmi_stats_persist_freq: int = 100,
@@ -120,6 +121,8 @@ class VcmiEnv(gym.Env):
         term_reward_mult: int = 1,
         reward_clip_tanh_army_frac: float = 1.0,
         reward_army_value_ref: int = 1000,
+        conntype: str = "proc",
+        other_env: Optional["VcmiEnv"] = None
     ):
         # Initialization code here
 
@@ -175,33 +178,30 @@ class VcmiEnv(gym.Env):
             Values: "DEBUG" | "INFO" | "WARN" | "ERROR"
             Default: "WARN"
 
-        * attacker (str)
-            VCMI `--red-ai` option. Specifies the attacking player.
-            Values:
-            - If "MMAI_USER" is given, VCMI will send attacking player's
-            observations and request actions from this gym environment.
-            - If "MMAI_MODEL" is given, VCMI will load a pre-trained model from
-            a file specified by the `attacker_model` parameter and will
-            automatically act on behalf of the attacking player using the
-            model's predictions.
-            - If "MMAI_SCRIPT_SUMMONER", "StupidAI" or "BattleAI" is given,
+        * role (str)
+            VCMI battle perspective of this VcmiEnv.
+            Values: "attacker" | "defender"
+            Default: "attacker"
+
+        * opponent (str)
+            Opponent to play against.
+            - If "StupidAI", "BattleAI" or "MMAI_SCRIPT_SUMMONER" is given,
             VCMI will automatically act on behalf of the attacking player using
-            the corresponding scripted bot logic.
-            Values: "MMAI_USER" | "MMAI_MODEL" | "MMAI_SCRIPT_SUMMONER" | "StupidAI" | "BattleAI"
+            scripted bot logic.
+            - If "MMAI_MODEL" is given, a pre-trained model will be loaded from
+            a file specified by the `opponent_model` parameter and will
+            automatically act on behalf of the opposing player using the
+            model's predictions.
+            - If "OTHER_ENV" is given, the opponent will be another VcmiEnv.
+            For this to work, the two environments must be connected via the
+            `other_env` argument.
+            Values: "StupidAI" | "BattleAI" | "MMAI_SCRIPT_SUMMONER" | "MMAI_MODEL" | "OTHER_ENV"
             Default: "StupidAI"
 
-        * defender (str)
-            VCMI `--blue-ai` option.
-            Same as `attacker`, but for the defending player.
-
-        * attacker_model (str)
+        * opponent_model (str)
             Path to a pre-trained torch JIT model file.
-            Relative paths are resolved with respect the VCMI root dir.
-            Ignored unless `attacker` is "MMAI_MODEL".
+            Ignored unless `opponent` is "MMAI_MODEL".
             Default: None
-
-        * defender_model (str)
-            Same as `attacker_model`, but for the defending player.
 
         * vcmi_stats_mode (str)
             VCMI `--stats-mode` option. Specifies whether per-hero statistics
@@ -376,12 +376,40 @@ class VcmiEnv(gym.Env):
             the RL agent perceives early-game and late-game battles as equally
             significant.
             Default: 1000
+
+        * conntype (str)
+            Experimental; do not use.
+            Uses threadconnector instead of procconnector and VCMI is run in a
+            separate thread in the same process. This has major limitations:
+            env cannot be shutdown, nor there can be more than 1 envs ever
+            created in a single process (except for the special case of
+            dual-training where a single connector is shared). However, it
+            significantly improves performance as well as allows for a dual-env
+            setup in which another model can be loaded if VCMI is compiled
+            without libtorch support.
+
+        * other_env (VcmiEnv)
+            Experimental; do not use.
+            Another VcmiEnv to connect to.
+            Used for dual-model training in a multi-threaded setup where
+            the connector is "threadconnector". Here is how it works:
+            1. The first VcmiEnv is created with the following init args:
+                `opponent="OTHER_ENV", conntype="thread", other_env=None`.
+            2. The second VcmiEnv is created with the following init args:
+                `opponent="OTHER_ENV", conntype="thread", other_env=<the first env>`.
+            The two environments must be created in different threads as they
+            will block each other (see connector diagrams in the web docs).
+            All init arguments for the second env will be ignored in this case,
+            as there is only one instance of VCMI, started by the first env.
         """
         assert vcmi_loglevel_global in self.__class__.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in self.__class__.VCMI_LOGLEVELS
-        assert attacker in self.__class__.ROLES
-        assert defender in self.__class__.ROLES
-        assert attacker == "MMAI_USER" or defender == "MMAI_USER", "an MMAI_USER role is required"
+        assert role in self.__class__.ROLES
+        assert opponent in self.__class__.OPPONENTS
+        assert conntype in ["thread", "proc"]
+
+        self.action_space = self.__class__.ACTION_SPACE
+        self.observation_space = self.__class__.OBSERVATION_SPACE
 
         # <params>
         self.render_mode = render_mode
@@ -390,10 +418,9 @@ class VcmiEnv(gym.Env):
         self.max_steps = max_steps
         self.render_each_step = render_each_step
         self.mapname = mapname
-        self.attacker = attacker
-        self.defender = defender
-        self.attacker_model = attacker_model
-        self.defender_model = defender_model
+        self.role = role
+        self.opponent = opponent
+        self.opponent_model = opponent_model
         self.reward_clip_tanh_army_frac = reward_clip_tanh_army_frac
         self.reward_army_value_ref = reward_army_value_ref
         self.reward_dmg_factor = reward_dmg_factor
@@ -402,48 +429,81 @@ class VcmiEnv(gym.Env):
         self.step_reward_mult = step_reward_mult
         self.term_reward_mult = term_reward_mult
         self.allow_retreat = allow_retreat
+        self.other_env = other_env
         # </params>
 
-        self.logger = log.get_logger("VcmiEnv-v3", vcmienv_loglevel)
+        self.logger = log.get_logger("VcmiEnv-v4", vcmienv_loglevel)
 
-        self.connector = self.__class__.CONNECTOR_CLASS(
-            vcmienv_loglevel,
-            user_timeout,
-            vcmi_timeout,
-            boot_timeout,
-            allow_retreat,
-        )
+        connector_class = PyProcConnector
 
-        result = self.connector.start(
-            mapname,
-            seed or 0,
-            random_heroes,
-            random_obstacles,
-            town_chance,
-            warmachine_chance,
-            mana_min,
-            mana_max,
-            swap_sides,
-            vcmi_loglevel_global,
-            vcmi_loglevel_ai,
-            vcmi_loglevel_stats,
-            attacker,
-            defender,
-            attacker_model or "",
-            defender_model or "",
-            vcmi_stats_mode,
-            vcmi_stats_storage,
-            vcmi_stats_persist_freq,
-        )
+        if conntype == "thread":
+            connector_class = PyThreadConnector
 
-        self.action_space = self.__class__.ACTION_SPACE
-        self.observation_space = self.__class__.OBSERVATION_SPACE
+        if other_env is None:
+            self.connector = connector_class(
+                vcmienv_loglevel,
+                user_timeout,
+                vcmi_timeout,
+                boot_timeout,
+                allow_retreat,
+            )
+
+            if opponent == "OTHER_ENV":
+                opponent = "MMAI_MODEL"
+
+            if role == "attacker":
+                attacker = "MMAI_USER"
+                defender = opponent
+            else:
+                attacker = opponent
+                defender = "MMAI_USER"
+
+            if attacker == "MMAI_MODEL":
+                attacker_model = opponent_model
+                defender_model = ""
+            elif defender == "MMAI_MODEL":
+                attacker_model = ""
+                defender_model = opponent_model
+            else:
+                attacker_model = ""
+                defender_model = ""
+
+            self.connector.start(
+                mapname,
+                seed or 0,
+                random_heroes,
+                random_obstacles,
+                town_chance,
+                warmachine_chance,
+                mana_min,
+                mana_max,
+                swap_sides,
+                vcmi_loglevel_global,
+                vcmi_loglevel_ai,
+                vcmi_loglevel_stats,
+                attacker,
+                defender,
+                attacker_model,
+                defender_model,
+                vcmi_stats_mode,
+                vcmi_stats_storage,
+                vcmi_stats_persist_freq,
+            )
+        else:
+            assert conntype == "thread"
+            assert opponent == "OTHER_ENV"
+            assert role != other_env.role, "both envs must have different roles"
+            self.logger.info("Using external connector (from another env)")
+            self.connector = other_env.connector
+
+        if conntype == "thread":
+            self.connector.connect_as(role)
 
         # print("Action space: %s" % self.action_space)
         # print("Observation space: %s" % self.observation_space)
 
         # required to init vars
-        self._reset_vars(result)
+        self._reset_vars(self.connector.reset())
 
     @tracelog
     def step(self, action):
@@ -454,7 +514,7 @@ class VcmiEnv(gym.Env):
         if action == 0 and not self.allow_retreat:
             raise Exception("Retreat is not allowed")
 
-        res = self.connector.act(action)
+        res = self.connector.get_state(action)
 
         if action in [-1, 0]:
             self._reset_vars(res)

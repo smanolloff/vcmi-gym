@@ -1,0 +1,184 @@
+@startuml "connector-details-init"
+
+title "Connector details: init"
+
+skinparam sequenceBoxBorderColor #FFF
+skinparam sequenceMessageAlign direction
+
+!$nbsp = "<U+00A0>"
+
+' workaround the fact that text alignment can only be
+' set globally. Using hspace(n) returns N monospaced
+' $nbsp chars
+!function $hspace($length)
+  !$res = ""
+  !$i = $length
+  !while $i > 0
+    !$res = $res + $nbsp
+    !$i = $i - 1
+  !endwhile
+  !return "<font:monospaced>"+$res+"</font>"
+!endfunction
+
+!function $desc($txt)
+  !return "<font:Arial><color:Gray><i>// "+$txt+"</i></color></font>"
+!endfunction
+
+!function $lock_acq_fail_text($txt)
+  !return "<back:yellow><color:red>" + $txt
+!endfunction
+
+!function $lock_rel_text($lock_id)
+  !return "<color:yellow><back:black>release lock_" + $lock_id + "</back></color>"
+!endfunction
+
+!function $pred_fail_text($txt)
+  !return "<back:red><<" + $nbsp + $txt + $nbsp + ">>"
+!endfunction
+
+!function $pred_ok_text($txt)
+  !return "<back:lightgreen><<" + $nbsp + $txt + $nbsp + ">>"
+!endfunction
+
+!procedure $lock_acq_fail($node, $lock_id)
+  $node -> $node : $lock_acq_fail_text("acquire lock_" + $lock_id)
+  activate $node #red
+!endprocedure
+
+!procedure $lock_acq_direct($node, $lock_id)
+  $node -> $node : <back:yellow>acquire lock_##$lock_id</back>
+!endprocedure
+
+!procedure $lock_acq_latent($node, $lock_id)
+  $lock_acq_direct($node, $lock_id)
+  deactivate $node
+!endprocedure
+
+!procedure $lock_rel($node, $lock_id)
+  $node -> $node : $lock_rel_text($lock_id)
+!endprocedure
+
+!procedure $pred_fail($node, $txt)
+  $node -> $node : $pred_fail_text($txt)
+!endprocedure
+
+!procedure $pred_ok($node, $txt)
+  $node -> $node : $pred_ok_text($txt)
+!endprocedure
+
+!procedure $cond_wait($node, $cond_id)
+  $node -> $node : <back:red>cond_##$cond_id##.wait</back>\n$lock_rel_text($cond_id)
+  activate $node #red
+!endprocedure
+
+!procedure $cond_wait_pred($node, $cond_id, $pred)
+  $node -> $node : <back:red>cond_##$cond_id##.wait\n$pred_fail_text($pred)\n$lock_rel_text($cond_id)
+  activate $node #red
+!endprocedure
+
+!procedure $cond_notify($NodeA, $NodeB, $cond_id)
+  $NodeA --[#blue]> $NodeB : <color:blue>cond_##$cond_id##.notify</color>
+  $NodeB --[#red]> $NodeB : $lock_acq_fail_text("lock_" + $cond_id)
+!endfunction
+
+!procedure $cond_switch($NodeA, $NodeB, $cond_id)
+  $cond_notify($NodeA, $NodeB, $cond_id)
+  $cond_wait($NodeA, $cond_id)
+  $lock_acq_latent($NodeB, $cond_id)
+!endfunction
+
+!procedure $flow(envid, $flowname)
+  note over CTRL##envid, DualEnv##envid #LightBlue : ↓ flow_##$flowname ↓
+!endprocedure
+
+!procedure $lockreport($owner_0, $owner_1, $owner_2)
+  note left of core #lightgray
+  <font:monospace>0</font>:$owner_0, <font:monospace>1</font>:$owner_1, <font:monospace>2</font>:$owner_2
+  end note
+!endprocedure
+
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+!procedure $sharevar($node1, $node2, $txt)
+  $node1 <--[#gray]> $node2 : <color:gray><font:monospace><<$nbsp $txt $nbsp>>
+!endfunction
+
+!procedure $sharevar($who, $txt)
+  $sharevar(att, def, $txt)
+!endfunction
+
+' avoids super long note lines in the diagram
+!function $str($txt)
+  !return $replace($txt, "\n", %newline())
+!endfunction
+
+participant "//cppconnector//\n$desc('attacker (0)')" as att
+participant "//cppconnector//\n$desc(core)" as core
+participant "//cppconnector//\n$desc('defender (1)')" as def
+
+== init ==
+?->> core ++ : init(dual=true)
+$lock_acq_direct(core, 2)
+$cond_wait_pred(core, 2, "att && def")
+[-> att ++ : connect(side=0)
+$lock_acq_direct(att, 2)
+$sharevar(att, core, "self.att = true")
+$cond_notify(att, core, 2)
+
+note over att
+  lock2 must be released
+  *after* 0 is obtained
+end note
+$lock_acq_direct(att, 0)
+$lock_rel(att, 2)
+
+$lock_acq_latent(core, 2)
+$pred_fail(core, "att && def")
+$cond_wait_pred(core, 2, "att && def")
+
+$cond_wait(att, 0)
+
+]-> def ++ : connect(side=1)
+$lock_acq_direct(def, 2)
+$sharevar(def, core, "self.def = true")
+$cond_notify(def, core, 2)
+$lock_acq_direct(def, 1)
+$lock_rel(def, 2)
+$pred_ok(core, "def && def")
+$lock_acq_latent(core, 2)
+
+note over core
+  Players are ready when both
+  lock_0 and lock_1 are acquired
+end note
+
+$lock_acq_direct(core, 0)
+$lock_acq_fail(core, 1)
+$cond_wait(def, 1)
+$lock_acq_latent(core, 1)
+
+note over core : << start_vcmi >>
+
+?<<-- core -- :
+
+|||
+$lockreport("(free)", "(free)", "(free)")
+|||
+
+== Awaiting state ==
+
+''''''''''''''''''''''''''''''
+''' HORIZONTAL SPACING
+
+att -[#fff]> core : $hspace(30)
+def -[#fff]> core : $hspace(30)
+
+@enduml

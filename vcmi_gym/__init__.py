@@ -27,6 +27,7 @@ from .envs.v1.decoder.other import (
 
 from .envs.v2.vcmi_env import VcmiEnv as VcmiEnv_v2
 from .envs.v3.vcmi_env import VcmiEnv as VcmiEnv_v3
+from .envs.v4.vcmi_env import VcmiEnv as VcmiEnv_v4
 
 from .envs.util.dual_env import DualEnvController, DualEnvClient
 from .envs.util.wrappers import LegacyActionSpaceWrapper
@@ -36,6 +37,7 @@ all = [
     VcmiEnv_v1,
     VcmiEnv_v2,
     VcmiEnv_v3,
+    VcmiEnv_v4,
     DualEnvController,
     DualEnvClient,
     HexAction,
@@ -53,4 +55,5 @@ common_opts = dict(disable_env_checker=True, order_enforce=False)
 
 gymnasium.register(id="VCMI-v1", entry_point="vcmi_gym:VcmiEnv_v1", **common_opts)
 gymnasium.register(id="VCMI-v2", entry_point="vcmi_gym:VcmiEnv_v2", **common_opts)
-gymnasium.register(id="VCMI-v3", entry_point="vcmi_gym:VcmiEnv_v3", **common_opts)
+# gymnasium.register(id="VCMI-v3", entry_point="vcmi_gym:VcmiEnv_v3", **common_opts)
+gymnasium.register(id="VCMI-v4", entry_point="vcmi_gym:VcmiEnv_v4", **common_opts)

@@ -215,7 +215,7 @@ class DualEnvController:
     @tracelog
     def _env_step(self, action):
         obs, rew, term, trunc, info = self.env.step(action)
-        self._info(f"Step ({action}): term={term}, trunc={trunc}, side={info['side']}")
+        self._info(f"Step ({action}): rew={rew}, term={term}, trunc={trunc}, side={info['side']}")
         return obs, rew, term, trunc, info
 
     @tracelog

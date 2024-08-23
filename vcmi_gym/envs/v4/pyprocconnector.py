@@ -21,32 +21,34 @@ import numpy as np
 import os
 import signal
 import atexit
+import threading
 from collections import OrderedDict
 
 from ..util import log
 
 if (os.getenv("VCMIGYM_DEBUG", None) == "1"):
-    from ...connectors.build import exporter_v1
+    from ...connectors.build import exporter_v4
 else:
-    from ...connectors.rel import exporter_v1
+    from ...connectors.rel import exporter_v4
 
-EXPORTER = exporter_v1.Exporter()
+EXPORTER = exporter_v4.Exporter()
 
 N_NONHEX_ACTIONS = EXPORTER.get_n_nonhex_actions()
 N_HEX_ACTIONS = EXPORTER.get_n_hex_actions()
 N_ACTIONS = EXPORTER.get_n_actions()
 
 STATE_SIZE = EXPORTER.get_state_size()
+STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
+STATE_SIZE_STACKS = EXPORTER.get_state_size_stacks()
 STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
+STATE_SIZE_ONE_STACK = EXPORTER.get_state_size_one_stack()
 STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
-ATTRMAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_attribute_mapping()]))
+HEXATTRMAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
+STACKATTRMAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_stack_attribute_mapping()]))
 
 HEXACTMAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_hexactions())]))
 HEXSTATEMAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_hexstates())]))
-DMGMODMAP = types.MappingProxyType(OrderedDict([(mod, i) for i, mod in enumerate(EXPORTER.get_dmgmods())]))
-SHOOTDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(EXPORTER.get_shootdistances())]))
-MELEEDISTMAP = types.MappingProxyType(OrderedDict([(dist, i) for i, dist in enumerate(EXPORTER.get_meleedistances())]))
 SIDEMAP = types.MappingProxyType(OrderedDict([("LEFT", EXPORTER.get_side_left()), ("RIGHT", EXPORTER.get_side_right())]))
 
 PyState = ctypes.c_float * STATE_SIZE
@@ -87,7 +89,7 @@ def tracelog(func, maxlen=MAXLEN):
 # Same as connector's P_Result, but with values converted to ctypes
 class PyResult():
     def __init__(self, cres):
-        self.state = np.ctypeslib.as_array(cres.state).reshape(11, 15, -1)
+        self.state = np.ctypeslib.as_array(cres.state)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
         self.attnmask = np.ctypeslib.as_array(cres.attnmask).reshape(165, 165)
         self.errcode = cres.errcode
@@ -98,19 +100,21 @@ class PyResult():
         self.units_killed = cres.units_killed
         self.value_lost = cres.value_lost
         self.value_killed = cres.value_killed
-        self.side0_army_value = cres.side0_army_value
-        self.side1_army_value = cres.side1_army_value
+        self.initial_side0_army_value = cres.initial_side0_army_value
+        self.initial_side1_army_value = cres.initial_side1_army_value
+        self.current_side0_army_value = cres.current_side0_army_value
+        self.current_side1_army_value = cres.current_side1_army_value
         self.is_battle_over = cres.is_battle_over
         self.is_victorious = cres.is_victorious
 
 
-class PyConnector():
+class PyProcConnector():
     COMMAND_TYPE_UNSET = -1
     COMMAND_TYPE_RESET = 0
     COMMAND_TYPE_ACT = 1
     COMMAND_TYPE_RENDER_ANSI = 2
 
-    # Needs to be overwritten by subclasses => define in PyConnector body
+    # Needs to be overwritten by subclasses => define in PyProcConnector body
     class PyRawState(ctypes.Structure):
         _fields_ = [
             ("state", PyState),
@@ -124,8 +128,10 @@ class PyConnector():
             ("units_killed", ctypes.c_int),
             ("value_lost", ctypes.c_int),
             ("value_killed", ctypes.c_int),
-            ("side0_army_value", ctypes.c_int),
-            ("side1_army_value", ctypes.c_int),
+            ("initial_side0_army_value", ctypes.c_int),
+            ("initial_side1_army_value", ctypes.c_int),
+            ("current_side0_army_value", ctypes.c_int),
+            ("current_side1_army_value", ctypes.c_int),
             ("is_battle_over", ctypes.c_bool),
             ("is_victorious", ctypes.c_bool),
         ]
@@ -137,8 +143,8 @@ class PyConnector():
         self.started = False
         self.loglevel = loglevel
         self.shutdown_lock = multiprocessing.Lock()
-        self.shutdown_complete = False
-        self.logger = log.get_logger("PyConnector", self.loglevel)
+        self.shutting_down = multiprocessing.Event()
+        self.logger = log.get_logger("PyProcConnector", self.loglevel)
         self.allow_retreat = allow_retreat
 
         # use "or" to catch zeros
@@ -146,21 +152,46 @@ class PyConnector():
         self.vcmi_timeout = vcmi_timeout or 999999
         self.boot_timeout = boot_timeout or 999999
 
+    @classmethod
+    def deathwatch(cls, proc, cond, logger, shutting_down):
+        proc.join()  # Wait for the process to complete
+
+        try:
+            proc.close()  # shutdown's close does not seem to work if proc is joined here
+        except Exception:
+            pass  # AttributeError: _sentinel
+
+        if not shutting_down.is_set():
+            logger.error("VCMI process has died")
+
+        # VCMI process is has died, most likely while holding the lock
+        # for some reason this prevents cond.wait(timeout) in `self._wait()`
+        # process from working (hangs forever)
+        # However, releasing the lock here un-hangs the wait above.
+        # (...NOTE: does not work if monitor_process is an instance method?!)
+        # Not sure what's going on, but this resolves the issue.
+        try:
+            cond._lock.release()
+        except ValueError:
+            # ValueError: semaphore or lock released too many times
+            # i.e. lock was not owned; just ignore it
+            pass
+
     @tracelog
     def start(self, *args):
         assert not self.started, "Already started"
         self.started = True
 
         self.v_action = multiprocessing.Value(PyAction)
-        self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 8192)
+        self.v_result_render_ansi = multiprocessing.Array(ctypes.c_char, 65536)
         self.v_command_type = multiprocessing.Value(ctypes.c_int)
-        self.v_command_type.value = PyConnector.COMMAND_TYPE_UNSET
+        self.v_command_type.value = PyProcConnector.COMMAND_TYPE_UNSET
         self.v_result_act = multiprocessing.Value(self.__class__.PyRawState)
 
         # Process synchronization:
         # cond.notify() will wake up the other proc (which immediately tries to acquire the lock)
         # cond.wait() will release the lock and wait (other proc now successfully acquires the lock)
-        self.cond = multiprocessing.Condition()
+        self.cond = multiprocessing.Condition(multiprocessing.Lock())
         self.proc = multiprocessing.Process(
             target=self.start_connector,
             args=args,
@@ -170,16 +201,8 @@ class PyConnector():
 
         atexit.register(self.shutdown)
 
-        # Multiple VCMIs booting simultaneously is not OK
-        # (they all write to the same files at boot)
         # Boot time is <1s, 6 simultaneously procs should not take <10s
         if not self._try_start(100, 0.1):
-            # self.semaphore.release()
-
-            # Is this needed?
-            # (NOTE: it might raise posix_ipc.ExistentialError)
-            # posix_ipc.unlink_semaphore(self.semaphore.name)
-
             # try once again after releasing
             if not self._try_start(1, 0):
                 raise Exception("Failed to acquire semaphore")
@@ -187,19 +210,32 @@ class PyConnector():
         return PyResult(self.v_result_act)
 
     def shutdown(self):
-        if self.shutdown_complete:
+        if self.shutting_down.is_set():
             return
 
         with self.shutdown_lock:
-            self.shutdown_complete = True
+            self.shutting_down.set()
 
         self.logger.info("Terminating VCMI PID=%s" % self.proc.pid)
 
-        # proc may not have been started at all (semaphore failed to acquire)
+        # proc may not have been started at all
+        # it is also already joined by deathwatch, but joining it again is ok
         if self.proc:
-            self.proc.terminate()
-            self.proc.join()
-            self.proc.close()
+            try:
+                self.proc.terminate()
+                self.proc.join()
+                self.proc.close()
+            except ValueError:
+                # most likely already closed by deathwatch
+                pass
+            except Exception as e:
+                self.logger.warn("Could not close self.proc: %s" % str(e))
+
+        if getattr(self, "deathwatch_thread", None):
+            try:
+                self.deathwatch_thread.join()
+            except Exception as e:
+                self.logger.warn("Could not join deathwatch_thread: %s" % str(e))
 
         try:
             self.cond.release()
@@ -214,6 +250,7 @@ class PyConnector():
         del self.v_command_type
         del self.cond
         del self.proc
+        del self.deathwatch_thread
 
         # attempt to prevent log duplication from ray PB2 training
         # Close logger last (because of the "Resources released" message)
@@ -226,15 +263,15 @@ class PyConnector():
     @tracelog
     def reset(self):
         with self.cond:
-            self.v_command_type.value = PyConnector.COMMAND_TYPE_RESET
+            self.v_command_type.value = PyProcConnector.COMMAND_TYPE_RESET
             self.cond.notify()
             self._wait_vcmi()
         return PyResult(self.v_result_act)
 
     @tracelog
-    def act(self, action):
+    def get_state(self, action):
         with self.cond:
-            self.v_command_type.value = PyConnector.COMMAND_TYPE_ACT
+            self.v_command_type.value = PyProcConnector.COMMAND_TYPE_ACT
             self.v_action.value = action
             self.cond.notify()
             self._wait_vcmi()
@@ -243,7 +280,7 @@ class PyConnector():
     @tracelog
     def render_ansi(self):
         with self.cond:
-            self.v_command_type.value = PyConnector.COMMAND_TYPE_RENDER_ANSI
+            self.v_command_type.value = PyProcConnector.COMMAND_TYPE_RENDER_ANSI
             self.cond.notify()
             self._wait_vcmi()
         return self.v_result_render_ansi.value.decode("utf-8")
@@ -251,7 +288,16 @@ class PyConnector():
     def _try_start(self, _retries, _retry_interval):
         with self.cond:
             self.proc.start()
-            # boot time may be long, add extra 10s
+
+            # XXX: deathwatch must be started AFTER self.proc.start()
+            #      (they are not pickle-able, and won't exist in sub-proc)
+            self.deathwatch_thread = threading.Thread(
+                target=self.__class__.deathwatch,
+                args=(self.proc, self.cond, self.logger, self.shutting_down),
+                daemon=True
+            )
+            self.deathwatch_thread.start()
+
             self._wait_boot()
         return True
 
@@ -283,12 +329,12 @@ class PyConnector():
 
         atexit.register(self.shutdown_proc)
 
-        self.logger = log.get_logger("PyConnector-sub", self.loglevel)
+        self.logger = log.get_logger("PyProcConnector-sub", self.loglevel)
 
         self.logger.info("Starting VCMI")
         self.logger.debug("VCMI connector args: %s" % str(args))
         # XXX: self.__connector is ONLY available in the sub-process!
-        self.__connector = self._get_connector().Connector(*args)
+        self.__connector = self._get_connector().ProcConnector(*args)
 
         with self.cond:
             self.set_v_result_act(self.__connector.start())
@@ -312,16 +358,17 @@ class PyConnector():
     #       in the newly created process
     def _get_connector(self):
         if (os.getenv("VCMIGYM_DEBUG", None) == "1"):
-            from ...connectors.build import connector_v1
+            print("Using debug connector...")
+            from ...connectors.build import connector_v4
         else:
-            from ...connectors.rel import connector_v1
+            from ...connectors.rel import connector_v4
 
-        return connector_v1
+        return connector_v4
 
     def set_v_result_act(self, result):
         self.v_result_act.state = np.ctypeslib.as_ctypes(result.get_state())
         self.v_result_act.actmask = np.ctypeslib.as_ctypes(result.get_actmask())
-        # self.v_result_act.attnmask = np.ctypeslib.as_ctypes(result.get_attnmask())
+        # self.v_result_act.attnmask = np.ctypeslib.as_ctypes(np.array(result.get_attnmask(), dtype=np.float32))
         self.v_result_act.errcode = ctypes.c_int(result.get_errcode())
         self.v_result_act.side = ctypes.c_int(result.get_side())
         self.v_result_act.dmg_dealt = ctypes.c_int(result.get_dmg_dealt())
@@ -330,8 +377,10 @@ class PyConnector():
         self.v_result_act.units_killed = ctypes.c_int(result.get_units_killed())
         self.v_result_act.value_lost = ctypes.c_int(result.get_value_lost())
         self.v_result_act.value_killed = ctypes.c_int(result.get_value_killed())
-        self.v_result_act.side0_army_value = ctypes.c_int(result.get_side0_army_value())
-        self.v_result_act.side1_army_value = ctypes.c_int(result.get_side1_army_value())
+        self.v_result_act.initial_side0_army_value = ctypes.c_int(result.get_initial_side0_army_value())
+        self.v_result_act.initial_side1_army_value = ctypes.c_int(result.get_initial_side1_army_value())
+        self.v_result_act.current_side0_army_value = ctypes.c_int(result.get_current_side0_army_value())
+        self.v_result_act.current_side1_army_value = ctypes.c_int(result.get_current_side1_army_value())
         self.v_result_act.is_battle_over = ctypes.c_bool(result.get_is_battle_over())
         self.v_result_act.is_victorious = ctypes.c_bool(result.get_is_victorious())
 
@@ -340,11 +389,11 @@ class PyConnector():
 
     def process_command(self):
         match self.v_command_type.value:
-            case PyConnector.COMMAND_TYPE_ACT:
-                self.set_v_result_act(self.__connector.act(self.v_action.value))
-            case PyConnector.COMMAND_TYPE_RESET:
+            case PyProcConnector.COMMAND_TYPE_ACT:
+                self.set_v_result_act(self.__connector.getState(self.v_action.value))
+            case PyProcConnector.COMMAND_TYPE_RESET:
                 self.set_v_result_act(self.__connector.reset())
-            case PyConnector.COMMAND_TYPE_RENDER_ANSI:
+            case PyProcConnector.COMMAND_TYPE_RENDER_ANSI:
                 self.v_result_render_ansi.value = bytes(self.__connector.renderAnsi(), 'utf-8')
             case _:
                 raise Exception("Unknown command: %s" % self.v_command_type.value)

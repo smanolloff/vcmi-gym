@@ -32,10 +32,11 @@ def get_action(model, obs, mask):
 
 def main():
     total_steps = 1000
-    env = vcmi_gym.VcmiEnv_v3(
+    env = vcmi_gym.VcmiEnv_v4(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
         random_heroes=1,
         random_obstacles=1,
+        conntype="thread"
         # swap_sides=1,
         # defender="MMAI_USER",
         # defender_model="/Users/simo/Projects/vcmi-gym/data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00000/checkpoint_000020/agent.pt"
@@ -57,14 +58,15 @@ def main():
     assert total_steps % 10 == 0
 
     print("* Map: %s" % ew.mapname)
-    print("* Attacker: %s %s" % (ew.attacker, ew.attacker_model if ew.attacker == "MMAI_MODEL" else ""))
-    print("* Defender: %s %s" % (ew.defender, ew.defender_model if ew.defender == "MMAI_MODEL" else ""))
+    print("* Player: %s" % ew.role)
+    print("* Opponent: %s %s" % (ew.opponent, ew.opponent_model if ew.opponent == "MMAI_MODEL" else ""))
     print("* Total steps: %d" % total_steps)
     print("")
 
     was_term = False
     termside = -1
-    two_users = ew.attacker == "MMAI_USER" and ew.defender == "MMAI_USER"
+    # two_users = ew.attacker == "MMAI_USER" and ew.defender == "MMAI_USER"
+    two_users = False
 
     # No model => get_action() will pick a random valid action
     model = None
