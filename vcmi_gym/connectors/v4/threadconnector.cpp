@@ -35,9 +35,10 @@
 #include <string>
 #include <thread>
 
-#define ASSERT_STATE(id, want) \
-    if(want != connstate) \
-        throw VCMIConnectorException(std::string(id) + ": unexpected connector state: want: " + std::to_string(EI(want)) + ", have: " + std::to_string(EI(connstate)))
+#define ASSERT_STATE(id, want) { \
+    if((want) != (connstate)) \
+        throw VCMIConnectorException(std::string(id) + ": unexpected connector state: want: " + std::to_string(EI(want)) + ", have: " + std::to_string(EI(connstate))); \
+}
 
 namespace Connector::V4::Thread {
     // Python does not know about some threads and exceptions thrown there
@@ -427,14 +428,9 @@ namespace Connector::V4::Thread {
         maybeThrowError();
 
         if (res == RETURN_CODE_TIMEOUT) {
-            setError(boost::str(boost::format(
-                "getAction: timeout after %ds while waiting for client (red:%s, blue:%s, connectedClient0: %d, connectedClient1: %d)\n") \
-                % bootTimeout % red % blue % connectedClient0 % connectedClient1
-            ));
+            setError(boost::str(boost::format("getAction: timeout after %ds while waiting for user\n") % userTimeout));
         } else if (res != RETURN_CODE_OK) {
-            setError(boost::str(boost::format(
-                "getAction: unexpected return code from cond_wait: %d\n") % res
-            ));
+            setError(boost::str(boost::format("getAction: unexpected return code from cond_wait: %d\n") % res));
         } else if (connstate != ConnectorState::AWAITING_STATE) {
             setError(FMT("getAction: unexpected connector state: want: %d, have: %d", EI(ConnectorState::AWAITING_STATE) % EI(connstate)));
         }

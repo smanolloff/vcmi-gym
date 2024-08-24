@@ -59,9 +59,9 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
         import torch
         import wandb
         agent = torch.load(resume_path)
+        config_overrides.insert(0, f"agent_load_file={repr(resume_path)}")
         run = wandb.Api().run(f"s-manolloff/vcmi-gym/{agent.args.run_id}")
         cfg = copy.deepcopy(run.config)
-        cfg["agent_load_file"] = resume_path
         alg = cfg["_raytune"]["algo"]
         exp_name = cfg["_raytune"]["experiment_name"]
 
@@ -76,7 +76,6 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
 
         resume = {
             "resumed_at": datetime.datetime.now().astimezone().isoformat(),
-            "resume_path": resume_path,
             "prev_run_id": agent.args.run_id,
             "prev_trial_id": getattr(agent.args, "trial_id", "(no trial_id)"),
             "overrides": {}

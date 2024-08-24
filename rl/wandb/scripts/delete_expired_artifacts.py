@@ -17,7 +17,7 @@ runs = wandb.Api().runs(
 
 for run in runs:
     print("Scanning artifacts of run %s (%s/%s)" % (run.name, run.group, run.id))
-    artifacts = [(a, datetime.datetime.fromisoformat(a.created_at)) for a in run.logged_artifacts()]
+    artifacts = [(a, datetime.datetime.strptime(a.created_at, "%Y-%m-%dT%H:%M:%SZ")) for a in run.logged_artifacts()]
     print("Found %d artifacts" % len(artifacts))
 
     now = datetime.datetime.now()
@@ -26,7 +26,7 @@ for run in runs:
         if not artifact.ttl:
             continue
 
-        created_at = datetime.datetime.fromisoformat(artifact.created_at)
+        created_at = datetime.datetime.strptime(artifact.created_at, "%Y-%m-%dT%H:%M:%SZ")
         if created_at + artifact.ttl < now:
             print("Deleting artifact created at %s with TTL %s" % (artifact.created_at, artifact.ttl))
             artifact.delete()

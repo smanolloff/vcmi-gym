@@ -252,8 +252,8 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
                 for run in runs:
                     LOG.info("Scanning artifacts of run %s (%s/%s)" % (run.name, run.group, run.id))
 
-                    # XXX: artifact timestamps are naive UTC
-                    artifacts = [(a, datetime.datetime.fromisoformat(a.created_at)) for a in run.logged_artifacts()]
+                    # XXX: assume artifact timestamps are in UTC ("Z" timezone)
+                    artifacts = [(a, datetime.datetime.strptime(a.created_at, "%Y-%m-%dT%H:%M:%SZ")) for a in run.logged_artifacts()]
 
                     LOG.debug("Found %d artifacts" % len(artifacts))
                     for artifact, dt in sorted(artifacts, key=lambda x: x[1]):

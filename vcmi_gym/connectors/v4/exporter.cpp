@@ -148,14 +148,16 @@ namespace Connector::V4 {
             break; case SA::RETALIATIONS_LEFT: attrname = "RETALIATIONS_LEFT";
             break; case SA::IS_WIDE: attrname = "IS_WIDE";
             break; case SA::AI_VALUE: attrname = "AI_VALUE";
-            break; case SA::MORALE: attrname = "MORALE";
-            break; case SA::LUCK: attrname = "LUCK";
+            break; case SA::ACTED: attrname = "ACTED";
+            break; case SA::SLEEPING: attrname = "SLEEPING";
+            break; case SA::BLOCKED: attrname = "BLOCKED";
+            break; case SA::BLOCKING: attrname = "BLOCKING";
+            break; case SA::ESTIMATED_DMG: attrname = "ESTIMATED_DMG";
             break; case SA::FLYING: attrname = "FLYING";
             break; case SA::BLIND_LIKE_ATTACK: attrname = "BLIND_LIKE_ATTACK";
             break; case SA::ADDITIONAL_ATTACK: attrname = "ADDITIONAL_ATTACK";
             break; case SA::NO_MELEE_PENALTY: attrname = "NO_MELEE_PENALTY";
             break; case SA::TWO_HEX_ATTACK_BREATH: attrname = "TWO_HEX_ATTACK_BREATH";
-            break; case SA::NON_LIVING: attrname = "NON_LIVING";
             break; case SA::BLOCKS_RETALIATION: attrname = "BLOCKS_RETALIATION";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));

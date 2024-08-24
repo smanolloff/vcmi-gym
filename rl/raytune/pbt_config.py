@@ -66,7 +66,7 @@ config = {
         #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         # """
-        "population_size": 7,
+        "population_size": 5,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -100,7 +100,7 @@ config = {
             "num_steps": [128, 256, 512],
 
             # PPO-vanilla specific
-            "lr_schedule": {"start": explist(1e-5, 1e-4, n=20)},
+            "lr_schedule": {"start": explist(5e-6, 1e-4, n=20)},
             "gae_lambda": linlist(0.5, 0.99, n=20),
             "num_minibatches": [2, 4, 8],
             "update_epochs": linlist(2, 20, n=5, dtype=int),
@@ -171,8 +171,9 @@ config = {
         # "gym/generated/4096/4096-mixstack-5K-01.vmap"
         # "gym/generated/4096/4096-v3-100K-mod.vmap",
     ],
-    "opponent_sbm_probs": [2, 1, 0],
-    "opponent_load_file": "rl/models/Attacker model:v9/jit-agent.pt",
+    "opponent_sbm_probs": [1, 0, 0],
+    "opponent_load_file": None,
+    # "opponent_load_file": "rl/models/Attacker model:v9/jit-agent.pt",
     # "opponent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
 
     #
@@ -215,10 +216,10 @@ config = {
     "network": {
         "attention": None,
         "features_extractor1_stacks": [
-            # => (B, 1960)
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*98]},
-            # => (B, 1, 1960)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 98, "stride": 98},
+            # => (B, 2040)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*102]},
+            # => (B, 1, 2040)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 102, "stride": 102},
             {"t": "Flatten"},
             {"t": "LeakyReLU"},
             # => (B, 160)
@@ -263,7 +264,8 @@ config = {
     "num_envs": 1,
     "env": {
         "reward_dmg_factor": 5,
-        "step_reward_fixed": -300,
+        "step_reward_fixed": 0,
+        "step_reward_frac": -0.003,
         "step_reward_mult": 1,
         "term_reward_mult": 1,
         "reward_clip_tanh_army_frac": 1,
@@ -278,9 +280,10 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
+        "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 3,
+    "env_version": 4,
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None

@@ -138,16 +138,14 @@ def create_venv(env_cls, args, seed):
                 dataclasses.asdict(args.env),
                 seed=seed,
                 mapname=mapname,
-                attacker=opponent,
-                defender=opponent,
-                attacker_model=args.opponent_load_file,
-                defender_model=args.opponent_load_file,
+                role=args.mapside,
+                opponent=opponent,
+                opponent_model=args.opponent_load_file,
             )
 
             for a in env_kwargs.pop("deprecated_args", ["encoding_type"]):
                 env_kwargs.pop(a, None)
 
-            env_kwargs[args.mapside] = "MMAI_USER"
             print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs))
             state["n"] += 1
 

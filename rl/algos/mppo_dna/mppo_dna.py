@@ -59,12 +59,14 @@ class EnvArgs:
     vcmienv_loglevel: str = "WARN"
     sparse_info: bool = True
     step_reward_fixed: int = 0
+    step_reward_frac: float = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
     consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
     user_timeout: int = 30
     vcmi_timeout: int = 30
     boot_timeout: int = 30
+    conntype: str = "proc"
     random_heroes: int = 1
     random_obstacles: int = 1
     town_chance: int = 0
@@ -315,7 +317,7 @@ class AgentNN(nn.Module):
         self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
     def extract_features(self, x):
-        stacks, hexes = x.split([1960, 10725], dim=1)
+        stacks, hexes = x.split([2040, 10725], dim=1)
         fstacks = self.features_extractor1_stacks(stacks)
         fhexes = self.features_extractor1_hexes(hexes)
         fcat = torch.cat((fstacks, fhexes), dim=1)
@@ -394,7 +396,7 @@ class Agent(nn.Module):
         # v1, v2
         # jagent.features_extractor = clean_agent.NN.features_extractor
 
-        # v3
+        # v3+
         jagent.features_extractor1_policy_stacks = clean_agent.NN_policy.features_extractor1_stacks
         jagent.features_extractor1_policy_hexes = clean_agent.NN_policy.features_extractor1_hexes
         jagent.features_extractor2_policy = clean_agent.NN_policy.features_extractor2
@@ -454,8 +456,8 @@ class JitAgent(nn.Module):
             # v1, v2
             # features = self.features_extractor(b_obs)
 
-            # v3
-            stacks, hexes = b_obs.split([1960, 10725], dim=1)
+            # v3+
+            stacks, hexes = b_obs.split([2040, 10725], dim=1)
             fstacks = self.features_extractor1_policy_stacks(stacks)
             fhexes = self.features_extractor1_policy_hexes(hexes)
             fcat = torch.cat((fstacks, fhexes), dim=1)
@@ -470,7 +472,7 @@ class JitAgent(nn.Module):
     def get_value(self, obs) -> float:
         with torch.no_grad():
             b_obs = obs.unsqueeze(dim=0)
-            stacks, hexes = b_obs.split([1960, 10725], dim=1)
+            stacks, hexes = b_obs.split([2040, 10725], dim=1)
             fstacks = self.features_extractor1_value_stacks(stacks)
             fhexes = self.features_extractor1_value_hexes(hexes)
             fcat = torch.cat((fstacks, fhexes), dim=1)
@@ -588,6 +590,8 @@ def main(args):
         from vcmi_gym import VcmiEnv_v2 as VcmiEnv
     elif args.env_version == 3:
         from vcmi_gym import VcmiEnv_v3 as VcmiEnv
+    elif args.env_version == 4:
+        from vcmi_gym import VcmiEnv_v4 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
@@ -1049,7 +1053,7 @@ def debug_args():
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
         num_envs=1,
-        num_steps=8,
+        num_steps=256,
         gamma=0.8,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,
@@ -1058,10 +1062,10 @@ def debug_args():
         num_minibatches_value=4,
         num_minibatches_policy=4,
         num_minibatches_distill=4,
-        update_epochs=2,
-        update_epochs_value=2,
-        update_epochs_policy=2,
-        update_epochs_distill=2,
+        update_epochs=10,
+        update_epochs_value=10,
+        update_epochs_policy=10,
+        update_epochs_distill=10,
         norm_adv=True,
         clip_coef=0.3,
         clip_vloss=True,
@@ -1097,17 +1101,18 @@ def debug_args():
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
+            conntype="proc"
 
         ),
         env_wrappers=[],
-        env_version=3,
+        env_version=4,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
             attention=None,
             features_extractor1_stacks=[
-                # => (B, 1960)
-                dict(t="Unflatten", dim=1, unflattened_size=[1, 20*98]),
-                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=98, stride=98),
+                # => (B, 2040)
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 20*102]),
+                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=102, stride=98),
                 dict(t="Flatten"),
                 dict(t="LeakyReLU"),
                 # => (B, 160)
