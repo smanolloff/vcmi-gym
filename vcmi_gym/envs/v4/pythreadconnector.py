@@ -18,6 +18,7 @@ import types
 import os
 import threading
 import warnings
+import random
 from collections import OrderedDict
 
 from ..util import log
@@ -92,8 +93,9 @@ class PyThreadConnector():
     #
     # MAIN PROCESS
     #
-    def __init__(self, loglevel, user_timeout, vcmi_timeout, boot_timeout, allow_retreat):
+    def __init__(self, loglevel, maxlogs, user_timeout, vcmi_timeout, boot_timeout, allow_retreat):
         self.loglevel = loglevel
+        self.maxlogs = maxlogs
         self.boot_timeout = boot_timeout or 99999
         self.vcmi_timeout = vcmi_timeout or 99999
         self.user_timeout = user_timeout or 99999
@@ -107,6 +109,7 @@ class PyThreadConnector():
     def start(self, *args):
         with self.startlock:
             if self.starting.is_set():
+                warnings.warn("PyThreadConnector is already started")
                 return
 
             self.thread = threading.Thread(
@@ -116,7 +119,6 @@ class PyThreadConnector():
                 daemon=True
             )
 
-            # atexit.register(self.shutdown)
             self.thread.start()
             self.starting.wait()
 
@@ -132,7 +134,7 @@ class PyThreadConnector():
         if self.thread:
             try:
                 if self.thread.is_alive():
-                    self.__connector.shutdown()
+                    self._connector.shutdown()
                 self.thread.join()
             except Exception as e:
                 self.logger.error("Could not join self.thread: %s" % str(e))
@@ -147,35 +149,56 @@ class PyThreadConnector():
 
     @tracelog
     def reset(self):
-        # return PyResult()
-        assert self.thread.is_alive(), "VCMI thread is dead"
-        code, res = self.__connector.reset(self.side)
-        assert code == 0, "bad return code: %s" % code
-        return PyResult(res)
+        try:
+            assert self.thread.is_alive(), "VCMI thread is dead."
+            code, res = self._connector.reset(self.side)
+            assert code == 0, "bad return code: %s" % code
+            return PyResult(res)
+        except Exception as e:
+            self.logger.error(f"Exception caught: {str(e)}\nConnector log dump:")
+            for msg in self._connector.getLogs():
+                print(msg)
+            raise
 
     @tracelog
-    def get_state(self, action):
-        assert self.thread.is_alive(), "VCMI thread is dead"
-        code, res = self.__connector.getState(self.side, action)
-        assert code == 0, "bad return code: %s" % code
-        return PyResult(res)
+    def step(self, action):
+        try:
+            assert self.thread.is_alive(), "VCMI thread is dead."
+            code, res = self._connector.step(self.side, action)
+            assert code == 0, "bad return code: %s" % code
+            return PyResult(res)
+        except Exception as e:
+            self.logger.error(f"Exception caught: {str(e)}\nConnector log dump:")
+            for msg in self._connector.getLogs():
+                print(msg)
+            raise
 
     @tracelog
-    def render_ansi(self):
-        # TODO: bytes->decode() needed?
-        # return bytes(self.__connector.renderAnsi(self.side), 'utf-8').decode("utf-8")
-        assert self.thread.is_alive(), "VCMI thread is dead"
-        code, res = self.__connector.renderAnsi(self.side)
-        assert code == 0, "bad return code: %s" % code
-        return res
+    def render(self):
+        try:
+            assert self.thread.is_alive(), "VCMI thread is dead."
+            code, res = self._connector.render(self.side)
+            assert code == 0, "bad return code: %s" % code
+            return res
+        except Exception as e:
+            self.logger.error(f"Exception caught: {str(e)}\nConnector log dump:")
+            for msg in self._connector.getLogs():
+                print(msg)
+            raise
 
     @tracelog
     def connect_as(self, perspective):
-        assert self.thread.is_alive(), "VCMI thread is dead"
-        self.side = 0 if perspective == "attacker" else 1
-        code, res = self.__connector.connect(self.side)
-        assert code == 0, "bad return code: %s" % code
-        return PyResult(res)
+        try:
+            assert self.thread.is_alive(), "VCMI thread is dead."
+            self.side = 0 if perspective == "attacker" else 1
+            code, res = self._connector.connect(self.side)
+            assert code == 0, "bad return code: %s" % code
+            return PyResult(res)
+        except Exception as e:
+            self.logger.error(f"Exception caught: {str(e)}\nConnector log dump:")
+            for msg in self._connector.getLogs():
+                print(msg)
+            raise
 
     #
     # This method is the SUB-THREAD
@@ -191,8 +214,14 @@ class PyThreadConnector():
         else:
             from ...connectors.rel import connector_v4
 
-        connector = connector_v4
         self.logger.debug("VCMI connector args: %s" % str(args))
-        self.__connector = connector.ThreadConnector(*args)
+        self._connector = connector_v4.ThreadConnector(
+            self.maxlogs,
+            self.boot_timeout,
+            self.vcmi_timeout,
+            self.user_timeout,
+            *args
+        )
+
         self.starting.set()
-        self.__connector.start(self.boot_timeout, self.vcmi_timeout, self.user_timeout)
+        self._connector.start()

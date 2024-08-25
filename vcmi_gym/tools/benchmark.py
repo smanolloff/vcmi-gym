@@ -36,7 +36,7 @@ def main():
         "gym/generated/4096/4096-6stack-100K-01.vmap",
         random_heroes=1,
         random_obstacles=1,
-        conntype="thread"
+        conntype="proc"
         # swap_sides=1,
         # defender="MMAI_USER",
         # defender_model="/Users/simo/Projects/vcmi-gym/data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00000/checkpoint_000020/agent.pt"

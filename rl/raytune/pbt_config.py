@@ -66,7 +66,7 @@ config = {
         #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         # """
-        "population_size": 5,
+        "population_size": 6,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -280,7 +280,7 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "conntype": "thread"
+        "conntype": "proc"
     },
     "seed": 0,
     "env_version": 4,

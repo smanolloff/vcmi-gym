@@ -1,6 +1,6 @@
 @startuml "connector-details-init"
 
-title "Connector details: init"
+title "Connector details: battle turn (attacker)"
 
 skinparam sequenceBoxBorderColor #FFF
 skinparam sequenceMessageAlign direction
@@ -36,8 +36,8 @@ skinparam sequenceMessageAlign direction
   !return "<back:red><<" + $nbsp + $txt + $nbsp + ">>"
 !endfunction
 
-!function $pred_ok_text($cond_id, $txt)
-  !return "<back:lightgreen>cond_" + $cond_id + ".wait\n<back:lightgreen><<" + $nbsp + $txt + $nbsp + ">>"
+!function $pred_ok_text($txt)
+  !return "<back:lightgreen><<" + $nbsp + $txt + $nbsp + ">>"
 !endfunction
 
 !procedure $lock_acq_fail($node, $lock_id)
@@ -62,8 +62,8 @@ skinparam sequenceMessageAlign direction
   $node -> $node : $pred_fail_text($txt)
 !endprocedure
 
-!procedure $pred_ok($node, $cond_id, $txt)
-  $node -> $node : $pred_ok_text($cond_id, $txt)
+!procedure $pred_ok($node, $txt)
+  $node -> $node : $pred_ok_text($txt)
 !endprocedure
 
 !procedure $cond_wait($node, $cond_id)
@@ -111,10 +111,6 @@ skinparam sequenceMessageAlign direction
   $node1 <--[#gray]> $node2 : <color:gray><font:monospace><<$nbsp $txt $nbsp>>
 !endfunction
 
-!procedure $sharevar($who, $txt)
-  $sharevar(att, def, $txt)
-!endfunction
-
 ' avoids super long note lines in the diagram
 !function $str($txt)
   !return $replace($txt, "\n", %newline())
@@ -123,40 +119,57 @@ skinparam sequenceMessageAlign direction
 participant "//cppconnector//\n$desc('attacker (0)')" as att
 participant "//cppconnector//\n$desc(core)" as core
 
-== init ==
-?->> core ++ : init(dual=false)
-[-> att ++ : connect(side=0)
 
-note over core, att #yellow
-  Who grabs the lock first?
-  * core
-  $desc("case 1 of 2")
+activate att
+activate core
+?-[#white]> core :
+activate att #red
+
+core --[#white]>  -- :
+
+== Awaiting state ==
+
+$lockreport("(free)", "(free)")
+
+== Attacker's turn ==
+
+?o-> core ++ : getAction(state)
+$lock_acq_direct(core, 0)
+|||
+$sharevar(core, att, "this.state = state")
+$cond_switch(core, att, 0)
+att ->[ -- : obs
+
+$lockreport("(free)", "(free)")
+
+[-> att ++ : action
+group Race Cond
+  $pred_fail(core, "timeout")
+  $lock_acq_direct(att, 0)
+  deactivate core
+  $lock_acq_fail(core, 0)
+end
+
+note over core #red
+  core: cond_0.wait() timed out
+  core: attempts to re-acquire lock_0 and blocks
+  (lock_0 was acquired by attacker)
+  => core blocks, ignoring the notify...
 end note
 
-$lock_acq_direct(core, 2)
-$cond_wait_pred(core, 2, "att || def")
-$lock_acq_direct(att, 2)
-$sharevar(att, core, "self.att = true")
-$cond_notify(att, core, 2)
-
-note over att
-  lock2 must be released
-  *after* 0 is obtained
-end note
-$lock_acq_direct(att, 0)
-$lock_rel(att, 2)
-$lock_acq_latent(core, 2)
-$pred_ok(core, 2, "att || ref")
-
+$sharevar(att, core, "this.action = action")
+$cond_notify(att, core, 0)
 $cond_wait(att, 0)
+$lock_acq_latent(core, 0)
+note over core
+  re-acquired lock after cond.wait()
+  global timeout not reached => wait more
+end note
+$cond_wait(core, 0)
 
-note over core : << start_vcmi >>
-
-?<<-- core -- :
 
 |||
 $lockreport("(free)", "(free)")
-|||
 
 == Awaiting state ==
 

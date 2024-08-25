@@ -27,6 +27,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
+#include <mutex>
 #include <pybind11/pybind11.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/stl.h>
@@ -34,47 +35,84 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 #define ASSERT_STATE(id, want) { \
     if((want) != (connstate)) \
         throw VCMIConnectorException(std::string(id) + ": unexpected connector state: want: " + std::to_string(EI(want)) + ", have: " + std::to_string(EI(connstate))); \
 }
 
+// Python does not know about some threads and exceptions thrown there
+// result in abrupt program termination.
+// => use this to set a member var `_error`
+//    (the exception must be constructed and thrown in python-aware thread)
+#define SET_ERROR(msg) { \
+    LOG(boost::str(boost::format("ERROR (only recorded): %1%") % msg)); \
+    _error = msg; \
+}
+
 namespace Connector::V4::Thread {
-    // Python does not know about some threads and exceptions thrown there
-    // result in abrupt program termination.
-    // => use this to set a member var `_error`
-    //    (the exception must be constructed and thrown in python-aware thread)
-    void Connector::setError(std::string msg) {
-        std::cerr << "ERROR: " << msg;
-        _error = msg;
+
+    const std::vector<std::string> Connector::getLogs() {
+        return std::vector<std::string>(logs.begin(), logs.end());
     }
 
-    void Connector::maybeThrowError() {
-        if (_error.empty()) return;
-        // if (_shutdown) return;
-        auto msg = _error;
-        _error = "";
-        throw VCMIConnectorException(msg);
+    void Connector::log(std::string funcname, std::string msg) {
+#if VERBOSE || LOGCOLLECT
+        boost::posix_time::ptime t = boost::posix_time::microsec_clock::universal_time();
+
+        // std::string entry = boost::str(boost::format("++ %1% <%2%>[%3%][%4%] <%5%> %6%") \
+        //     % boost::posix_time::to_iso_extended_string(t)
+        //     % std::this_thread::get_id()
+        //     % std::filesystem::path(__FILE__).filename().string()
+        //     % (PyGILState_Check() ? "GIL=1" : "GIL=0")
+        //     % funcname
+        //     % msg
+        // );
+
+        std::string entry = boost::str(boost::format("++ %s <%s>[GIL=%d] <%s> %s")
+            % boost::posix_time::to_iso_extended_string(t)
+            % std::this_thread::get_id()
+            % PyGILState_Check()
+            % funcname
+            % msg
+        );
+
+#if LOGCOLLECT
+        {
+            std::unique_lock lock(mlog);
+            if (logs.size() == maxlogs)
+                logs.pop_front();
+            logs.push_back(entry);
+        }
+#endif // LOGCOLLECT
+
+#if VERBOSE
+        {
+            std::unique_lock lock(mlog);
+            std::cout << entry << "\n";
+        }
+#endif // VERBOSE
+#endif // VERBOSE || LOGCOLLECT
     }
 
-    int Connector::_cond_wait(const char* funcname, int id, std::condition_variable &cond, std::unique_lock<std::mutex> &l, int timeoutSeconds, std::function<bool()> &checker) {
-        int res;
+    ReturnCode Connector::_cond_wait(const char* funcname, int id, std::condition_variable &cond, std::unique_lock<std::mutex> &l, int timeoutSeconds, std::function<bool()> &checker) {
+        ReturnCode res;
         int i = 0;
         auto start = std::chrono::high_resolution_clock::now();
 
         while (true) {
-            // LOGFMT("[%s] cond%d.wait/2 ...", funcname % id);
+            // LOG(boost::str(boost::format("[%s] cond%d.wait/2: checker()...") % funcname % id));
             auto fres = checker();
-            // LOGFMT("[%s] cond%d.wait/2 -> %d", funcname % id % static_cast<int>(res));
+            // LOG(boost::str(boost::format("[%s] cond%d.wait/2: checker -> %d") % funcname % id % static_cast<int>(fres)));
 
             // XXX: shutdown is not really supported
             if (_shutdown) {
                 LOG("shutdown requested");
-                res = RETURN_CODE_SHUTDOWN;
+                res = ReturnCode::SHUTDOWN;
                 break;
             } else if (fres) {
-                res = RETURN_CODE_OK;
+                res = ReturnCode::OK;
                 break;
             }
 
@@ -82,7 +120,8 @@ namespace Connector::V4::Thread {
                 std::chrono::high_resolution_clock::now() - start;
 
             if (timeoutSeconds != -1 && elapsed.count() > timeoutSeconds) {
-                res = RETURN_CODE_TIMEOUT;
+                LOG(boost::str(boost::format("%s: cond%d.wait/2 timed out after %d seconds\n") % funcname % id % elapsed.count()));
+                res = ReturnCode::TIMEOUT;
                 break;
             }
         }
@@ -91,17 +130,9 @@ namespace Connector::V4::Thread {
         return res;
     }
 
-    int Connector::cond_wait(const char* funcname, int id, std::condition_variable &cond, std::unique_lock<std::mutex> &l, int timeoutSeconds) {
-        std::function<bool()> checker = [&cond, &l]() -> bool {
-            return cond.wait_for(l, std::chrono::milliseconds(1000)) == std::cv_status::no_timeout;
-        };
-
-        return _cond_wait(funcname, id, cond, l, timeoutSeconds, checker);
-    }
-
-    int Connector::cond_wait(const char* funcname, int id, std::condition_variable &cond, std::unique_lock<std::mutex> &l, int timeoutSeconds, std::function<bool()> &pred) {
+    ReturnCode Connector::cond_wait(const char* funcname, int id, std::condition_variable &cond, std::unique_lock<std::mutex> &l, int timeoutSeconds, std::function<bool()> &pred) {
         std::function<bool()> checker = [&cond, &l, &pred]() -> bool {
-            return cond.wait_for(l, std::chrono::milliseconds(1000), pred);
+            return cond.wait_for(l, std::chrono::milliseconds(100), pred);
         };
 
         return _cond_wait(funcname, id, cond, l, timeoutSeconds, checker);
@@ -110,6 +141,10 @@ namespace Connector::V4::Thread {
     // EOF TEST SIGNAL HANDLING
 
     Connector::Connector(
+        const int maxlogs_,
+        const int bootTimeout_,
+        const int vcmiTimeout_,
+        const int userTimeout_,
         const std::string mapname_,
         const int seed_,
         const int randomHeroes_,
@@ -129,7 +164,11 @@ namespace Connector::V4::Thread {
         const std::string statsMode_,
         const std::string statsStorage_,
         const int statsPersistFreq_
-    ) : mapname(mapname_),
+    ) : maxlogs(maxlogs_),
+        bootTimeout(bootTimeout_),
+        vcmiTimeout(vcmiTimeout_),
+        userTimeout(userTimeout_),
+        mapname(mapname_),
         seed(seed_),
         randomHeroes(randomHeroes_),
         randomObstacles(randomObstacles_),
@@ -229,150 +268,58 @@ namespace Connector::V4::Thread {
         return res;
     }
 
-    const std::tuple<int, std::string> Connector::renderAnsi(int side) {
-        LOG("renderAnsi called with side=" + std::to_string(side));
-        ASSERT_STATE("renderAnsi", side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0);
+    ReturnCode Connector::getState(const char* funcname, int side, MMAI::Schema::Action action_) {
+        LOGFMT("%s called with side=%d", funcname % side);
 
-        // throw any errors set during getAction
-        maybeThrowError();
-
+        auto expstate = side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0;
         auto &m = side ? m1 : m0;
         auto &cond = side ? cond1 : cond0;
 
-        LOG("obtain lock");
-        std::unique_lock lock(m);
-        LOG("obtain lock: done");
+        ASSERT_STATE(funcname, expstate);
 
-        LOGFMT("set this->action = %d", MMAI::Schema::ACTION_RENDER_ANSI);
-        action = MMAI::Schema::ACTION_RENDER_ANSI;
+        LOGFMT("obtain lock%d", side);
+        std::unique_lock lock(m);
+        LOGFMT("obtain lock%d: done", side);
+
+        LOGFMT("set this->action = %d", action_);
+        action = action_;
 
         LOG("set connstate = AWAITING_STATE");
         connstate = ConnectorState::AWAITING_STATE;
 
-        LOG("cond.notify_one()");
+        LOGFMT("cond%d.notify_one()", side);
         cond.notify_one();
 
-        int res = 0;
+        std::function<bool()> pred = [this, expstate] { return connstate == expstate; };
 
-        {
-            LOG("release Python GIL");
-            py::gil_scoped_release release;
+        LOGFMT("cond%1%.wait(lock%1%)", side);
+        auto res = cond_wait(funcname, side, cond, lock, vcmiTimeout, pred);
+        LOGFMT("cond%1%.wait(lock%1%): done", side);
 
-            LOG("cond.wait(lock)");
-            res = cond_wait(__func__, side, cond, lock, vcmiTimeout);
-            LOG("cond.wait(lock): done");
+        LOGFMT("release lock%d (return)", side);
+        return res;
+    }
 
-            LOG("acquire Python GIL (scope-auto)");
-        }
-
-        ASSERT_STATE("renderAnsi.2", side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0);
-
-        // throw any errors set during getAction
-        maybeThrowError();
-
+    const std::tuple<int, std::string> Connector::render(int side) {
+        auto code = getState(__func__, side, MMAI::Schema::ACTION_RENDER_ANSI);
         auto sup = extractSupplementaryData(state);
         assert(sup->getType() == MMAI::Schema::V4::ISupplementaryData::Type::ANSI_RENDER);
-
-        LOG("release lock (return)");
         LOG("return state->ansiRender");
-        return {res, sup->getAnsiRender()};
+        return {static_cast<int>(code), sup->getAnsiRender()};
     }
 
     const std::tuple<int, P_State> Connector::reset(int side) {
-        LOG("reset called with side=" + std::to_string(side));
-        ASSERT_STATE("reset", side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0);
-
-        // throw any errors set during getAction
-        maybeThrowError();
-
-        auto &m = side ? m1 : m0;
-        auto &cond = side ? cond1 : cond0;
-
-        std::unique_lock lock(m);
-        LOG("obtain lock: done");
-
-        LOGFMT("set this->action = %d", MMAI::Schema::ACTION_RESET);
-        action = MMAI::Schema::ACTION_RESET;
-
-        LOG("set state = AWAITING_STATE");
-        connstate = ConnectorState::AWAITING_STATE;
-
-        LOG("cond.notify_one()");
-        cond.notify_one();
-
-        int res;
-
-        {
-            LOG("release Python GIL");
-            py::gil_scoped_release release;
-
-            LOG("cond.wait(lock)");
-            res = cond_wait(__func__, side, cond, lock, vcmiTimeout);
-            LOG("cond.wait(lock): done");
-
-            LOG("acquire Python GIL (scope-auto)");
-            // py::gil_scoped_acquire acquire2;
-        }
-
-        ASSERT_STATE("reset.2", side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0);
-
-        // throw any errors set during getAction
-        maybeThrowError();
-
-        LOG("release lock (return)");
+        auto code = getState(__func__, side, MMAI::Schema::ACTION_RESET);
+        auto pstate = convertState(state);
         LOG("return P_State");
-        const auto pstate = convertState(state);
-        assert(pstate.type == MMAI::Schema::V4::ISupplementaryData::Type::REGULAR);
-        return {res, pstate};
+        return {static_cast<int>(code), pstate};
     }
 
-    const std::tuple<int, P_State> Connector::getState(int side, MMAI::Schema::Action a) {
-        LOG("getState called with side=" + std::to_string(side));
-        ASSERT_STATE("getState", side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0);
-
-        // throw any errors set during getAction
-        maybeThrowError();
-
-        // Prevent control actions via `step`
-        assert(a > 0);
-
-        auto &m = side ? m1 : m0;
-        auto &cond = side ? cond1 : cond0;
-
-        LOG("obtain lock");
-        std::unique_lock lock(m);
-        LOG("obtain lock: done");
-
-        LOGFMT("set this->action = %d", a);
-        action = a;
-
-        LOG("set connstate = AWAITING_STATE");
-        connstate = ConnectorState::AWAITING_STATE;
-
-        LOG("cond.notify_one()");
-        cond.notify_one();
-
-        int res;
-
-        {
-            LOG("release Python GIL");
-            py::gil_scoped_release release;
-
-            LOG("cond.wait(lock)");
-            res = cond_wait(__func__, side, cond, lock, vcmiTimeout);
-            LOG("cond.wait(lock): done");
-
-            LOG("acquire Python GIL (scope-auto)");
-        }
-
-        ASSERT_STATE("getState.2", side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0);
-
-        // throw any errors set during getAction
-        maybeThrowError();
-
-        LOG("release lock (return)");
+    const std::tuple<int, P_State> Connector::step(int side, MMAI::Schema::Action a) {
+        auto code = getState(__func__, side, a);
+        auto pstate = convertState(state);
         LOG("return P_State");
-        return {res, convertState(state)};
+        return {static_cast<int>(code), pstate};
     }
 
     // this is called by a VCMI thread (the runNetwork thread)
@@ -383,18 +330,15 @@ namespace Connector::V4::Thread {
     MMAI::Schema::Action Connector::getAction(const MMAI::Schema::IState* s, int side) {
         LOG("getAction called with side=" + std::to_string(side));
 
-        LOG("acquire Python GIL");
-        py::gil_scoped_acquire acquire;
-
         auto &m = side ? m1 : m0;
         auto &cond = side ? cond1 : cond0;
 
-        LOG("obtain lock");
+        LOGFMT("obtain lock%d", side);
         std::unique_lock lock(m);
-        LOG("obtain lock: done");
+        LOGFMT("obtain lock%d: done", side);
 
         if (connstate != ConnectorState::AWAITING_STATE)
-            setError(FMT("getAction: Unexpected connector state: want: %d, have: %d", EI(ConnectorState::AWAITING_STATE) % EI(connstate)));
+            SET_ERROR(boost::str(boost::format("%s: Unexpected connector state: want: %d, have: %d") % __func__ % EI(ConnectorState::AWAITING_STATE) % EI(connstate)));
 
         LOG("set this->istate = s");
         state = s;
@@ -404,54 +348,45 @@ namespace Connector::V4::Thread {
             ? ConnectorState::AWAITING_ACTION_1
             : ConnectorState::AWAITING_ACTION_0;
 
-        LOG("cond.notify_one()");
+        LOGFMT("cond%d.notify_one()", side);
         cond.notify_one();
 
-        int res;
+        std::function<bool()> pred = [this] { return connstate == ConnectorState::AWAITING_STATE; };
 
-        {
-            LOG("release Python GIL");
-            py::gil_scoped_release release;
-
-            // Now wait again (will unblock once step/reset have been called)
-            LOG("cond.wait(lock)");
-            res = cond_wait(__func__, side, cond, lock, userTimeout);
-            LOG("cond.wait(lock): done");
-
-            LOG("acquire Python GIL (scope-auto)");
-            // py::gil_scoped_acquire acquire2;
-        }
+        // Now wait again (will unblock once step/reset have been called)
+        LOGFMT("cond%1%.wait(lock%1%)", side);
+        auto res = cond_wait(__func__, side, cond, lock, userTimeout, pred);
+        LOGFMT("cond%1%.wait(lock%1%): done", side);
 
         // the above cond_wait gave priority to a python thread which was
         // waiting in getState. It was supposed to throw any stored errors
         // If it did not (bug) => throw here
-        maybeThrowError();
-
-        if (res == RETURN_CODE_TIMEOUT) {
-            setError(boost::str(boost::format("getAction: timeout after %ds while waiting for user\n") % userTimeout));
-        } else if (res != RETURN_CODE_OK) {
-            setError(boost::str(boost::format("getAction: unexpected return code from cond_wait: %d\n") % res));
-        } else if (connstate != ConnectorState::AWAITING_STATE) {
-            setError(FMT("getAction: unexpected connector state: want: %d, have: %d", EI(ConnectorState::AWAITING_STATE) % EI(connstate)));
+        if (!_error.empty()) {
+            auto msg = _error;
+            _error = "";
+            throw VCMIConnectorException(msg);
         }
 
-        LOG("release lock (return)");
+        if (res == ReturnCode::TIMEOUT) {
+            SET_ERROR(boost::str(boost::format("timeout after %ds while waiting for user\n") % userTimeout));
+        } else if (res != ReturnCode::OK) {
+            SET_ERROR(boost::str(boost::format("unexpected return code from cond_wait: %d\n") % EI(res)));
+        } else if (connstate != ConnectorState::AWAITING_STATE) {
+            SET_ERROR(boost::str(boost::format("unexpected connector state: want: %d, have: %d") % EI(ConnectorState::AWAITING_STATE) % EI(connstate)));
+        }
+
+        LOGFMT("release lock%d (return)", side);
         LOGFMT("return Action: %d", action);
         return action;
     }
 
+    // initial connect is a special case and cannot reuse getState()
     const std::tuple<int, P_State> Connector::connect(int side) {
         LOG("connect called with side=" + std::to_string(side));
 
-        LOG("release Python GIL");
-        py::gil_scoped_release release;
-
-        std::this_thread::sleep_for(std::chrono::seconds(1));
         LOG("obtain lock2");
         std::unique_lock lock2(m2);
         LOG("obtain lock2: done");
-
-        ASSERT_STATE("connect", ConnectorState::NEW);
 
         if (side)
             connectedClient1 = true;
@@ -461,41 +396,38 @@ namespace Connector::V4::Thread {
         LOG("cond2.notify_one()");
         cond2.notify_one();
 
+        auto expstate = side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0;
         auto &m = side ? m1 : m0;
         auto &cond = side ? cond1 : cond0;
 
-        LOG("obtain lock");
+        LOGFMT("obtain lock%d", side);
         std::unique_lock lock(m);
-        LOG("obtain lock: done");
+        LOGFMT("obtain lock%d: done", side);
 
         LOG("release lock2");
         lock2.unlock();
 
-        LOG("cond.wait(lock)");
-        auto res = cond_wait(__func__, side, cond, lock, bootTimeout);
-        LOG("cond.wait(lock): done");
+        ReturnCode res;
 
-        ASSERT_STATE("connect.2", side ? ConnectorState::AWAITING_ACTION_1 : ConnectorState::AWAITING_ACTION_0);
+        std::function<bool()> pred = [this, expstate] { return connstate == expstate; };
+        LOGFMT("cond%1%.wait(lock%1%)", side);
+        res = cond_wait(__func__, side, cond, lock, bootTimeout, pred);
+        LOGFMT("cond%1%.wait(lock%1%): done", side);
 
-        LOG("acquire Python GIL");
-        py::gil_scoped_acquire acquire;
-
-        LOG("release lock (return)");
-        LOG("release Python GIL (return)");
-        LOG("return P_Result");
-
-        return {res, convertState(state)};
+        auto pstate = convertState(state);
+        LOGFMT("release lock%d (return)", side);
+        LOG("return P_State");
+        return {static_cast<int>(res), pstate};
     }
 
-    void Connector::start(int bootTimeout_, int vcmiTimeout_, int userTimeout_) {
+    void Connector::start() {
         ASSERT_STATE("start", ConnectorState::NEW);
-
-        bootTimeout = bootTimeout_;
-        vcmiTimeout = vcmiTimeout_;
-        userTimeout = userTimeout_;
 
         setvbuf(stdout, NULL, _IONBF, 0);
         LOG("start");
+
+        LOG("release Python GIL");
+        py::gil_scoped_release release;
 
         // struct sigaction sa;
         // sa.sa_handler = signal_handler;
@@ -509,34 +441,27 @@ namespace Connector::V4::Thread {
         std::unique_lock lock2(m2);
         LOG("obtain lock2: done");
 
+        std::function<bool()> predicate = [this] {
+            return (connectedClient0 || red != "MMAI_USER")
+                && (connectedClient1 || blue != "MMAI_USER");
+        };
+
+        LOGFMT("cond2.wait(lock2, %1%s, predicate)", bootTimeout);
+        auto res = cond_wait(__func__, 2, cond2, lock2, bootTimeout, predicate);
+        if (res == ReturnCode::TIMEOUT) {
+            throw VCMIConnectorException(boost::str(boost::format(
+                "timeout after %ds while waiting for client (red:%s, blue:%s, connectedClient0: %d, connectedClient1: %d)\n") \
+                % bootTimeout % red % blue % connectedClient0 % connectedClient1
+            ));
+            return;
+        } else if (res != ReturnCode::OK) {
+            throw VCMIConnectorException(boost::str(boost::format(
+                "unexpected return code from cond_wait: %d\n") % EI(res)
+            ));
+            return;
+        }
+
         {
-            LOG("release Python GIL");
-            py::gil_scoped_release release;
-
-            std::function<bool()> predicate = [this] {
-                return (connectedClient0 || red != "MMAI_USER")
-                    && (connectedClient1 || blue != "MMAI_USER");
-            };
-
-            if (predicate()) {
-                LOGFMT("clients already connected: (%s || %s) && (%s || %s)", connectedClient0 % red % connectedClient1 % blue);
-            } else {
-                LOGFMT("cond2.wait(lock2, %1%s, predicate)", bootTimeout);
-                auto res = cond_wait(__func__, 2, cond2, lock2, bootTimeout, predicate);
-                if (res == RETURN_CODE_TIMEOUT) {
-                    throw VCMIConnectorException(boost::str(boost::format(
-                        "timeout after %ds while waiting for client (red:%s, blue:%s, connectedClient0: %d, connectedClient1: %d)\n") \
-                        % bootTimeout % red % blue % connectedClient0 % connectedClient1
-                    ));
-                    return;
-                } else if (res != RETURN_CODE_OK) {
-                    throw VCMIConnectorException(boost::str(boost::format(
-                        "unexpected return code from cond_wait: %d\n") % res
-                    ));
-                    return;
-                }
-            }
-
             // Successfully obtaining these locks means the
             // clients are ready and waiting for state
             LOG("obtain lock0");
@@ -547,8 +472,7 @@ namespace Connector::V4::Thread {
             std::unique_lock lock1(m1);
             LOG("obtain lock1: done");
 
-            LOG("acquire Python GIL (scope-auto)");
-            // py::gil_scoped_acquire acquire2;
+            LOG("release lock0 and lock1");
         }
 
         auto f_getAction0 = [this](const MMAI::Schema::IState* s) {
@@ -619,9 +543,6 @@ namespace Connector::V4::Thread {
 
         LOG("release lock2");
         lock2.unlock();
-
-        LOG("release Python GIL");
-        py::gil_scoped_release release;
 
         LOG("launch VCMI (will never return)");
         ML::start_vcmi();

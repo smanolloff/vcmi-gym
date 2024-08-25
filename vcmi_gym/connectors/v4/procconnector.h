@@ -21,6 +21,7 @@
 #include <thread>
 #include <cstdio>
 #include <iostream>
+#include <deque>
 
 #include "AI/MMAI/schema/base.h"
 #include "AI/MMAI/schema/v4/types.h"
@@ -34,10 +35,14 @@ namespace Connector::V4::Proc {
     };
 
     class Connector {
+        std::mutex mlog;
         std::mutex m;
         std::condition_variable cond;
 
         ConnectorState connstate = ConnectorState::NEW;
+
+        int maxlogs;
+        std::deque<std::string> logs {};
 
         const std::string mapname;
         const int seed;
@@ -69,8 +74,10 @@ namespace Connector::V4::Proc {
         MMAI::Schema::Action getAction(const MMAI::Schema::IState * r);
         const MMAI::Schema::Action getActionDummy(MMAI::Schema::IState);
         const MMAI::Schema::V4::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
+        void log(std::string funcname, std::string msg);
     public:
         Connector(
+            const int maxlogs,
             const std::string mapname,
             const int seed,
             const int randomHeroes,
@@ -94,8 +101,9 @@ namespace Connector::V4::Proc {
 
         const P_State start();
         const P_State reset();
-        const P_State getState(const MMAI::Schema::Action a);
-        const std::string renderAnsi();
+        const P_State step(const MMAI::Schema::Action a);
+        const std::string render();
+        const std::vector<std::string> getLogs();
 
         virtual const int version();
         virtual ~Connector() = default;

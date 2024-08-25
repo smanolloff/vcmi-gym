@@ -31,7 +31,8 @@ def update_config_value(cfg, path, value):
 
     old_value = d.get(keys[-1])
     new_value = ast.literal_eval(value)
-    print("Overwrite %s: %s -> %s" % (path, old_value, value))
+    action = "No change for" if old_value == new_value else "Overwrite"
+    print("%s %s: %s -> %s" % (action, path, old_value, value))
     d[keys[-1]] = new_value
     return old_value, new_value
 
@@ -65,6 +66,9 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
         alg = cfg["_raytune"]["algo"]
         exp_name = cfg["_raytune"]["experiment_name"]
 
+        # Special key holding the ORIGINAL run_id to resume. Do not remove.
+        cfg["_raytune"]["resumed_run_id"] = agent.args.run_id
+
         cfg["_raytune"]["initial_hyperparams"] = extract_initial_hyperparams(
             asdict(agent.args),
             cfg["_raytune"]["hyperparam_mutations"]
@@ -84,8 +88,9 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
         # config_overrides is a list of "path.to.key=value"
         for co in config_overrides:
             name, value = co.split("=")
-            oldvalue, _newvalue = update_config_value(cfg, name, value)
-            resume["overrides"][name] = [oldvalue, value]
+            oldvalue, newvalue = update_config_value(cfg, name, value)
+            if oldvalue != newvalue:
+                resume["overrides"][name] = [oldvalue, value]
 
         cfg["_raytune"]["resumes"].append(resume)
 

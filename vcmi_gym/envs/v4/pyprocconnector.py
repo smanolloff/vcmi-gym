@@ -139,9 +139,10 @@ class PyProcConnector():
     #
     # MAIN PROCESS
     #
-    def __init__(self, loglevel, user_timeout, vcmi_timeout, boot_timeout, allow_retreat):
+    def __init__(self, loglevel, maxlogs, user_timeout, vcmi_timeout, boot_timeout, allow_retreat):
         self.started = False
         self.loglevel = loglevel
+        self.maxlogs = maxlogs
         self.shutdown_lock = multiprocessing.Lock()
         self.shutting_down = multiprocessing.Event()
         self.logger = log.get_logger("PyProcConnector", self.loglevel)
@@ -269,7 +270,7 @@ class PyProcConnector():
         return PyResult(self.v_result_act)
 
     @tracelog
-    def get_state(self, action):
+    def step(self, action):
         with self.cond:
             self.v_command_type.value = PyProcConnector.COMMAND_TYPE_ACT
             self.v_action.value = action
@@ -278,7 +279,7 @@ class PyProcConnector():
         return PyResult(self.v_result_act)
 
     @tracelog
-    def render_ansi(self):
+    def render(self):
         with self.cond:
             self.v_command_type.value = PyProcConnector.COMMAND_TYPE_RENDER_ANSI
             self.cond.notify()
@@ -334,7 +335,7 @@ class PyProcConnector():
         self.logger.info("Starting VCMI")
         self.logger.debug("VCMI connector args: %s" % str(args))
         # XXX: self.__connector is ONLY available in the sub-process!
-        self.__connector = self._get_connector().ProcConnector(*args)
+        self.__connector = self._get_connector().ProcConnector(self.maxlogs, *args)
 
         with self.cond:
             self.set_v_result_act(self.__connector.start())
@@ -390,11 +391,11 @@ class PyProcConnector():
     def process_command(self):
         match self.v_command_type.value:
             case PyProcConnector.COMMAND_TYPE_ACT:
-                self.set_v_result_act(self.__connector.getState(self.v_action.value))
+                self.set_v_result_act(self.__connector.step(self.v_action.value))
             case PyProcConnector.COMMAND_TYPE_RESET:
                 self.set_v_result_act(self.__connector.reset())
             case PyProcConnector.COMMAND_TYPE_RENDER_ANSI:
-                self.v_result_render_ansi.value = bytes(self.__connector.renderAnsi(), 'utf-8')
+                self.v_result_render_ansi.value = bytes(self.__connector.render(), 'utf-8')
             case _:
                 raise Exception("Unknown command: %s" % self.v_command_type.value)
 

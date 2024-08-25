@@ -442,6 +442,7 @@ class VcmiEnv(gym.Env):
         if other_env is None:
             self.connector = connector_class(
                 vcmienv_loglevel,
+                1000,  # maxlogs
                 user_timeout,
                 vcmi_timeout,
                 boot_timeout,
@@ -514,7 +515,7 @@ class VcmiEnv(gym.Env):
         if action == 0 and not self.allow_retreat:
             raise Exception("Retreat is not allowed")
 
-        res = self.connector.get_state(action)
+        res = self.connector.step(action)
 
         if action in [-1, 0]:
             self._reset_vars(res)
@@ -565,7 +566,7 @@ class VcmiEnv(gym.Env):
                 "Reward:    %-5s (total: %s)\n"
                 "Net value: %-5s (total: %s)"
             ) % (
-                self.connector.render_ansi(),
+                self.connector.render(),
                 self.analyzer.actions_count,
                 round(self.reward, 2),
                 round(self.reward_total, 2),

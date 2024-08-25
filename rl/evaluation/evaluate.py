@@ -159,14 +159,25 @@ def create_venv(env_cls, agent, mapname, role, opponent, wrappers):
             mana_max=0,
             swap_sides=agent.args.env.swap_sides,
             mapname=mapname,
-            attacker=opponent,
-            defender=opponent
         )
+
+        match env_cls:
+            case vcmi_gym.VcmiEnv_v3:
+                env_kwargs.pop("conntype", None)
+                env_kwargs["attacker"] = opponent
+                env_kwargs["defender"] = opponent
+                env_kwargs[role] = "MMAI_USER"
+            case vcmi_gym.VcmiEnv_v4:
+                env_kwargs["role"] = args.mapside
+                env_kwargs["opponent"] = opponent
+                env_kwargs["opponent_model"] = args.opponent_load_file
+                env_kwargs["conntype"] = "thread"
+            case _:
+                raise Exception("env cls not supported: %s" % env_cls)
 
         for a in env_kwargs.pop("deprecated_args", ["encoding_type"]):
             env_kwargs.pop(a, None)
 
-        env_kwargs[role] = "MMAI_USER"
         # LOG.debug("Env kwargs: %s" % env_kwargs)
         env = env_cls(**env_kwargs)
         for wrapper_cls in wrappers:
@@ -278,7 +289,7 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
 
                         # add timezone information to dt for printing correct time
                         dt = dt.replace(tzinfo=datetime.timezone.utc).astimezone()
-                        LOG.info(f"Downloading artifact {artifact.name} from {time.ctime(dt.timestamp())}, step={md.get("step", "?")})")
+                        LOG.info(f"Downloading artifact {artifact.name} from {time.ctime(dt.timestamp())}, step={md.get('step', '?')})")
 
                         f = files[0].download(tmpdir, replace=True)
 
@@ -400,6 +411,8 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                         env_cls = vcmi_gym.VcmiEnv_v2
                     case 3:
                         env_cls = vcmi_gym.VcmiEnv_v3
+                    case 4:
+                        env_cls = vcmi_gym.VcmiEnv_v4
                     case _:
                         raise Exception("unsupported env version: %d" % env_version)
 

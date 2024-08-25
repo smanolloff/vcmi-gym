@@ -21,10 +21,13 @@
 #include <thread>
 #include <cstdio>
 #include <iostream>
+#include <atomic>
+#include <deque>
 
 #include "AI/MMAI/schema/base.h"
 #include "AI/MMAI/schema/v4/types.h"
 #include "common.h"
+#include "exporter.h"
 
 namespace Connector::V4::Thread {
     enum ConnectorState {
@@ -45,6 +48,7 @@ namespace Connector::V4::Thread {
         std::mutex m0;
         std::mutex m1;
         std::mutex m2;
+        std::mutex mlog;
         std::condition_variable cond0;
         std::condition_variable cond1;
         std::condition_variable cond2;
@@ -59,12 +63,12 @@ namespace Connector::V4::Thread {
         std::string _error;
 
         ConnectorState connstate = ConnectorState::NEW;
+        std::deque<std::string> logs {};
 
-        // set during .start()
-        int bootTimeout;
-        int vcmiTimeout;
-        int userTimeout;
-
+        const int maxlogs;
+        const int bootTimeout;
+        const int vcmiTimeout;
+        const int userTimeout;
         const std::string mapname;
         const int seed;
         const int randomHeroes;
@@ -96,15 +100,19 @@ namespace Connector::V4::Thread {
         const MMAI::Schema::Action getActionDummy(MMAI::Schema::IState);
         const MMAI::Schema::V4::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
 
-        int cond_wait(
-            const char* func,
-            int id,
-            std::condition_variable &cond,
-            std::unique_lock<std::mutex> &l,
-            int timeoutSeconds  // -1 = no timeout
-        );
+        // essentially, all of .reset(), .render() and .step() are a form of getState
+        ReturnCode getState(const char* funcname, int side, int action);
 
-        int cond_wait(
+        // XXX: cond_wait without a predicate is prone to race conditions
+        // int cond_wait(
+        //     const char* func,
+        //     int id,
+        //     std::condition_variable &cond,
+        //     std::unique_lock<std::mutex> &l,
+        //     int timeoutSeconds  // -1 = no timeout
+        // );
+
+        ReturnCode cond_wait(
             const char* func,
             int id,
             std::condition_variable &cond,
@@ -113,7 +121,7 @@ namespace Connector::V4::Thread {
             std::function<bool()> &pred
         );
 
-        int _cond_wait(
+        ReturnCode _cond_wait(
             const char* func,
             int id,
             std::condition_variable &cond,
@@ -123,10 +131,15 @@ namespace Connector::V4::Thread {
         );
 
         void maybeThrowError();
-        void setError(std::string msg);
+        void log(std::string funcname, std::string msg);
+
         // void signal_handler(int signal);
     public:
         Connector(
+            const int maxlogs,
+            const int bootTimeout,
+            const int vcmiTimeout,
+            const int userTimeout,
             const std::string mapname,
             const int seed,
             const int randomHeroes,
@@ -149,12 +162,13 @@ namespace Connector::V4::Thread {
         );
 
         // timeouts are in seconds
-        void start(int bootTimeout, int vcmiTimeout, int userTimeout);
+        void start();
         const std::tuple<int, P_State> connect(int side);
         const std::tuple<int, P_State> reset(int side);
-        const std::tuple<int, P_State> getState(int side, const MMAI::Schema::Action a);
-        const std::tuple<int, std::string> renderAnsi(int side);
+        const std::tuple<int, P_State> step(int side, const MMAI::Schema::Action a);
+        const std::tuple<int, std::string> render(int side);
         void shutdown();
+        const std::vector<std::string> getLogs();
 
         virtual const int version();
         virtual ~Connector() = default;

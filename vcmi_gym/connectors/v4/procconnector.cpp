@@ -29,6 +29,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 #define ASSERT_STATE(want) \
     if(want != connstate) \
@@ -38,6 +39,7 @@ namespace Connector::V4::Proc {
     namespace py = pybind11;
 
     Connector::Connector(
+        const int maxlogs_,
         const std::string mapname_,
         const int seed_,
         const int randomHeroes_,
@@ -57,7 +59,8 @@ namespace Connector::V4::Proc {
         const std::string statsMode_,
         const std::string statsStorage_,
         const int statsPersistFreq_
-    ) : mapname(mapname_),
+    ) : maxlogs(maxlogs_),
+        mapname(mapname_),
         seed(seed_),
         randomHeroes(randomHeroes_),
         randomObstacles(randomObstacles_),
@@ -78,8 +81,44 @@ namespace Connector::V4::Proc {
         statsPersistFreq(statsPersistFreq_)
         {};
 
+
     const int Connector::version() {
         return 4;
+    }
+
+    const std::vector<std::string> Connector::getLogs() {
+        return std::vector<std::string>(logs.begin(), logs.end());
+    }
+
+    void Connector::log(std::string funcname, std::string msg) {
+#if VERBOSE || LOGCOLLECT
+        boost::posix_time::ptime t = boost::posix_time::microsec_clock::universal_time();
+
+        std::string entry = boost::str(boost::format("++ %1% <%2%>[%3%][%4%] <%5%> %6%") \
+            % boost::posix_time::to_iso_extended_string(t)
+            % std::this_thread::get_id()
+            % std::filesystem::path(__FILE__).filename().string()
+            % (PyGILState_Check() ? "GIL=1" : "GIL=0")
+            % funcname
+            % msg
+        );
+
+#if LOGCOLLECT
+        {
+            std::unique_lock lock(mlog);
+            if (logs.size() == maxlogs)
+                logs.pop_front();
+            logs.push_back(entry);
+        }
+#endif // LOGCOLLECT
+
+#if VERBOSE
+        {
+            std::unique_lock lock(mlog);
+            std::cout << entry << "\n";
+        }
+#endif // VERBOSE
+#endif // VERBOSE || LOGCOLLECT
     }
 
     const MMAI::Schema::V4::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
@@ -197,7 +236,7 @@ namespace Connector::V4::Proc {
         return pstate;
     }
 
-    const std::string Connector::renderAnsi() {
+    const std::string Connector::render() {
         ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         LOG("obtain lock");
@@ -233,7 +272,7 @@ namespace Connector::V4::Proc {
         return sup->getAnsiRender();
     }
 
-    const P_State Connector::getState(MMAI::Schema::Action a) {
+    const P_State Connector::step(MMAI::Schema::Action a) {
         ASSERT_STATE(ConnectorState::AWAITING_ACTION);
 
         // Prevent control actions via `step`
@@ -385,7 +424,7 @@ namespace Connector::V4::Proc {
         connstate = ConnectorState::AWAITING_STATE;
 
         LOG("launch VCMI thread");
-        vcmithread = std::thread([] {
+        vcmithread = std::thread([this] {
             LOG("[thread] Start VCMI");
             ML::start_vcmi();
             assert(false); // should never be here

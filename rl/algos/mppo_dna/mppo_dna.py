@@ -1101,8 +1101,7 @@ def debug_args():
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
-            conntype="proc"
-
+            conntype="thread"
         ),
         env_wrappers=[],
         env_version=4,

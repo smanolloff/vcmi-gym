@@ -129,13 +129,12 @@ participant "//cppconnector//\n$desc(core)" as core
 
 note over core, att #yellow
   Who grabs the lock first?
-  * core
-  $desc("case 1 of 2")
+  * att
+  $desc("case 2 of 2")
 end note
 
-$lock_acq_direct(core, 2)
-$cond_wait_pred(core, 2, "att || def")
 $lock_acq_direct(att, 2)
+$lock_acq_fail(core, 2)
 $sharevar(att, core, "self.att = true")
 $cond_notify(att, core, 2)
 

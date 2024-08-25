@@ -152,7 +152,7 @@ $sharevar(def, core, "self.def = true")
 $cond_notify(def, core, 2)
 $lock_acq_direct(def, 1)
 $lock_rel(def, 2)
-$pred_ok(core, "def && def")
+$pred_ok(core, "att && def")
 $lock_acq_latent(core, 2)
 
 note over core

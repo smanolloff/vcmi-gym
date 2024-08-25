@@ -26,11 +26,13 @@ namespace Connector::V4 {
 
     using AttributeMapping = std::tuple<std::string, std::string, int, int, int>;
 
-    constexpr int RETURN_CODE_OK = 0;
-    constexpr int RETURN_CODE_SHUTDOWN = 1;
-    constexpr int RETURN_CODE_TIMEOUT = 2;
-    constexpr int RETURN_CODE_INTERRUPTED = 3;
-    constexpr int RETURN_CODE_ERROR = 255;
+    enum class ReturnCode {
+        OK = 0,
+        SHUTDOWN,
+        TIMEOUT,
+        INTERRUPTED,
+        ERROR
+    };
 
     class Exporter {
     public:

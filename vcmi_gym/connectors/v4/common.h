@@ -27,22 +27,21 @@
 
 #include <pybind11/numpy.h>
 
-#define VERBOSE true  // no effect on release builds
-
-#define FMT(fmt, elems) boost::str(boost::format(fmt) % elems)
-
 #ifdef DEBUG_BUILD
-    #define LOG_MSG_COMMON() std::cout \
-        << "<" << std::this_thread::get_id() << ">" \
-        << "[" << std::filesystem::path(__FILE__).filename().string() << "]" \
-        << "[" << (PyGILState_Check() ? "GIL=1" : "GIL=0") << "] " \
-        << "(" << __FUNCTION__ << ") "
+    #define VERBOSE 1       // whether to output logs to STDOUT
+    #define LOGCOLLECT 1    // whether to record logs in memory
+#else
+    #define VERBOSE 0
+    // #define LOGCOLLECT 0
+    #define LOGCOLLECT 1
+#endif
 
-    #define LOG(msg) if(VERBOSE) LOG_MSG_COMMON(); std::cout << msg << "\n"
-    #define LOGFMT(fmt, elems) if(VERBOSE) LOG_MSG_COMMON(); std::cout << FMT(fmt, elems) << "\n"
+#if VERBOSE || LOGCOLLECT
+    #define LOG(msg) log(__func__, msg);
+    #define LOGFMT(fmt, elems) LOG(boost::str(boost::format(fmt) % elems));
 #else
     #define LOG(msg) // noop
-    #define LOGFMT(msg, elems) // noop
+    #define LOGFMT(fmt, elems) // noop
 #endif
 
 namespace Connector::V4 {

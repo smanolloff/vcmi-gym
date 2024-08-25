@@ -30,6 +30,7 @@ namespace Connector::V4 {
 
         py::class_<Proc::Connector, std::unique_ptr<Proc::Connector>>(m, "ProcConnector")
             .def(py::init<
+                const int &,         // maxlogs
                 const std::string &, // mapname
                 const int &,         // seed
                 const int &,         // randomHeroes
@@ -52,11 +53,16 @@ namespace Connector::V4 {
             >())
             .def("start", &Proc::Connector::start)
             .def("reset", &Proc::Connector::reset)
-            .def("getState", &Proc::Connector::getState)
-            .def("renderAnsi", &Proc::Connector::renderAnsi);
+            .def("step", &Proc::Connector::step)
+            .def("render", &Proc::Connector::render)
+            .def("getLogs", &Proc::Connector::getLogs);
 
         py::class_<Thread::Connector, std::unique_ptr<Thread::Connector>>(m, "ThreadConnector")
             .def(py::init<
+                const int &,         // maxlogs
+                const int &,         // bootTimeout
+                const int &,         // vcmiTimeout
+                const int &,         // userTimeout
                 const std::string &, // mapname
                 const int &,         // seed
                 const int &,         // randomHeroes
@@ -80,8 +86,12 @@ namespace Connector::V4 {
             .def("start", &Thread::Connector::start)
             .def("reset", &Thread::Connector::reset)
             .def("connect", &Thread::Connector::connect)
-            .def("getState", &Thread::Connector::getState)
-            .def("renderAnsi", &Thread::Connector::renderAnsi);
+            .def("step", &Thread::Connector::step)
+            .def("render", &Thread::Connector::render)
+            .def("getLogs", &Thread::Connector::getLogs);
+
+        py::register_exception<Thread::VCMIConnectorException>(m, "PyThreadVCMIConnectorException");
+
     }
 
 }
