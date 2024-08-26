@@ -5,7 +5,7 @@ import io
 import random
 
 # Usage:
-# python maps/mapgen/rendomize_slots.py path/to/map.vmap
+# python maps/mapgen/replace_warmachine_creatures.py path/to/map.vmap
 
 
 if __name__ == "__main__":
@@ -24,7 +24,8 @@ if __name__ == "__main__":
 
     for k, v in objects.items():
         if k.startswith("hero_"):
-            random.shuffle(v["options"]["army"])
+            for a in v["options"]["army"]:
+                random.shuffle(v["options"]["army"])
 
     memory_zip = io.BytesIO()
     with zipfile.ZipFile(memory_zip, 'w') as zipf:

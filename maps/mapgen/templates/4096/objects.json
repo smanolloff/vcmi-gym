@@ -262,5 +262,26 @@
 		"type" : "town",
 		"x" : 70,
 		"y" : 70
-	}
+	},
+  "creatureBank_8" : {
+    "l" : 0,
+    "subtype" : "core:nagaBank",
+    "template" : {
+      "animation" : "AVXbnk60",
+      "editorAnimation" : "",
+      "mask" : [
+        "VVV",
+        "VVV", 
+        "VAB"
+      ],
+      "visitableFrom" : [
+        "---",
+        "+-+",
+        "+++"
+      ]
+    },
+    "type" : "creatureBank",
+    "x" : 36,
+    "y" : 69
+  }
 }

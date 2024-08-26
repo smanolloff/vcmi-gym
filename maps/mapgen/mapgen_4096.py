@@ -30,8 +30,8 @@ MAP_DIR = "../gym/generated/4096"
 # name template containing a single {id} token to be replaced with MAP_ID
 MAP_NAME_TEMPLATE = "4096-all-mixstack-100K-{id:02d}"
 # id of maps to generate (inclusive)
-MAP_ID_START = 1
-MAP_ID_END = 1
+MAP_ID_START = 2
+MAP_ID_END = 2
 
 # ARMY_N_STACKS_SAME = False  # same for both sides
 ARMY_N_STACKS_MIN = 1
@@ -65,11 +65,19 @@ ARMY_VALUE_ERROR_MAX = 0.01
 #   crystal dragon  = 39338 (tier 8 - strongest unit, azure dragon is removed)
 #
 # i.e. a value of "15" will ensure all armies contain a stack of peasants.
-ARMY_WEAKEST_CREATURE_VALUE_MAX = 100
+# XXX: pay attention to target army value and STACK_QTY_MAX
+#      Example:
+#       target army value: 100K
+#       STACK_QTY_MAX: 1023
+#       ARMY_WEAKEST_CREATURE_VALUE_MAX: 100
+#       => the only allowed 1-stack armies will be:
+#           a) 1000 centaurs (value=100)
+#           b) 1020 walking dead (value=98)
+#
+ARMY_WEAKEST_CREATURE_VALUE_MAX = 1000
 
-# Hero IDs are re-mapped when game starts
-# => use hero experience as a reference
-# HERO_EXP_REF = 10000000
+# prevents "defend-only" AIs
+CHANCE_ONLY_SHOOTERS = 5
 
 
 class StackTooBigError(Exception):
@@ -93,7 +101,10 @@ class MaxAttemptsExceeded(Exception):
 
 
 def get_all_creatures():
-    return [(c["vcminame"], c["name"], c["value"]) for c in ALL_CREATURES]
+    return (
+        [(c["vcminame"], c["name"], c["value"]) for c in ALL_CREATURES if c["shooter"]],
+        [(c["vcminame"], c["name"], c["value"]) for c in ALL_CREATURES if not c["shooter"]]
+    )
 
 
 def get_templates():
@@ -130,7 +141,7 @@ def build_army(target_value, err_frac_max, creatures=None, n_stacks=None, all_cr
     if creatures is None:
         assert all_creatures, "when creatures is None, all_creatures is required"
         assert n_stacks, "when creatures is None, n_stacks is required"
-        creatures = random.sample(all_creatures, n_stacks)
+        creatures = random.choices(all_creatures, k=n_stacks)
     else:
         assert all_creatures is None, "when creatures is given, all_creatures must be None"
         assert n_stacks is None, "when creatures is given, n_stacks must be None"
@@ -244,7 +255,8 @@ def save(header, objects, surface_terrain):
 
 
 if __name__ == "__main__":
-    all_creatures = get_all_creatures()
+    all_shooter_creatures, all_melee_creatures = get_all_creatures()
+    all_creatures = all_shooter_creatures + all_melee_creatures
     all_values = list(range(ARMY_VALUE_MIN, ARMY_VALUE_MAX+1, ARMY_VALUE_ROUND))
 
     for mapid in range(MAP_ID_START, MAP_ID_END + 1):
@@ -256,7 +268,10 @@ if __name__ == "__main__":
         header["description"] = (
             f"AI test map {header['name']}\n"
             f"Target army values: {value}\n"
-            f"Stack count min/max: {ARMY_N_STACKS_MIN}/{ARMY_N_STACKS_MAX}\n"
+            f"Number of stacks: min={ARMY_N_STACKS_MIN}, max={ARMY_N_STACKS_MAX} \n"
+            f"Max number of creatures in 1 stack: {STACK_QTY_MAX}\n"
+            f"Max value of weakest creature in army: {ARMY_WEAKEST_CREATURE_VALUE_MAX}\n"
+            f"Chance for shooters-only army: {CHANCE_ONLY_SHOOTERS}%"
         )
         oid = 0
 
@@ -264,9 +279,10 @@ if __name__ == "__main__":
 
         # add forts for the 8 towns
         fortnames = ["core:fort", "core:citadel", "core:castle"]
-        fortlvls = [3] * 5  # 5 castles
+        fortlvls = [3] * 4  # 4 castles
         fortlvls += [2] * 2  # 2 citadels
         fortlvls += [1] * 1  # 1 fort
+        fortlvls += [0] * 1  # 1 village (still useful: prevents regular obstacles)
         for i, fortlvl in enumerate(fortlvls):
             # mapeditor generates them in reversed order
             buildings = list(reversed(fortnames[:fortlvl]))
@@ -278,7 +294,14 @@ if __name__ == "__main__":
             for x in range(5, 69):  # 64 columns (heroes are 2 tiles for some reason)
                 print(f"* Generating army for hero #{oid}")
                 n_stacks = random.randint(ARMY_N_STACKS_MIN, ARMY_N_STACKS_MAX)
-                army = build_army_with_retry(value, ARMY_VALUE_ERROR_MAX, n_stacks=n_stacks, all_creatures=all_creatures, verbose=True)
+
+                allowed_creatures = all_creatures
+
+                shooters_roll = random.randint(0, 100)
+                if shooters_roll < CHANCE_ONLY_SHOOTERS:
+                    allowed_creatures = all_shooter_creatures
+
+                army = build_army_with_retry(value, ARMY_VALUE_ERROR_MAX, n_stacks=n_stacks, all_creatures=allowed_creatures, verbose=True)
                 hero_army = [{} for i in range(7)]
                 for (slot, (vcminame, _, number)) in enumerate(army):
                     hero_army[slot] = dict(amount=number, type=f"core:{vcminame}")
@@ -323,7 +346,7 @@ if __name__ == "__main__":
                 objects[values["name"]] = dict(
                     type="hero", subtype=values["type"], x=x, y=y, l=0,
                     options=dict(
-                        experience=oid,
+                        experience=1000000+oid,
                         name=values["name"],
                         formation="wide",
                         gender=1,
