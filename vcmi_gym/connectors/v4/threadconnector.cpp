@@ -47,6 +47,7 @@
 // => use this to set a member var `_error`
 //    (the exception must be constructed and thrown in python-aware thread)
 #define SET_ERROR(msg) { \
+    std::cerr << boost::str(boost::format("ERROR (only recorded): %1%") % msg); \
     LOG(boost::str(boost::format("ERROR (only recorded): %1%") % msg)); \
     _error = msg; \
 }
@@ -296,6 +297,10 @@ namespace Connector::V4::Thread {
         auto res = cond_wait(funcname, side, cond, lock, vcmiTimeout, pred);
         LOGFMT("cond%1%.wait(lock%1%): done", side);
 
+        if (!_error.empty()) {
+            throw VCMIConnectorException(_error);
+        }
+
         LOGFMT("release lock%d (return)", side);
         return res;
     }
@@ -362,9 +367,11 @@ namespace Connector::V4::Thread {
         // waiting in getState. It was supposed to throw any stored errors
         // If it did not (bug) => throw here
         if (!_error.empty()) {
-            auto msg = _error;
-            _error = "";
-            throw VCMIConnectorException(msg);
+            // need to explicitly print the logs here
+            // (this exception won't be handled by python)
+            for (auto &msg : logs)
+                std::cerr << msg << "\n";
+            throw VCMIConnectorException(_error);
         }
 
         if (res == ReturnCode::TIMEOUT) {
