@@ -66,7 +66,7 @@ config = {
         #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         # """
-        "population_size": 6,
+        "population_size": 5,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -215,6 +215,11 @@ config = {
     # NN arch
     "network": {
         "attention": None,
+        "features_extractor1_misc": [
+            {"t": "Linear", "in_features": 4, "out_features": 4},
+            {"t": "LeakyReLU"},
+            # => (B, 160)
+        ],
         "features_extractor1_stacks": [
             # => (B, 2040)
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*102]},
@@ -234,8 +239,8 @@ config = {
             # => (B, 1320)
         ],
         "features_extractor2": [
-            # => (B, 1480)
-            {"t": "Linear", "in_features": 1480, "out_features": 512},
+            # => (B, 1484)
+            {"t": "Linear", "in_features": 1484, "out_features": 512},
             {"t": "LeakyReLU"},
         ],
         "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},

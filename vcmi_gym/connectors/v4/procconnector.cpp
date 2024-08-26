@@ -170,7 +170,7 @@ namespace Connector::V4::Proc {
         for (int i=0; i < attnmask.size(); i++)
             patmmd[i] = attnmask[i];
 
-        auto stats = sup->getStats();
+        auto misc = sup->getMisc();
         auto res = P_State(
              sup->getType(),
              pbs,
@@ -184,10 +184,10 @@ namespace Connector::V4::Proc {
              sup->getUnitsKilled(),
              sup->getValueLost(),
              sup->getValueKilled(),
-             stats->getInitialArmyValueLeft(),
-             stats->getInitialArmyValueRight(),
-             stats->getCurrentArmyValueLeft(),
-             stats->getCurrentArmyValueRight(),
+             misc->getInitialArmyValueLeft(),
+             misc->getInitialArmyValueRight(),
+             misc->getCurrentArmyValueLeft(),
+             misc->getCurrentArmyValueRight(),
              sup->getIsBattleEnded(),
              sup->getIsVictorious(),
              sup->getAnsiRender()

@@ -90,6 +90,7 @@ class EnvArgs:
 @dataclass
 class NetworkArgs:
     attention: dict = field(default_factory=dict)
+    features_extractor1_misc: list[dict] = field(default_factory=list)
     features_extractor1_stacks: list[dict] = field(default_factory=list)
     features_extractor1_hexes: list[dict] = field(default_factory=list)
     features_extractor2: list[dict] = field(default_factory=list)
@@ -298,6 +299,11 @@ class AgentNN(nn.Module):
         else:
             self.attention = None
 
+        self.features_extractor1_misc = torch.nn.Sequential()
+        for spec in network.features_extractor1_misc:
+            layer = AgentNN.build_layer(spec)
+            self.features_extractor1_misc.append(common.layer_init(layer))
+
         self.features_extractor1_stacks = torch.nn.Sequential()
         for spec in network.features_extractor1_stacks:
             layer = AgentNN.build_layer(spec)
@@ -317,10 +323,11 @@ class AgentNN(nn.Module):
         self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
     def extract_features(self, x):
-        stacks, hexes = x.split([2040, 10725], dim=1)
+        misc, stacks, hexes = x.split([4, 2040, 10725], dim=1)
+        fmisc = self.features_extractor1_misc(misc)
         fstacks = self.features_extractor1_stacks(stacks)
         fhexes = self.features_extractor1_hexes(hexes)
-        fcat = torch.cat((fstacks, fhexes), dim=1)
+        fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
         return self.features_extractor2(fcat)
 
     def get_value(self, x, attn_mask=None):
@@ -397,10 +404,12 @@ class Agent(nn.Module):
         # jagent.features_extractor = clean_agent.NN.features_extractor
 
         # v3+
+        jagent.features_extractor1_policy_misc = clean_agent.NN_policy.features_extractor1_misc
         jagent.features_extractor1_policy_stacks = clean_agent.NN_policy.features_extractor1_stacks
         jagent.features_extractor1_policy_hexes = clean_agent.NN_policy.features_extractor1_hexes
         jagent.features_extractor2_policy = clean_agent.NN_policy.features_extractor2
 
+        jagent.features_extractor1_value_misc = clean_agent.NN_value.features_extractor1_misc
         jagent.features_extractor1_value_stacks = clean_agent.NN_value.features_extractor1_stacks
         jagent.features_extractor1_value_hexes = clean_agent.NN_value.features_extractor1_hexes
         jagent.features_extractor2_value = clean_agent.NN_value.features_extractor2
@@ -457,10 +466,11 @@ class JitAgent(nn.Module):
             # features = self.features_extractor(b_obs)
 
             # v3+
-            stacks, hexes = b_obs.split([2040, 10725], dim=1)
+            misc, stacks, hexes = b_obs.split([4, 2040, 10725], dim=1)
+            fmisc = self.features_extractor1_policy_misc(misc)
             fstacks = self.features_extractor1_policy_stacks(stacks)
             fhexes = self.features_extractor1_policy_hexes(hexes)
-            fcat = torch.cat((fstacks, fhexes), dim=1)
+            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
             features = self.features_extractor2_policy(fcat)
 
             action_logits = self.actor(features)
@@ -472,10 +482,11 @@ class JitAgent(nn.Module):
     def get_value(self, obs) -> float:
         with torch.no_grad():
             b_obs = obs.unsqueeze(dim=0)
-            stacks, hexes = b_obs.split([2040, 10725], dim=1)
+            misc, stacks, hexes = b_obs.split([4, 2040, 10725], dim=1)
+            fmisc = self.features_extractor1_value_misc(misc)
             fstacks = self.features_extractor1_value_stacks(stacks)
             fhexes = self.features_extractor1_value_hexes(hexes)
-            fcat = torch.cat((fstacks, fhexes), dim=1)
+            fcat = torch.cat((misc, fstacks, fhexes), dim=1)
             features = self.features_extractor2_value(fcat)
             value = self.critic(features)
             return value.float().item()
@@ -1101,13 +1112,19 @@ def debug_args():
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
-            conntype="thread"
+            conntype="proc"
         ),
         env_wrappers=[],
         env_version=4,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
             attention=None,
+            features_extractor1_misc=[
+                # => (B, 4)
+                dict(t="Linear", in_features=4, out_features=4),
+                dict(t="LeakyReLU"),
+                # => (B, 160)
+            ],
             features_extractor1_stacks=[
                 # => (B, 2040)
                 dict(t="Unflatten", dim=1, unflattened_size=[1, 20*102]),
@@ -1126,8 +1143,8 @@ def debug_args():
                 # => (B, 660)
             ],
             features_extractor2=[
-                # => (B, 820)
-                dict(t="Linear", in_features=820, out_features=512),
+                # => (B, 824)
+                dict(t="Linear", in_features=824, out_features=512),
                 dict(t="LeakyReLU"),
             ],
             actor=dict(t="Linear", in_features=512, out_features=2312),
