@@ -53,6 +53,7 @@ bgjob() {
         while IFS= read -r line; do
             echo -en "\033[0m"
             echo "<job=$job_id PID=$!> [$(date +"%Y-%m-%d %H:%M:%S")] $line"
+            echo -en "\033[0m"
         done <"$fifo"
         set -x
         # Remove the named pipe after the job is done
@@ -70,7 +71,7 @@ function run_mlclient() {
 
     for _ in $(seq 10); do
         touch "$WATCHDOGFILE"
-        $VCMI/rel/bin/mlclient \
+        $VCMI/rel/bin/mlclient-cli \
             --headless \
             --loglevel-ai error --loglevel-global error --loglevel-stats info \
             --random-heroes 1 --random-obstacles 1 --swap-sides 0 \
@@ -91,6 +92,6 @@ for i in $(seq 1 10); do
 
     wait
     cp "$DB" "${DB%.sqlite3}-$i.sqlite3"
-    python maps.mapgen.rebalance.py "$MAP" "$DB"
+    python -m maps.mapgen.rebalance "$MAP" "$DB"
     echo "update stats set wins=0, games=0" | sqlite3 "$DB"
 done
