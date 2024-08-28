@@ -90,7 +90,7 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
             name, value = co.split("=")
             oldvalue, newvalue = update_config_value(cfg, name, value)
             if oldvalue != newvalue:
-                resume["overrides"][name] = [oldvalue, value]
+                resume["overrides"][name] = [oldvalue, newvalue]
 
         cfg["_raytune"]["resumes"].append(resume)
 

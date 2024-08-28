@@ -18,7 +18,7 @@ import types
 import os
 import threading
 import warnings
-import random
+
 from collections import OrderedDict
 
 from ..util import log
@@ -90,6 +90,8 @@ class PyResult():
 
 
 class PyThreadConnector():
+    VCMI_STARTED = False
+
     #
     # MAIN PROCESS
     #
@@ -101,14 +103,22 @@ class PyThreadConnector():
         self.user_timeout = user_timeout or 99999
         self.logger = log.get_logger("PyThreadConnector", self.loglevel)
         self.startlock = threading.RLock()
+        self.started = threading.Event()
         self.termlock = threading.RLock()
-        self.starting = threading.Event()
-        self.shutting_down = threading.Event()
+        self.finished = threading.Event()
 
     @tracelog
     def start(self, *args):
+        if self.__class__.VCMI_STARTED:
+            warnings.warn(
+                f"A VCMI instance has previously been started in this process (PID={os.getpid()}). "
+                "VCMI does not perform full cleanup on shutdown and leaves an inconsistent global state behind. "
+                "Attempting to start another VCMI instance will cause undefined behaviour."
+            )
+            raise RuntimeError("Cannot start another VCMI instance in this process.")
+
         with self.startlock:
-            if self.starting.is_set():
+            if self.started.is_set():
                 warnings.warn("PyThreadConnector is already started")
                 return
 
@@ -120,32 +130,31 @@ class PyThreadConnector():
             )
 
             self.thread.start()
-            self.starting.wait()
+            self.started.wait()
 
     def shutdown(self):
-        warnings.warn("using 'thread' connector does not support env shutdown")
-        if self.shutting_down.is_set():
-            return
+        with self.termlock:
+            if self.finished.is_set():
+                return
 
-        self.shutting_down.set()
+            if self.thread:
+                try:
+                    if self.thread.is_alive():
+                        self._connector.shutdown()
+                        if self.finished.wait(5):
+                            self.thread.join()
+                            self.logger.info("VCMI shutdown complete")
+                        else:
+                            raise Exception("VCMI shutdown timed out after 5s")
+                except Exception as e:
+                    self.logger.error("Could not join self.thread: %s" % str(e))
 
-        # proc may not have been started at all
-        # it is also already joined by deathwatch, but joining it again is ok
-        if self.thread:
-            try:
-                if self.thread.is_alive():
-                    self._connector.shutdown()
-                self.thread.join()
-            except Exception as e:
-                self.logger.error("Could not join self.thread: %s" % str(e))
+            self.finished.set()
 
-        # attempt to prevent log duplication from ray PB2 training
-        # Close logger last (because of the "Resources released" message)
-        self.logger.info("Resources released")
-        for handler in self.logger.handlers:
-            self.logger.removeHandler(handler)
-            handler.close()
-        del self.logger
+            for handler in self.logger.handlers:
+                self.logger.removeHandler(handler)
+                handler.close()
+            del self.logger
 
     @tracelog
     def reset(self):
@@ -223,5 +232,7 @@ class PyThreadConnector():
             *args
         )
 
-        self.starting.set()
+        self.__class__.VCMI_STARTED = True
+        self.started.set()
         self._connector.start()
+        self.finished.set()

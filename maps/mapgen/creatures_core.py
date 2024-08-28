@@ -9,7 +9,7 @@
 # NOTE: The 4 "NOT USED" creatures, warmachines and arrow tower are commented out
 #
 
-ALL_CREATURES = [
+CREATURES = [
     {
         "id": 0,
         "vcminame": "pikeman",

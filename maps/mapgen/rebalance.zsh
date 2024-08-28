@@ -66,19 +66,20 @@ function run_mlclient() {
     # * 1 worker gathers data for 14min
     # * 36 workers need a total of 15min for dbupdate (~25s per worker)
     #
-    timeout_minutes=20  # XXX: ensure watchdog has bigger timeout
+    timeout_minutes=5  # XXX: ensure watchdog has bigger timeout
 
     for _ in $(seq 10); do
         touch "$WATCHDOGFILE"
-        $VCMI/rel/bin/mlclient-headless \
+        $VCMI/rel/bin/mlclient \
+            --headless \
             --loglevel-ai error --loglevel-global error --loglevel-stats info \
             --random-heroes 1 --random-obstacles 1 --swap-sides 0 \
-            --red-ai MMAI_SCRIPT_SUMMONER --blue-ai MMAI_SCRIPT_SUMMONER \
+            --left-ai MMAI_SCRIPT_SUMMONER --right-ai MMAI_SCRIPT_SUMMONER \
             --stats-mode red \
             --stats-storage "$DB" \
             --stats-timeout $((timeout_minutes*60*1000)) \
-            --stats-persist-freq 0 \
-            --max-battles 26000 \
+            --stats-persist-freq 5000 \
+            --max-battles 20000 \
             --map "$VCMIMAP"
     done
 }
@@ -90,6 +91,6 @@ for i in $(seq 1 10); do
 
     wait
     cp "$DB" "${DB%.sqlite3}-$i.sqlite3"
-    python maps/mapgen/rebalance.py "$VCMIMAP" "$DB"
+    python maps.mapgen.rebalance.py "$MAP" "$DB"
     echo "update stats set wins=0, games=0" | sqlite3 "$DB"
 done

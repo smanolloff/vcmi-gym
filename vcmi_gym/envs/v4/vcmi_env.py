@@ -333,7 +333,7 @@ class VcmiEnv(gym.Env):
             Reward calculation parameter, denoted `c` in the formula in `step_reward_mult`.
             This is similar to `step_reward_fixed`, but is given as a fraction
             of the mean of the two starting total army values.
-            Example: -0.001, meaning 0.1% of the starting army values (-100)
+            Example: -0.001, meaning 0.1% of the starting army values (-100 for a 100K army)
             Default: 0
 
         * reward_dmg_factor (int)
@@ -442,7 +442,7 @@ class VcmiEnv(gym.Env):
         if other_env is None:
             self.connector = connector_class(
                 vcmienv_loglevel,
-                1000,  # maxlogs
+                100,  # maxlogs
                 user_timeout,
                 vcmi_timeout,
                 boot_timeout,
