@@ -45,6 +45,7 @@ from .mapgen import (
     CreditsExceeded,
     NoSlotsLeft,
     UnbuildableArmy,
+    UncorrectableArmy,
     Stack,
     build_pool_configs,
 )
@@ -99,6 +100,7 @@ class PoolRebalance:
     n_unknown: int = 0   # heroes we have no stats for
     n_skipped: int = 0   # heroes that don't need any change
     n_updated: int = 0   # heroes changed
+    n_rebuilt: int = 0   # rebuilt from scratch (special cases only)
     n_failed: int = 0    # heroes failed
     armies: dict = field(default_factory=lambda: {})
     mean_army_value: float = 0.0
@@ -116,12 +118,17 @@ class RebalanceFailed(Exception):
 
 
 def rebalance_army(army_config, correction_factor):
+    # The min guaranteed correction is used only during initial map generation
+    # new_pool_config = replace(army_config.pool_config, min_guaranteed_correction=0)
+    # army_config = replace(army_config, pool_config=new_pool_config)
+    rebuilt = False
+
     for i in range(100):
         try:
-            return army_config.generate_army(), i
+            return army_config.generate_army(), i, rebuilt
         except UnbuildableArmy as e:
-            if army_config.verbose:
-                print(f"({i}) {str(e)})")
+            if army_config.verbosity > 0:
+                print(f"({i}) {e.__class__.__name__}: {str(e)}")
 
             weights_to_reduce = []
 
@@ -152,9 +159,27 @@ def rebalance_army(army_config, correction_factor):
                         break
 
                 # if no stacks have qty > 1, nothing more can be done
+                # XXX: the difference with an UncorrectableArmy is that here the
+                #      army cannot reach the target value at all (cannot be built).
+                #      An uncorrectable army has reached it (i.e. can be built).
                 if not weights_to_reduce:
                     assert all(s.qty == 1 for s in e.stacks), [s.qty for s in e.stacks]
-                    raise RebalanceFailed()
+                    # TODO: remove me (one-time fix for uncorrectable armies)
+                    #       should raise under normal operation
+                    #       Used to generate new, correctable armies once during:
+                    rebuilt = True
+                    army_config = army_config.pool_config.generate_army_config()
+                    continue
+                    # raise RebalanceFailed()
+
+            elif isinstance(e, UncorrectableArmy):
+                # TODO: remove me (one-time fix for uncorrectable armies)
+                #       should raise under normal operation
+                # generate new, correctable army
+                rebuilt = True
+                army_config = army_config.pool_config.generate_army_config()
+                continue
+                # raise RebalanceFailed()
             else:
                 # ???
                 raise
@@ -163,7 +188,7 @@ def rebalance_army(army_config, correction_factor):
             new_weights = copy.deepcopy(army_config.weights)
             for i in weights_to_reduce:
                 new_weights[i] *= 0.8
-                if army_config.verbose:
+                if army_config.verbosity > 2:
                     print(f"Reduced weight of {army_config.creatures[i].name} by 20%")
 
             # Re-normalize
@@ -317,7 +342,7 @@ def gather_pool_rebalance_stats(db, objects, pr):
     print("[%s]   stddev_army_value: %.2f (%.2f%%)" % (pr.pool_config.name, pr.stddev_army_value, pr.stddev_army_value_frac * 100))
 
 
-def rebalance_pool(pr, objects, verbosity=0):
+def rebalance_pool(pr, objects, verbosity=0, debugger=False):
     changed = False
     sum_corrections = 0
     for hero_name, hero_army in pr.armies.items():
@@ -329,7 +354,7 @@ def rebalance_pool(pr, objects, verbosity=0):
         if abs(correction_factor) <= pr.pool_config.max_allowed_error:
             # nothing to correct
             pr.n_skipped += 1
-            if verbosity > 0:
+            if verbosity > 1:
                 print(f"=== {hero_name}: skip (correction={correction_factor:.3f}, errmax={pr.pool_config.max_allowed_error:.2f}, winrate={hero_winrate:.2f}) ===")
             continue
 
@@ -340,10 +365,10 @@ def rebalance_pool(pr, objects, verbosity=0):
             target_value=new_value,
             creatures=[s.creature for s in hero_army.stacks],
             weights=[s.value() / hero_army.value() for s in hero_army.stacks],
-            verbose=verbosity > 1
+            verbosity=verbosity
         )
 
-        if verbosity > 0:
+        if verbosity > 1:
             print("=== %s ===\n  winrate:\t\t%.2f (mean=%.2f)\n  value (current):\t%d\n  value (target):\t%d (%s%.2f%%)" % (
                 hero_name,
                 hero_winrate,
@@ -355,12 +380,13 @@ def rebalance_pool(pr, objects, verbosity=0):
             ))
 
         try:
-            new_army, attempt = rebalance_army(copy.deepcopy(army_config), new_value)
+            new_army, attempt, rebuilt = rebalance_army(copy.deepcopy(army_config), new_value)
             changed = True
             pr.n_updated += 1
+            pr.n_rebuilt += int(rebuilt)
 
             # TODO: implement army.render()
-            if verbosity > 0:
+            if verbosity > 1:
                 print("  attempts:\t\t%d" % (attempt + 1))
                 print("  army (old):\t%s" % ", ".join([s.render() for s in hero_army.stacks]))
                 print("  army (new):\t%s" % ", ".join([s.render() for s in new_army.stacks]))
@@ -368,9 +394,8 @@ def rebalance_pool(pr, objects, verbosity=0):
             new_army = hero_army  # just use the old army
             pr.n_failed += 1
             print("Failed to rebuild %s" % hero_name)
-
-        if not new_army:
-            raise Exception("Failed to generate army for %s" % hero_name)
+            if debugger:
+                breakpoint()
 
         objects[hero_name]["options"]["army"] = new_army.to_json()
 
@@ -381,9 +406,10 @@ def rebalance_pool(pr, objects, verbosity=0):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-a', help="analyze data and exit", action="store_true")
-    parser.add_argument('-v', help="be more verbose (-vv for even more)", action="count", default=0)
+    parser.add_argument('-v', help="be more verbose (-vvv for even more)", action="count", default=0)
     parser.add_argument('--dry-run', help="don't save anything", action="store_true")
     parser.add_argument('--seed', help="random seed", type=int)
+    parser.add_argument('--debugger', help="enable breakpoint() RebalanceFailed errors", action="store_true")
     parser.add_argument('map', metavar="<map>", type=str, help="map to be rebalanced")
     parser.add_argument('statsdb', metavar="<statsdb>", type=str, help="map's stats database file (sqlite3)")
     args = parser.parse_args()
@@ -416,7 +442,8 @@ def main():
         # analyze only
         sys.exit(0)
 
-    changed = any(rebalance_pool(pr, objects) for pr in pool_rebalances)
+    changes = [rebalance_pool(pr, objects, args.v, args.debugger) for pr in pool_rebalances]
+    changed = any(changes)
 
     if not changed:
         print("Nothing to do.")
@@ -434,6 +461,7 @@ def main():
                 report += f"\n    skip={pr.n_skipped*100.0/pr.n_total:.0f}%, "
                 report += f"\n    upd={pr.n_updated*100.0/pr.n_total:.0f}%, "
                 report += f"\n    fail={pr.n_failed*100.0/pr.n_total:.0f}%, "
+                report += f"\n    rebuilt={pr.n_rebuilt*100.0/pr.n_total:.0f}%, "
                 report += f"\n    mean_winrate={pr.mean_winrate:.2f}, stddev_winrate={pr.stddev_winrate:.2f} ({pr.stddev_winrate_frac*100:.2f}%), "
                 report += f"\n    mean_army_value={pr.mean_army_value:.2f}, stddev_army_value={pr.stddev_army_value:.2f} ({pr.stddev_army_value_frac*100:.2f}%), "
                 report += f"\n    mean_correction={pr.mean_correction:.2f} (max_correction={ARMY_VALUE_CORRECTION_CLIP:.2f})\n"

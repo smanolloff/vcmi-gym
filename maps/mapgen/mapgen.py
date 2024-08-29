@@ -47,6 +47,7 @@ from . import creatures_core
 #
 TOTAL_HEROES = 4096                 # Must be divisible by 8; max is 4096
 MAX_ALLOWED_ERROR = 0.05            # Max value for (unused_credits / target_value).
+MIN_GUARANTEED_CORRECTION = 0.3     # Headroom for army nerfing, i.e. min value for (weakest_stack.value() / army.value())
 STACK_WEIGHT_MAXDEV = 0.4           # Deviation (0..1); 0 means weight=avgweight, 0.5 means weight = (0.5*avgweight ... 1.5*avgweight)
 CHANCE_ATLEAST_ONE_SHOOTER = 0.5    # Chance to replace 1 stack with a shooter in melee armies
 CHANCE_ONLY_SHOOTERS = 0.07         # Additional chance to have only shooter stacks (natural is 0.03)
@@ -75,6 +76,10 @@ class NoSlotsLeft(UnbuildableArmy):
 
 
 class CreditsExceeded(UnbuildableArmy):
+    pass
+
+
+class UncorrectableArmy(UnbuildableArmy):
     pass
 
 
@@ -112,13 +117,14 @@ class PoolConfig:
     size: int
     creatures: list[Creature]
     max_allowed_error: float
+    min_guaranteed_correction: float
     stack_weight_maxdev: float
     chance_only_shooters: float
     chance_atleast_one_shooter: float
     stack_qty_max: int
     stacks_min: int
     stacks_max: int
-    verbose: bool = False
+    verbosity: int = 0
 
     _melee_creatures: list[Creature] = field(init=False)
     _ranged_creatures: list[Creature] = field(init=False)
@@ -173,7 +179,7 @@ class PoolConfig:
             target_value=self.target_value,
             creatures=self.generate_creatures(n_stacks),
             weights=self.__class__.generate_weights(n_stacks, self.stack_weight_maxdev),
-            verbose=self.verbose
+            verbosity=self.verbosity
         )
 
 
@@ -183,7 +189,7 @@ class ArmyConfig:
     target_value: int
     creatures: list[Creature]
     weights: list[float]
-    verbose: bool = False
+    verbosity: int = 0
 
     _credit: int = field(init=False)
 
@@ -207,7 +213,7 @@ class ArmyConfig:
         credit = self.target_value
         weakest_value = self.creatures[-1].value
 
-        if self.verbose:
+        if self.verbosity > 2:
             print("Generating army with:")
             print(f"  target_value={self.target_value}")
             print(f"  max_err_value={self.pool_config.max_allowed_error_value()}")
@@ -225,7 +231,7 @@ class ArmyConfig:
             credit -= stack.value()
             carry = target_value - stack.value()
 
-            if self.verbose:
+            if self.verbosity > 2:
                 print("    %4s %-25s %-13s %-23s %-14s %s" % (
                     stack.qty,
                     f"'{stack.creature.name}' ({stack.creature.value})",
@@ -296,7 +302,7 @@ class ArmyConfig:
                     stacks.extend([s1, s2])
                     credit -= ((s1.value() + s2.value()) - s.value())
 
-                    if self.verbose:
+                    if self.verbosity > 2:
                         print("  + %4s %-25s %-13s %-23s %-14s %s" % (
                             s2.qty,
                             f"'{s2.creature.name}' ({s2.creature.value})",
@@ -321,16 +327,45 @@ class ArmyConfig:
             # => credit = -3080
             # It's too complicated to try and "fix" this
             # Just fail and generate a new army config instead
-            raise CreditsExceeded(self, stacks, "Failed to build army with:\n\ttarget=%d,\n\tweights=%s\n\tcreatures=%s" % (
-                self.target_value,
-                [round(w, 2) for w in self.weights],
-                [f"{c.name} ({c.value})" for c in self.creatures]
-            ))
+            if self.verbosity == 0:
+                msg = "Failed to build army with target=%d"
+            elif self.verbosity == 1:
+                msg = "Failed to build army with: target=%d, weights=%s" % (
+                    self.target_value,
+                    [round(w, 2) for w in self.weights]
+                )
+            else:
+                msg = "Failed to build army with:\n\ttarget=%d,\n\tweights=%s\n\tcreatures=%s" % (
+                    self.target_value,
+                    [round(w, 2) for w in self.weights],
+                    [f"{c.name} ({c.value})" for c in self.creatures]
+                )
+
+            raise CreditsExceeded(self, stacks, msg)
         else:
             # 0 credit remaining - perfect generation
             pass
 
-        return Army(config=self, stacks=stacks)
+        army = Army(config=self, stacks=stacks)
+
+        if army.correction_headroom() < self.pool_config.min_guaranteed_correction:
+            if self.verbosity < 2:
+                msg = "Correction headroom too low: want: %.2f, have: %.2f" % (
+                    self.pool_config.min_guaranteed_correction,
+                    army.correction_headroom()
+                )
+            else:
+                msg = "Correction headroom too low: want: %.2f, have: %.2f\n\ttarget=%d,\n\tweights=%s\n\tcreatures=%s" % (
+                    self.pool_config.min_guaranteed_correction,
+                    army.correction_headroom(),
+                    self.target_value,
+                    [round(w, 2) for w in self.weights],
+                    [f"{c.name} ({c.value})" for c in self.creatures]
+                )
+
+            raise UncorrectableArmy(self, stacks, msg)
+
+        return army
 
 
 @dataclass(frozen=True)
@@ -347,8 +382,8 @@ class Pool:
             try:
                 return self.config.generate_army_config().generate_army()
             except UnbuildableArmy as e:
-                if self.config.verbose:
-                    print(f"({i}) {str(e)}")
+                if self.config.verbosity > 0:
+                    print(f"({i}) {e.__class__.__name__}: {str(e)}")
 
 
 @dataclass
@@ -358,6 +393,10 @@ class Army:
 
     def value(self):
         return sum(s.value() for s in self.stacks)
+
+    def correction_headroom(self):
+        reducable_value = sum(s.creature.value * (s.qty - 1) for s in self.stacks)
+        return reducable_value / self.value()
 
     def to_json(self):
         res = [{} for i in range(7)]
@@ -382,7 +421,7 @@ def get_templates():
     return header, objects, surface_terrain
 
 
-def build_pool_configs(verbose=False):
+def build_pool_configs(verbosity=0):
     res = []
     all_creatures = [Creature(**creature) for creature in creatures_core.CREATURES]
     pool_size = TOTAL_HEROES // len(POOLS)
@@ -394,13 +433,14 @@ def build_pool_configs(verbose=False):
             size=pool_size,
             creatures=all_creatures,
             max_allowed_error=MAX_ALLOWED_ERROR,
+            min_guaranteed_correction=MIN_GUARANTEED_CORRECTION,
             stack_weight_maxdev=STACK_WEIGHT_MAXDEV,
             chance_only_shooters=CHANCE_ONLY_SHOOTERS,
             chance_atleast_one_shooter=CHANCE_ATLEAST_ONE_SHOOTER,
             stack_qty_max=STACK_QTY_MAX,
             stacks_min=STACKS_MIN,
             stacks_max=STACKS_MAX,
-            verbose=verbose
+            verbosity=verbosity
         ))
 
     return res
@@ -420,7 +460,7 @@ def save(dest, header, objects, surface_terrain):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-v', help="be more verbose", action="store_true")
+    parser.add_argument('-v', help="be more verbose (-vvv for even more)", action="count", default=0)
     parser.add_argument('--force', help="overwrite map if already exists", action="store_true")
     parser.add_argument('--dry-run', help="don't save anything", action="store_true")
     parser.add_argument('--seed', help="random seed", type=int)
@@ -465,7 +505,7 @@ def main():
     header["description"] += f"\nNumber of pools: {len(POOLS)}"
 
     colornames = ["red", "blue", "tan", "green", "orange", "purple", "teal", "pink"]
-    pools = [Pool(config=pc) for pc in build_pool_configs()]
+    pools = [Pool(config=pc) for pc in build_pool_configs(args.v)]
 
     def army_iterator():
         oid = 0
