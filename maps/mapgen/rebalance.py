@@ -49,17 +49,8 @@ from .mapgen import (
     build_pool_configs,
 )
 
-# Max value for (unused_credits / target_value)
-# (None = auto)
-ARMY_VALUE_ERROR_MAX = None
-
 # Limit corrections to (1-clip, 1+clip) to avoid destructive updates
-# (None = auto)
-ARMY_VALUE_CORRECTION_CLIP = None
-
-# Change army composition if the current one does not allow for adjustment
-# (overriden to True if "-c" flag is given)
-ALLOW_ARMY_COMP_CHANGE = False
+ARMY_VALUE_CORRECTION_CLIP = 0.2
 
 
 def load(path):
@@ -100,8 +91,8 @@ def backup(path):
 @dataclass
 class PoolRebalance:
     pool_config: PoolConfig
-    start_id: int
-    end_id: int = None
+    min_id: int
+    max_id: int = None
     winrates: dict = field(default_factory=lambda: {})
     n_games: int = 0
     n_total: int = 0     # total heroes on the map (sum of counters below)
@@ -197,6 +188,196 @@ def rebalance_army(army_config, correction_factor):
     raise RebalanceFailed()
 
 
+def verify_data(db, objects, pool_rebalances):
+    n_json_pool_heroes = {pr.pool_config.name: 0 for pr in pool_rebalances}
+
+    for k, v in objects.items():
+        if not k.startswith("hero_"):
+            continue
+
+        m = re.match(r"^hero_(\d+)_pool_([0-9A-Za-z]+)$", k)
+        assert m, "invalid hero name: %s" % k
+        hero_id = int(m.group(1))
+        pool_name = m.group(2)
+        assert pool_name not in pool_rebalances, "%s in %s" % (pool_name, list(pool_rebalances.keys()))
+
+        # [configs <=> JSON]
+        # Hero IDs in each pool
+        pr = next(pr for pr in pool_rebalances if pr.pool_config.name == pool_name)
+        assert hero_id >= pr.min_id, f"{hero_id} >= {pr.min_id}"
+        assert hero_id <= pr.max_id, f"{hero_id} <= {pr.max_id}"
+        n_json_pool_heroes[pool_name] += 1
+
+    # [configs <=> JSON]
+    # Number of pools
+    assert len(pool_rebalances) == len(n_json_pool_heroes.keys())
+
+    # [configs <=> JSON]
+    # Number of heroes in each pool
+    for (pool_name, pool_size) in n_json_pool_heroes.items():
+        pr = next(pr for pr in pool_rebalances if pr.pool_config.name == pool_name)
+        assert pr.pool_config.size == pool_size, f"[{pool_name}] {pr.pool_config.size} == {pool_size}"
+
+    sql = (
+        "select pool,"
+        "       count(*),"
+        "       count(distinct lhero),"
+        "       count(distinct rhero),"
+        "       min(lhero),"
+        "       min(rhero),"
+        "       max(lhero),"
+        "       max(rhero) "
+        "from stats group by pool"
+    )
+
+    rows = db.execute(sql).fetchall()
+
+    # [configs <=> DB]
+    # Number of pools
+    assert len(pool_rebalances) == len(rows), f"{len(pool_rebalances)} == {len(rows)}"
+
+    for (pool_id, n_pairings, n_lheroes, n_rheroes, min_lhero, min_rhero, max_lhero, max_rhero) in rows:
+        pr = next(pr for pr in pool_rebalances if pr.pool_config.id == pool_id)
+
+        # [configs <=> DB]
+        # Number of heroes in each pool
+        assert pr.pool_config.size == n_lheroes, f"[{pool_id}] {pr.pool_config.size} == {n_lheroes}"
+        assert pr.pool_config.size == n_rheroes, f"[{pool_id}] {pr.pool_config.size} == {n_rheroes}"
+
+        # [configs <=> DB]
+        # Number of pairings in each pool
+        config_n_pairings = pr.pool_config.size * (pr.pool_config.size - 1)
+        assert config_n_pairings == n_pairings, f"[{pool_id}] {config_n_pairings} == {n_pairings}"
+
+        # [configs <=> DB]
+        # Hero IDs in each pool
+        assert pr.min_id == min_lhero, f"[{pool_id}] {pr.min_id} == {min_lhero}"
+        assert pr.min_id == min_rhero, f"[{pool_id}] {pr.min_id} == {min_rhero}"
+        assert pr.max_id == max_lhero, f"[{pool_id}] {pr.max_id} == {max_lhero}"
+        assert pr.max_id == max_rhero, f"[{pool_id}] {pr.max_id} == {max_rhero}"
+
+
+def gather_pool_rebalance_stats(db, objects, pr):
+    poolclause = f"(lhero >= {pr.min_id} AND lhero <= {pr.max_id})"
+
+    # XXX: heroes with no stats will not be modified
+    query = f"select count(*) from (select lhero from stats where {poolclause} group by lhero having sum(games) == 0)"
+    [(count,)] = db.execute(query).fetchall()
+    if count > 0:
+        warnings.warn(f"[{pr.pool_config.name}] there are {count} heroes with no stats")
+
+    query = f"select 'hero_' || lhero || '_pool_{pr.pool_config.name}', 1.0*sum(wins)/sum(games) from stats where {poolclause} AND games > 0 GROUP BY lhero"
+    pr.winrates = dict(db.execute(query).fetchall())
+
+    query = f"select sum(games) from stats where {poolclause}"
+    pr.n_games = db.execute(query).fetchall()[0][0]
+
+    for hero_id in range(pr.min_id, pr.max_id+1):
+        # XXX: using `k` and `v` var names for historical reasons
+        k = f"hero_{hero_id}_pool_{pr.pool_config.name}"
+        v = objects[k]
+        pr.n_total += 1
+
+        # assert k in winrates, "hero %s not in stats db" % k
+        if k not in pr.winrates:
+            pr.n_unknown += 1
+            continue
+
+        stacks = []
+        for jstack in v["options"]["army"]:
+            if not jstack:
+                continue
+            vcminame = jstack["type"].removeprefix("core:")
+            creature = next(c for c in pr.pool_config.creatures if c.vcminame == vcminame)
+            stacks.append(Stack(
+                creature=creature,
+                qty=jstack["amount"],
+                target_value=-1
+            ))
+
+        assert len(stacks) > 0 and len(stacks) <= 7
+        pr.armies[k] = Army(None, sorted(stacks, key=lambda s: -s.creature.value))
+
+    army_value_list = [a.value() for a in pr.armies.values()]
+
+    pr.mean_army_value = np.mean(army_value_list)
+    pr.stddev_army_value = np.std(army_value_list)
+    pr.stddev_army_value_frac = pr.stddev_army_value / pr.mean_army_value
+
+    pr.winlist = list(pr.winrates.values())
+    pr.mean_winrate = np.mean(pr.winlist)
+    pr.stddev_winrate = np.std(pr.winlist)
+    pr.stddev_winrate_frac = pr.stddev_winrate / pr.mean_winrate
+
+    print("[%s] Stats:" % pr.pool_config.name)
+    print("[%s]   n_games: %d" % (pr.pool_config.name, pr.n_games))
+    print("[%s]   mean_winrate: %.2f" % (pr.pool_config.name, pr.mean_winrate))
+    print("[%s]   stddev_winrate: %.2f (%.2f%%)" % (pr.pool_config.name, pr.stddev_winrate, pr.stddev_winrate_frac * 100))
+    print("[%s]   mean_army_value: %.2f" % (pr.pool_config.name, pr.mean_army_value))
+    print("[%s]   stddev_army_value: %.2f (%.2f%%)" % (pr.pool_config.name, pr.stddev_army_value, pr.stddev_army_value_frac * 100))
+
+
+def rebalance_pool(pr, objects, verbosity=0):
+    changed = False
+    sum_corrections = 0
+    for hero_name, hero_army in pr.armies.items():
+        hero_winrate = pr.winrates[hero_name]
+        correction_factor = (pr.mean_winrate - hero_winrate) * pr.stddev_winrate * 2
+        correction_factor = np.clip(correction_factor, -ARMY_VALUE_CORRECTION_CLIP, ARMY_VALUE_CORRECTION_CLIP)
+        sum_corrections += abs(correction_factor)
+
+        if abs(correction_factor) <= pr.pool_config.max_allowed_error:
+            # nothing to correct
+            pr.n_skipped += 1
+            if verbosity > 0:
+                print(f"=== {hero_name}: skip (correction={correction_factor:.3f}, errmax={pr.pool_config.max_allowed_error:.2f}, winrate={hero_winrate:.2f}) ===")
+            continue
+
+        new_value = int(hero_army.value() * (1 + correction_factor))
+
+        army_config = ArmyConfig(
+            pool_config=pr.pool_config,
+            target_value=new_value,
+            creatures=[s.creature for s in hero_army.stacks],
+            weights=[s.value() / hero_army.value() for s in hero_army.stacks],
+            verbose=verbosity > 1
+        )
+
+        if verbosity > 0:
+            print("=== %s ===\n  winrate:\t\t%.2f (mean=%.2f)\n  value (current):\t%d\n  value (target):\t%d (%s%.2f%%)" % (
+                hero_name,
+                hero_winrate,
+                pr.mean_winrate,
+                hero_army.value(),
+                new_value,
+                "+" if correction_factor > 0 else "",
+                correction_factor * 100,
+            ))
+
+        try:
+            new_army, attempt = rebalance_army(copy.deepcopy(army_config), new_value)
+            changed = True
+            pr.n_updated += 1
+
+            # TODO: implement army.render()
+            if verbosity > 0:
+                print("  attempts:\t\t%d" % (attempt + 1))
+                print("  army (old):\t%s" % ", ".join([s.render() for s in hero_army.stacks]))
+                print("  army (new):\t%s" % ", ".join([s.render() for s in new_army.stacks]))
+        except RebalanceFailed:
+            new_army = hero_army  # just use the old army
+            pr.n_failed += 1
+            print("Failed to rebuild %s" % hero_name)
+
+        if not new_army:
+            raise Exception("Failed to generate army for %s" % hero_name)
+
+        objects[hero_name]["options"]["army"] = new_army.to_json()
+
+    pr.mean_correction = sum_corrections / pr.n_total
+    return changed
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-a', help="analyze data and exit", action="store_true")
@@ -212,171 +393,30 @@ def main():
     random.seed(seed)
 
     path, (header, objects, surface_terrain) = load(args.map)
-
-    clip = ARMY_VALUE_CORRECTION_CLIP
-    if clip is None:
-        # 0.2 = 20% correction limit
-        clip = 0.2
-
     db = sqlite3.connect(args.statsdb)
 
     print("Loading database %s ..." % args.statsdb)
 
-    pool_configs = {pc.name: pc for pc in build_pool_configs()}
-    pool_rebalances = {"": PoolRebalance(pool_config=None, start_id=1, end_id=-1)}
+    pool_rebalances = []
 
-    last_hero_id = -1
-    last_pool_name = ""
+    for pc in build_pool_configs():
+        min_id = pc.id * pc.size
+        max_id = min_id + pc.size - 1
+        pool_rebalances.append(PoolRebalance(pool_config=pc, min_id=min_id, max_id=max_id))
 
-    for k, v in objects.items():
-        if not k.startswith("hero_"):
-            continue
+    # Verify data integrity (configs <=> json <=> DB)
+    # The pool_configs (from mapgen.py) must be the same ones
+    # used during the map's initial generation.
+    verify_data(db, objects, pool_rebalances)
 
-        m = re.match(r"^hero_(\d+)_pool_([0-9A-Za-z]+)$", k)
-        assert m, "invalid hero name: %s" % k
-        hero_id = int(m.group(1))
-        pool_name = m.group(2)
-        assert hero_id == last_hero_id + 1, f"{hero_id} != {last_hero_id} + 1"
-
-        if pool_name != last_pool_name:
-            assert pool_name not in pool_rebalances, "%s in %s" % (pool_name, list(pool_rebalances.keys()))
-            assert pool_name in pool_configs, f"pool '{pool_name}' not found in {list(pool_configs.keys)}"
-            # XXX: Assuming pool_configs (from mapgen) are relevant for
-            #      the map which we now rebalance
-            pc = pool_configs[pool_name]
-            pool_rebalances[last_pool_name].end_id = last_hero_id
-            pool_rebalances[pool_name] = PoolRebalance(pool_config=pc, start_id=hero_id)
-        last_hero_id = hero_id
-        last_pool_name = pool_name
-
-    pool_rebalances[last_pool_name].end_id = last_hero_id
-    del pool_rebalances[""]
-    print("pool_rebalances: %s" % list(pool_rebalances.keys()))
-
-    assert len(pool_rebalances) == len(pool_configs)
-
-    for pr in pool_rebalances.values():
-        poolclause = f"(lhero >= {pr.start_id} AND lhero <= {pr.end_id})"
-
-        # XXX: heroes with no stats will not be modified
-        query = f"select count(*) from (select lhero from stats where {poolclause} group by lhero having sum(games) == 0)"
-        [(count,)] = db.execute(query).fetchall()
-        if count > 0:
-            warnings.warn(f"[{pr.pool_config.name}] there are {count} heroes with no stats")
-
-        query = f"select 'hero_' || lhero || '_pool_{pr.pool_config.name}', 1.0*sum(wins)/sum(games) from stats where {poolclause} AND games > 0 GROUP BY lhero"
-        pr.winrates = dict(db.execute(query).fetchall())
-
-        query = f"select sum(games) from stats where {poolclause}"
-        pr.n_games = db.execute(query).fetchall()[0][0]
-
-        for hero_id in range(pr.start_id, pr.end_id+1):
-            # XXX: using `k` and `v` var names for historical reasons
-            k = f"hero_{hero_id}_pool_{pr.pool_config.name}"
-            v = objects[k]
-            pr.n_total += 1
-
-            # assert k in winrates, "hero %s not in stats db" % k
-            if k not in pr.winrates:
-                pr.n_unknown += 1
-                continue
-
-            stacks = []
-            for jstack in v["options"]["army"]:
-                if not jstack:
-                    continue
-                vcminame = jstack["type"].removeprefix("core:")
-                creature = next(c for c in pr.pool_config.creatures if c.vcminame == vcminame)
-                stacks.append(Stack(
-                    creature=creature,
-                    qty=jstack["amount"],
-                    target_value=-1
-                ))
-
-            assert len(stacks) > 0 and len(stacks) <= 7
-            pr.armies[k] = Army(None, sorted(stacks, key=lambda s: -s.creature.value))
-
-        army_value_list = [a.value() for a in pr.armies.values()]
-
-        pr.mean_army_value = np.mean(army_value_list)
-        pr.stddev_army_value = np.std(army_value_list)
-        pr.stddev_army_value_frac = pr.stddev_army_value / pr.mean_army_value
-
-        pr.winlist = list(pr.winrates.values())
-        pr.mean_winrate = np.mean(pr.winlist)
-        pr.stddev_winrate = np.std(pr.winlist)
-        pr.stddev_winrate_frac = pr.stddev_winrate / pr.mean_winrate
-
-        print("[%s] Stats:" % pr.pool_config.name)
-        print("[%s]   n_games: %d" % (pr.pool_config.name, pr.n_games))
-        print("[%s]   mean_winrate: %.2f" % (pr.pool_config.name, pr.mean_winrate))
-        print("[%s]   stddev_winrate: %.2f (%.2f%%)" % (pr.pool_config.name, pr.stddev_winrate, pr.stddev_winrate_frac * 100))
-        print("[%s]   mean_army_value: %.2f" % (pr.pool_config.name, pr.mean_army_value))
-        print("[%s]   stddev_army_value: %.2f (%.2f%%)" % (pr.pool_config.name, pr.stddev_army_value, pr.stddev_army_value_frac * 100))
+    for pr in pool_rebalances:
+        gather_pool_rebalance_stats(db, objects, pr)
 
     if args.a:
         # analyze only
         sys.exit(0)
 
-    changed = False
-
-    for pr in pool_rebalances.values():
-        sum_corrections = 0
-        for hero_name, hero_army in pr.armies.items():
-            hero_winrate = pr.winrates[hero_name]
-            correction_factor = (pr.mean_winrate - hero_winrate) * pr.stddev_winrate * 2
-            correction_factor = np.clip(correction_factor, -clip, clip)
-            sum_corrections += abs(correction_factor)
-
-            if abs(correction_factor) <= pr.pool_config.max_allowed_error:
-                # nothing to correct
-                pr.n_skipped += 1
-                if args.v:
-                    print(f"=== {hero_name}: skip (correction={correction_factor:.3f}, errmax={pr.pool_config.max_allowed_error:.2f}, winrate={hero_winrate:.2f}) ===")
-                continue
-
-            new_value = int(hero_army.value() * (1 + correction_factor))
-
-            army_config = ArmyConfig(
-                pool_config=pr.pool_config,
-                target_value=new_value,
-                creatures=[s.creature for s in hero_army.stacks],
-                weights=[s.value() / hero_army.value() for s in hero_army.stacks],
-                verbose=args.v > 1
-            )
-
-            if args.v > 0:
-                print("=== %s ===\n  winrate:\t\t%.2f (mean=%.2f)\n  value (current):\t%d\n  value (target):\t%d (%s%.2f%%)" % (
-                    hero_name,
-                    hero_winrate,
-                    pr.mean_winrate,
-                    hero_army.value(),
-                    new_value,
-                    "+" if correction_factor > 0 else "",
-                    correction_factor * 100,
-                ))
-
-            try:
-                new_army, attempt = rebalance_army(copy.deepcopy(army_config), new_value)
-                changed = True
-                pr.n_updated += 1
-
-                # TODO: implement army.render()
-                if args.v > 0:
-                    print("  attempts:\t\t%d" % (attempt + 1))
-                    print("  army (old):\t%s" % ", ".join([s.render() for s in hero_army.stacks]))
-                    print("  army (new):\t%s" % ", ".join([s.render() for s in new_army.stacks]))
-            except RebalanceFailed:
-                new_army = hero_army  # just use the old army
-                pr.n_failed += 1
-                print("Failed to rebuild %s" % hero_name)
-
-            if not new_army:
-                raise Exception("Failed to generate army for %s" % hero_name)
-
-            objects[hero_name]["options"]["army"] = new_army.to_json()
-
-        pr.mean_correction = sum_corrections / pr.n_total
+    changed = any(rebalance_pool(pr, objects) for pr in pool_rebalances)
 
     if not changed:
         print("Nothing to do.")
@@ -387,7 +427,7 @@ def main():
 
             report = f"[{t}] Rebalanced {path} with stats:"
 
-            for pr in pool_rebalances.values():
+            for pr in pool_rebalances:
                 report += f"\n  - pool {pr.pool_config.name}:"
                 report += f"\n    tot={pr.n_total}, "
                 report += f"\n    ukn={pr.n_unknown*100.0/pr.n_total:.0f}%, "
@@ -396,7 +436,7 @@ def main():
                 report += f"\n    fail={pr.n_failed*100.0/pr.n_total:.0f}%, "
                 report += f"\n    mean_winrate={pr.mean_winrate:.2f}, stddev_winrate={pr.stddev_winrate:.2f} ({pr.stddev_winrate_frac*100:.2f}%), "
                 report += f"\n    mean_army_value={pr.mean_army_value:.2f}, stddev_army_value={pr.stddev_army_value:.2f} ({pr.stddev_army_value_frac*100:.2f}%), "
-                report += f"\n    mean_correction={pr.mean_correction:.2f} (max_correction={clip:.2f})\n"
+                report += f"\n    mean_correction={pr.mean_correction:.2f} (max_correction={ARMY_VALUE_CORRECTION_CLIP:.2f})\n"
 
             if args.dry_run:
                 print(report)

@@ -71,6 +71,8 @@ function run_mlclient() {
 
     for _ in $(seq 10); do
         touch "$WATCHDOGFILE"
+
+        # XXX: persist freq of 999999999 db write only on exit
         $VCMI/rel/bin/mlclient-cli \
             --headless \
             --loglevel-ai error --loglevel-global error --loglevel-stats info \
@@ -79,7 +81,7 @@ function run_mlclient() {
             --stats-mode red \
             --stats-storage "$DB" \
             --stats-timeout $((timeout_minutes*60*1000)) \
-            --stats-persist-freq 5000 \
+            --stats-persist-freq 999999999 \
             --max-battles 20000 \
             --map "$VCMIMAP"
     done

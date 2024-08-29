@@ -30,6 +30,7 @@ import re
 import zipfile
 import argparse
 from dataclasses import dataclass, field
+from collections import OrderedDict
 
 from . import creatures_core
 
@@ -54,12 +55,12 @@ STACKS_MIN = 1
 STACKS_MAX = 7
 
 # k=name, v=target_value
-POOLS = {
+POOLS = OrderedDict({
     "10k": 10_000,
     "50k": 50_000,
     "150k": 150_000,
     "500k": 500_000
-}
+})
 
 
 class UnbuildableArmy(Exception):
@@ -105,7 +106,8 @@ class Stack:
 
 @dataclass(frozen=True)
 class PoolConfig:
-    name: str  # unique identifier, must match /^[0-9A-Za-z]$/
+    id: int    # unique integer identifier (used in stats DB)
+    name: str  # unique string identifier, must match /^[0-9A-Za-z]$/
     target_value: int
     size: int
     creatures: list[Creature]
@@ -384,8 +386,9 @@ def build_pool_configs(verbose=False):
     res = []
     all_creatures = [Creature(**creature) for creature in creatures_core.CREATURES]
     pool_size = TOTAL_HEROES // len(POOLS)
-    for name, value in POOLS.items():
+    for i, (name, value) in enumerate(POOLS.items()):
         res.append(PoolConfig(
+            id=i,
             name=name,
             target_value=value,
             size=pool_size,
