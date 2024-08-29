@@ -119,8 +119,8 @@ class RebalanceFailed(Exception):
 
 def rebalance_army(army_config, correction_factor):
     # The min guaranteed correction is used only during initial map generation
-    # new_pool_config = replace(army_config.pool_config, min_guaranteed_correction=0)
-    # army_config = replace(army_config, pool_config=new_pool_config)
+    new_pool_config = replace(army_config.pool_config, min_guaranteed_correction=0)
+    army_config = replace(army_config, pool_config=new_pool_config)
     rebuilt = False
 
     for i in range(100):
@@ -164,22 +164,10 @@ def rebalance_army(army_config, correction_factor):
                 #      An uncorrectable army has reached it (i.e. can be built).
                 if not weights_to_reduce:
                     assert all(s.qty == 1 for s in e.stacks), [s.qty for s in e.stacks]
-                    # TODO: remove me (one-time fix for uncorrectable armies)
-                    #       should raise under normal operation
-                    #       Used to generate new, correctable armies once during:
-                    rebuilt = True
-                    army_config = army_config.pool_config.generate_army_config()
-                    continue
-                    # raise RebalanceFailed()
+                    raise RebalanceFailed()
 
             elif isinstance(e, UncorrectableArmy):
-                # TODO: remove me (one-time fix for uncorrectable armies)
-                #       should raise under normal operation
-                # generate new, correctable army
-                rebuilt = True
-                army_config = army_config.pool_config.generate_army_config()
-                continue
-                # raise RebalanceFailed()
+                raise RebalanceFailed()
             else:
                 # ???
                 raise
