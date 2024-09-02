@@ -32,7 +32,8 @@
     #define LOGCOLLECT 0    // whether to record logs in memory
 #else
     #define VERBOSE 0
-    #define LOGCOLLECT 1
+    // #define LOGCOLLECT 1
+    #define LOGCOLLECT 0
 #endif
 
 #if VERBOSE || LOGCOLLECT

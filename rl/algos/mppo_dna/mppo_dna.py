@@ -179,7 +179,7 @@ class Args:
     max_grad_norm: float = 0.5
     norm_adv: bool = True
     num_envs: int = 1
-    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-mixstack-100K-01.vmap"])
+    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4x1024.vmap"])
 
     num_minibatches: int = 4  # used if nn-specific num_minibatches is 0
     num_minibatches_distill: int = 0

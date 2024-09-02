@@ -50,7 +50,6 @@ class ScheduleArgs:
 
 @dataclass
 class EnvArgs:
-    encoding_type: str = ""  # DEPRECATED
     max_steps: int = 500
     reward_dmg_factor: int = 5
     vcmi_loglevel_global: str = "error"
@@ -58,12 +57,13 @@ class EnvArgs:
     vcmienv_loglevel: str = "WARN"
     sparse_info: bool = True
     step_reward_fixed: int = 0
+    step_reward_frac: float = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
-    consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
     user_timeout: int = 30
     vcmi_timeout: int = 30
     boot_timeout: int = 30
+    conntype: str = "proc"
     random_heroes: int = 1
     random_obstacles: int = 1
     town_chance: int = 0
@@ -75,8 +75,6 @@ class EnvArgs:
     reward_army_value_ref: int = 0
     true_rng: bool = True  # DEPRECATED
     deprecated_args: list[dict] = field(default_factory=lambda: [
-        "encoding_type",
-        "consecutive_error_reward_factor",
         "true_rng"
     ])
 
@@ -87,6 +85,7 @@ class EnvArgs:
 @dataclass
 class NetworkArgs:
     attention: dict = field(default_factory=dict)
+    features_extractor1_misc: list[dict] = field(default_factory=list)
     features_extractor1_stacks: list[dict] = field(default_factory=list)
     features_extractor1_hexes: list[dict] = field(default_factory=list)
     features_extractor2: list[dict] = field(default_factory=list)
@@ -98,7 +97,6 @@ class NetworkArgs:
 class State:
     seed: int = -1
     resumes: int = 0
-    map_swaps: int = 0  # DEPRECATED
     global_timestep: int = 0
     current_timestep: int = 0
     current_vstep: int = 0
@@ -149,8 +147,6 @@ class Args:
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
     mapside: str = "attacker"
-    mapmask: str = ""  # DEPRECATED
-    randomize_maps: bool = False  # DEPRECATED
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
     max_saves: int = 3
@@ -160,8 +156,7 @@ class Args:
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
     lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
     weight_decay: float = 0.0
-    num_envs: int = 0  # DEPRECATED (envmaps determines number of envs now)
-    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4096-mixstack-100K-01.vmap"])
+    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4x1024.vmap"])
     num_steps: int = 128
     gamma: float = 0.99
     stats_buffer_size: int = 100
@@ -261,6 +256,11 @@ class AgentNN(nn.Module):
         else:
             self.attention = None
 
+        self.features_extractor1_misc = torch.nn.Sequential()
+        for spec in network.features_extractor1_misc:
+            layer = AgentNN.build_layer(spec)
+            self.features_extractor1_misc.append(common.layer_init(layer))
+
         self.features_extractor1_stacks = torch.nn.Sequential()
         for spec in network.features_extractor1_stacks:
             layer = AgentNN.build_layer(spec)
@@ -280,10 +280,11 @@ class AgentNN(nn.Module):
         self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
     def extract_features(self, x):
-        stacks, hexes = x.split([1960, 10725], dim=1)
+        misc, stacks, hexes = x.split([4, 2040, 10725], dim=1)
+        fmisc = self.features_extractor1_misc(misc)
         fstacks = self.features_extractor1_stacks(stacks)
         fhexes = self.features_extractor1_hexes(hexes)
-        fcat = torch.cat((fstacks, fhexes), dim=1)
+        fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
         return self.features_extractor2(fcat)
 
     def get_value(self, x, attn_mask=None):
@@ -350,10 +351,10 @@ class Agent(nn.Module):
         jagent = JitAgent()
         jagent.env_version = clean_agent.env_version
 
-        # v1, v2
+        # v2-
         # jagent.features_extractor = clean_agent.NN.features_extractor
 
-        # v3
+        # v3+
         jagent.features_extractor1_stacks = clean_agent.NN.features_extractor1_stacks
         jagent.features_extractor1_hexes = clean_agent.NN.features_extractor1_hexes
         jagent.features_extractor2 = clean_agent.NN.features_extractor2
@@ -400,14 +401,15 @@ class JitAgent(nn.Module):
             b_obs = obs.unsqueeze(dim=0)
             b_mask = mask.unsqueeze(dim=0)
 
-            # v1, v2
+            # v2-
             # features = self.features_extractor(b_obs)
 
-            # v3
-            stacks, hexes = b_obs.split([1960, 10725], dim=1)
+            # v3+
+            misc, stacks, hexes = b_obs.split([4, 2040, 10725], dim=1)
+            fmisc = self.features_extractor1_misc(misc)
             fstacks = self.features_extractor1_stacks(stacks)
             fhexes = self.features_extractor1_hexes(hexes)
-            fcat = torch.cat((fstacks, fhexes), dim=1)
+            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
             features = self.features_extractor2(fcat)
 
             action_logits = self.actor(features)
@@ -419,10 +421,11 @@ class JitAgent(nn.Module):
     def get_value(self, obs) -> float:
         with torch.no_grad():
             b_obs = obs.unsqueeze(dim=0)
-            stacks, hexes = b_obs.split([1960, 10725], dim=1)
+            misc, stacks, hexes = b_obs.split([4, 2040, 10725], dim=1)
+            fmisc = self.features_extractor1_misc(misc)
             fstacks = self.features_extractor1_stacks(stacks)
             fhexes = self.features_extractor1_hexes(hexes)
-            fcat = torch.cat((fstacks, fhexes), dim=1)
+            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
             features = self.features_extractor2(fcat)
             value = self.critic(features)
             return value.float().item()
@@ -513,6 +516,8 @@ def main(args, agent_cls=Agent):
         from vcmi_gym import VcmiEnv_v2 as VcmiEnv
     elif args.env_version == 3:
         from vcmi_gym import VcmiEnv_v3 as VcmiEnv
+    elif args.env_version == 4:
+        from vcmi_gym import VcmiEnv_v4 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
@@ -855,7 +860,11 @@ def main(args, agent_cls=Agent):
 
     # Needed by PBT to save model after iteration ends
     # XXX: limit returned mean reward to only the rollouts in this iteration
-    return agent, common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-agent.state.current_rollout:])
+    return (
+        agent,
+        common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-agent.state.current_rollout:]),
+        common.safe_mean(list(agent.state.rollout_net_value_queue_1000)[-agent.state.current_rollout:]),
+    )
 
 
 def debug_args():
@@ -888,12 +897,12 @@ def debug_args():
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
-        envmaps=["gym/A1.vmap"],
+        envmaps=["gym/generated/4096/4x1024.vmap"],
         # num_steps=64,
         num_steps=256,
         gamma=0.8,
         gae_lambda=0.8,
-        num_minibatches=2,
+        num_minibatches=4,
         # num_minibatches=16,
         # update_epochs=2,
         update_epochs=10,
@@ -932,40 +941,39 @@ def debug_args():
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
+            conntype="proc"
         ),
         env_wrappers=[],
-        env_version=3,
+        env_version=4,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
             attention=None,
-            features_extractor1_stacks=[
-                # => (B, 1960)
-                dict(t="Unflatten", dim=1, unflattened_size=[1, 20*98]),
-                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=98, stride=98),
-                dict(t="Flatten"),
+            features_extractor1_misc=[
+                # => (B, 4)
+                dict(t="Linear", in_features=4, out_features=4),
                 dict(t="LeakyReLU"),
                 # => (B, 160)
-                dict(t="Unflatten", dim=1, unflattened_size=[20, 8]),
-                dict(t="SelfAttention", edim=8),
+            ],
+            features_extractor1_stacks=[
+                # => (B, 2040)
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 20*102]),
+                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=102, stride=98),
                 dict(t="Flatten"),
+                dict(t="LeakyReLU"),
                 # => (B, 160)
             ],
             features_extractor1_hexes=[
                 # => (B, 10725)
                 dict(t="Unflatten", dim=1, unflattened_size=[1, 165*65]),
                 # => (B, 1, 10725)
-                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=65, stride=65),
+                dict(t="Conv1d", in_channels=1, out_channels=4, kernel_size=65, stride=65),
                 dict(t="Flatten"),
                 dict(t="LeakyReLU"),
-                # => (B, 1320)
-                dict(t="Unflatten", dim=1, unflattened_size=[165, 4]),
-                dict(t="SelfAttention", edim=4),
-                dict(t="Flatten"),
-                # => (B, 1320)
+                # => (B, 660)
             ],
             features_extractor2=[
-                # => (B, 1480)
-                dict(t="Linear", in_features=1480, out_features=512),
+                # => (B, 824)
+                dict(t="Linear", in_features=824, out_features=512),
                 dict(t="LeakyReLU"),
             ],
             actor=dict(t="Linear", in_features=512, out_features=2312),

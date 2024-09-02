@@ -102,16 +102,8 @@ class SerializableCategoricalMasked:
 def create_venv(env_cls, args, seed):
     assert args.mapside in ["attacker", "defender"]
 
-    if args.mapmask:
-        # XXX: mapmask is supported for backward compatibility only
-        assert args.num_envs == 1
-        num_envs = 1
-        all_maps = glob.glob("maps/%s" % args.mapmask)
-        all_maps = [m.removeprefix("maps/") for m in all_maps]
-        all_maps.sort()
-    else:
-        num_envs = len(args.envmaps)
-        all_maps = args.envmaps
+    num_envs = len(args.envmaps)
+    all_maps = args.envmaps
 
     state = {"n": 0}
     lock = threading.RLock()

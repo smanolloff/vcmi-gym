@@ -9,6 +9,7 @@ config = {
         "perturbation_interval": 1,
         "synch": True,
         "time_attr": "training_iteration",  # XXX: don't use time_total_s
+        "metric": "value_mean",  # "rew_mean" | "value_mean"
 
         # """
         # *** Resource allocation ***
@@ -23,47 +24,6 @@ config = {
         # Measuring resource consumption with 1 MPPO process:
         #
         #       $ NO_WANDB=true NO_SAVE=true python -m rl.algos.mppo.mppo
-        #
-        # with config: num_envs=1, num_steps=256, update_epochs=10
-        #
-        # Results taken from `htop` with a huge refresh interfal (10+s)
-        # to ensure multiple rollouts occur in a single refresh.
-        # `htop` must be configured to show combined CPU usage in 1 bar
-        # For GPU, `nvidia-smi` is used to obtain memory consumption.
-        #
-        #   mac: TODO
-        #       16% of all (10) CPUs, spiking to 23%
-        #       5% of all (16G) system memory
-        #       ---
-        #       => 6 workers for 96% of CPU (real CPU reported: 45%...)
-        #
-        #   pc (cpu):
-        #       50.5% of all (8) CPUs
-        #       14% (1.1G) of all (8G) system memory
-        #       ---
-        #       => not good for PBT (2 workers max)
-        #
-        #   pc (cuda):
-        #       13% of all (8) CPUs
-        #       14% (1.1G) of all (8G) system memory
-        #       12.5% (500M) of all (8G) system memory
-        #       ---
-        #       => 6 workers for 78% of CPU, 75% of GPU, 84% of memory
-        #
-        #   dancho-server: TODO
-        #
-        #   mila-pc (cuda)
-        #       1.7% of all (64) CPUs
-        #       2% (1.2G) of all (64G) system memory
-        #       8.5% (500M) of all (6.1G) GPU memory
-        #       ---
-        #       => 12 workers for 80% of GPU
-        #
-        #   mila-pc (cpu)
-        #       18% of all (64) CPUs, spiking to 32%
-        #       1.1% (700M) of all (64G) system memory
-        #       => 4 workers for 72% of all CPU (real CPU reported: 7%...)
-        #       => ...empirically found 16 CPU + 16 GPU workers is best
         #
         # """
         "population_size": 5,
@@ -106,19 +66,12 @@ config = {
             "update_epochs": linlist(2, 20, n=5, dtype=int),
             "vf_coef": linlist(0.1, 2, n=9),
 
-            # PPO-DNA specific
-            # "lr_schedule_value": {"start": explist(1e-7, 1e-4, n=20)},
-            # "lr_schedule_policy": {"start": explist(1e-7, 1e-4, n=20)},
-            # "lr_schedule_distill": {"start": explist(1e-7, 1e-4, n=20)},
-            # "num_minibatches_distill": [2, 4, 8],
-            # "num_minibatches_policy": [2, 4, 8],
-            # "num_minibatches_value": [2, 4, 8],
-            # "update_epochs_distill": linlist(2, 10, n=5, dtype=int),
-            # "update_epochs_policy": linlist(2, 10, n=5, dtype=int),
-            # "update_epochs_value": linlist(2, 10, n=5, dtype=int),
-            # "gae_lambda_policy": linlist(0.59, 0.99, n=9),
-            # "gae_lambda_value": linlist(0.59, 0.99, n=9),
-            # "distill_beta": linlist(0.5, 1.0, n=6),
+            "env": {
+                "reward_dmg_factor": linlist(0, 50, n=11),
+                "step_reward_frac": [0] + explist(0.00001, 0.1, 10),
+                "step_reward_mult": linlist(0, 5, n=11),
+                "term_reward_mult": linlist(0, 5, n=11),
+            }
         },
 
         #
@@ -163,13 +116,11 @@ config = {
     "agent_load_file": None,
 
     # "agent_load_file": None,
-    "tags": ["Map-v3", "StupidAI", "obstacles-random", "v3"],
+    "tags": ["Map-pools", "StupidAI", "obstacles-random", "v4"],
     "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
-        # "gym/generated/4096/4096-mixstack-300K-01.vmap",
-        "gym/generated/4096/4096-mixstack-100K-01.vmap",
-        # "gym/generated/4096/4096-mixstack-5K-01.vmap"
-        # "gym/generated/4096/4096-v3-100K-mod.vmap",
+        # "gym/generated/4096/4096-mixstack-100K-01.vmap",
+        "gym/generated/4096/4x1024.vmap"
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -266,7 +217,6 @@ config = {
     "permasave_every": 0,   # no effect (NO_SAVE=true)
     "max_saves": 3,         # no effect (NO_SAVE=true)
     "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
-    "num_envs": 1,
     "env": {
         "reward_dmg_factor": 5,
         "step_reward_fixed": 0,
@@ -285,7 +235,7 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "conntype": "proc"
+        "conntype": "thread"
     },
     "seed": 0,
     "env_version": 4,

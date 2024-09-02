@@ -144,7 +144,7 @@ def load_agent(agent_file, run_id):
 
 def create_venv(env_cls, agent, mapname, role, opponent, wrappers):
     mappath = f"maps/{mapname}"
-    assert os.path.isfile(mappath), "Map not found at: %s" % mappath
+    assert os.path.isfile(mappath), "Map not found at: %s (cwd: %s)" % (mappath, os.getcwd())
     assert role in ["attacker", "defender"]
 
     def env_creator():

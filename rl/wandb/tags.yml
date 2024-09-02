@@ -7,6 +7,7 @@
 - Map-7stack-01
 - Map-4096-mixstack
 - Map-v3
+- Map-pools
 
 # Opponents
 - StupidAI
@@ -39,3 +40,4 @@
 
 # schemas
 - v3
+- v4

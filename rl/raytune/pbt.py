@@ -99,7 +99,7 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
     # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.PopulationBasedTraining.html
     scheduler = ray.tune.schedulers.PopulationBasedTraining(
         time_attr=cfg["_raytune"]["time_attr"],
-        metric="rew_mean",
+        metric=cfg["_raytune"]["metric"],
         mode="max",
         perturbation_interval=cfg["_raytune"]["perturbation_interval"],
         hyperparam_mutations=mutations,

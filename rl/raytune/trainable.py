@@ -126,5 +126,5 @@ class Trainable(ray.tune.Trainable):
         self.cfg["skip_wandb_log_code"] = (self.iteration > 0)
         self.cfg["trial_id"] = self.trial_id
         args = self.algo.Args(wandb.run.id, wandb.run.group, **self.cfg)
-        self.agent, rew_mean = self.algo.main(args)
-        return {"rew_mean": rew_mean}
+        self.agent, rew_mean, value_mean = self.algo.main(args)
+        return {"rew_mean": rew_mean, "value_mean": value_mean}
