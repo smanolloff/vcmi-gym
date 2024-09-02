@@ -83,6 +83,7 @@ namespace Connector::V4 {
                 const std::string &, // statsStorage
                 const int &          // statsPersistFreq
             >())
+            .def("shutdown", &Thread::Connector::shutdown)
             .def("start", &Thread::Connector::start)
             .def("reset", &Thread::Connector::reset)
             .def("connect", &Thread::Connector::connect)

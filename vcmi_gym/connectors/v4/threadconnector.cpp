@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include "threadconnector.h"
+#include "AI/MMAI/schema/base.h"
 #include "AI/MMAI/schema/v4/constants.h"
 #include "AI/MMAI/schema/v4/types.h"
 #include "ML/MLClient.h"
@@ -47,9 +48,25 @@
 // => use this to set a member var `_error`
 //    (the exception must be constructed and thrown in python-aware thread)
 #define SET_ERROR(msg) { \
-    std::cerr << boost::str(boost::format("ERROR (only recorded): %1%") % msg); \
-    LOG(boost::str(boost::format("ERROR (only recorded): %1%") % msg)); \
-    _error = msg; \
+    if (!_shutdown) { \
+        std::cerr << boost::str(boost::format("ERROR (only recorded): %1%") % msg); \
+        LOG(boost::str(boost::format("ERROR (only recorded): %1%") % msg)); \
+        _error = msg; \
+    } \
+}
+
+#define SHUTDOWN_VCMI_RETURN(ret) { \
+    if (_shutdown) { \
+        LOG("connector is shutting down"); \
+        return ret; \
+    } \
+}
+
+#define SHUTDOWN_PYTHON_RETURN(ret) { \
+    if (_shutdown) { \
+        LOG("connector is shutting down"); \
+        return {static_cast<int>(ReturnCode::SHUTDOWN), ret}; \
+    } \
 }
 
 namespace Connector::V4::Thread {
@@ -291,7 +308,7 @@ namespace Connector::V4::Thread {
         LOGFMT("cond%d.notify_one()", side);
         cond.notify_one();
 
-        std::function<bool()> pred = [this, expstate] { return connstate == expstate; };
+        std::function<bool()> pred = [this, expstate] { return connstate == expstate || _shutdown; };
 
         LOGFMT("cond%1%.wait(lock%1%)", side);
         auto res = cond_wait(funcname, side, cond, lock, vcmiTimeout, pred);
@@ -306,6 +323,7 @@ namespace Connector::V4::Thread {
     }
 
     const std::tuple<int, std::string> Connector::render(int side) {
+        SHUTDOWN_PYTHON_RETURN("");
         auto code = getState(__func__, side, MMAI::Schema::ACTION_RENDER_ANSI);
         auto sup = extractSupplementaryData(state);
         assert(sup->getType() == MMAI::Schema::V4::ISupplementaryData::Type::ANSI_RENDER);
@@ -314,6 +332,7 @@ namespace Connector::V4::Thread {
     }
 
     const std::tuple<int, P_State> Connector::reset(int side) {
+        SHUTDOWN_PYTHON_RETURN(convertState(state)); // reuse last state if shutting down
         auto code = getState(__func__, side, MMAI::Schema::ACTION_RESET);
         auto pstate = convertState(state);
         LOG("return P_State");
@@ -321,6 +340,7 @@ namespace Connector::V4::Thread {
     }
 
     const std::tuple<int, P_State> Connector::step(int side, MMAI::Schema::Action a) {
+        SHUTDOWN_PYTHON_RETURN(convertState(state)); // reuse last state if shutting down
         auto code = getState(__func__, side, a);
         auto pstate = convertState(state);
         LOG("return P_State");
@@ -333,6 +353,8 @@ namespace Connector::V4::Thread {
     // => set a member var `_error` to be thrown by python-aware threads
     // Only throw here if this var was previously set and still not thrown
     MMAI::Schema::Action Connector::getAction(const MMAI::Schema::IState* s, int side) {
+        SHUTDOWN_VCMI_RETURN(MMAI::Schema::ACTION_RESET);
+
         LOG("getAction called with side=" + std::to_string(side));
 
         auto &m = side ? m1 : m0;
@@ -356,12 +378,14 @@ namespace Connector::V4::Thread {
         LOGFMT("cond%d.notify_one()", side);
         cond.notify_one();
 
-        std::function<bool()> pred = [this] { return connstate == ConnectorState::AWAITING_STATE; };
+        std::function<bool()> pred = [this] { return connstate == ConnectorState::AWAITING_STATE || _shutdown; };
 
         // Now wait again (will unblock once step/reset have been called)
         LOGFMT("cond%1%.wait(lock%1%)", side);
         auto res = cond_wait(__func__, side, cond, lock, userTimeout, pred);
         LOGFMT("cond%1%.wait(lock%1%): done", side);
+
+        SHUTDOWN_VCMI_RETURN(MMAI::Schema::ACTION_RESET);
 
         // the above cond_wait gave priority to a python thread which was
         // waiting in getState. It was supposed to throw any stored errors
@@ -376,6 +400,8 @@ namespace Connector::V4::Thread {
 
         if (res == ReturnCode::TIMEOUT) {
             SET_ERROR(boost::str(boost::format("timeout after %ds while waiting for user\n") % userTimeout));
+        } else if (res == ReturnCode::SHUTDOWN) {
+            LOG("connector is shutting down...");
         } else if (res != ReturnCode::OK) {
             SET_ERROR(boost::str(boost::format("unexpected return code from cond_wait: %d\n") % EI(res)));
         } else if (connstate != ConnectorState::AWAITING_STATE) {
@@ -460,6 +486,9 @@ namespace Connector::V4::Thread {
                 "timeout after %ds while waiting for client (red:%s, blue:%s, connectedClient0: %d, connectedClient1: %d)\n") \
                 % bootTimeout % red % blue % connectedClient0 % connectedClient1
             ));
+            return;
+        } else if (res == ReturnCode::SHUTDOWN) {
+            LOG("connector is shutting down...");
             return;
         } else if (res != ReturnCode::OK) {
             throw VCMIConnectorException(boost::str(boost::format(
@@ -553,6 +582,13 @@ namespace Connector::V4::Thread {
 
         LOG("launch VCMI (will never return)");
         ML::start_vcmi();
-        assert(false); // should never be here
+
+        if (!_shutdown)
+            std::cerr << "ERROR: ML::start_vcmi() returned, but shutdown is false";
+    }
+
+    void Connector::shutdown() {
+        _shutdown = true;
+        ML::shutdown_vcmi();
     }
 }

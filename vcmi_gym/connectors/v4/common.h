@@ -28,7 +28,7 @@
 #include <pybind11/numpy.h>
 
 #ifdef DEBUG_BUILD
-    #define VERBOSE 0       // whether to output logs to STDOUT
+    #define VERBOSE 1       // whether to output logs to STDOUT
     #define LOGCOLLECT 0    // whether to record logs in memory
 #else
     #define VERBOSE 0
