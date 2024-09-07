@@ -14,6 +14,8 @@
 # limitations under the License.
 # =============================================================================
 
+import numpy as np
+
 from .battlefield import Battlefield
 from .hex import Hex
 from .stack import Stack
@@ -28,10 +30,22 @@ class Decoder:
 
     @classmethod
     def decode(cls, obs):
-        assert obs.shape == (pyconnector.STATE_SIZE,)
+        assert obs.shape == (pyconnector.STATE_SIZE,), f"{obs.shape} == ({pyconnector.STATE_SIZE},)"
 
-        stacks = obs[:pyconnector.STATE_SIZE_STACKS].reshape(20, pyconnector.STATE_SIZE_ONE_STACK)
-        hexes = obs[pyconnector.STATE_SIZE_STACKS:].reshape(11, 15, pyconnector.STATE_SIZE_ONE_HEX)
+        sizes = [
+            pyconnector.STATE_SIZE_MISC,
+            pyconnector.STATE_SIZE_ONE_STACK * 20,
+            pyconnector.STATE_SIZE_ONE_HEX * 11 * 15
+        ]
+
+        assert sum(sizes) == pyconnector.STATE_SIZE, f"{sum(sizes)} == {pyconnector.STATE_SIZE}"
+
+        # calculate the indexes of the delimiters from the sizes
+        delimiters = np.cumsum(sizes)[:-1]
+
+        misc, stacks, hexes = np.split(obs, delimiters)
+        stacks = stacks.reshape(20, pyconnector.STATE_SIZE_ONE_STACK)
+        hexes = hexes.reshape(11, 15, pyconnector.STATE_SIZE_ONE_HEX)
 
         res = Battlefield()
 

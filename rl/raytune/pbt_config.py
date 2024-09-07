@@ -66,12 +66,12 @@ config = {
             "update_epochs": linlist(2, 20, n=5, dtype=int),
             "vf_coef": linlist(0.1, 2, n=9),
 
-            "env": {
-                "reward_dmg_factor": linlist(0, 50, n=11),
-                "step_reward_frac": [0] + explist(0.00001, 0.1, 10),
-                "step_reward_mult": linlist(0, 5, n=11),
-                "term_reward_mult": linlist(0, 5, n=11),
-            }
+            # "env": {
+            #     "reward_dmg_factor": linlist(0, 50, n=11),
+            #     "step_reward_frac": [0] + explist(0.00001, 0.1, 10),
+            #     "step_reward_mult": linlist(0, 5, n=11),
+            #     "term_reward_mult": linlist(0, 5, n=11),
+            # }
         },
 
         #
@@ -172,10 +172,10 @@ config = {
             # => (B, 160)
         ],
         "features_extractor1_stacks": [
-            # => (B, 2040)
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*102]},
-            # => (B, 1, 2040)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 102, "stride": 102},
+            # => (B, 2000)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*100]},
+            # => (B, 1, 2000)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 100, "stride": 100},
             {"t": "Flatten"},
             {"t": "LeakyReLU"},
             # => (B, 160)

@@ -27,6 +27,7 @@ namespace Connector::V4 {
     const int Exporter::getNNonhexActions() const { return N_NONHEX_ACTIONS; }
     const int Exporter::getNHexActions() const { return N_HEX_ACTIONS; }
     const int Exporter::getStateSize() const { return BATTLEFIELD_STATE_SIZE; }
+    const int Exporter::getStateSizeMisc() const { return BATTLEFIELD_STATE_SIZE_MISC; }
     const int Exporter::getStateSizeOneHex() const { return BATTLEFIELD_STATE_SIZE_ONE_HEX; }
     const int Exporter::getStateSizeAllHexes() const { return BATTLEFIELD_STATE_SIZE_ALL_HEXES; }
     const int Exporter::getStateSizeOneStack() const { return BATTLEFIELD_STATE_SIZE_ONE_STACK; }
@@ -143,16 +144,15 @@ namespace Connector::V4 {
             break; case SA::HP: attrname = "HP";
             break; case SA::HP_LEFT: attrname = "HP_LEFT";
             break; case SA::SPEED: attrname = "SPEED";
-            break; case SA::WAITED: attrname = "WAITED";
+            break; case SA::ACTSTATE: attrname = "ACTSTATE";
             break; case SA::QUEUE_POS: attrname = "QUEUE_POS";
             break; case SA::RETALIATIONS_LEFT: attrname = "RETALIATIONS_LEFT";
             break; case SA::IS_WIDE: attrname = "IS_WIDE";
             break; case SA::AI_VALUE: attrname = "AI_VALUE";
-            break; case SA::ACTED: attrname = "ACTED";
             break; case SA::SLEEPING: attrname = "SLEEPING";
             break; case SA::BLOCKED: attrname = "BLOCKED";
             break; case SA::BLOCKING: attrname = "BLOCKING";
-            break; case SA::ESTIMATED_DMG: attrname = "ESTIMATED_DMG";
+            // break; case SA::ESTIMATED_DMG: attrname = "ESTIMATED_DMG";
             break; case SA::FLYING: attrname = "FLYING";
             break; case SA::BLIND_LIKE_ATTACK: attrname = "BLIND_LIKE_ATTACK";
             break; case SA::ADDITIONAL_ATTACK: attrname = "ADDITIONAL_ATTACK";
@@ -205,6 +205,7 @@ namespace Connector::V4 {
             .def("get_n_nonhex_actions", &Exporter::getNNonhexActions)
             .def("get_n_hex_actions", &Exporter::getNHexActions)
             .def("get_state_size", &Exporter::getStateSize)
+            .def("get_state_size_misc", &Exporter::getStateSizeMisc)
             .def("get_state_size_hexes", &Exporter::getStateSizeAllHexes)
             .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)
             .def("get_state_size_stacks", &Exporter::getStateSizeAllStacks)

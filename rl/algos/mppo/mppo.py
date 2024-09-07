@@ -280,7 +280,7 @@ class AgentNN(nn.Module):
         self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
     def extract_features(self, x):
-        misc, stacks, hexes = x.split([4, 2040, 10725], dim=1)
+        misc, stacks, hexes = x.split([4, 2000, 10725], dim=1)
         fmisc = self.features_extractor1_misc(misc)
         fstacks = self.features_extractor1_stacks(stacks)
         fhexes = self.features_extractor1_hexes(hexes)
@@ -405,7 +405,7 @@ class JitAgent(nn.Module):
             # features = self.features_extractor(b_obs)
 
             # v3+
-            misc, stacks, hexes = b_obs.split([4, 2040, 10725], dim=1)
+            misc, stacks, hexes = b_obs.split([4, 2000, 10725], dim=1)
             fmisc = self.features_extractor1_misc(misc)
             fstacks = self.features_extractor1_stacks(stacks)
             fhexes = self.features_extractor1_hexes(hexes)
@@ -421,7 +421,7 @@ class JitAgent(nn.Module):
     def get_value(self, obs) -> float:
         with torch.no_grad():
             b_obs = obs.unsqueeze(dim=0)
-            misc, stacks, hexes = b_obs.split([4, 2040, 10725], dim=1)
+            misc, stacks, hexes = b_obs.split([4, 2000, 10725], dim=1)
             fmisc = self.features_extractor1_misc(misc)
             fstacks = self.features_extractor1_stacks(stacks)
             fhexes = self.features_extractor1_hexes(hexes)
@@ -924,7 +924,6 @@ def debug_args():
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
             vcmienv_loglevel="WARN",
-            consecutive_error_reward_factor=-1,
             sparse_info=True,
             step_reward_fixed=-100,
             step_reward_mult=1,
@@ -955,9 +954,9 @@ def debug_args():
                 # => (B, 160)
             ],
             features_extractor1_stacks=[
-                # => (B, 2040)
-                dict(t="Unflatten", dim=1, unflattened_size=[1, 20*102]),
-                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=102, stride=98),
+                # => (B, 2000)
+                dict(t="Unflatten", dim=1, unflattened_size=[1, 20*100]),
+                dict(t="Conv1d", in_channels=1, out_channels=8, kernel_size=100, stride=98),
                 dict(t="Flatten"),
                 dict(t="LeakyReLU"),
                 # => (B, 160)

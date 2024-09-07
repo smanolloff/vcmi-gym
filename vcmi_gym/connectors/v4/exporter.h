@@ -40,6 +40,7 @@ namespace Connector::V4 {
         virtual const int getNActions() const;
         virtual const int getNNonhexActions() const;
         virtual const int getNHexActions() const;
+        virtual const int getStateSizeMisc() const;
         virtual const int getStateSize() const;
         virtual const int getStateSizeOneHex() const;
         virtual const int getStateSizeAllHexes() const;

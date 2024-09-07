@@ -168,10 +168,10 @@ def create_venv(env_cls, agent, mapname, role, opponent, wrappers):
                 env_kwargs["defender"] = opponent
                 env_kwargs[role] = "MMAI_USER"
             case vcmi_gym.VcmiEnv_v4:
-                env_kwargs["role"] = args.mapside
+                env_kwargs["role"] = agent.args.mapside
                 env_kwargs["opponent"] = opponent
-                env_kwargs["opponent_model"] = args.opponent_load_file
-                env_kwargs["conntype"] = "thread"
+                env_kwargs["opponent_model"] = agent.args.opponent_load_file
+                env_kwargs["conntype"] = "proc"
             case _:
                 raise Exception("env cls not supported: %s" % env_cls)
 
@@ -255,7 +255,7 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
                     path="s-manolloff/vcmi-gym",
                     filters={
                         "updatedAt": {"$gt": gt.isoformat()},
-                        "tags": {"$nin": ["no-eval"]},
+                        "tags": {"$nin": ["no-eval"], "$in": ["v4"]},
                         "display_name": "T0"
                     }
                 )
@@ -404,6 +404,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     env_version = agent.env_version
                     wrappers = []
 
+                print(f"CWD: {os.getcwd()}")
                 match env_version:
                     case 1:
                         env_cls = vcmi_gym.VcmiEnv_v1
@@ -416,6 +417,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     case _:
                         raise Exception("unsupported env version: %d" % env_version)
 
+                print(f"CWD: {os.getcwd()}")
                 rewards = {"StupidAI": [], "BattleAI": []}
                 lengths = {"StupidAI": [], "BattleAI": []}
                 net_values = {"StupidAI": [], "BattleAI": []}
