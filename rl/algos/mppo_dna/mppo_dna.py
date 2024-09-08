@@ -486,7 +486,7 @@ class JitAgent(nn.Module):
             fmisc = self.features_extractor1_value_misc(misc)
             fstacks = self.features_extractor1_value_stacks(stacks)
             fhexes = self.features_extractor1_value_hexes(hexes)
-            fcat = torch.cat((misc, fstacks, fhexes), dim=1)
+            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
             features = self.features_extractor2_value(fcat)
             value = self.critic(features)
             return value.float().item()
@@ -1027,7 +1027,12 @@ def main(args):
             envs.close()
 
     # Needed by PBT to save model after iteration ends
-    return agent, common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-agent.state.current_rollout:])
+    # XXX: limit returned mean reward to only the rollouts in this iteration
+    return (
+        agent,
+        common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-agent.state.current_rollout:]),
+        common.safe_mean(list(agent.state.rollout_net_value_queue_1000)[-agent.state.current_rollout:]),
+    )
 
 
 def debug_args():
@@ -1123,7 +1128,7 @@ def debug_args():
                 # => (B, 4)
                 dict(t="Linear", in_features=4, out_features=4),
                 dict(t="LeakyReLU"),
-                # => (B, 160)
+                # => (B, 4)
             ],
             features_extractor1_stacks=[
                 # => (B, 2040)

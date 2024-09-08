@@ -119,8 +119,8 @@ config = {
     "tags": ["Map-pools", "StupidAI", "obstacles-random", "v4"],
     "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
-        # "gym/generated/4096/4096-mixstack-100K-01.vmap",
-        "gym/generated/4096/4x1024.vmap"
+        "gym/generated/4096/4096-mixstack-100K-01.vmap",
+        # "gym/generated/4096/4x1024.vmap"
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -169,13 +169,13 @@ config = {
         "features_extractor1_misc": [
             {"t": "Linear", "in_features": 4, "out_features": 4},
             {"t": "LeakyReLU"},
-            # => (B, 160)
+            # => (B, 4)
         ],
         "features_extractor1_stacks": [
-            # => (B, 2000)
-            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*100]},
-            # => (B, 1, 2000)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 100, "stride": 100},
+            # => (B, 2040)
+            {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*102]},
+            # => (B, 1, 2040)
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 102, "stride": 102},
             {"t": "Flatten"},
             {"t": "LeakyReLU"},
             # => (B, 160)

@@ -152,7 +152,7 @@ namespace Connector::V4 {
             break; case SA::SLEEPING: attrname = "SLEEPING";
             break; case SA::BLOCKED: attrname = "BLOCKED";
             break; case SA::BLOCKING: attrname = "BLOCKING";
-            // break; case SA::ESTIMATED_DMG: attrname = "ESTIMATED_DMG";
+            break; case SA::ESTIMATED_DMG: attrname = "ESTIMATED_DMG";
             break; case SA::FLYING: attrname = "FLYING";
             break; case SA::BLIND_LIKE_ATTACK: attrname = "BLIND_LIKE_ATTACK";
             break; case SA::ADDITIONAL_ATTACK: attrname = "ADDITIONAL_ATTACK";

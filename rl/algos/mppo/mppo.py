@@ -280,7 +280,7 @@ class AgentNN(nn.Module):
         self.critic = common.layer_init(AgentNN.build_layer(network.critic), gain=1.0)
 
     def extract_features(self, x):
-        misc, stacks, hexes = x.split([4, 2000, 10725], dim=1)
+        misc, stacks, hexes = x.split([2, 2000, 10725], dim=1)
         fmisc = self.features_extractor1_misc(misc)
         fstacks = self.features_extractor1_stacks(stacks)
         fhexes = self.features_extractor1_hexes(hexes)
@@ -355,6 +355,7 @@ class Agent(nn.Module):
         # jagent.features_extractor = clean_agent.NN.features_extractor
 
         # v3+
+        jagent.features_extractor1_misc = clean_agent.NN.features_extractor1_misc
         jagent.features_extractor1_stacks = clean_agent.NN.features_extractor1_stacks
         jagent.features_extractor1_hexes = clean_agent.NN.features_extractor1_hexes
         jagent.features_extractor2 = clean_agent.NN.features_extractor2
@@ -405,7 +406,7 @@ class JitAgent(nn.Module):
             # features = self.features_extractor(b_obs)
 
             # v3+
-            misc, stacks, hexes = b_obs.split([4, 2000, 10725], dim=1)
+            misc, stacks, hexes = b_obs.split([2, 2000, 10725], dim=1)
             fmisc = self.features_extractor1_misc(misc)
             fstacks = self.features_extractor1_stacks(stacks)
             fhexes = self.features_extractor1_hexes(hexes)
@@ -421,7 +422,7 @@ class JitAgent(nn.Module):
     def get_value(self, obs) -> float:
         with torch.no_grad():
             b_obs = obs.unsqueeze(dim=0)
-            misc, stacks, hexes = b_obs.split([4, 2000, 10725], dim=1)
+            misc, stacks, hexes = b_obs.split([2, 2000, 10725], dim=1)
             fmisc = self.features_extractor1_misc(misc)
             fstacks = self.features_extractor1_stacks(stacks)
             fhexes = self.features_extractor1_hexes(hexes)
@@ -948,10 +949,10 @@ def debug_args():
         network=dict(
             attention=None,
             features_extractor1_misc=[
-                # => (B, 4)
-                dict(t="Linear", in_features=4, out_features=4),
+                # => (B, 2)
+                dict(t="Linear", in_features=2, out_features=2),
                 dict(t="LeakyReLU"),
-                # => (B, 160)
+                # => (B, 2)
             ],
             features_extractor1_stacks=[
                 # => (B, 2000)
@@ -971,8 +972,8 @@ def debug_args():
                 # => (B, 660)
             ],
             features_extractor2=[
-                # => (B, 824)
-                dict(t="Linear", in_features=824, out_features=512),
+                # => (B, 822)
+                dict(t="Linear", in_features=822, out_features=512),
                 dict(t="LeakyReLU"),
             ],
             actor=dict(t="Linear", in_features=512, out_features=2312),
