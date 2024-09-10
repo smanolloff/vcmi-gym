@@ -335,7 +335,8 @@ def rebalance_pool(pr, objects, verbosity=0, debugger=False):
     sum_corrections = 0
     for hero_name, hero_army in pr.armies.items():
         hero_winrate = pr.winrates[hero_name]
-        correction_factor = (pr.mean_winrate - hero_winrate) * pr.stddev_winrate * 2
+        # correction_factor = (pr.mean_winrate - hero_winrate) * pr.stddev_winrate * 2
+        correction_factor = (0.5 - hero_winrate) * pr.stddev_winrate * 2
         correction_factor = np.clip(correction_factor, -ARMY_VALUE_CORRECTION_CLIP, ARMY_VALUE_CORRECTION_CLIP)
         sum_corrections += abs(correction_factor)
 
