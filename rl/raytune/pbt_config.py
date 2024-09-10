@@ -119,8 +119,8 @@ config = {
     "tags": ["Map-pools", "StupidAI", "obstacles-random", "v4"],
     "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
-        "gym/generated/4096/4096-mixstack-100K-01.vmap",
-        # "gym/generated/4096/4x1024.vmap"
+        # "gym/generated/4096/4096-mixstack-100K-01.vmap",
+        "gym/generated/4096/4x1024.vmap"
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -167,35 +167,33 @@ config = {
     "network": {
         "attention": None,
         "features_extractor1_misc": [
+            # => (B, 4)
             {"t": "Linear", "in_features": 4, "out_features": 4},
-            {"t": "LeakyReLU"},
             # => (B, 4)
         ],
         "features_extractor1_stacks": [
             # => (B, 2040)
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*102]},
-            # => (B, 1, 2040)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 102, "stride": 102},
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 102, "stride": 102},
             {"t": "Flatten"},
-            {"t": "LeakyReLU"},
             # => (B, 160)
         ],
         "features_extractor1_hexes": [
             # => (B, 10725)
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 165*65]},
             # => (B, 1, 10725)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 8, "kernel_size": 65, "stride": 65},
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 65, "stride": 65},
             {"t": "Flatten"},
-            {"t": "LeakyReLU"},
             # => (B, 1320)
         ],
         "features_extractor2": [
             # => (B, 1484)
-            {"t": "Linear", "in_features": 1484, "out_features": 512},
+            {"t": "LeakyReLU"},
+            {"t": "Linear", "in_features": 744, "out_features": 256},
             {"t": "LeakyReLU"},
         ],
-        "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},
-        "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
+        "actor": {"t": "Linear", "in_features": 256, "out_features": 2312},
+        "critic": {"t": "Linear", "in_features": 256, "out_features": 1}
     },
 
     # Static
@@ -218,16 +216,16 @@ config = {
     "max_saves": 3,         # no effect (NO_SAVE=true)
     "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
     "env": {
-        "reward_dmg_factor": 5,
+        "reward_dmg_factor": 20,
         "step_reward_fixed": 0,
         "step_reward_frac": -0.003,
         "step_reward_mult": 1,
-        "term_reward_mult": 1,
+        "term_reward_mult": 2,
         "reward_clip_tanh_army_frac": 1,
         "reward_army_value_ref": 500,
         "random_heroes": 1,
         "random_obstacles": 1,
-        "town_chance": 0,
+        "town_chance": 10,
         "warmachine_chance": 40,
         "mana_min": 0,
         "mana_max": 0,
