@@ -501,7 +501,7 @@ class Agent(nn.Module):
     @staticmethod
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
-        model = torch.load(agent_file, map_location=device)
+        model = torch.load(agent_file, map_location=device, weights_only=False)
 
         # XXX: temp code for migrating models
         if getattr(model, "obs_dims", None) is None:

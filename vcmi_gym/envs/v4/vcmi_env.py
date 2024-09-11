@@ -27,6 +27,10 @@ from .pyprocconnector import (
     STATE_VALUE_NA,
     STATE_SIZE,
     N_ACTIONS,
+    STATE_SIZE_MISC,
+    STATE_SIZE_STACKS,
+    STATE_SIZE_HEXES,
+    STATE_SEQUENCE
 )
 
 from .pythreadconnector import PyThreadConnector
@@ -82,6 +86,11 @@ class VcmiEnv(gym.Env):
         shape=(STATE_SIZE,),
         dtype=np.float32
     )
+
+    STATE_SIZE_MISC = STATE_SIZE_MISC
+    STATE_SIZE_HEXES = STATE_SIZE_HEXES
+    STATE_SIZE_STACKS = STATE_SIZE_STACKS
+    STATE_SEQUENCE = STATE_SEQUENCE
 
     def __init__(
         self,

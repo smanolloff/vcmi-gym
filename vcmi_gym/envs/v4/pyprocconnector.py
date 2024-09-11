@@ -39,10 +39,11 @@ N_ACTIONS = EXPORTER.get_n_actions()
 
 STATE_SIZE = EXPORTER.get_state_size()
 STATE_SIZE_MISC = EXPORTER.get_state_size_misc()
-STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
 STATE_SIZE_STACKS = EXPORTER.get_state_size_stacks()
-STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
+STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
 STATE_SIZE_ONE_STACK = EXPORTER.get_state_size_one_stack()
+STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
+STATE_SEQUENCE = ["misc", "stacks", "hexes"]
 STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
 HEXATTRMAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))

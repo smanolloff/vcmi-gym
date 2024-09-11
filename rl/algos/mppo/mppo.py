@@ -29,6 +29,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 # import tyro
+import warnings
 
 from .. import common
 
@@ -400,6 +401,13 @@ class Agent(nn.Module):
     @staticmethod
     def save(agent, agent_file):
         print("Saving agent to %s" % agent_file)
+        if not os.path.isabs(agent_file):
+            warnings.warn(
+                f"path {agent_file} is not absolute!"
+                " If VCMI is started in a thread, the current directory is changed."
+                f" CWD: {os.getcwd()}"
+            )
+
         attrs = ["args", "observation_space", "action_space", "obs_dims", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
@@ -437,10 +445,12 @@ class Agent(nn.Module):
     @staticmethod
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
-        model = torch.load(agent_file, map_location=device)
+        model = torch.load(agent_file, map_location=device, weights_only=False)
         # XXX: temp code for migrating models
         if getattr(model, "obs_dims", None) is None:
             model.obs_dims = dict(misc=4, stacks=2040, hexes=10725)
+            model.NN.obs_splitter = Split(list(model.obs_dims.values()), dim=1)
+            model.NN.__dict__["_modules"].move_to_end("obs_splitter", last=False)
             model.NN.obs_dims = model.obs_dims
             model.NN.features_extractor1_hexes[0].unflattened_size = [165, model.obs_dims["hexes"] // 165]
             model.NN.features_extractor1_stacks[0].unflattened_size = [20, model.obs_dims["stacks"] // 20]
