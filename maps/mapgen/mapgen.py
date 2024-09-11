@@ -45,7 +45,7 @@ from . import creatures_core
 #
 # => real chance is CHANCE_ONLY_SHOOTERS + 3%
 #
-TOTAL_HEROES = 4096                 # Must be divisible by 8; max is 4096
+TOTAL_HEROES = 512                 # Must be divisible by 8; max is 4096
 MAX_ALLOWED_ERROR = 0.05            # Max value for (unused_credits / target_value).
 MIN_GUARANTEED_CORRECTION = 0.3     # Headroom for army nerfing, i.e. min value for (weakest_stack.value() / army.value())
 STACK_WEIGHT_MAXDEV = 0.4           # Deviation (0..1); 0 means weight=avgweight, 0.5 means weight = (0.5*avgweight ... 1.5*avgweight)
@@ -595,6 +595,12 @@ def main():
             )
 
             oid += 1
+
+            # need to break from both loops
+            if oid == TOTAL_HEROES:
+                break
+        if oid == TOTAL_HEROES:
+            break
 
     # for y in range(5, 66, 3):
     #     for x in range(8, 72, 5):
