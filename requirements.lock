@@ -2,17 +2,17 @@
 # XXX: ALWAYS save a lock file when modifying requirements:
 #     pip3 freeze -r requirements.txt > requirements.lock
 numpy==1.26.4
-PyYAML==6.0.1
-wandb==0.17.1
+PyYAML==6.0.2
+wandb==0.17.9
 gymnasium==0.29.1
 onnx-pytorch==0.1.5
-ray==2.24.0
+ray==2.35.0
 
 # Nightly ray builds
 #ray @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
 #ray[tune] @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
 # Manually uncomment one of the torch packages -- see comment below
-torch==2.1.2
+torch==2.4.1
 #torch @ https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.3.1%2Bcpu.cxx11.abi-cp312-cp312-linux_x86_64.whl
 # Python's "torch" package is *not* compiled with CXX11 ABI flag by default.
 # - on macOS there is no issue (CXX11 ABI is not used there)
@@ -134,7 +134,7 @@ tensorflow-macos==2.14.0
 termcolor==2.4.0
 threadpoolctl==3.2.0
 tomli==2.0.1
-torchvision==0.16.2
+torchvision==0.19.1
 tqdm==4.66.1
 typing_extensions==4.9.0
 tyro==0.7.3
