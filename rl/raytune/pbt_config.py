@@ -168,32 +168,37 @@ config = {
         "attention": None,
         "features_extractor1_misc": [
             # => (B, 4)
-            {"t": "Linear", "in_features": 4, "out_features": 4},
+            {"t": "Linear", "in_features": 4, "out_features": 8},
             # => (B, 4)
         ],
         "features_extractor1_stacks": [
             # => (B, 2040)
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 20*102]},
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 102, "stride": 102},
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 16, "kernel_size": 102, "stride": 102},
             {"t": "Flatten"},
-            # => (B, 160)
+            # => (B, 320)
         ],
         "features_extractor1_hexes": [
             # => (B, 10725)
             {"t": "Unflatten", "dim": 1, "unflattened_size": [1, 165*65]},
             # => (B, 1, 10725)
-            {"t": "Conv1d", "in_channels": 1, "out_channels": 4, "kernel_size": 65, "stride": 65},
+            {"t": "Conv1d", "in_channels": 1, "out_channels": 32, "kernel_size": 65, "stride": 65},
+            # => (B, 5280)
+
+            # {"t": "LeakyReLU"},
+            # {"t": "Conv1d", "in_channels": 32, "out_channels": 8, "kernel_size": 1, "stride": 1},
+            # # => (B, 1320)
+
             {"t": "Flatten"},
-            # => (B, 1320)
         ],
         "features_extractor2": [
-            # => (B, 1484)
+            # => (B, 5608)
             {"t": "LeakyReLU"},
-            {"t": "Linear", "in_features": 744, "out_features": 256},
+            {"t": "Linear", "in_features": 5608, "out_features": 1024},
             {"t": "LeakyReLU"},
         ],
-        "actor": {"t": "Linear", "in_features": 256, "out_features": 2312},
-        "critic": {"t": "Linear", "in_features": 256, "out_features": 1}
+        "actor": {"t": "Linear", "in_features": 1024, "out_features": 2312},
+        "critic": {"t": "Linear", "in_features": 1024, "out_features": 1}
     },
 
     # Static
