@@ -12,7 +12,7 @@ def main(file, mdfile=None):
     folder = os.path.dirname(file)
     jitfile = os.path.join(folder, f"jit-{os.path.basename(file)}")
 
-    agent = torch.load(file, map_location=torch.device("cpu"))
+    agent = torch.load(file, map_location=torch.device("cpu"), weights_only=False)
 
     run = wandb.init(project="vcmi-gym", id=agent.args.run_id, resume="must", reinit=True)
     art = wandb.Artifact(

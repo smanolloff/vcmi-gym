@@ -59,7 +59,7 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
     if resume_path:
         import torch
         import wandb
-        agent = torch.load(resume_path)
+        agent = torch.load(resume_path, weights_only=False)
         config_overrides.insert(0, f"agent_load_file={repr(resume_path)}")
         run = wandb.Api().run(f"s-manolloff/vcmi-gym/{agent.args.run_id}")
         cfg = copy.deepcopy(run.config)

@@ -31,11 +31,16 @@ import argparse
 import copy
 import sqlite3
 import torch
+import zipfile
+import json
+import re
 
-from dataclasses import asdict
+from dataclasses import dataclass, asdict
 from contextlib import contextmanager
+from typing import List
 
 import vcmi_gym
+
 
 @contextmanager
 def dblock(db, lock_id):
@@ -51,11 +56,16 @@ def dblock(db, lock_id):
             db.execute("ROLLBACK")
 
 
-def evaluate_policy(agent, venv, episodes_per_env):
+def evaluate_policy(agent, venv, episodes_per_env, statsdb):
     n_envs = venv.num_envs
     counts = np.zeros(n_envs, dtype="int")
     ep_results = {"rewards": [], "lengths": [], "net_values": [], "is_successes": []}
+
+    # must reset (the vec env requires it)
     observations, _ = venv.reset()
+
+    # Don't count losses from resets (aka. retreats)
+    statsdb.execute("update stats set wins=0, games=0")
 
     # For a vectorized environments the output will be in the form of::
     #     >>> infos = {
@@ -137,18 +147,18 @@ def evaluate_policy(agent, venv, episodes_per_env):
 
 def load_agent(agent_file, run_id):
     # LOG.debug("Loading agent from %s" % agent_file)
-    agent = torch.load(agent_file, map_location="cpu")
+    agent = torch.load(agent_file, map_location="cpu", weights_only=False)
     assert agent.args.run_id == run_id, "%s != %s" % (agent.args.run_id, run_id)
     return agent
 
 
-def create_venv(env_cls, agent, mapname, role, opponent, wrappers):
+def create_venv(env_cls, agent, mapname, role, opponent, wrappers, env_kwargs={}):
     mappath = f"maps/{mapname}"
     assert os.path.isfile(mappath), "Map not found at: %s (cwd: %s)" % (mappath, os.getcwd())
     assert role in ["attacker", "defender"]
 
     def env_creator():
-        env_kwargs = dict(
+        kwargs = dict(
             asdict(agent.args.env),
             seed=42,
             random_heroes=1,
@@ -161,25 +171,27 @@ def create_venv(env_cls, agent, mapname, role, opponent, wrappers):
             mapname=mapname,
         )
 
+        kwargs = dict(kwargs, **env_kwargs)
+
         match env_cls:
             case vcmi_gym.VcmiEnv_v3:
-                env_kwargs.pop("conntype", None)
-                env_kwargs["attacker"] = opponent
-                env_kwargs["defender"] = opponent
-                env_kwargs[role] = "MMAI_USER"
+                kwargs.pop("conntype", None)
+                kwargs["attacker"] = opponent
+                kwargs["defender"] = opponent
+                kwargs[role] = "MMAI_USER"
             case vcmi_gym.VcmiEnv_v4:
-                env_kwargs["role"] = agent.args.mapside
-                env_kwargs["opponent"] = opponent
-                env_kwargs["opponent_model"] = agent.args.opponent_load_file
-                env_kwargs["conntype"] = "proc"
+                kwargs["role"] = agent.args.mapside
+                kwargs["opponent"] = opponent
+                kwargs["opponent_model"] = agent.args.opponent_load_file
+                kwargs["conntype"] = "proc"
             case _:
                 raise Exception("env cls not supported: %s" % env_cls)
 
-        for a in env_kwargs.pop("deprecated_args", ["encoding_type"]):
-            env_kwargs.pop(a, None)
+        for a in kwargs.pop("deprecated_args", ["encoding_type"]):
+            kwargs.pop(a, None)
 
-        # LOG.debug("Env kwargs: %s" % env_kwargs)
-        env = env_cls(**env_kwargs)
+        # LOG.debug("Env kwargs: %s" % kwargs)
+        env = env_cls(**kwargs)
         for wrapper_cls in wrappers:
             env = wrapper_cls(env)
         return env
@@ -342,6 +354,17 @@ def flatten_dict(d, parent_key='', sep='.'):
     return dict(items)
 
 
+@dataclass
+class Result:
+    opponent: str   # "StupidAI", "BattleAI"
+    siege: bool
+    reward: float
+    length: float
+    net_value: float
+    is_success: float
+    pooldata: List[float]
+
+
 def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None):
     os.environ["WANDB_SILENT"] = "true"
 
@@ -380,10 +403,57 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
     statedict = {}
 
     if model:
-        rid = torch.load(model, map_location="cpu").args.run_id
+        rid = torch.load(model, map_location="cpu", weights_only=False).args.run_id
         it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{rid}"), model, {})]
     else:
         it = find_agents(LOG, WORKER_ID, N_WORKERS, statedict)
+
+    # store this as it will get changed when VCMI is loaded as a thread
+    cwd = os.getcwd()
+    print(f"CWD: {cwd}")
+
+    n_eval_episodes = 1000  # combinations for 8x64 maps are 448
+
+    # Build list of pool names based on the hero names in the map JSON
+    vmap = "gym/generated/evaluation/8x64.vmap"
+    mappath = f"maps/{vmap}"
+    pools = []
+    n_heroes = 0
+    print("Parsing map %s" % mappath)
+    with zipfile.ZipFile(mappath, 'r') as zipf:
+        with zipf.open("objects.json") as f:
+            for k, v in json.load(f).items():
+                if not k.startswith("hero_"):
+                    continue
+                m = re.match(r"hero_\d+_pool_(.*)", k)
+                assert m, f"invalid hero name: {k}"
+                if m.group(1) not in pools:
+                    pools.append(m.group(1))
+                n_heroes += 1
+
+    print("Found %d heroes in %d pools: %s" % (n_heroes, len(pools), pools))
+
+    assert n_heroes % len(pools) == 0
+
+    tmpdir = os.path.join(cwd, "tmp")
+    os.makedirs(tmpdir, exist_ok=True)
+    statsdbpath = os.path.join(tmpdir, f"evaluate-{WORKER_ID}.sqlite3")
+
+    script_parts = [
+        "DROP TABLE IF EXISTS stats;",
+        "DROP TABLE IF EXISTS stats_md;"
+    ]
+
+    with open(f"{cwd}/vcmi/server/ML/sql/structure.sql", "r") as f:
+        script_parts.append(re.sub(r"--.*", "", f.read()).strip())
+
+    with open(f"{cwd}/vcmi/server/ML/sql/seed.sql", "r") as f:
+        script_parts.append(re.sub(r"--.*", "", f.read()).strip())
+
+    stats_sql_script_template = "\n".join(script_parts)
+
+    print(f"Connecting to {statsdbpath}")
+    statsdb = sqlite3.connect(statsdbpath, isolation_level=None)
 
     try:
         for run, agent_load_file, metadata in it:
@@ -404,7 +474,6 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     env_version = agent.env_version
                     wrappers = []
 
-                print(f"CWD: {os.getcwd()}")
                 match env_version:
                     case 1:
                         env_cls = vcmi_gym.VcmiEnv_v1
@@ -417,87 +486,103 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     case _:
                         raise Exception("unsupported env version: %d" % env_version)
 
-                print(f"CWD: {os.getcwd()}")
-                rewards = {"StupidAI": [], "BattleAI": []}
-                lengths = {"StupidAI": [], "BattleAI": []}
-                net_values = {"StupidAI": [], "BattleAI": []}
-                is_successes = {"StupidAI": [], "BattleAI": []}
+                side = run.config.get("mapside")
+                side_int = 0 if side == "attacker" else 1
+                side_col = "red" if side == "attacker" else "blue"
 
+                stats_sql_script = stats_sql_script_template.replace("(?, ?, ?)", f"({len(pools)}, {n_heroes//len(pools)}, {side_int})")
+                results = []
                 wandb_results = {}
 
                 for k, v in flatten_dict(metadata, sep=".").items():
                     wandb_results[f"eval/metadata/{k}"] = v
 
-                for vmap in ["4x1024.vmap", "88-3stack-300K.vmap", "88-3stack-20K.vmap", "88-7stack-300K.vmap"]:
-                    rewards[vmap] = []
-                    lengths[vmap] = []
-                    net_values[vmap] = []
-                    is_successes[vmap] = []
+                for opponent in ["StupidAI", "BattleAI"]:
+                    # reset db
+                    statsdb.executescript(stats_sql_script)
 
-                    for opponent in ["StupidAI", "BattleAI"]:
+                    for siege in [False, True]:
                         tstart = time.time()
-                        venv = create_venv(env_cls, agent, f"gym/generated/evaluation/{vmap}", run.config.get("mapside", "attacker"), opponent, wrappers)
-                        ep_results = evaluate_policy(agent, venv, episodes_per_env=400)
+                        venv = create_venv(
+                            env_cls,
+                            agent,
+                            vmap,
+                            side,
+                            opponent,
+                            wrappers,
+                            env_kwargs=dict(
+                                vcmi_stats_storage=statsdbpath,
+                                # XXX: mid-game resets are OK (retreats are not collected as stats)
+                                vcmi_stats_persist_freq=n_eval_episodes,
+                                vcmi_stats_mode=side_col,
+                                # vcmi_loglevel_stats="trace",
+                                town_chance=100 if siege else 0
+                            )
+                        )
 
-                        rewards[opponent].append(np.mean(ep_results["rewards"]))
-                        lengths[opponent].append(np.mean(ep_results["lengths"]))
-                        net_values[opponent].append(np.mean(ep_results["net_values"]))
-                        is_successes[opponent].append(np.mean(ep_results["is_successes"]))
-
-                        rewards[vmap].append(np.mean(ep_results["rewards"]))
-                        lengths[vmap].append(np.mean(ep_results["lengths"]))
-                        net_values[vmap].append(np.mean(ep_results["net_values"]))
-                        is_successes[vmap].append(np.mean(ep_results["is_successes"]))
-
+                        ep_results = evaluate_policy(agent, venv, episodes_per_env=n_eval_episodes, statsdb=statsdb)
                         venv.close()
 
-                        print("%-25s %-10s %-8s reward=%-6d net_value=%-6d is_success=%-6.2f length=%-3d (%.2fs)" % (
+                        rows = statsdb.execute(
+                            "select pool, 1.0*sum(wins)/sum(games) as winrate "
+                            "from stats "
+                            "where games > 0 "
+                            "group by pool "
+                            "order by pool asc"
+                        ).fetchall()
+
+                        assert len(pools) == len(rows), f"{len(pools)} == {len(rows)}"
+
+                        result = Result(
+                            opponent=opponent,
+                            siege=siege,
+                            reward=np.mean(ep_results["rewards"]),
+                            length=np.mean(ep_results["lengths"]),
+                            net_value=np.mean(ep_results["net_values"]),
+                            is_success=np.mean(ep_results["is_successes"]),
+                            pooldata=[winrate for (_, winrate) in rows]
+                        )
+
+                        results.append(result)
+
+                        print("%-4s %-10s %-8s siege=%d reward=%-5d net_value=%-8d is_success=%-5.2f length=%-3d (%.2fs)" % (
                             run.name,
-                            vmap,
-                            opponent,
-                            np.mean(ep_results["rewards"]),
-                            np.mean(ep_results["net_values"]),
-                            np.mean(ep_results["is_successes"]),
-                            np.mean(ep_results["lengths"]),
+                            os.path.basename(vmap),
+                            result.opponent,
+                            result.siege,
+                            result.reward,
+                            result.net_value,
+                            result.is_success,
+                            result.length,
                             time.time() - tstart
                         ))
+
+                        print("%15s %s" % ("", "  ".join([f"{pools[i]}={f:.2f}" for (i, f) in enumerate(result.pooldata)])))
 
                         if watchdog_file:
                             pathlib.Path(watchdog_file).touch()
 
-                    wandb_results[f"eval/map/{vmap}/reward"] = np.mean(rewards[vmap])
-                    wandb_results[f"eval/map/{vmap}/length"] = np.mean(lengths[vmap])
-                    wandb_results[f"eval/map/{vmap}/net_value"] = np.mean(net_values[vmap])
-                    wandb_results[f"eval/map/{vmap}/is_success"] = np.mean(is_successes[vmap])
+                m = os.path.basename(vmap)
+                wandb_results[f"eval/map/{m}/reward"] = np.mean([r.reward for r in results])
+                wandb_results[f"eval/map/{m}/length"] = np.mean([r.length for r in results])
+                wandb_results[f"eval/map/{m}/net_value"] = np.mean([r.net_value for r in results])
+                wandb_results[f"eval/map/{m}/is_success"] = np.mean([r.is_success for r in results])
 
-                    # print("%-20s %-20s reward=%-6d net_value=%-6d is_success=%-6.2f length=%-3d" % (
-                    #     vmap,
-                    #     np.mean(rewards[vmap]),
-                    #     np.mean(net_values[vmap]),
-                    #     np.mean(is_successes[vmap]),
-                    #     np.mean(lengths[vmap]),
-                    # ))
+                for o in ["StupidAI", "BattleAI"]:
+                    wandb_results[f"eval/opponent/{o}/reward"] = np.mean([r.reward for r in results if r.opponent == o])
+                    wandb_results[f"eval/opponent/{o}/length"] = np.mean([r.length for r in results if r.opponent == o])
+                    wandb_results[f"eval/opponent/{o}/net_value"] = np.mean([r.net_value for r in results if r.opponent == o])
+                    wandb_results[f"eval/opponent/{o}/is_success"] = np.mean([r.is_success for r in results if r.opponent == o])
 
-                # no need to flatten lists, they are all the same lengths so np.mean just works
-                wandb_results["eval/opponent/StupidAI/reward"] = np.mean(rewards["StupidAI"])
-                wandb_results["eval/opponent/StupidAI/length"] = np.mean(lengths["StupidAI"])
-                wandb_results["eval/opponent/StupidAI/net_value"] = np.mean(net_values["StupidAI"])
-                wandb_results["eval/opponent/StupidAI/is_success"] = np.mean(is_successes["StupidAI"])
-
-                wandb_results["eval/opponent/BattleAI/reward"] = np.mean(rewards["BattleAI"])
-                wandb_results["eval/opponent/BattleAI/length"] = np.mean(lengths["BattleAI"])
-                wandb_results["eval/opponent/BattleAI/net_value"] = np.mean(net_values["BattleAI"])
-                wandb_results["eval/opponent/BattleAI/is_success"] = np.mean(is_successes["BattleAI"])
-
-                wandb_results["eval/all/reward"] = np.mean(rewards["StupidAI"] + rewards["BattleAI"])
-                wandb_results["eval/all/length"] = np.mean(lengths["StupidAI"] + lengths["BattleAI"])
-                wandb_results["eval/all/net_value"] = np.mean(net_values["StupidAI"] + net_values["BattleAI"])
-                wandb_results["eval/all/is_success"] = np.mean(is_successes["StupidAI"] + is_successes["BattleAI"])
+                for i, p in enumerate(pools):
+                    wandb_results[f"eval/pool/{p}/is_success"] = np.mean([r.pooldata[i] for r in results])
 
                 if os.getenv("NO_WANDB") != "true":
                     with dblock(db, WORKER_ID):
                         with wandb_init(run) as irun:
                             irun.log(copy.deepcopy(wandb_results))
+                else:
+                    print("WANDB RESULTS (skipped):\n%s" % wandb_results)
 
                 # LOG.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
                 #     run.id,

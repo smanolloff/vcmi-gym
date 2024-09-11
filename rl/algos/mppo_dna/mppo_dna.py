@@ -453,12 +453,6 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        # XXX: temp code for migration
-        if agent.args.network.features_extractor1_stacks[0]["t"] == "Unflatten":
-            agent.args.network.features_extractor1_stacks.pop(0)
-        if agent.args.network.features_extractor1_hexes[0]["t"] == "Unflatten":
-            agent.args.network.features_extractor1_hexes.pop(0)
-
         attrs = ["args", "observation_space", "action_space", "obs_dims", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
@@ -507,22 +501,7 @@ class Agent(nn.Module):
     @staticmethod
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
-        model = torch.load(agent_file, map_location=device, weights_only=False)
-
-        # XXX: temp code for migrating models
-        if getattr(model, "obs_dims", None) is None:
-            model.obs_dims = dict(misc=4, stacks=2040, hexes=10725)
-            model.NN_value.obs_splitter = Split(list(model.obs_dims.values()), dim=1)
-            model.NN_value.__dict__["_modules"].move_to_end("obs_splitter", last=False)
-            model.NN_value.obs_dims = model.obs_dims
-            model.NN_value.features_extractor1_hexes[0].unflattened_size = [165, model.obs_dims["hexes"] // 165]
-            model.NN_value.features_extractor1_stacks[0].unflattened_size = [20, model.obs_dims["stacks"] // 20]
-            model.NN_policy.obs_splitter = model.NN_value.obs_splitter
-            model.NN_policy.__dict__["_modules"].move_to_end("obs_splitter", last=False)
-            model.NN_policy.obs_dims = model.obs_dims
-            model.NN_policy.features_extractor1_hexes[0].unflattened_size = [165, model.obs_dims["hexes"] // 165]
-            model.NN_policy.features_extractor1_stacks[0].unflattened_size = [20, model.obs_dims["stacks"] // 20]
-        return model
+        return torch.load(agent_file, map_location=device, weights_only=False)
 
     def __init__(self, args, observation_space, action_space, obs_dims, state=None, device="cpu"):
         super().__init__()
@@ -1020,7 +999,7 @@ def main(args):
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
-            Agent.save(agent, "/Users/simo/Projects/vcmi-gym/simotest.pt")
+            # Agent.save(agent, "/Users/simo/Projects/vcmi-gym/simotest.pt")
 
             wandb_log({"params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"]})
             wandb_log({"params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"]})
@@ -1154,161 +1133,131 @@ def main(args):
 
 
 def debug_args():
-    return Args("test", "test", **{'env': {'conntype': 'thread', 'mana_max': 0, 'mana_min': 0, 'swap_sides': 0, 'town_chance': 10, 'boot_timeout': 300, 'user_timeout': 60, 'vcmi_timeout': 60, 'random_heroes': 1, 'random_obstacles': 1, 'step_reward_frac': -0.003, 'step_reward_mult': 1, 'term_reward_mult': 2, 'reward_dmg_factor': 20, 'step_reward_fixed': 0, 'warmachine_chance': 40, 'reward_army_value_ref': 500, 'reward_clip_tanh_army_frac': 1}, 'seed': 0, 'tags': ['Map-pools', 'StupidAI', 'obstacles-random', 'v4'], 'gamma': 0.8425, 'notes': '', 'resume': False, 'envmaps': ['gym/generated/4096/4x1024.vmap'], 'mapside': 'defender',
-        'network': {
-        'actor': {'t': 'Linear', 'in_features': 512, 'out_features': 2312},
-        'critic': {'t': 'Linear', 'in_features': 512, 'out_features': 1},
-        'attention': None,
-        'features_extractor2': [
-            {'t': 'LeakyReLU'},
-            {'t': 'Linear', 'in_features': 3284, 'out_features': 512},
-            {'t': 'LeakyReLU'}
-        ],
-        'features_extractor1_misc': [
-            {'t': 'Linear', 'in_features': 4, 'out_features': 16},
-            {'t': 'LeakyReLU'},
-            {'t': 'Linear', 'in_features': 16, 'out_features': 4}
-        ],
-        'features_extractor1_hexes': [
-            {'t': 'Unflatten', 'dim': 1, 'unflattened_size': [165, 65]},
-            {'t': 'Linear', 'in_features': 65, 'out_features': 256},
-            {'t': 'LeakyReLU'},
-            {'t': 'Linear', 'in_features': 256, 'out_features': 16},
-            {'t': 'Flatten'}
-        ],
-        'features_extractor1_stacks': [
-            {'t': 'Unflatten', 'dim': 1, 'unflattened_size': [20, 102]},
-            {'t': 'Linear', 'in_features': 102, 'out_features': 256},
-            {'t': 'LeakyReLU'},
-            {'t': 'Linear', 'in_features': 256, 'out_features': 32},
-            {'t': 'Flatten'}
-        ]}, 'vf_coef': 1.2, 'ent_coef': 0.007, 'loglevel': 20, 'norm_adv': True, 'trial_id': None, 'clip_coef': 0.4, 'logparams': {}, 'max_saves': 3, 'num_steps': 128, 'overwrite': [], 'clip_vloss': False, 'gae_lambda': 0.8, 'save_every': 0, 'env_version': 4, 'lr_schedule': {'mode': 'const', 'start': 1e-05}, 'env_wrappers': [], 'weight_decay': 0, 'max_grad_norm': 0.5, 'seconds_total': 1800, 'update_epochs': 10, 'quit_on_target': False, 'agent_load_file': 'data/PBT-v4-deep-20240910_191732/3065c_00001/checkpoint_000013/agent.pt', 'num_minibatches': 2, 'permasave_every': 0, 'skip_wandb_init': True, 'out_dir_template': 'data/{group_id}/{run_id}', 'rollouts_per_log': 50, 'ep_rew_mean_target': None, 'opponent_load_file': None, 'opponent_sbm_probs': [1, 0, 0], 'skip_wandb_log_code': False, 'success_rate_target': None, 'rollouts_per_mapchange': 0, 'rollouts_per_table_log': 0})
+    return Args(
+        "mppo_dna-test",
+        "mppo_dna-test",
+        loglevel=logging.DEBUG,
+        run_name=None,
+        trial_id=None,
+        wandb_project=None,
+        resume=False,
+        overwrite=[],
+        notes=None,
+        # agent_load_file="/Users/simo/Projects/vcmi-gym/vcmi/rel/bin/simotest.pt",
+        agent_load_file=None,
+        vsteps_total=0,
+        seconds_total=0,
+        rollouts_per_mapchange=0,
+        rollouts_per_log=1,
+        rollouts_per_table_log=100000,
+        success_rate_target=None,
+        ep_rew_mean_target=None,
+        quit_on_target=False,
+        mapside="defender",
+        save_every=2000000000,  # greater than time.time()
+        permasave_every=2000000000,  # greater than time.time()
+        max_saves=0,
+        out_dir_template="data/mppo_dna-test/mppo_dna-test",
+        opponent_load_file=None,
+        opponent_sbm_probs=[1, 0, 0],
+        weight_decay=0.05,
+        lr_schedule=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
+        num_envs=1,
+        num_steps=256,
+        gamma=0.8,
+        gae_lambda=0.9,
+        gae_lambda_policy=0.95,
+        gae_lambda_value=0.95,
+        num_minibatches=4,
+        num_minibatches_value=4,
+        num_minibatches_policy=4,
+        num_minibatches_distill=4,
+        update_epochs=10,
+        update_epochs_value=10,
+        update_epochs_policy=10,
+        update_epochs_distill=10,
+        norm_adv=True,
+        clip_coef=0.3,
+        clip_vloss=True,
+        ent_coef=0.01,
+        max_grad_norm=0.5,
+        distill_beta=1.0,
+        target_kl=None,
+        logparams={},
+        cfg_file=None,
+        seed=42,
+        skip_wandb_init=False,
+        skip_wandb_log_code=False,
+        env=EnvArgs(
+            max_steps=500,
+            reward_dmg_factor=5,
+            vcmi_loglevel_global="error",
+            vcmi_loglevel_ai="error",
+            vcmienv_loglevel="WARN",
+            consecutive_error_reward_factor=-1,
+            sparse_info=True,
+            step_reward_fixed=-100,
+            step_reward_mult=1,
+            term_reward_mult=0,
+            random_heroes=0,
+            random_obstacles=0,
+            town_chance=0,
+            warmachine_chance=0,
+            mana_min=0,
+            mana_max=0,
+            swap_sides=0,
+            reward_clip_tanh_army_frac=1,
+            reward_army_value_ref=0,
+            user_timeout=0,
+            vcmi_timeout=0,
+            boot_timeout=0,
+            conntype="thread"
+        ),
+        env_wrappers=[],
+        env_version=4,
+        # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
+        network=dict(
+            attention=None,
+            features_extractor1_misc=[
+                # => (B, M)
+                dict(t="LazyLinear", out_features=16),
+                dict(t="LeakyReLU"),
+                dict(t="Linear", in_features=16, out_features=4),
+                # => (B, 2)
+            ],
+            features_extractor1_stacks=[
+                # => (B, 20, S)
+                dict(t="LazyLinear", out_features=256),
+                dict(t="LeakyReLU"),
+                dict(t="Linear", in_features=256, out_features=32),
+                # => (B, 20, 16)
 
-    # return Args(
-    #     "mppo_dna-test",
-    #     "mppo_dna-test",
-    #     loglevel=logging.DEBUG,
-    #     run_name=None,
-    #     trial_id=None,
-    #     wandb_project=None,
-    #     resume=False,
-    #     overwrite=[],
-    #     notes=None,
-    #     # agent_load_file="/Users/simo/Projects/vcmi-gym/vcmi/rel/bin/simotest.pt",
-    #     agent_load_file=None,
-    #     vsteps_total=0,
-    #     seconds_total=0,
-    #     rollouts_per_mapchange=0,
-    #     rollouts_per_log=1,
-    #     rollouts_per_table_log=100000,
-    #     success_rate_target=None,
-    #     ep_rew_mean_target=None,
-    #     quit_on_target=False,
-    #     mapside="defender",
-    #     save_every=2000000000,  # greater than time.time()
-    #     permasave_every=2000000000,  # greater than time.time()
-    #     max_saves=0,
-    #     out_dir_template="data/mppo_dna-test/mppo_dna-test",
-    #     opponent_load_file=None,
-    #     opponent_sbm_probs=[1, 0, 0],
-    #     weight_decay=0.05,
-    #     lr_schedule=ScheduleArgs(mode="const", start=0.001),
-    #     lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
-    #     lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
-    #     lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
-    #     num_envs=1,
-    #     num_steps=256,
-    #     gamma=0.8,
-    #     gae_lambda=0.9,
-    #     gae_lambda_policy=0.95,
-    #     gae_lambda_value=0.95,
-    #     num_minibatches=4,
-    #     num_minibatches_value=4,
-    #     num_minibatches_policy=4,
-    #     num_minibatches_distill=4,
-    #     update_epochs=10,
-    #     update_epochs_value=10,
-    #     update_epochs_policy=10,
-    #     update_epochs_distill=10,
-    #     norm_adv=True,
-    #     clip_coef=0.3,
-    #     clip_vloss=True,
-    #     ent_coef=0.01,
-    #     max_grad_norm=0.5,
-    #     distill_beta=1.0,
-    #     target_kl=None,
-    #     logparams={},
-    #     cfg_file=None,
-    #     seed=42,
-    #     skip_wandb_init=False,
-    #     skip_wandb_log_code=False,
-    #     env=EnvArgs(
-    #         max_steps=500,
-    #         reward_dmg_factor=5,
-    #         vcmi_loglevel_global="error",
-    #         vcmi_loglevel_ai="error",
-    #         vcmienv_loglevel="WARN",
-    #         consecutive_error_reward_factor=-1,
-    #         sparse_info=True,
-    #         step_reward_fixed=-100,
-    #         step_reward_mult=1,
-    #         term_reward_mult=0,
-    #         random_heroes=0,
-    #         random_obstacles=0,
-    #         town_chance=0,
-    #         warmachine_chance=0,
-    #         mana_min=0,
-    #         mana_max=0,
-    #         swap_sides=0,
-    #         reward_clip_tanh_army_frac=1,
-    #         reward_army_value_ref=0,
-    #         user_timeout=0,
-    #         vcmi_timeout=0,
-    #         boot_timeout=0,
-    #         conntype="thread"
-    #     ),
-    #     env_wrappers=[],
-    #     env_version=4,
-    #     # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
-    #     network=dict(
-    #         attention=None,
-    #         features_extractor1_misc=[
-    #             # => (B, M)
-    #             dict(t="LazyLinear", out_features=16),
-    #             dict(t="LeakyReLU"),
-    #             dict(t="Linear", in_features=16, out_features=4),
-    #             # => (B, 2)
-    #         ],
-    #         features_extractor1_stacks=[
-    #             # => (B, 20, S)
-    #             dict(t="LazyLinear", out_features=256),
-    #             dict(t="LeakyReLU"),
-    #             dict(t="Linear", in_features=256, out_features=32),
-    #             # => (B, 20, 16)
+                dict(t="Flatten"),
+                # => (B, 320)
+            ],
+            features_extractor1_hexes=[
+                # => (B, 165, H)
+                dict(t="LazyLinear", out_features=256),
+                dict(t="LeakyReLU"),
+                dict(t="Linear", in_features=256, out_features=16),
+                # => (B, 165, 16)
 
-    #             dict(t="Flatten"),
-    #             # => (B, 320)
-    #         ],
-    #         features_extractor1_hexes=[
-    #             # => (B, 165, H)
-    #             dict(t="LazyLinear", out_features=256),
-    #             dict(t="LeakyReLU"),
-    #             dict(t="Linear", in_features=256, out_features=16),
-    #             # => (B, 165, 16)
-
-    #             dict(t="Flatten"),
-    #             # => (B, 2640)
-    #         ],
-    #         features_extractor2=[
-    #             # => (B, 2964)
-    #             dict(t="LeakyReLU"),
-    #             dict(t="LazyLinear", out_features=512),
-    #             dict(t="LeakyReLU"),
-    #         ],
-    #         actor=dict(t="Linear", in_features=512, out_features=2312),
-    #         critic=dict(t="Linear", in_features=512, out_features=1)
-    #     )
-    # )
+                dict(t="Flatten"),
+                # => (B, 2640)
+            ],
+            features_extractor2=[
+                # => (B, 2964)
+                dict(t="LeakyReLU"),
+                dict(t="LazyLinear", out_features=512),
+                dict(t="LeakyReLU"),
+            ],
+            actor=dict(t="Linear", in_features=512, out_features=2312),
+            critic=dict(t="Linear", in_features=512, out_features=1)
+        )
+    )
 
 
 if __name__ == "__main__":

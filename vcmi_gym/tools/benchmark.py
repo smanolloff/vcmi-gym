@@ -72,7 +72,7 @@ def main():
     model = None
 
     # Normal torch model
-    # model = torch.load("rl/models/Attacker model:v7/agent.pt")
+    # model = torch.load("rl/models/Attacker model:v7/agent.pt", weights_only=False)
 
     # JIT torch model (~5% faster)
     #model = torch.jit.load("rl/models/Attacker model:v7/jit-agent.pt")
