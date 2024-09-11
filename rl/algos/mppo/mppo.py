@@ -224,7 +224,7 @@ class ResBlock(nn.Module):
 
 class SelfAttention(nn.Module):
     def __init__(self, edim, num_heads=1):
-        assert self.edim % num_heads == 0, f"{self.edim} % {num_heads} == 0"
+        assert edim % num_heads == 0, f"{edim} % {num_heads} == 0"
         super().__init__()
         self.edim = edim
         self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=1, batch_first=True)
