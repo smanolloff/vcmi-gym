@@ -258,11 +258,21 @@ def find_local_agents(LOG, _WORKER_ID, _N_WORKERS, _statedict):
         time.sleep(30)
 
 
-def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
+def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict, group):
     with tempfile.TemporaryDirectory(prefix="vcmi-gym-evaluator") as tmpdir:
         while True:
             try:
                 gt = datetime.datetime.now() - datetime.timedelta(days=3)
+                filters = {
+                    "updatedAt": {"$gt": gt.isoformat()},
+                    "tags": {"$nin": ["no-eval"], "$in": ["v4"]},
+                    "display_name": "T0"
+                }
+
+                if group:
+                    filters["group"] = group
+                    print("Filtering runs for group %s" % group)
+
                 runs = wandb.Api().runs(
                     path="s-manolloff/vcmi-gym",
                     filters={
@@ -333,11 +343,11 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict):
             time.sleep(30)
 
 
-def find_agents(LOG, WORKER_ID, N_WORKERS, statedict):
+def find_agents(LOG, WORKER_ID, N_WORKERS, statedict, group):
     if os.getenv("NO_WANDB") == "true":
         return find_local_agents(LOG, WORKER_ID, N_WORKERS, statedict)
     else:
-        return find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict)
+        return find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict, group)
 
 
 # Flatten dict:
@@ -406,7 +416,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
         rid = torch.load(model, map_location="cpu", weights_only=False).args.run_id
         it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{rid}"), model, {})]
     else:
-        it = find_agents(LOG, WORKER_ID, N_WORKERS, statedict)
+        it = find_agents(LOG, WORKER_ID, N_WORKERS, statedict, args.group)
 
     # store this as it will get changed when VCMI is loaded as a thread
     cwd = os.getcwd()
@@ -621,6 +631,7 @@ if __name__ == "__main__":
     parser.add_argument('-i', '--worker-id', type=int, default=0, help="this worker's ID (0-based)")
     parser.add_argument('-I', '--n-workers', type=int, default=1, help="total number of workers")
     parser.add_argument('-d', '--database', type=str, help="path to sqlite3 database for locking")
+    parser.add_argument('-g', '--group', type=str, help="wandb group to filter runs for")
     args = parser.parse_args()
 
     main(**args.__dict__)

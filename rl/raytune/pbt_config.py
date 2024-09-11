@@ -168,7 +168,7 @@ config = {
         "attention": None,
         "features_extractor1_misc": [
             # => (B, M)
-            {"t": "Linear", "in_features": "_M_", "out_features": 16},
+            {"t": "LazyLinear", "out_features": 16},
             {"t": "LeakyReLU"},
             {"t": "Linear", "in_features": 16, "out_features": 4},
             # => (B, 4)
@@ -177,7 +177,7 @@ config = {
             # => (B, 20, S)
             # {"t": "SelfAttention", "edim": _S_, "num_heads": 6},
 
-            {"t": "Linear", "in_features": "_S_", "out_features": 256},
+            {"t": "LazyLinear", "out_features": 256},
             {"t": "LeakyReLU"},
             {"t": "Linear", "in_features": 256, "out_features": 32},
             # => (B, 20, 32)
@@ -192,7 +192,7 @@ config = {
             # => (B, 165, H)
             # {"t": "SelfAttention", "edim": "_H_", "num_heads": 5},
 
-            {"t": "Linear", "in_features": "_H_", "out_features": 256},
+            {"t": "LazyLinear", "out_features": 256},
             {"t": "LeakyReLU"},
             {"t": "Linear", "in_features": 256, "out_features": 16},
             # => (B, 165, 16)
