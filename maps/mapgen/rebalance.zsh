@@ -69,7 +69,7 @@ function run_mlclient() {
     #
     timeout_minutes=5  # XXX: ensure watchdog has bigger timeout
 
-    for _ in $(seq 5); do
+    for _ in $(seq 1); do
         touch "$WATCHDOGFILE"
 
         # XXX: persist freq of 999999999 db write only on exit
@@ -82,7 +82,7 @@ function run_mlclient() {
             --stats-storage "$DB" \
             --stats-timeout $((timeout_minutes*60*1000)) \
             --stats-persist-freq 999999999 \
-            --max-battles 20000 \
+            --max-battles 10000 \
             --map "$VCMIMAP"
     done
 }

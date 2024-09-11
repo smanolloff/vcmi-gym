@@ -83,12 +83,12 @@ def save(path, header, objects, surface_terrain):
 
 
 def backup(path):
-    for i in range(1, 9):
+    for i in range(1, 99):
         if os.path.exists(f"{path}.{i}"):
             continue
         shutil.move(path, f"{path}.{i}")
         return
-    raise Exception("Could not make backup (already have 9 backups)")
+    raise Exception("Could not make backup (already have 99 backups)")
 
 
 @dataclass
