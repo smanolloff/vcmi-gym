@@ -428,7 +428,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 for k, v in flatten_dict(metadata, sep=".").items():
                     wandb_results[f"eval/metadata/{k}"] = v
 
-                for vmap in ["88-3stack-300K.vmap", "88-3stack-20K.vmap", "88-7stack-300K.vmap"]:
+                for vmap in ["4x1024.vmap", "88-3stack-300K.vmap", "88-3stack-20K.vmap", "88-7stack-300K.vmap"]:
                     rewards[vmap] = []
                     lengths[vmap] = []
                     net_values[vmap] = []

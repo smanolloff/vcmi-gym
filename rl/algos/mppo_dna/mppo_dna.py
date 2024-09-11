@@ -30,6 +30,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 # import tyro
+import warnings
 
 from .. import common
 
@@ -445,6 +446,13 @@ class Agent(nn.Module):
     @staticmethod
     def save(agent, agent_file):
         print("Saving agent to %s" % agent_file)
+        if not os.path.isabs(agent_file):
+            warnings.warn(
+                f"path {agent_file} is not absolute!"
+                " If VCMI is started in a thread, the current directory is changed."
+                f" CWD: {os.getcwd()}"
+            )
+
         attrs = ["args", "observation_space", "action_space", "obs_dims", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
@@ -494,14 +502,17 @@ class Agent(nn.Module):
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
         model = torch.load(agent_file, map_location=device)
+
         # XXX: temp code for migrating models
         if getattr(model, "obs_dims", None) is None:
             model.obs_dims = dict(misc=4, stacks=2040, hexes=10725)
             model.NN_value.obs_splitter = Split(list(model.obs_dims.values()), dim=1)
+            model.NN_value.__dict__["_modules"].move_to_end("obs_splitter", last=False)
             model.NN_value.obs_dims = model.obs_dims
             model.NN_value.features_extractor1_hexes[0].unflattened_size = [165, model.obs_dims["hexes"] // 165]
             model.NN_value.features_extractor1_stacks[0].unflattened_size = [20, model.obs_dims["stacks"] // 20]
             model.NN_policy.obs_splitter = model.NN_value.obs_splitter
+            model.NN_policy.__dict__["_modules"].move_to_end("obs_splitter", last=False)
             model.NN_policy.obs_dims = model.obs_dims
             model.NN_policy.features_extractor1_hexes[0].unflattened_size = [165, model.obs_dims["hexes"] // 165]
             model.NN_policy.features_extractor1_stacks[0].unflattened_size = [20, model.obs_dims["stacks"] // 20]
@@ -1145,7 +1156,7 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="data/PBT-v4-deep-20240910_191732/3065c_00000/checkpoint_000005/agent.pt",
+        # agent_load_file="/Users/simo/Projects/vcmi-gym/vcmi/rel/bin/simotest.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -1216,7 +1227,7 @@ def debug_args():
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
-            conntype="proc"
+            conntype="thread"
         ),
         env_wrappers=[],
         env_version=4,
@@ -1225,15 +1236,16 @@ def debug_args():
             attention=None,
             features_extractor1_misc=[
                 # => (B, M)
-                dict(t="LazyLinear", out_features=4),
+                dict(t="LazyLinear", out_features=16),
                 dict(t="LeakyReLU"),
+                dict(t="Linear", in_features=16, out_features=4),
                 # => (B, 2)
             ],
             features_extractor1_stacks=[
                 # => (B, 20, S)
-                dict(t="LazyLinear", out_features=64),
+                dict(t="LazyLinear", out_features=256),
                 dict(t="LeakyReLU"),
-                dict(t="Linear", in_features=64, out_features=16),
+                dict(t="Linear", in_features=256, out_features=32),
                 # => (B, 20, 16)
 
                 dict(t="Flatten"),
@@ -1241,9 +1253,9 @@ def debug_args():
             ],
             features_extractor1_hexes=[
                 # => (B, 165, H)
-                dict(t="LazyLinear", out_features=32),
+                dict(t="LazyLinear", out_features=256),
                 dict(t="LeakyReLU"),
-                dict(t="Linear", in_features=32, out_features=16),
+                dict(t="Linear", in_features=256, out_features=16),
                 # => (B, 165, 16)
 
                 dict(t="Flatten"),
