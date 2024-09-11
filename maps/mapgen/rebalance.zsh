@@ -69,7 +69,7 @@ function run_mlclient() {
     #
     timeout_minutes=5  # XXX: ensure watchdog has bigger timeout
 
-    for _ in $(seq 10); do
+    for _ in $(seq 5); do
         touch "$WATCHDOGFILE"
 
         # XXX: persist freq of 999999999 db write only on exit

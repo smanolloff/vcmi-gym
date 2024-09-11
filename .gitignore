@@ -17,6 +17,7 @@ test.out
 *.onnx
 *.sqlite3
 *.sqlite3-journal
+.watchdog
 tmp/
 rl/models/
 rl/stats/
