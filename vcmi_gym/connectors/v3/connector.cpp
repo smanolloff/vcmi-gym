@@ -20,7 +20,6 @@
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"
-#include "MMAILoader/TorchModel.h"
 #include <algorithm>
 
 #include <pybind11/pybind11.h>
@@ -336,10 +335,15 @@ namespace Connector::V3 {
         std::function<double(const MMAI::Schema::IState* s)> getValueRed;
         std::function<double(const MMAI::Schema::IState* s)> getValueBlue;
 
+        std::string leftModelFile = "";
+        std::string rightModelFile = "";
+
         if (red == "MMAI_USER") {
             leftModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
         } else if (red == "MMAI_MODEL") {
-            leftModel = new MMAI::TorchModel(redModel, false);
+            // BAI will load the model model based on settings["battle"]["MMAI"]
+            leftModel = nullptr;
+            leftModelFile = redModel;
         } else {
             leftModel = new ML::ModelWrappers::Scripted(red);
         }
@@ -347,7 +351,9 @@ namespace Connector::V3 {
         if (blue == "MMAI_USER") {
             rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
         } else if (blue == "MMAI_MODEL") {
-            rightModel = new MMAI::TorchModel(blueModel, false);
+            // BAI will load the model model based on settings["battle"]["MMAI"]
+            rightModel = nullptr;
+            rightModelFile = blueModel;
         } else {
             rightModel = new ML::ModelWrappers::Scripted(blue);
         }
@@ -358,6 +364,8 @@ namespace Connector::V3 {
             mapname,            // mapname
             leftModel,          // leftModel
             rightModel,         // rightModel
+            leftModelFile,      // leftModelFile
+            rightModelFile,     // rightModelFile
             0,                  // maxBattles
             seed,               // seed
             randomHeroes,       // randomHeroes

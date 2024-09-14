@@ -25,18 +25,11 @@ else()
 endif()
 
 find_library(LIBMLCLIENT NAMES mlclient PATHS "${VCMI_BIN_PATH}" NO_DEFAULT_PATH)
-find_library(LIBMMAILOADER NAMES mmailoader PATHS "${VCMI_BIN_PATH}" NO_DEFAULT_PATH)
 
 if(LIBMLCLIENT)
     message(STATUS "Found libmlclient: ${LIBMLCLIENT}")
 else()
     message(FATAL_ERROR "libmlclient not found (searched in \"${VCMI_BIN_PATH}\")")
-endif()
-
-if(LIBMMAILOADER)
-    message(STATUS "Found libmmailoader: ${LIBMMAILOADER}")
-else()
-    message(FATAL_ERROR "libmmailoader not found (searched in \"${VCMI_BIN_PATH}\")")
 endif()
 
 # Using variables for the file lists make it easier to define new targets
@@ -75,10 +68,10 @@ target_link_libraries(connector_v1 PRIVATE "${Boost_LIBRARIES}")
 target_link_libraries(connector_v2 PRIVATE "${Boost_LIBRARIES}")
 target_link_libraries(connector_v3 PRIVATE "${Boost_LIBRARIES}")
 target_link_libraries(connector_v4 PRIVATE "${Boost_LIBRARIES}")
-target_link_libraries(connector_v1 PUBLIC ${LIBMLCLIENT} ${LIBMMAILOADER})
-target_link_libraries(connector_v2 PUBLIC ${LIBMLCLIENT} ${LIBMMAILOADER})
-target_link_libraries(connector_v3 PUBLIC ${LIBMLCLIENT} ${LIBMMAILOADER})
-target_link_libraries(connector_v4 PUBLIC ${LIBMLCLIENT} ${LIBMMAILOADER})
+target_link_libraries(connector_v1 PUBLIC ${LIBMLCLIENT})
+target_link_libraries(connector_v2 PUBLIC ${LIBMLCLIENT})
+target_link_libraries(connector_v3 PUBLIC ${LIBMLCLIENT})
+target_link_libraries(connector_v4 PUBLIC ${LIBMLCLIENT})
 include_directories(SYSTEM ${Boost_INCLUDE_DIR})
 
 if(DEBUG_BUILD)
