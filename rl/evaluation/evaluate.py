@@ -517,83 +517,80 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 for k, v in flatten_dict(metadata, sep=".").items():
                     wandb_results[f"eval/metadata/{k}"] = v
 
-                for opponent in ["StupidAI", "BattleAI"]:
-                    # reset db
-                    statsdb.executescript(stats_sql_script)
+                # reset db
+                statsdb.executescript(stats_sql_script)
 
-                    for siege in [False, True]:
-                        tstart = time.time()
-                        venv = create_venv(
-                            env_cls,
-                            agent,
-                            vmap,
-                            side,
-                            opponent,
-                            wrappers,
-                            env_kwargs=dict(
-                                vcmi_stats_storage=statsdbpath,
-                                # XXX: mid-game resets are OK (retreats are not collected as stats)
-                                vcmi_stats_persist_freq=n_eval_episodes,
-                                vcmi_stats_mode=side_col,
-                                # vcmi_loglevel_stats="trace",
-                                town_chance=100 if siege else 0
-                            )
+                for siege in [False, True]:
+                    tstart = time.time()
+                    venv = create_venv(
+                        env_cls,
+                        agent,
+                        vmap,
+                        side,
+                        "BattleAI",
+                        wrappers,
+                        env_kwargs=dict(
+                            vcmi_stats_storage=statsdbpath,
+                            # XXX: mid-game resets are OK (retreats are not collected as stats)
+                            vcmi_stats_persist_freq=n_eval_episodes,
+                            vcmi_stats_mode=side_col,
+                            # vcmi_loglevel_stats="trace",
+                            town_chance=100 if siege else 0
                         )
+                    )
 
-                        with torch.no_grad():
-                            ep_results = evaluate_policy(agent, jit_agent, venv, episodes_per_env=n_eval_episodes, statsdb=statsdb)
-                        venv.close()
+                    with torch.no_grad():
+                        ep_results = evaluate_policy(agent, jit_agent, venv, episodes_per_env=n_eval_episodes, statsdb=statsdb)
+                    venv.close()
 
-                        rows = statsdb.execute(
-                            "select pool, 1.0*sum(wins)/sum(games) as winrate "
-                            "from stats "
-                            "where games > 0 "
-                            "group by pool "
-                            "order by pool asc"
-                        ).fetchall()
+                    rows = statsdb.execute(
+                        "select pool, 1.0*sum(wins)/sum(games) as winrate "
+                        "from stats "
+                        "where games > 0 "
+                        "group by pool "
+                        "order by pool asc"
+                    ).fetchall()
 
-                        assert len(pools) == len(rows), f"{len(pools)} == {len(rows)}"
+                    assert len(pools) == len(rows), f"{len(pools)} == {len(rows)}"
 
-                        result = Result(
-                            opponent=opponent,
-                            siege=siege,
-                            reward=np.mean(ep_results["rewards"]),
-                            length=np.mean(ep_results["lengths"]),
-                            net_value=np.mean(ep_results["net_values"]),
-                            is_success=np.mean(ep_results["is_successes"]),
-                            pooldata=[winrate for (_, winrate) in rows]
-                        )
+                    result = Result(
+                        opponent="BattleAI",
+                        siege=siege,
+                        reward=np.mean(ep_results["rewards"]),
+                        length=np.mean(ep_results["lengths"]),
+                        net_value=np.mean(ep_results["net_values"]),
+                        is_success=np.mean(ep_results["is_successes"]),
+                        pooldata=[winrate for (_, winrate) in rows]
+                    )
 
-                        results.append(result)
+                    results.append(result)
 
-                        print("%-4s %-10s %-8s siege=%d reward=%-5d net_value=%-8d is_success=%-5.2f length=%-3d (%.2fs)" % (
-                            run.name,
-                            os.path.basename(vmap),
-                            result.opponent,
-                            result.siege,
-                            result.reward,
-                            result.net_value,
-                            result.is_success,
-                            result.length,
-                            time.time() - tstart
-                        ))
+                    print("%-4s %-10s %-8s siege=%d reward=%-5d net_value=%-8d is_success=%-5.2f length=%-3d (%.2fs)" % (
+                        run.name,
+                        os.path.basename(vmap),
+                        "BattleAI",
+                        result.siege,
+                        result.reward,
+                        result.net_value,
+                        result.is_success,
+                        result.length,
+                        time.time() - tstart
+                    ))
 
-                        print("%15s %s" % ("", "  ".join([f"{pools[i]}={f:.2f}" for (i, f) in enumerate(result.pooldata)])))
+                    print("%15s %s" % ("", "  ".join([f"{pools[i]}={f:.2f}" for (i, f) in enumerate(result.pooldata)])))
 
-                        if watchdog_file:
-                            pathlib.Path(watchdog_file).touch()
+                    if watchdog_file:
+                        pathlib.Path(watchdog_file).touch()
 
                 m = os.path.basename(vmap)
-                wandb_results[f"eval/map/{m}/reward"] = np.mean([r.reward for r in results])
-                wandb_results[f"eval/map/{m}/length"] = np.mean([r.length for r in results])
-                wandb_results[f"eval/map/{m}/net_value"] = np.mean([r.net_value for r in results])
-                wandb_results[f"eval/map/{m}/is_success"] = np.mean([r.is_success for r in results])
 
-                for o in ["StupidAI", "BattleAI"]:
-                    wandb_results[f"eval/opponent/{o}/reward"] = np.mean([r.reward for r in results if r.opponent == o])
-                    wandb_results[f"eval/opponent/{o}/length"] = np.mean([r.length for r in results if r.opponent == o])
-                    wandb_results[f"eval/opponent/{o}/net_value"] = np.mean([r.net_value for r in results if r.opponent == o])
-                    wandb_results[f"eval/opponent/{o}/is_success"] = np.mean([r.is_success for r in results if r.opponent == o])
+                wandb_results["eval/all/is_success"] = np.mean([r.is_success for r in results])
+                wandb_results["eval/field/is_success"] = np.mean([r.is_success for r in results if not r.siege])
+                wandb_results["eval/siege/is_success"] = np.mean([r.is_success for r in results if r.siege])
+
+                wandb_results["eval/all/length"] = np.mean([r.length for r in results])
+                wandb_results["eval/field/length"] = np.mean([r.length for r in results if not r.siege])
+                wandb_results["eval/siege/length"] = np.mean([r.length for r in results if r.siege])
 
                 for i, p in enumerate(pools):
                     wandb_results[f"eval/pool/{p}/is_success"] = np.mean([r.pooldata[i] for r in results])
