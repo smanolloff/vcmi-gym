@@ -270,17 +270,20 @@ class SelfAttention(nn.Module):
         assert edim % num_heads == 0, f"{edim} % {num_heads} == 0"
         super().__init__()
         self.edim = edim
-        self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=1, batch_first=True)
+        self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=num_heads, batch_first=True)
 
     def forward(self, b_obs, b_masks=None):
-        assert b_obs.shape == (b_obs.shape[0], 11, 15, self.edim), f"wrong obs shape: {b_obs.shape} != ({b_obs.shape[0]}, 11, 15, {self.edim})"
+        assert len(b_obs.shape) == 3
+        assert b_obs.shape[2] == self.edim
+
         if b_masks is None:
-            b_obs = b_obs.flatten(start_dim=1, end_dim=2)
-            # => (B, 165, e)
             res, _ = self.mha(b_obs, b_obs, b_obs, need_weights=False)
             return res
         else:
-            assert b_masks.shape == (b_masks.shape[0], 165, 165), f"wrong b_masks shape: {b_masks.shape} != ({b_masks.shape[0]}, 165, 165)"
+            assert len(b_masks.shape) == 3
+            assert b_masks.shape[0] == b_obs.shape[0], f"{b_masks.shape[0]} == {b_obs.shape[0]}"
+            assert b_masks.shape[1] == b_obs.shape[1], f"{b_masks.shape[1]} == {b_obs.shape[1]}"
+            assert b_masks.shape[1] == b_masks.shape[2], f"{b_masks.shape[1]} == {b_masks.shape[2]}"
             b_obs = b_obs.flatten(start_dim=1, end_dim=2)
             # => (B, 165, e)
             res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
@@ -1226,6 +1229,7 @@ def debug_args():
                 dict(t="LazyLinear", out_features=16),
                 dict(t="LeakyReLU"),
                 dict(t="Linear", in_features=16, out_features=4),
+                dict(t="LeakyReLU"),
                 # => (B, 2)
             ],
             features_extractor1_stacks=[
@@ -1233,6 +1237,8 @@ def debug_args():
                 dict(t="LazyLinear", out_features=256),
                 dict(t="LeakyReLU"),
                 dict(t="Linear", in_features=256, out_features=32),
+                dict(t="LeakyReLU"),
+                dict(t="SelfAttention", edim=32, num_heads=1),
                 # => (B, 20, 16)
 
                 dict(t="Flatten"),
@@ -1243,6 +1249,8 @@ def debug_args():
                 dict(t="LazyLinear", out_features=256),
                 dict(t="LeakyReLU"),
                 dict(t="Linear", in_features=256, out_features=16),
+                dict(t="LeakyReLU"),
+                dict(t="SelfAttention", edim=16, num_heads=1),
                 # => (B, 165, 16)
 
                 dict(t="Flatten"),
@@ -1250,7 +1258,6 @@ def debug_args():
             ],
             features_extractor2=[
                 # => (B, 2964)
-                dict(t="LeakyReLU"),
                 dict(t="LazyLinear", out_features=512),
                 dict(t="LeakyReLU"),
             ],

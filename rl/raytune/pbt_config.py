@@ -171,15 +171,16 @@ config = {
             {"t": "LazyLinear", "out_features": 16},
             {"t": "LeakyReLU"},
             {"t": "Linear", "in_features": 16, "out_features": 4},
+            {"t": "LeakyReLU"},
             # => (B, 4)
         ],
         "features_extractor1_stacks": [
             # => (B, 20, S)
-            # {"t": "SelfAttention", "edim": _S_, "num_heads": 6},
-
             {"t": "LazyLinear", "out_features": 256},
             {"t": "LeakyReLU"},
             {"t": "Linear", "in_features": 256, "out_features": 32},
+            {"t": "LeakyReLU"},
+            {"t": "SelfAttention", "edim": 32, "num_heads": 1},
             # => (B, 20, 32)
 
             {"t": "Flatten"},
@@ -190,11 +191,11 @@ config = {
         ],
         "features_extractor1_hexes": [
             # => (B, 165, H)
-            # {"t": "SelfAttention", "edim": "_H_", "num_heads": 5},
-
             {"t": "LazyLinear", "out_features": 256},
             {"t": "LeakyReLU"},
             {"t": "Linear", "in_features": 256, "out_features": 16},
+            {"t": "LeakyReLU"},
+            {"t": "SelfAttention", "edim": 16, "num_heads": 1},
             # => (B, 165, 16)
 
             {"t": "Flatten"},
@@ -205,7 +206,6 @@ config = {
         ],
         "features_extractor2": [
             # => (B, 3284)
-            {"t": "LeakyReLU"},
             {"t": "Linear", "in_features": 3284, "out_features": 512},
             {"t": "LeakyReLU"},
         ],
@@ -250,7 +250,7 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "conntype": "thread"
+        "conntype": "proc"
     },
     "seed": 0,
     "env_version": 4,

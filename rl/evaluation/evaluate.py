@@ -56,7 +56,7 @@ def dblock(db, lock_id):
             db.execute("ROLLBACK")
 
 
-def evaluate_policy(agent, venv, episodes_per_env, statsdb):
+def evaluate_policy(agent, jit_agent, venv, episodes_per_env, statsdb):
     n_envs = venv.num_envs
     counts = np.zeros(n_envs, dtype="int")
     ep_results = {"rewards": [], "lengths": [], "net_values": [], "is_successes": []}
@@ -99,16 +99,26 @@ def evaluate_policy(agent, venv, episodes_per_env, statsdb):
     #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/vector/vector_env.py#L275-L300
     #   https://github.com/Farama-Foundation/Gymnasium/blob/v0.29.1/gymnasium/wrappers/record_episode_statistics.py#L102-L124
     #
+    if jit_agent:
+        assert n_envs == 1, "jit agent can be used only if num_envs is 1"
+
     while (counts < episodes_per_env).any():
         if not hasattr(agent.args, "envmaps"):
             # old scheme (without PERCENT_CUR_TO_START_TOTAL_VALUE)
             observations = observations[:, :, :, 1:]
 
-        actions = agent.predict(
-            torch.as_tensor(observations).float(),
-            torch.as_tensor(np.array(venv.unwrapped.call("action_mask")))
-        )
-        observations, rewards, terms, truncs, infos = venv.step(actions)
+        if jit_agent:
+            action = jit_agent.predict(
+                torch.as_tensor(observations[0]).float(),
+                torch.as_tensor(np.array(venv.unwrapped.call("action_mask")[0]))
+            )
+            observations, rewards, terms, truncs, infos = venv.step([action])
+        else:
+            actions = agent.predict(
+                torch.as_tensor(observations).float(),
+                torch.as_tensor(np.array(venv.unwrapped.call("action_mask")))
+            )
+            observations, rewards, terms, truncs, infos = venv.step(actions)
 
         if "final_info" not in infos:
             continue
@@ -270,17 +280,10 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict, group):
                 }
 
                 if group:
-                    filters["group"] = group
                     print("Filtering runs for group %s" % group)
+                    filters["group"] = group
 
-                runs = wandb.Api().runs(
-                    path="s-manolloff/vcmi-gym",
-                    filters={
-                        "updatedAt": {"$gt": gt.isoformat()},
-                        "tags": {"$nin": ["no-eval"], "$in": ["v4"]},
-                        "display_name": "T0"
-                    }
-                )
+                runs = wandb.Api().runs(path="s-manolloff/vcmi-gym", filters=filters)
 
                 for run in runs:
                     LOG.info("Scanning artifacts of run %s (%s/%s)" % (run.name, run.group, run.id))
@@ -375,7 +378,7 @@ class Result:
     pooldata: List[float]
 
 
-def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None):
+def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None, jit_model=None, group=None):
     os.environ["WANDB_SILENT"] = "true"
 
     LOG = logging.getLogger("evaluator")
@@ -416,13 +419,14 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
         rid = torch.load(model, map_location="cpu", weights_only=False).args.run_id
         it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{rid}"), model, {})]
     else:
-        it = find_agents(LOG, WORKER_ID, N_WORKERS, statedict, args.group)
+        assert not jit_model, "jit-model can only be given if model is also given"
+        it = find_agents(LOG, WORKER_ID, N_WORKERS, statedict, group)
 
     # store this as it will get changed when VCMI is loaded as a thread
     cwd = os.getcwd()
     print(f"CWD: {cwd}")
 
-    n_eval_episodes = 1000  # combinations for 8x64 maps are 448
+    n_eval_episodes = 500  # combinations for 8x64 maps are 448
 
     # Build list of pool names based on the hero names in the map JSON
     vmap = "gym/generated/evaluation/8x64.vmap"
@@ -471,6 +475,12 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 LOG.info('Evaluating %s (%s/%s)' % (run.name, run.group, run.id))
                 agent = load_agent(agent_file=agent_load_file, run_id=run.id)
                 agent.eval()
+
+                if jit_model:
+                    jit_agent = torch.jit.load(jit_model)
+                    jit_agent.eval()
+                else:
+                    jit_agent = None
 
                 nn = getattr(agent, "NN", getattr(agent, "NN_policy", None))
                 assert nn, "agent has neighter .NN nor .NN_policy properties"
@@ -530,7 +540,8 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                             )
                         )
 
-                        ep_results = evaluate_policy(agent, venv, episodes_per_env=n_eval_episodes, statsdb=statsdb)
+                        with torch.no_grad():
+                            ep_results = evaluate_policy(agent, jit_agent, venv, episodes_per_env=n_eval_episodes, statsdb=statsdb)
                         venv.close()
 
                         rows = statsdb.execute(
@@ -631,6 +642,7 @@ if __name__ == "__main__":
     parser.add_argument('-i', '--worker-id', type=int, default=0, help="this worker's ID (0-based)")
     parser.add_argument('-I', '--n-workers', type=int, default=1, help="total number of workers")
     parser.add_argument('-d', '--database', type=str, help="path to sqlite3 database for locking")
+    parser.add_argument('-j', '--jit-model', type=str, help="jit model  to use for predictions (the regular model will be used for args only)")
     parser.add_argument('-g', '--group', type=str, help="wandb group to filter runs for")
     args = parser.parse_args()
 

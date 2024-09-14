@@ -4,13 +4,14 @@
 #      for Mac, commands must be amended
 
 USAGE="
-Usage: zsh rl/evaluation/watchdog.zsh N_WORKERS WORKER_ID
+Usage: zsh rl/evaluation/watchdog.zsh N_WORKERS WORKER_ID GROUP
 "
 
 CHECK_EVERY=90  # minutes
 
 N_WORKERS=$1
 WORKER_ID=$2
+GROUP=$3
 WATCHDOGFILE=/tmp/evaluator-${WORKER_ID}
 
 [ -n "$N_WORKERS" -a -n "$WORKER_ID" ] || { echo "$USAGE"; exit 1; }
@@ -63,7 +64,9 @@ function handle_sigint() {
 }
 
 function start_evaluator() {
-  python -m rl.evaluation.evaluate -w $WATCHDOGFILE -d locks.sqlite3 -I $N_WORKERS -i $WORKER_ID
+  args=(-w $WATCHDOGFILE -d locks.sqlite3 -I $N_WORKERS -i $WORKER_ID)
+  [ -z "$GROUP" ] || args+=(-g "$GROUP")
+  python -m rl.evaluation.evaluate "${args[@]}"
 }
 
 trap "handle_sigint" INT
