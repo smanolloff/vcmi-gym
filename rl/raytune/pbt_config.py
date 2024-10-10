@@ -60,11 +60,14 @@ config = {
             "num_steps": [128, 256, 512],
 
             # PPO-vanilla specific
-            "lr_schedule": {"start": explist(5e-6, 1e-4, n=20)},
+            "lr_schedule": {"start": explist(1e-5, 2e-4, n=20)},
             "gae_lambda": linlist(0.5, 0.99, n=20),
             "num_minibatches": [2, 4, 8],
-            "update_epochs": linlist(2, 20, n=5, dtype=int),
+            "update_epochs": linlist(1, 10, n=5, dtype=int),
             "vf_coef": linlist(0.1, 2, n=9),
+            # "clip_vloss": [1, 0],  # not used in ppo-dna
+            "clip_coef": linlist(0.1, 0.8, n=8),
+            "norm_adv": [1, 0],
 
             # "env": {
             #     "reward_dmg_factor": linlist(0, 50, n=11),
@@ -168,49 +171,41 @@ config = {
         "attention": None,
         "features_extractor1_misc": [
             # => (B, M)
-            {"t": "LazyLinear", "out_features": 16},
-            {"t": "LeakyReLU"},
-            {"t": "Linear", "in_features": 16, "out_features": 4},
+            {"t": "LazyLinear", "out_features": 4},
             {"t": "LeakyReLU"},
             # => (B, 4)
         ],
         "features_extractor1_stacks": [
             # => (B, 20, S)
-            {"t": "LazyLinear", "out_features": 256},
+            {"t": "LazyLinear", "out_features": 16},
             {"t": "LeakyReLU"},
-            {"t": "Linear", "in_features": 256, "out_features": 32},
-            {"t": "LeakyReLU"},
-            {"t": "SelfAttention", "edim": 32, "num_heads": 1},
-            # => (B, 20, 32)
+            # => (B, 20, 16)
 
             {"t": "Flatten"},
-            # => (B, 640)
+            # => (B, 320)
 
             # {"t": "LeakyReLU"},
             # {"t": "Linear", "in_features": 640, "out_features": 256},
         ],
         "features_extractor1_hexes": [
             # => (B, 165, H)
-            {"t": "LazyLinear", "out_features": 256},
+            {"t": "LazyLinear", "out_features": 8},
             {"t": "LeakyReLU"},
-            {"t": "Linear", "in_features": 256, "out_features": 16},
-            {"t": "LeakyReLU"},
-            {"t": "SelfAttention", "edim": 16, "num_heads": 1},
-            # => (B, 165, 16)
+            # => (B, 165, 8)
 
             {"t": "Flatten"},
-            # => (B, 2640)
+            # => (B, 1320)
 
             # {"t": "LeakyReLU"},
             # {"t": "Linear", "in_features": 2640, "out_features": 256},
         ],
         "features_extractor2": [
-            # => (B, 3284)
-            {"t": "Linear", "in_features": 3284, "out_features": 512},
+            # => (B, 1644)
+            {"t": "Linear", "in_features": 1644, "out_features": 768},
             {"t": "LeakyReLU"},
         ],
-        "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},
-        "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
+        "actor": {"t": "Linear", "in_features": 768, "out_features": 2312},
+        "critic": {"t": "Linear", "in_features": 768, "out_features": 1}
     },
 
     # Static
@@ -233,16 +228,17 @@ config = {
     "max_saves": 3,         # no effect (NO_SAVE=true)
     "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
     "env": {
-        "reward_dmg_factor": 20,
+        "reward_dmg_factor": 5,
         "step_reward_fixed": 0,
-        "step_reward_frac": -0.003,
+        "step_reward_frac": -0.002,
         "step_reward_mult": 1,
-        "term_reward_mult": 2,
+        "term_reward_mult": 0,
         "reward_clip_tanh_army_frac": 1,
         "reward_army_value_ref": 500,
-        "random_heroes": 1,
-        "random_obstacles": 1,
-        "town_chance": 10,
+        "reward_dynamic_scaling": False,
+        "random_heroes": 3,
+        "random_obstacles": 3,
+        "town_chance": 0,
         "warmachine_chance": 40,
         "mana_min": 0,
         "mana_max": 0,
@@ -250,7 +246,7 @@ config = {
         "user_timeout": 60,
         "vcmi_timeout": 60,
         "boot_timeout": 300,
-        "conntype": "proc"
+        "conntype": "thread"
     },
     "seed": 0,
     "env_version": 4,

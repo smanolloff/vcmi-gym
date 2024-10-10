@@ -1,0 +1,217 @@
+@startuml "arch-vcmi-fullyconv"
+' left to right direction
+
+skinparam defaultTextAlignment center
+skinparam NoteTextAlignment left
+
+<style>
+Usecase {
+  BackGroundColor #efe
+}
+</style>
+
+'''
+''' Utility functions
+'''
+
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+' Wraps each line of $txt within $open and $close
+' Example:
+'   $tagged_text("<color:red>", "two\nlines", "</color>")
+'   => "<color:red>two</color>\n<color:red>lines</color>")"
+!function $tagged_text($open, $txt, $close) return $open + $replace($txt, "\n", $close+"\n"+$open) + $close
+
+!function $node_text($name) return $tagged_text("<b>", $name, "</b>")
+!function $node_text($name, $desc) return $node_text($name)+"\n"+$tagged_text("<font:monospaced><size:10>", $desc, "</size></font>")
+!function $node_text($name, $desc, $txt) return $node_text($name, $desc)+"\n\n"+$tagged_text("<color:888><size:10>", $txt, "</size></color>")
+
+'''
+''' Node types
+'''
+
+' Data
+!procedure $Data($id, $name)
+  Usecase $id as "$node_text($name)"
+!endprocedure
+
+!procedure $Data($id, $name, $desc)
+  Usecase $id as "$node_text($name, $desc)"
+!endprocedure
+
+!procedure $Data($id, $name, $desc, $txt)
+  Usecase $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' MLP (FC)
+!procedure $MLP($id, $name, $desc)
+  Hexagon $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $MLP($id, $name, $desc, $txt)
+  Hexagon $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Transformer
+!procedure $Transformer($id, $name, $desc)
+  Queue $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Transformer($id, $name, $desc, $txt)
+  Queue $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Convolution
+!procedure $Convolution($id, $name, $desc)
+  Node $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Convolution($id, $name, $desc, $txt)
+  Node $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Output
+!procedure $Output($id, $name)
+  Component $id as "$node_text($name)" #orange
+!endprocedure
+
+!procedure $Output($id, $name, $desc)
+  Component $id as "$node_text($name, $desc)" #orange
+!endprocedure
+
+' Condition
+!procedure $Condition($id, $name)
+  Boundary $id as "$node_text($name)"
+!endprocedure
+
+!procedure $Condition($id, $name, $desc)
+  Boundary $id as "$node_text($name, $desc)"
+!endprocedure
+
+' Reshape
+!procedure $Reshape($id)
+  Control $id as " "
+!endprocedure
+
+' Activation
+!procedure $Activation($id, $name)
+  Action $id as "$name"
+!endprocedure
+
+' Sum / Mean / etc.
+!procedure $Op($id, $name)
+  Agent $id as "$name"
+!endprocedure
+!procedure $Op($id, $name, $txt)
+  ' Agent $id as "$node_text($name, "", $txt)"
+  Agent $id as "$name\n$tagged_text("<color:888><size:10>", $txt, "</size></color>")"
+!endprocedure
+
+!procedure $Stack($id, $name)
+  Collections $id as "$name"
+!endprocedure
+!procedure $Stack($id, $name, $txt)
+  ' Collections $id as "$node_text($name, "", $txt)"
+  Collections $id as "$name\n$tagged_text("<color:888><size:10>", $txt, "</size></color>")"
+!endprocedure
+
+
+' Link
+!procedure $Link($a, $b, $dim)
+  $a --> $b : " $dim "
+!endprocedure
+!procedure $Link($a, $b, $dim, $txt)
+  ' The newline causes a bug where the 1st line appears
+  ' on the top-left side
+  ' ...but it looks better that way
+  $a --> $b : " $dim "\n$txt
+!endprocedure
+
+' title "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+' left to right direction
+
+
+$Data(state, "State", "", "<<H3 screenshot here>>")
+$Data(obs_hexes, "Hex data", "165 hexes\n**<<E>>** attributes each")
+$Link(state, obs_hexes, "")
+
+$Convolution(conv0, "Conv2d", "kernel_size=(1,56)\nstride=(1,56)\nout_channels=32")
+$Link(obs_hexes, conv0, "(165, E)\n→\n(E, 11, 15)")
+$Convolution(conv1, "Conv2d", "kernel_size=5\nstride=1\nout_channels=32")
+$Link(conv0, conv1, "<<ReLU>>\n\n(165, 32)\n→\n(32, 11, 15)")
+$Data(hex_embeddings, "Hex\nEmbeddings")
+$Link(conv1, hex_embeddings, "<<ReLU>>\n\n(32, 11, 15)")
+
+Frame "Non-spatial" {
+  $MLP(nonspatial_mlp, "MLP", "10560 → 256")
+  $Link(hex_embeddings, nonspatial_mlp, "\n(32, 11, 15)\n→\n(10560,)")
+  $Data(embedded_summary, "Summary\nEmbedding")
+  $Link(nonspatial_mlp, embedded_summary, "<<ReLU>>\n\n(256,)")
+  $MLP(action1_mlp, "MLP", "256 → 5")
+  $Link(embedded_summary, action1_mlp, "")
+
+  $Data(action1, "Action1", "<i>logits</i>\napply mask & sample")
+  $Link(action1_mlp, action1, "(5,)")
+
+  $MLP(value_mlp, "MLP", "256 → 1")
+  $Link(embedded_summary, value_mlp, "")
+  $Output(value, "Value")
+  $Link(value_mlp, value, "")
+}
+
+$Output(action1_out, "Action1")
+$Link(action1, action1_out, "")
+
+note bottom of action1_out
+* Defend
+* Wait
+end note
+
+$Stack(concat1, "stack")
+$Link(action1_out, concat1, "broadcast\n(1, 11, 15)")
+$Link(hex_embeddings, concat1, "(64, 11, 15)")
+$Data(hex_embeddings2, "Hex\nEmbeddings #2")
+$Link(concat1, hex_embeddings2, "(65, 11, 15)")
+
+Frame "Spatial #1" {
+  $Convolution(conv3, "Conv2d", "kernel_size=1\nstride=1\nout_channels=1")
+  $Link(hex_embeddings2, conv3, "(65, 11, 15)")
+  $Data(action2, "Action2", "<i>logits</i>\napply mask & sample")
+  $Link(conv3, action2, "(1, 11, 15)\n→\n(165,)")
+}
+
+$Output(action2_out, "Action2", "i.e. Hex for Action1")
+$Link(action2, action2_out, "")
+
+note bottom of action2_out
+* Move to Hex
+* Shoot at Hex
+end note
+
+$Stack(concat2, "stack")
+$Link(action2_out, concat2, "broadcast\n(1, 11, 15)")
+$Link(hex_embeddings2, concat2, "(65, 11, 15)")
+$Data(hex_embeddings3, "Hex\nEmbeddings #3")
+$Link(concat2, hex_embeddings3, "(66, 11, 15)")
+
+Frame "Spatial #2" {
+  $Convolution(conv4, "Conv2d", "kernel_size=1\nstride=1\nout_channels=1")
+  $Link(hex_embeddings3, conv4, "(66, 11, 15)")
+  $Data(action3, "Action3", "<i>logits</i>\napply mask & sample")
+  $Link(conv4, action3, "(1, 11, 15)\n→\n(165,)")
+}
+
+$Output(action3_out, "Action3", "i.e. Hex2 for Action1")
+$Link(action3, action3_out, "N")
+
+note bottom of action3_out
+* Move to Hex then attack at Hex2
+end note
+
+@enduml
+

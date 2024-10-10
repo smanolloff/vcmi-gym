@@ -1,0 +1,171 @@
+@startuml "arch-vcmi-fullyconv"
+' left to right direction
+
+skinparam defaultTextAlignment center
+skinparam NoteTextAlignment left
+
+<style>
+Usecase {
+  BackGroundColor #efe
+}
+
+
+</style>
+
+'''
+''' Utility functions
+'''
+
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+' Wraps each line of $txt within $open and $close
+' Example:
+'   $tagged_text("<color:red>", "two\nlines", "</color>")
+'   => "<color:red>two</color>\n<color:red>lines</color>")"
+!function $tagged_text($open, $txt, $close) return $open + $replace($txt, "\n", $close+"\n"+$open) + $close
+
+!function $node_text($name) return $tagged_text("<b>", $name, "</b>")
+!function $node_text($name, $desc) return $node_text($name)+"\n"+$tagged_text("<font:monospaced><size:10>", $desc, "</size></font>")
+!function $node_text($name, $desc, $txt) return $node_text($name, $desc)+"\n\n"+$tagged_text("<color:888><size:10>", $txt, "</size></color>")
+
+'''
+''' Node types
+'''
+
+' Data
+!procedure $Data($id, $name)
+  Usecase $id as "$node_text($name)"
+!endprocedure
+
+!procedure $Data($id, $name, $desc)
+  Usecase $id as "$node_text($name, $desc)"
+!endprocedure
+
+!procedure $Data($id, $name, $desc, $txt)
+  Usecase $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' FC (FC)
+!procedure $FC($id, $name, $desc)
+  Hexagon $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $FC($id, $name, $desc, $txt)
+  Hexagon $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Transformer
+!procedure $Transformer($id, $name, $desc)
+  Queue $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Transformer($id, $name, $desc, $txt)
+  Queue $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Convolution
+!procedure $Convolution($id, $name, $desc)
+  Node $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Convolution($id, $name, $desc, $txt)
+  Node $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Output
+!procedure $Output($id, $name)
+  Component $id as "$node_text($name)" #orange
+!endprocedure
+
+!procedure $Output($id, $name, $desc)
+  Component $id as "$node_text($name, $desc)" #orange
+!endprocedure
+
+' Condition
+!procedure $Condition($id, $name)
+  Boundary $id as "$node_text($name)"
+!endprocedure
+
+!procedure $Condition($id, $name, $desc)
+  Boundary $id as "$node_text($name, $desc)"
+!endprocedure
+
+' Reshape
+!procedure $Reshape($id)
+  Control $id as " "
+!endprocedure
+
+' Activation
+!procedure $Activation($id, $name)
+  Action $id as "$name"
+!endprocedure
+
+' Sum / Mean / etc.
+!procedure $Op($id, $name)
+  Agent $id as "$name"
+!endprocedure
+!procedure $Op($id, $name, $txt)
+  ' Agent $id as "$node_text($name, "", $txt)"
+  Agent $id as "$name\n$tagged_text("<color:888><size:10>", $txt, "</size></color>")"
+!endprocedure
+
+' Link
+!procedure $Link($a, $b, $dim)
+  $a --> $b : " $dim "
+!endprocedure
+!procedure $Link($a, $b, $dim, $txt)
+  ' The newline causes a bug where the 1st line appears
+  ' on the top-left side
+  ' ...but it looks better that way
+  $a --> $b : " $dim "\n$txt
+!endprocedure
+
+' title "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+' left to right direction
+
+$Data(state, "State", "", "<<H3 screenshot here>>")
+$Data(obs_stacks, "Stack data", "20 stacks\n**<<S>>** attributes each")
+$Data(obs_hexes, "Hex data", "165 hexes\n**<<H>>** attributes each")
+$Data(obs_misc, "Misc. data", "**<<M>>** attributes")
+$Link(state, obs_stacks, "")
+$Link(state, obs_hexes, "")
+$Link(state, obs_misc, "")
+
+$Convolution(conv_stacks, "Conv1d", "kernel_size=H\nstride=H\nout_channels=8")
+$Convolution(conv_hexes, "Conv1d", "kernel_size=H\nstride=H\nout_channels=8")
+$FC(fc_misc, "FC", "M → 4")
+$Link(obs_misc, fc_misc, "(M,)")
+$Link(obs_hexes, conv_hexes, "(165*H)")
+$Link(obs_stacks, conv_stacks, "(20*S)")
+
+$Op(concat, "Concat")
+$Link(conv_stacks, concat, "(8, 20) → (160,)")
+$Link(conv_hexes, concat, "(8, 165) → (1320,)")
+$Link(fc_misc, concat, "(4,)")
+
+$Activation(act_concat, "LeakyReLU")
+$Link(concat, act_concat, "(1484,)")
+
+
+$FC(mlp0, "FC", "1484 → 512")
+$Link(act_concat, mlp0, "(1484,)")
+$Activation(mlp0_act, "LeakyReLU")
+$Link(mlp0, mlp0_act, "(512,)")
+$FC(action_mlp, "FC", "512 → 2312")
+$Link(mlp0_act, action_mlp, "(512,)")
+$FC(value_mlp, "FC", "512 → 1")
+$Link(mlp0_act, value_mlp, "(512,)")
+
+$Output(action, "Action")
+$Link(action_mlp, action, "(2312,)")
+
+$Output(value, "Value")
+$Link(value_mlp, value, "(1,)")
+
+@enduml
+

@@ -104,6 +104,7 @@ def create_venv(env_cls, args, seed):
 
     num_envs = len(args.envmaps)
     all_maps = args.envmaps
+    version = args.env_version
 
     state = {"n": 0}
     lock = threading.RLock()
@@ -130,10 +131,26 @@ def create_venv(env_cls, args, seed):
                 dataclasses.asdict(args.env),
                 seed=seed,
                 mapname=mapname,
-                role=args.mapside,
-                opponent=opponent,
-                opponent_model=args.opponent_load_file,
             )
+
+            if version == 4:
+                env_kwargs = dict(
+                    env_kwargs,
+                    role=args.mapside,
+                    opponent=opponent,
+                    opponent_model=args.opponent_load_file,
+                )
+            elif version == 3:
+                env_kwargs = dict(
+                    env_kwargs,
+                    attacker=opponent,
+                    defender=opponent,
+                    attacker_model=args.opponent_load_file,
+                    defender_model=args.opponent_load_file,
+                )
+                env_kwargs[args.mapside] = "MMAI_USER"
+            else:
+                raise Exception("Unexpected env version: %s" % version)
 
             for a in env_kwargs.pop("deprecated_args", ["encoding_type"]):
                 env_kwargs.pop(a, None)

@@ -29,6 +29,8 @@ import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.mobile_optimizer import optimize_for_mobile
+
 # import tyro
 import warnings
 
@@ -77,6 +79,7 @@ class EnvArgs:
     swap_sides: int = 0
     reward_clip_tanh_army_frac: int = 1
     reward_army_value_ref: int = 0
+    reward_dynamic_scaling: bool = False
     true_rng: bool = True  # DEPRECATED
     deprecated_args: list[dict] = field(default_factory=lambda: [
         "encoding_type",
@@ -251,6 +254,9 @@ class Split(nn.Module):
     def forward(self, x):
         return torch.split(x, self.split_size, self.dim)
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}(dim={self.dim}, split_size={self.split_size})"
+
 
 class ResBlock(nn.Module):
     def __init__(self, channels, activation="LeakyReLU"):
@@ -296,7 +302,7 @@ class AgentNN(nn.Module):
         kwargs = dict(spec)  # copy
         t = kwargs.pop("t")
 
-        assert len(obs_dims) == 3  # [M, H, S]
+        assert len(obs_dims) == 3  # [M, S, H]
 
         for k, v in kwargs.items():
             if v == "_M_":
@@ -319,7 +325,6 @@ class AgentNN(nn.Module):
         self.obs_dims = obs_dims
 
         assert isinstance(obs_dims, dict)
-        assert len(obs_dims) == 3
         assert list(obs_dims.keys()) == ["misc", "stacks", "hexes"]  # order is important
 
         # 2 nonhex actions (RETREAT, WAIT) + 165 hexes*14 actions each
@@ -499,7 +504,9 @@ class Agent(nn.Module):
         # common
         jagent.actor = clean_agent.NN_policy.actor
         jagent.critic = clean_agent.NN_value.critic
-        torch.jit.save(torch.jit.script(jagent), jagent_file)
+
+        jagent_optimized = optimize_for_mobile(torch.jit.script(jagent), preserved_methods=["get_version", "predict", "get_value"])
+        jagent_optimized._save_for_lite_interpreter(jagent_file)
 
     @staticmethod
     def load(agent_file, device="cpu"):
@@ -548,42 +555,67 @@ class JitAgent(nn.Module):
     # XXX: attention is not handled here
     @torch.jit.export
     def predict(self, obs, mask) -> int:
-        with torch.no_grad():
-            b_obs = obs.unsqueeze(dim=0)
-            b_mask = mask.unsqueeze(dim=0)
+        b_obs = obs.unsqueeze(dim=0)
+        b_mask = mask.unsqueeze(dim=0)
 
-            # v1, v2
-            # features = self.features_extractor(b_obs)
+        # v1, v2
+        # features = self.features_extractor(b_obs)
 
-            # v3+
-            misc, stacks, hexes = self.obs_splitter(b_obs)
-            fmisc = self.features_extractor1_policy_misc(misc)
-            fstacks = self.features_extractor1_policy_stacks(stacks)
-            fhexes = self.features_extractor1_policy_hexes(hexes)
-            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
-            features = self.features_extractor2_policy(fcat)
+        # v3+
+        misc, stacks, hexes = self.obs_splitter(b_obs)
+        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
+        features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
+            self.features_extractor1_policy_misc(split[0]),
+            self.features_extractor1_policy_stacks(split[0]),
+            self.features_extractor1_policy_hexes(split[1])
+        )))
 
-            action_logits = self.actor(features)
-            dist = common.SerializableCategoricalMasked(logits=action_logits, mask=b_mask)
-            action = torch.argmax(dist.probs, dim=1)
-            return action.int().item()
+        action_logits = self.actor(features)
+        probs = self.categorical_masked(logits0=action_logits, mask=b_mask)
+        action = torch.argmax(probs, dim=1)
+
+        return action.int().item()
+
+    @torch.jit.export
+    def forward(self, obs) -> torch.Tensor:
+        b_obs = obs.unsqueeze(dim=0)
+        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
+        features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
+            self.features_extractor1_policy_misc(split[0]),
+            self.features_extractor1_policy_stacks(split[1]),
+            self.features_extractor1_policy_hexes(split[2])
+        )))
+
+        return torch.cat(dim=1, tensors=(self.actor(features), self.critic(features)))
 
     @torch.jit.export
     def get_value(self, obs) -> float:
-        with torch.no_grad():
-            b_obs = obs.unsqueeze(dim=0)
-            misc, stacks, hexes = self.obs_splitter(b_obs)
-            fmisc = self.features_extractor1_value_misc(misc)
-            fstacks = self.features_extractor1_value_stacks(stacks)
-            fhexes = self.features_extractor1_value_hexes(hexes)
-            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
-            features = self.features_extractor2_value(fcat)
-            value = self.critic(features)
-            return value.float().item()
+        b_obs = obs.unsqueeze(dim=0)
+        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
+        features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
+            self.features_extractor1_policy_misc(split[0]),
+            self.features_extractor1_policy_stacks(split[1]),
+            self.features_extractor1_policy_hexes(split[2])
+        )))
+
+        value = self.critic(features)
+        return value.float().item()
 
     @torch.jit.export
     def get_version(self) -> int:
         return self.env_version
+
+    # Implement SerializableCategoricalMasked as a function
+    # (lite interpreted does not support instantiating the class)
+    @torch.jit.export
+    def categorical_masked(self, logits0: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits0.dtype)
+
+        # logits
+        logits1 = torch.where(mask, logits0, mask_value)
+        logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        return probs
 
 
 def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda):
@@ -1214,6 +1246,7 @@ def debug_args():
             swap_sides=0,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
+            reward_dynamic_scaling=False,
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,

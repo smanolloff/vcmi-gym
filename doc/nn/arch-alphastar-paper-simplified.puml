@@ -1,0 +1,205 @@
+@startuml "arch-alphastar-entity"
+
+skinparam defaultTextAlignment center
+
+skinparam defaultTextAlignment center
+skinparam NoteTextAlignment left
+
+<style>
+Usecase {
+  BackGroundColor #efe
+}
+
+
+</style>
+
+'''
+''' Utility functions
+'''
+
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+' Wraps each line of $txt within $open and $close
+' Example:
+'   $tagged_text("<color:red>", "two\nlines", "</color>")
+'   => "<color:red>two</color>\n<color:red>lines</color>")"
+!function $tagged_text($open, $txt, $close) return $open + $replace($txt, "\n", $close+"\n"+$open) + $close
+
+!function $node_text($name) return $tagged_text("<b>", $name, "</b>")
+!function $node_text($name, $desc) return $node_text($name)+"\n"+$tagged_text("<font:monospaced><size:10>", $desc, "</size></font>")
+!function $node_text($name, $desc, $txt) return $node_text($name, $desc)+"\n\n"+$tagged_text("<color:888><size:10>", $txt, "</size></color>")
+
+'''
+''' Node types
+'''
+
+' Data
+!procedure $Data($id, $name)
+  Usecase $id as "$node_text($name)"
+!endprocedure
+
+!procedure $Data($id, $name, $desc)
+  Usecase $id as "$node_text($name, $desc)"
+!endprocedure
+
+!procedure $Data($id, $name, $desc, $txt)
+  Usecase $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' FC (FC)
+!procedure $FC($id, $name, $desc)
+  Hexagon $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $FC($id, $name, $desc, $txt)
+  Hexagon $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Transformer
+!procedure $Transformer($id, $name, $desc)
+  Queue $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Transformer($id, $name, $desc, $txt)
+  Queue $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Convolution
+!procedure $Convolution($id, $name, $desc)
+  Node $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Convolution($id, $name, $desc, $txt)
+  Node $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Output
+!procedure $Output($id, $name)
+  Component $id as "$node_text($name)" #orange
+!endprocedure
+
+!procedure $Output($id, $name, $desc)
+  Component $id as "$node_text($name, $desc)" #orange
+!endprocedure
+
+' Condition
+!procedure $Condition($id, $name)
+  Boundary $id as "$node_text($name)"
+!endprocedure
+
+!procedure $Condition($id, $name, $desc)
+  Boundary $id as "$node_text($name, $desc)"
+!endprocedure
+
+' Reshape
+!procedure $Reshape($id)
+  Control $id as " "
+!endprocedure
+
+' Activation
+!procedure $Activation($id, $name)
+  Action $id as "$name"
+!endprocedure
+
+' Sum / Mean / etc.
+!procedure $Op($id, $name)
+  Agent $id as "$name"
+!endprocedure
+!procedure $Op($id, $name, $txt)
+  ' Agent $id as "$node_text($name, "", $txt)"
+  Agent $id as "$name\n$tagged_text("<color:888><size:10>", $txt, "</size></color>")"
+!endprocedure
+
+' Link
+!procedure $Link($a, $b, $dim)
+  $a --> $b : " $dim "
+!endprocedure
+!procedure $Link($a, $b, $dim, $txt)
+  ' The newline causes a bug where the 1st line appears
+  ' on the top-left side
+  ' ...but it looks better that way
+  $a --> $b : " $dim "\n$txt
+!endprocedure
+
+' Link
+!procedure $LinkAct($a, $b, $dim)
+  $a -0-> $b : " $dim "
+!endprocedure
+!procedure $LinkAct($a, $b, $dim, $txt)
+  ' The newline causes a bug where the 1st line appears
+  ' on the top-left side
+  ' ...but it looks better that way
+  $a -0-> $b : " $dim "\n$txt
+!endprocedure
+
+' title "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+' left to right direction
+
+$Data(enc1in, "Preprocessed entities", "N entities", "N=512\nEach having size 676+")
+
+$FC(enc1fc, "Encoder: FC?", "? → E", "N channels, E=256") #yellow
+$Link(enc1in, enc1fc, "(N, ?)")
+
+Frame "'Transformer' layer\n(3x)" as transformer {
+  $Op(t_split, "self-attention", "embed_dim=E\n\n(2-head)")
+  $LinkAct(enc1fc, t_split, "(N, E)", "ReLU")
+  $Transformer(t_h1, "Head #1", "embed_dim=E/2")
+  $Transformer(t_h2, "Head #2", "embed_dim=E/2")
+  t_h1 <- t_split
+  t_split -> t_h2
+
+  $FC(t_h1fc, "FC", "E/2 → E", "N channels")
+  $FC(t_h2fc, "FC", "E/2 → E", "N channels")
+
+  $Link(t_h1, t_h1fc, "(N, E/2)")
+  $Link(t_h2, t_h2fc, "(N, E/2)")
+
+  $Op(t_sum, "sum")
+
+  t_h1fc -> t_sum : (N, E)
+  t_sum <- t_h2fc : (N, E)
+
+  $FC(t_fc, "FC", "E → 1024 → E", "N channels")
+  $Link(t_sum, t_fc, "(N, E)", "<back:yellow>ReLU?</back>")
+
+}
+
+Control repeat as " "
+$LinkAct(t_fc, repeat, "(N, E)", "ReLU")
+note right : 3 "transformer" layers
+
+Label fork as "<size:32><b>⑃\nfork"
+$LinkAct(repeat, fork, "(N, E)\n<color:888><size:10>(512, 256)", "ReLU")
+
+$FC(fc1, "FC", "E → E")
+fc1 <- fork : "(N, E)"
+$Data(entity_embeddings, "Entity embeddings", "(N, E)")
+$LinkAct(fc1, entity_embeddings, "(N, E)", "ReLU")
+
+$Op(mean, "mean", "across N")
+fork -> mean : "(N, E)"
+$FC(fc2, "FC", "E → E")
+$Link(mean, fc2, "(E,)")
+$Data(embedded_entity, "Embedded entity", "(E,)")
+$LinkAct(fc2, embedded_entity, "(E,)", "ReLU")
+
+
+' Rectangle r2 as " " {
+'   $Op(r2mean, "mean", "(across units)\nXXX: masking?")
+'   $Link(t_fc, r2mean, "(N, E)")
+'   $FC(r2fc, "FC", "256 → 256")
+'   $Link(r2mean, r2fc, "(256,)")
+'   $Activation(r2act, "ReLU")
+'   $Link(r2fc, r2act, "(256,)")
+
+'   $Data(embedded_entity, "Embedded entity", "(256,)")
+'   r2act --> embedded_entity
+' }
+
+@enduml
+

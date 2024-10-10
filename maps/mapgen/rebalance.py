@@ -293,11 +293,6 @@ def gather_pool_rebalance_stats(db, objects, pr):
         v = objects[k]
         pr.n_total += 1
 
-        # assert k in winrates, "hero %s not in stats db" % k
-        if k not in pr.winrates:
-            pr.n_unknown += 1
-            continue
-
         stacks = []
         for jstack in v["options"]["army"]:
             if not jstack:
@@ -311,7 +306,14 @@ def gather_pool_rebalance_stats(db, objects, pr):
             ))
 
         assert len(stacks) > 0 and len(stacks) <= 7
-        pr.armies[k] = Army(None, sorted(stacks, key=lambda s: -s.creature.value))
+
+        # assert k in winrates, "hero %s not in stats db" % k
+        if k in pr.winrates:
+            pr.armies[k] = Army(None, sorted(stacks, key=lambda s: -s.creature.value))
+        else:
+            pr.n_unknown += 1
+            debug_armies[k] = Army(None, sorted(stacks, key=lambda s: -s.creature.value))
+            continue
 
     army_value_list = [a.value() for a in pr.armies.values()]
 

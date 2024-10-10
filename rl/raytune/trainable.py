@@ -103,6 +103,11 @@ class Trainable(ray.tune.Trainable):
             art.ttl = datetime.timedelta(days=7)
             art.metadata["step"] = wandb.run.step
             art.add_file(f, name="agent.pt")
+
+            jf = os.path.join(checkpoint_dir, "jit-agent.pt")
+            self.algo.Agent.jsave(self.agent, jf)
+            art.add_file(jf, name="jit-agent.pt")
+
             wandb.run.log_artifact(art, name="agent.pt")
         return checkpoint_dir
 
