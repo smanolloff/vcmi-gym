@@ -426,7 +426,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
     cwd = os.getcwd()
     print(f"CWD: {cwd}")
 
-    n_eval_episodes = 500  # combinations for 8x64 maps are 448
+    n_eval_episodes = 500  # combinations for 8x64 maps are 4032 per pool = 32256 total
 
     # Build list of pool names based on the hero names in the map JSON
     vmap = "gym/generated/evaluation/8x64.vmap"

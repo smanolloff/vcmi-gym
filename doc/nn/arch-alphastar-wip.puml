@@ -1,0 +1,159 @@
+@startuml "arch-vcmi-alphastar"
+
+skinparam defaultTextAlignment center
+
+<style>
+Collections {
+  BackGroundColor #efe
+}
+</style>
+
+'''
+''' Utility functions
+'''
+
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+' Wraps each line of $txt within $open and $close
+' Example:
+'   $tagged_text("<color:red>", "two\nlines", "</color>")
+'   => "<color:red>two</color>\n<color:red>lines</color>")"
+!function $tagged_text($open, $txt, $close) return $open + $replace($txt, "\n", $close+"\n"+$open) + $close
+
+!function $node_text($desc) return $tagged_text("<font:monospaced><size:10>", $desc, "</size></font>")
+!function $node_text($name, $desc) return "<b>"+$name+"</b>\n"+$node_text($desc)
+!function $node_text($name, $desc, $txt) return $node_text($name, $desc)+"\n\n"+$tagged_text("<color:888><size:10>", $txt, "</size></color>")
+
+'''
+''' Node types
+'''
+
+' Data
+!procedure $Data($id, $name, $txt)
+  Collections $id as "$node_text($name, $txt)"
+!endprocedure
+
+' MLP (FC)
+!procedure $MLP($id, $name, $desc)
+  Hexagon $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $MLP($id, $name, $desc, $txt)
+  Hexagon $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Attention
+!procedure $Attention($id, $name, $desc)
+  Queue $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Attention($id, $name, $desc, $txt)
+  Queue $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Convolution
+!procedure $Convolution($id, $name, $desc)
+  Node $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Convolution($id, $name, $desc, $txt)
+  Node $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Activation
+!procedure $Activation($id, $name)
+  Action $id as "$name"
+!endprocedure
+
+' Sum / Mean / etc.
+!procedure $Op($id, $name)
+  Agent $id as "$name"
+!endprocedure
+!procedure $Op($id, $name, $txt)
+  ' Agent $id as "$node_text($name, "", $txt)"
+  Agent $id as "$name\n$tagged_text("<color:888><size:10>", $txt, "</size></color>")"
+!endprocedure
+
+' Link
+!procedure $Link($a, $b, $dim)
+  $a --> $b : " $dim "
+!endprocedure
+!procedure $Link($a, $b, $dim, $txt)
+  ' The newline causes a bug where the 1st line appears
+  ' on the top-left side
+  ' ...but it looks better that way
+  $a --> $b : " $dim "\n$txt
+!endprocedure
+
+
+' collections "data"
+' action Convolution
+' hexagon MLP (FC)
+' queue Transformer
+''' less used:
+' label label
+' node node
+' rectangle rectangle2
+' storage storage
+
+
+$Data(enc1in, "Preprocessed units", "14")
+$MLP(enc1mlp, "MLP", "? → 256", "(14 channels)")
+$Link(enc1in, enc1mlp, "(14, ?)")
+$Activation(enc1act, "ReLU")
+$Link(enc1mlp, enc1act, "(14, 256)")
+
+Frame "3x" as transformer {
+  $Op(t1split, "self-attention", "(2-headed)")
+  $Link(enc1act, t1split, "(14, 256)")
+  $Attention(t1h1, "Head #1", "embed_dim=128")
+  $Attention(t1h2, "Head #2", "embed_dim=128")
+  t1h1 <- t1split
+  t1split -> t1h2
+
+  Rectangle "Concat alternative?" #white;line:ccc;line.dashed;text:ccc {
+    $Convolution(t1conv1, "Conv1d", "kernel_size=1\nout_channels=256")
+    $Convolution(t1conv2, "Conv1d", "kernel_size=1\nout_channels=256")
+    $Link(t1h1, t1conv1, "(14, 128)")
+    $Link(t1h2, t1conv2, "(14, 128)")
+
+    $Op(t1sum, "sum")
+    t1conv1 -> t1sum
+    t1sum <- t1conv2
+  }
+
+  $MLP(t1mlp, "MLP", "256 → 1024 → 256", "(14 channels)")
+  $Link(t1sum, t1mlp, "(14, 256)\n activation?")
+}
+
+Rectangle r1 as " " {
+  $Activation(r1act1, "ReLU")
+  $Link(t1mlp, r1act1, "(14, 256)")
+  $Convolution(conv1, "Conv1d", "kernel_size=1\nout_channels=256")
+  $Link(r1act1, conv1, "(14, 256)")
+  $Activation(r1act2, "ReLU")
+  $Link(conv1, r1act2, "(14, 256)")
+
+  $Data(entity_embeddings, "Entity embeddings", "(14, 256)")
+  r1act2 --> entity_embeddings
+}
+
+Rectangle r2 as " " {
+  $Op(r2mean, "mean", "(across units)\nXXX: masking?")
+  $Link(t1mlp, r2mean, "(14, 256)")
+  $MLP(r2mlp, "MLP", "256 → 256")
+  $Link(r2mean, r2mlp, "(256,)\nactivation?")
+  $Activation(r2act, "ReLU")
+  $Link(r2mlp, r2act, "(256,)")
+
+  $Data(embedded_entity, "Embedded entity", "(256,)")
+  r2act --> embedded_entity
+}
+
+@enduml
+

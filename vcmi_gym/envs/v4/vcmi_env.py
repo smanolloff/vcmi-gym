@@ -130,6 +130,7 @@ class VcmiEnv(gym.Env):
         term_reward_mult: int = 1,
         reward_clip_tanh_army_frac: float = 1.0,
         reward_army_value_ref: int = 1000,
+        reward_dynamic_scaling: bool = False,
         conntype: str = "proc",
         other_env: Optional["VcmiEnv"] = None
     ):
@@ -373,7 +374,7 @@ class VcmiEnv(gym.Env):
             - `R1` is the calculated reward as per the formula in `reward_clip_tanh_army_frac`
             - `f` is a configurable parameter
             - `Vm` is the mean of the two starting total army values
-            Used to scale rewards based on the initial starting army values by
+            Used to scale rewards based on the total army values by
             making all rewards relative to the starting army value.
             For example: consider these two VCMI battles:
               (A) armies with total starting army value = 1K (early game army)
@@ -385,6 +386,11 @@ class VcmiEnv(gym.Env):
             the RL agent perceives early-game and late-game battles as equally
             significant.
             Default: 1000
+
+        * reward_dynamic_scaling (bool)
+            Whether to scale rewards based on current (instead of starting)
+            total army values.
+            Default: False
 
         * conntype (str)
             Experimental; do not use.
@@ -432,6 +438,7 @@ class VcmiEnv(gym.Env):
         self.opponent_model = opponent_model
         self.reward_clip_tanh_army_frac = reward_clip_tanh_army_frac
         self.reward_army_value_ref = reward_army_value_ref
+        self.reward_dynamic_scaling = reward_dynamic_scaling
         self.reward_dmg_factor = reward_dmg_factor
         self.step_reward_fixed = step_reward_fixed
         self.step_reward_frac = step_reward_frac
@@ -698,6 +705,11 @@ class VcmiEnv(gym.Env):
     def calc_reward(self, analysis, res):
         if res.errcode > 0:
             return -100, -100
+
+        if self.reward_dynamic_scaling:
+            avg_army_value = (res.current_side0_army_value + res.current_side1_army_value) / 2
+            self.reward_scaling_factor = self.reward_army_value_ref / avg_army_value
+            self._step_reward_calc = self.step_reward_fixed + self.step_reward_frac * avg_army_value
 
         rew = analysis.net_value + self.reward_dmg_factor * analysis.net_dmg
         rew *= self.step_reward_mult

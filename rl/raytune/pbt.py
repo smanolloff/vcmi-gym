@@ -25,6 +25,9 @@ def update_config_value(cfg, path, value):
 
     # Traverse the dict to find the position of the final key
     for key in keys[:-1]:
+        # A typo when "updating" a key leads to an invalid key being saved
+        # into the wandb run config which is hard to recover from
+        assert key in d, "Key '%s' not found in current config"
         if key not in d:
             d[key] = {}
         d = d[key]

@@ -20,6 +20,7 @@
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"
+#include "ML/model_wrappers/torchpath.h"
 #include <algorithm>
 
 #include <pybind11/pybind11.h>
@@ -374,15 +375,11 @@ namespace Connector::V4::Proc {
         std::function<double(const MMAI::Schema::IState* s)> getValueRed;
         std::function<double(const MMAI::Schema::IState* s)> getValueBlue;
 
-        std::string leftModelFile = "";
-        std::string rightModelFile = "";
-
         if (red == "MMAI_USER") {
             leftModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
         } else if (red == "MMAI_MODEL") {
-            // BAI will load the model model based on settings["battle"]["MMAI"]
-            leftModel = nullptr;
-            leftModelFile = redModel;
+            // BAI will load the actual model based on leftModel->getName()
+            leftModel = new ML::ModelWrappers::TorchPath(redModel);
         } else {
             leftModel = new ML::ModelWrappers::Scripted(red);
         }
@@ -390,9 +387,8 @@ namespace Connector::V4::Proc {
         if (blue == "MMAI_USER") {
             rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
         } else if (blue == "MMAI_MODEL") {
-            // BAI will load the model model based on settings["battle"]["MMAI"]
-            rightModel = nullptr;
-            rightModelFile = blueModel;
+            // BAI will load the actual model based on leftModel->getName()
+            rightModel = new ML::ModelWrappers::TorchPath(blueModel);
         } else {
             rightModel = new ML::ModelWrappers::Scripted(blue);
         }
@@ -403,8 +399,6 @@ namespace Connector::V4::Proc {
             mapname,            // mapname
             leftModel,          // leftModel
             rightModel,         // rightModel
-            leftModelFile,      // leftModelFile
-            rightModelFile,     // rightModelFile
             0,                  // maxBattles
             seed,               // seed
             randomHeroes,       // randomHeroes

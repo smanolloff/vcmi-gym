@@ -1,0 +1,146 @@
+@startuml "arch-vcmi-fullyconv"
+' left to right direction
+
+skinparam defaultTextAlignment center
+skinparam NoteTextAlignment left
+
+<style>
+Usecase {
+  BackGroundColor #efe
+}
+
+
+</style>
+
+'''
+''' Utility functions
+'''
+
+!function $replace($txt, $search, $repl)
+  !$replaced = ""
+  !while %strpos($txt, $search) >= 0
+    !$position = %strpos($txt, $search)
+    !$replaced = $replaced + %substr($txt, 0, $position) + $repl
+    !$txt = %substr($txt, $position + %strlen($search))
+  !endwhile
+  !return $replaced + $txt
+!endfunction
+
+' Wraps each line of $txt within $open and $close
+' Example:
+'   $tagged_text("<color:red>", "two\nlines", "</color>")
+'   => "<color:red>two</color>\n<color:red>lines</color>")"
+!function $tagged_text($open, $txt, $close) return $open + $replace($txt, "\n", $close+"\n"+$open) + $close
+
+!function $node_text($name) return $tagged_text("<b>", $name, "</b>")
+!function $node_text($name, $desc) return $node_text($name)+"\n"+$tagged_text("<font:monospaced><size:10>", $desc, "</size></font>")
+!function $node_text($name, $desc, $txt) return $node_text($name, $desc)+"\n\n"+$tagged_text("<color:888><size:10>", $txt, "</size></color>")
+
+'''
+''' Node types
+'''
+
+' Data
+!procedure $Data($id, $name)
+  Usecase $id as "$node_text($name)"
+!endprocedure
+
+!procedure $Data($id, $name, $desc)
+  Usecase $id as "$node_text($name, $desc)"
+!endprocedure
+
+!procedure $Data($id, $name, $desc, $txt)
+  Usecase $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' MLP (FC)
+!procedure $MLP($id, $name, $desc)
+  Hexagon $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $MLP($id, $name, $desc, $txt)
+  Hexagon $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Transformer
+!procedure $Transformer($id, $name, $desc)
+  Queue $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Transformer($id, $name, $desc, $txt)
+  Queue $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Convolution
+!procedure $Convolution($id, $name, $desc)
+  Node $id as "$node_text($name, $desc)"
+!endprocedure
+!procedure $Convolution($id, $name, $desc, $txt)
+  Node $id as "$node_text($name, $desc, $txt)"
+!endprocedure
+
+' Output
+!procedure $Output($id, $name)
+  Component $id as "$node_text($name)" #orange
+!endprocedure
+
+!procedure $Output($id, $name, $desc)
+  Component $id as "$node_text($name, $desc)" #orange
+!endprocedure
+
+' Condition
+!procedure $Condition($id, $name)
+  Boundary $id as "$node_text($name)"
+!endprocedure
+
+!procedure $Condition($id, $name, $desc)
+  Boundary $id as "$node_text($name, $desc)"
+!endprocedure
+
+' Reshape
+!procedure $Reshape($id)
+  Control $id as " "
+!endprocedure
+
+' Activation
+!procedure $Activation($id, $name)
+  Action $id as "$name"
+!endprocedure
+
+' Sum / Mean / etc.
+!procedure $Op($id, $name)
+  Label $id as "$name"
+!endprocedure
+!procedure $Op($id, $name, $txt)
+  ' Label $id as "$node_text($name, "", $txt)"
+  Label $id as "$name\n$tagged_text("<color:888><size:10>", $txt, "</size></color>")"
+!endprocedure
+
+' Link
+!procedure $Link($a, $b, $dim)
+  $a --> $b : " $dim "
+!endprocedure
+!procedure $Link($a, $b, $dim, $txt)
+  ' The newline causes a bug where the 1st line appears
+  ' on the top-left side
+  ' ...but it looks better that way
+  $a --> $b : " $dim "\n$txt
+!endprocedure
+
+' title "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+' left to right direction
+
+$Data(obs, "Observation", "11x15*N", "N = N_HEX_ATTRS")
+$MLP(mlp0, "MLP", "X → 1024")
+$Link(obs, mlp0, "(11, 15*N) → (X,)")
+$MLP(action_mlp, "MLP", "1024 → 2311")
+$Link(mlp0, action_mlp, "(1024,)")
+$MLP(value_mlp, "MLP", "1024 → 1")
+$Link(mlp0, value_mlp, "(1024,)")
+
+$Output(action, "Action")
+$Link(action_mlp, action, "(2311,)")
+
+$Output(value, "Value")
+$Link(value_mlp, value, "(1,)")
+
+@enduml
+

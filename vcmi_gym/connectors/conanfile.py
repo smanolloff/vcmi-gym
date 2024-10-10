@@ -7,7 +7,7 @@ required_conan_version = ">=1.51.3"
 
 class Connector(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
-    requires = ["pybind11/[~2.12.0]", "boost/[^1.69]"]
+    requires = ["pybind11/[~2.12.0]", "boost/[^1.69 <1.86]"]
     default_options = {"boost/*:shared": True}
 
     def generate(self):

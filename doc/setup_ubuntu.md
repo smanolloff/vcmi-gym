@@ -22,6 +22,9 @@ Custom-made libraries that "connect" VCMI with the gym env:
 
 ```bash
 $ cd "$VCMIGYM/vcmi_gym/connectors"
+# TODO: libboost-all-dev has libgfortran5 dependency
+#       ...which creeps as a libtorch dependency during libtorch builds
+#       must find a less-generic boost package to install
 $ sudo apt install libboost-all-dev
 $ cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \

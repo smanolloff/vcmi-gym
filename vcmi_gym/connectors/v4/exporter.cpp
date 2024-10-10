@@ -135,6 +135,7 @@ namespace Connector::V4 {
             break; case SA::Y_COORD: attrname = "Y_COORD";
             break; case SA::X_COORD: attrname = "X_COORD";
             break; case SA::SIDE: attrname = "SIDE";
+            // break; case SA::CREATURE_ID: attrname = "CREATURE_ID";
             break; case SA::QUANTITY: attrname = "QUANTITY";
             break; case SA::ATTACK: attrname = "ATTACK";
             break; case SA::DEFENSE: attrname = "DEFENSE";
@@ -152,7 +153,7 @@ namespace Connector::V4 {
             break; case SA::SLEEPING: attrname = "SLEEPING";
             break; case SA::BLOCKED: attrname = "BLOCKED";
             break; case SA::BLOCKING: attrname = "BLOCKING";
-            break; case SA::ESTIMATED_DMG: attrname = "ESTIMATED_DMG";
+            // break; case SA::ESTIMATED_DMG: attrname = "ESTIMATED_DMG";
             break; case SA::FLYING: attrname = "FLYING";
             break; case SA::BLIND_LIKE_ATTACK: attrname = "BLIND_LIKE_ATTACK";
             break; case SA::ADDITIONAL_ATTACK: attrname = "ADDITIONAL_ATTACK";
