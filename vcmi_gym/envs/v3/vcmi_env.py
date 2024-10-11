@@ -28,7 +28,7 @@ from .pyconnector import (
     N_ACTIONS,
 )
 
-TRACE = True
+TRACE = False
 
 
 def tracelog(func, maxlen=80):

@@ -35,7 +35,7 @@ from .pyprocconnector import (
 
 from .pythreadconnector import PyThreadConnector
 
-TRACE = True
+TRACE = False
 
 
 def tracelog(func, maxlen=80):

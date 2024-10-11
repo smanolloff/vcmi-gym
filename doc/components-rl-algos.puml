@@ -8,7 +8,7 @@
 
 skinparam DefaultFontName monospaced
 <style>
-note {  MaximumWidth 500 }
+note { MaximumWidth 500 }
 </style>
 
 ' Used in place of " " where line wrapping is undesired

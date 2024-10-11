@@ -403,10 +403,10 @@ namespace Connector::V4::Proc {
             seed,               // seed
             randomHeroes,       // randomHeroes
             randomObstacles,    // randomObstacles
-            0,                  // townChance
-            0,                  // warmachineChance
-            0,                  // manaMin
-            0,                  // manaMax
+            townChance,         // townChance
+            warmachineChance,   // warmachineChance
+            manaMin,            // manaMin
+            manaMax,            // manaMax
             swapSides,          // swapSides
             loglevelGlobal,     // loglevelGlobal
             loglevelAI,         // loglevelAI
