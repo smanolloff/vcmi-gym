@@ -111,7 +111,8 @@ config = {
     #   = 6K episodes (good for 1K avg metric)
     #   = ~30..60 min (Mac)
     # "vsteps_total": 150_000,
-    "seconds_total": 1800,
+    # "seconds_total": 1800,
+    "seconds_total": 3600,
 
     # Initial checkpoint to start from
     # "agent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
@@ -120,7 +121,7 @@ config = {
 
     # "agent_load_file": None,
     "tags": ["Map-pools", "StupidAI", "obstacles-random", "v4"],
-    "mapside": "defender",  # attacker/defender; irrelevant if env.swap_sides > 0
+    "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
         # "gym/generated/4096/4096-mixstack-100K-01.vmap",
         "gym/generated/4096/4x1024.vmap"
@@ -177,12 +178,12 @@ config = {
         ],
         "features_extractor1_stacks": [
             # => (B, 20, S)
-            {"t": "LazyLinear", "out_features": 16},
+            {"t": "LazyLinear", "out_features": 8},
             {"t": "LeakyReLU"},
-            # => (B, 20, 16)
+            # => (B, 20, 8)
 
             {"t": "Flatten"},
-            # => (B, 320)
+            # => (B, 160)
 
             # {"t": "LeakyReLU"},
             # {"t": "Linear", "in_features": 640, "out_features": 256},
@@ -200,12 +201,12 @@ config = {
             # {"t": "Linear", "in_features": 2640, "out_features": 256},
         ],
         "features_extractor2": [
-            # => (B, 1644)
-            {"t": "Linear", "in_features": 1644, "out_features": 768},
+            # => (B, 1484)
+            {"t": "Linear", "in_features": 1484, "out_features": 512},
             {"t": "LeakyReLU"},
         ],
-        "actor": {"t": "Linear", "in_features": 768, "out_features": 2312},
-        "critic": {"t": "Linear", "in_features": 768, "out_features": 1}
+        "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},
+        "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
     },
 
     # Static
@@ -230,15 +231,15 @@ config = {
     "env": {
         "reward_dmg_factor": 5,
         "step_reward_fixed": 0,
-        "step_reward_frac": -0.002,
+        "step_reward_frac": -0.003,
         "step_reward_mult": 1,
         "term_reward_mult": 0,
         "reward_clip_tanh_army_frac": 1,
         "reward_army_value_ref": 500,
         "reward_dynamic_scaling": False,
-        "random_heroes": 3,
-        "random_obstacles": 3,
-        "town_chance": 0,
+        "random_heroes": 1,
+        "random_obstacles": 1,
+        "town_chance": 20,
         "warmachine_chance": 40,
         "mana_min": 0,
         "mana_max": 0,

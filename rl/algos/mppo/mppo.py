@@ -378,8 +378,8 @@ class AgentNN(nn.Module):
     # XXX: attention is not handled here
     def predict(self, b_obs, b_mask):
         with torch.no_grad():
-            b_obs = torch.as_tensor(b_obs, device='cpu')
-            b_mask = torch.as_tensor(b_mask, device='cpu')
+            b_obs = torch.as_tensor(b_obs)
+            b_mask = torch.as_tensor(b_mask)
 
             # Return unbatched action if input was unbatched
             if b_obs.shape == self.observation_space.shape:
@@ -628,9 +628,10 @@ def main(args, agent_cls=Agent):
         n_actions = 2312
 
     # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    LOG.info("RNG master seed: %s" % seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
     try:

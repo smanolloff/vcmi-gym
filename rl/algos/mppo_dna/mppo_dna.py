@@ -431,8 +431,8 @@ class AgentNN(nn.Module):
     # XXX: attention is not handled here
     def predict(self, b_obs, b_mask):
         with torch.no_grad():
-            b_obs = torch.as_tensor(b_obs, device='cpu')
-            b_mask = torch.as_tensor(b_mask, device='cpu')
+            b_obs = torch.as_tensor(b_obs)
+            b_mask = torch.as_tensor(b_mask)
 
             # Return unbatched action if input was unbatched
             if b_obs.shape == self.observation_space.shape:
@@ -562,12 +562,11 @@ class JitAgent(nn.Module):
         # features = self.features_extractor(b_obs)
 
         # v3+
-        misc, stacks, hexes = self.obs_splitter(b_obs)
         split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
         features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
             self.features_extractor1_policy_misc(split[0]),
-            self.features_extractor1_policy_stacks(split[0]),
-            self.features_extractor1_policy_hexes(split[1])
+            self.features_extractor1_policy_stacks(split[1]),
+            self.features_extractor1_policy_hexes(split[2])
         )))
 
         action_logits = self.actor(features)
@@ -708,12 +707,21 @@ def main(args):
 
     common.validate_tags(args.tags)
 
-    if args.seed >= 0:
-        seed = args.seed
-    elif agent and agent.state.seed >= 0:
-        seed = agent.state.seed
-    else:
-        seed = np.random.randint(2**31)
+    seed = 0
+
+    # XXX: seed logic is buggy, do not use
+    #      (this seed was never used to re-play trainings anyway)
+    #      Just generate a random non-0 seed every time
+
+    # if args.seed:
+    #     seed = args.seed
+    # elif agent and agent.state.seed:
+    #     seed = agent.state.seed
+    # else:
+
+    # XXX: make sure the new seed is never 0
+    while seed == 0:
+        seed = np.random.randint(2**31 - 1)
 
     wrappers = args.env_wrappers
 
@@ -752,9 +760,10 @@ def main(args):
         n_actions = 2312
 
     # TRY NOT TO MODIFY: seeding
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    LOG.info("RNG master seed: %s" % seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
     try:
