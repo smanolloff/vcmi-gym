@@ -41,6 +41,7 @@ from typing import List
 
 import vcmi_gym
 
+DEVICE = os.getenv("EVALUATOR_DEVICE", "auto")  # "auto" / "cpu" / "cuda"
 
 @contextmanager
 def dblock(db, lock_id):
@@ -56,16 +57,13 @@ def dblock(db, lock_id):
             db.execute("ROLLBACK")
 
 
-def evaluate_policy(agent, jit_agent, venv, episodes_per_env, statsdb):
+def evaluate_policy(agent, jit_agent, venv, episodes_per_env):
     n_envs = venv.num_envs
     counts = np.zeros(n_envs, dtype="int")
     ep_results = {"rewards": [], "lengths": [], "net_values": [], "is_successes": []}
 
     # must reset (the vec env requires it)
     observations, _ = venv.reset()
-
-    # Don't count losses from resets (aka. retreats)
-    statsdb.execute("update stats set wins=0, games=0")
 
     # For a vectorized environments the output will be in the form of::
     #     >>> infos = {
@@ -102,6 +100,7 @@ def evaluate_policy(agent, jit_agent, venv, episodes_per_env, statsdb):
     if jit_agent:
         assert n_envs == 1, "jit agent can be used only if num_envs is 1"
 
+    start_time = time.time()
     while (counts < episodes_per_env).any():
         if not hasattr(agent.args, "envmaps"):
             # old scheme (without PERCENT_CUR_TO_START_TOTAL_VALUE)
@@ -112,12 +111,15 @@ def evaluate_policy(agent, jit_agent, venv, episodes_per_env, statsdb):
                 torch.as_tensor(observations[0]).float(),
                 torch.as_tensor(np.array(venv.unwrapped.call("action_mask")[0]))
             )
+            #print("JIT agent prediction: %d" % action)
+            #print(venv.envs[0].render())
             observations, rewards, terms, truncs, infos = venv.step([action])
         else:
             actions = agent.predict(
-                torch.as_tensor(observations).float(),
-                torch.as_tensor(np.array(venv.unwrapped.call("action_mask")))
+                torch.as_tensor(observations, device=DEVICE).float(),
+                torch.as_tensor(np.array(venv.unwrapped.call("action_mask")), device=DEVICE)
             )
+            #print("Agent prediction: %s" % actions)
             observations, rewards, terms, truncs, infos = venv.step(actions)
 
         if "final_info" not in infos:
@@ -144,11 +146,32 @@ def evaluate_policy(agent, jit_agent, venv, episodes_per_env, statsdb):
                 # Already done with this env
                 continue
 
+            if n_envs == 1 and os.getenv("EVALUATOR_VERBOSE", "0") in ["1", "true"]:
+                if counts[i] == 0:
+                    print("Battle results: ", end="")
+                if infos["final_info"][i]["is_success"]:
+                    print(".", end="", flush=True)
+                else:
+                    print("F", end="", flush=True)
+
+                #print("Env %d, episode %03d: is_success=%d, net_value=%d, len=%d" % (
+                #    i,
+                #    counts[i],
+                #    infos["final_info"][i]["is_success"],
+                #    infos["final_info"][i]["net_value"],
+                #    infos["episode"]["l"][i]
+                #))
+
             counts[i] += 1
             ep_results["rewards"].append(infos["episode"]["r"][i])
             ep_results["lengths"].append(infos["episode"]["l"][i])
             ep_results["net_values"].append(infos["final_info"][i]["net_value"])
             ep_results["is_successes"].append(infos["final_info"][i]["is_success"])
+
+    if n_envs == 1:
+       print("\n")
+
+    print("Took: %s seconds" % (time.time() - start_time))
 
     assert all(counts == episodes_per_env), "Wrong counts: %s" % counts
     assert all(len(v) == n_envs*episodes_per_env for v in ep_results.values()), "Wrong ep_results: %s" % ep_results
@@ -157,12 +180,12 @@ def evaluate_policy(agent, jit_agent, venv, episodes_per_env, statsdb):
 
 def load_agent(agent_file, run_id):
     # LOG.debug("Loading agent from %s" % agent_file)
-    agent = torch.load(agent_file, map_location="cpu", weights_only=False)
+    agent = torch.load(agent_file, map_location=DEVICE, weights_only=False)
     assert agent.args.run_id == run_id, "%s != %s" % (agent.args.run_id, run_id)
     return agent
 
 
-def create_venv(env_cls, agent, mapname, role, opponent, wrappers, env_kwargs={}):
+def create_venv(LOG, env_cls, agent, mapname, role, opponent, wrappers, env_kwargs={}):
     mappath = f"maps/{mapname}"
     assert os.path.isfile(mappath), "Map not found at: %s (cwd: %s)" % (mappath, os.getcwd())
     assert role in ["attacker", "defender"]
@@ -179,13 +202,32 @@ def create_venv(env_cls, agent, mapname, role, opponent, wrappers, env_kwargs={}
             mana_max=0,
             swap_sides=agent.args.env.swap_sides,
             mapname=mapname,
+            max_steps=1000,
         )
+
+        if os.getenv("EVALUATOR_DEBUG", None) in ["1", "true"]:
+           #kwargs["vcmi_loglevel_ai"] = "debug"
+           kwargs["vcmi_loglevel_stats"] = "debug"
+           kwargs["vcmienv_loglevel"] = "DEBUG"
 
         kwargs = dict(kwargs, **env_kwargs)
 
         match env_cls:
+            case vcmi_gym.VcmiEnv_v2:
+                kwargs.pop("conntype", None)
+                kwargs.pop("reward_dynamic_scaling", None)
+                kwargs.pop("step_reward_frac", None)
+                kwargs.pop("town_chance", None)
+                kwargs.pop("warmachine_chance", None)
+                kwargs.pop("mana_min", None)
+                kwargs.pop("mana_max", None)
+                kwargs["attacker"] = opponent
+                kwargs["defender"] = opponent
+                breakpoint()
+                kwargs[role] = "MMAI_USER"
             case vcmi_gym.VcmiEnv_v3:
                 kwargs.pop("conntype", None)
+                kwargs.pop("reward_dynamic_scaling", None)
                 kwargs["attacker"] = opponent
                 kwargs["defender"] = opponent
                 kwargs[role] = "MMAI_USER"
@@ -200,7 +242,7 @@ def create_venv(env_cls, agent, mapname, role, opponent, wrappers, env_kwargs={}
         for a in kwargs.pop("deprecated_args", ["encoding_type"]):
             kwargs.pop(a, None)
 
-        # LOG.debug("Env kwargs: %s" % kwargs)
+        LOG.debug("Env kwargs: %s" % kwargs)
         env = env_cls(**kwargs)
         for wrapper_cls in wrappers:
             env = wrapper_cls(env)
@@ -309,8 +351,11 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict, group):
                             continue
 
                         files = list(artifact.files())
-                        assert len(files) == 1, "expected one file, got: "
-                        assert files[0].name == "agent.pt"
+                        for f in files:
+                            LOG.debug("Found artifact file: %s" % f)
+                        assert len(files) == 2, f"{len(files)} == 1"
+                        assert files[0].name == "agent.pt", f"{files[0].name} == agent.pt"
+                        assert files[1].name == "jit-agent.pt", f"{files[1].name} == jit-agent.pt"
 
                         # add timezone information to dt for printing correct time
                         dt = dt.replace(tzinfo=datetime.timezone.utc).astimezone()
@@ -379,9 +424,13 @@ class Result:
 
 
 def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None, jit_model=None, group=None):
+    global DEVICE
     os.environ["WANDB_SILENT"] = "true"
+    if DEVICE == "auto":
+      DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
     LOG = logging.getLogger("evaluator")
+    #LOG.setLevel(logging.DEBUG if os.getenv("EVALUATOR_DEBUG") in ["1", "true"] else logging.INFO)
     LOG.setLevel(logging.DEBUG)
 
     WORKER_ID = worker_id
@@ -416,7 +465,8 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
     statedict = {}
 
     if model:
-        rid = torch.load(model, map_location="cpu", weights_only=False).args.run_id
+        print("Using device: %s" % DEVICE)
+        rid = torch.load(model, map_location=DEVICE, weights_only=False).args.run_id
         it = [(wandb.Api().run(f"s-manolloff/vcmi-gym/{rid}"), model, {})]
     else:
         assert not jit_model, "jit-model can only be given if model is also given"
@@ -426,10 +476,11 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
     cwd = os.getcwd()
     print(f"CWD: {cwd}")
 
-    n_eval_episodes = 500  # combinations for 8x64 maps are 4032 per pool = 32256 total
+    # combinations for 8x64 maps are 4032 per pool = 32256 total
+    n_eval_episodes = int(os.getenv("EVALUATOR_EPISODES", "500"))
 
     # Build list of pool names based on the hero names in the map JSON
-    vmap = "gym/generated/evaluation/8x64.vmap"
+    vmap = os.getenv("EVALUATOR_MAP", "gym/generated/evaluation/8x64.vmap")
     mappath = f"maps/{vmap}"
     pools = []
     n_heroes = 0
@@ -440,9 +491,10 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 if not k.startswith("hero_"):
                     continue
                 m = re.match(r"hero_\d+_pool_(.*)", k)
-                assert m, f"invalid hero name: {k}"
-                if m.group(1) not in pools:
-                    pools.append(m.group(1))
+                #assert m, f"invalid hero name: {k}"
+                pool = m.group(1) if m else "default"
+                if pool not in pools:
+                    pools.append(pool)
                 n_heroes += 1
 
     print("Found %d heroes in %d pools: %s" % (n_heroes, len(pools), pools))
@@ -451,7 +503,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
 
     tmpdir = os.path.join(cwd, "tmp")
     os.makedirs(tmpdir, exist_ok=True)
-    statsdbpath = os.path.join(tmpdir, f"evaluate-{WORKER_ID}.sqlite3")
+    statsdbpath = os.path.join(tmpdir, f"evaluate-{N_WORKERS}-{WORKER_ID}.sqlite3")
 
     script_parts = [
         "DROP TABLE IF EXISTS stats;",
@@ -465,9 +517,6 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
         script_parts.append(re.sub(r"--.*", "", f.read()).strip())
 
     stats_sql_script_template = "\n".join(script_parts)
-
-    print(f"Connecting to {statsdbpath}")
-    statsdb = sqlite3.connect(statsdbpath, isolation_level=None)
 
     try:
         for run, agent_load_file, metadata in it:
@@ -490,10 +539,16 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     print("Legacy model detected -- using LegacyActionSpaceWrapper")
                     env_version = 3
                     wrappers = [vcmi_gym.LegacyActionSpaceWrapper]
+
+                    # fix for attacker-v7 (trained on v2 env)
+                    if not hasattr(agent.args.env, "deprecated_args"):
+                        env_version = 2
+                        agent.args.env.deprecated_args = ['true_rng']
                 else:
                     env_version = agent.env_version
                     wrappers = []
 
+                print("USING ENV VERSION: %d" % env_version)
                 match env_version:
                     case 1:
                         env_cls = vcmi_gym.VcmiEnv_v1
@@ -517,103 +572,115 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 for k, v in flatten_dict(metadata, sep=".").items():
                     wandb_results[f"eval/metadata/{k}"] = v
 
-                # reset db
-                statsdb.executescript(stats_sql_script)
+                env_opponents = os.getenv("EVALUATOR_OPPONENT", "both")
+                opponents = ["StupidAI", "BattleAI"] if env_opponents == "both" else [env_opponents]
+                for opponent in opponents:
+                    print("Opponent: %s" % opponent)
+                    for siege in [False, True]:
+                        tstart = time.time()
 
-                for siege in [False, True]:
-                    tstart = time.time()
-                    venv = create_venv(
-                        env_cls,
-                        agent,
-                        vmap,
-                        side,
-                        "BattleAI",
-                        wrappers,
-                        env_kwargs=dict(
-                            vcmi_stats_storage=statsdbpath,
-                            # XXX: mid-game resets are OK (retreats are not collected as stats)
-                            vcmi_stats_persist_freq=n_eval_episodes,
-                            vcmi_stats_mode=side_col,
-                            # vcmi_loglevel_stats="trace",
-                            town_chance=100 if siege else 0
+                        print(f"Connecting to {statsdbpath}")
+                        try:
+                            os.remove(statsdbpath)
+                        except FileNotFoundError:
+                            pass
+
+                        statsdb = sqlite3.connect(statsdbpath, isolation_level=None)
+                        statsdb.executescript(stats_sql_script)
+
+                        venv = create_venv(
+                            LOG,
+                            env_cls,
+                            agent,
+                            vmap,
+                            side,
+                            opponent,
+                            wrappers,
+                            env_kwargs=dict(
+                                vcmi_stats_storage=statsdbpath,
+                                # XXX: mid-game resets are OK (retreats are not collected as stats)
+                                vcmi_stats_persist_freq=10,
+                                vcmi_stats_mode=side_col,
+                                town_chance=100 if siege else 0,
+                            )
                         )
-                    )
 
-                    with torch.no_grad():
-                        ep_results = evaluate_policy(agent, jit_agent, venv, episodes_per_env=n_eval_episodes, statsdb=statsdb)
-                    venv.close()
+                        with torch.no_grad():
+                            ep_results = evaluate_policy(agent, jit_agent, venv, episodes_per_env=n_eval_episodes)
+                        venv.close()
 
-                    rows = statsdb.execute(
-                        "select pool, 1.0*sum(wins)/sum(games) as winrate "
-                        "from stats "
-                        "where games > 0 "
-                        "group by pool "
-                        "order by pool asc"
-                    ).fetchall()
+                        rows = statsdb.execute(
+                            "select pool, 1.0*sum(wins)/sum(games) as winrate "
+                            "from stats "
+                            "where games > 0 "
+                            "group by pool "
+                            "order by pool asc"
+                        ).fetchall()
 
-                    assert len(pools) == len(rows), f"{len(pools)} == {len(rows)}"
+                        assert len(pools) == len(rows), f"{len(pools)} == {len(rows)}"
 
-                    result = Result(
-                        opponent="BattleAI",
-                        siege=siege,
-                        reward=np.mean(ep_results["rewards"]),
-                        length=np.mean(ep_results["lengths"]),
-                        net_value=np.mean(ep_results["net_values"]),
-                        is_success=np.mean(ep_results["is_successes"]),
-                        pooldata=[winrate for (_, winrate) in rows]
-                    )
+                        result = Result(
+                            opponent=opponent,
+                            siege=siege,
+                            reward=np.mean(ep_results["rewards"]),
+                            length=np.mean(ep_results["lengths"]),
+                            net_value=np.mean(ep_results["net_values"]),
+                            is_success=np.mean(ep_results["is_successes"]),
+                            pooldata=[winrate for (_, winrate) in rows]
+                        )
 
-                    results.append(result)
+                        results.append(result)
 
-                    print("%-4s %-10s %-8s siege=%d reward=%-5d net_value=%-8d is_success=%-5.2f length=%-3d (%.2fs)" % (
-                        run.name,
-                        os.path.basename(vmap),
-                        "BattleAI",
-                        result.siege,
-                        result.reward,
-                        result.net_value,
-                        result.is_success,
-                        result.length,
-                        time.time() - tstart
-                    ))
+                        print("%-4s %-10s %-8s siege=%d reward=%-5d net_value=%-8d is_success=%-5.2f length=%-3d (%.2fs)" % (
+                            run.name,
+                            os.path.basename(vmap),
+                            opponent,
+                            result.siege,
+                            result.reward,
+                            result.net_value,
+                            result.is_success,
+                            result.length,
+                            time.time() - tstart
+                        ))
 
-                    print("%15s %s" % ("", "  ".join([f"{pools[i]}={f:.2f}" for (i, f) in enumerate(result.pooldata)])))
+                        print("%15s %s" % ("", "  ".join([f"{pools[i]}={f:.2f}" for (i, f) in enumerate(result.pooldata)])))
 
-                    if watchdog_file:
-                        pathlib.Path(watchdog_file).touch()
+                        if watchdog_file:
+                            pathlib.Path(watchdog_file).touch()
 
-                m = os.path.basename(vmap)
+                    m = os.path.basename(vmap)
 
-                wandb_results["eval/all/is_success"] = np.mean([r.is_success for r in results])
-                wandb_results["eval/field/is_success"] = np.mean([r.is_success for r in results if not r.siege])
-                wandb_results["eval/siege/is_success"] = np.mean([r.is_success for r in results if r.siege])
+                    wandb_results["eval/all/is_success"] = np.mean([r.is_success for r in results])
+                    wandb_results["eval/field/is_success"] = np.mean([r.is_success for r in results if not r.siege])
+                    wandb_results["eval/siege/is_success"] = np.mean([r.is_success for r in results if r.siege])
 
-                wandb_results["eval/all/length"] = np.mean([r.length for r in results])
-                wandb_results["eval/field/length"] = np.mean([r.length for r in results if not r.siege])
-                wandb_results["eval/siege/length"] = np.mean([r.length for r in results if r.siege])
+                    wandb_results["eval/all/length"] = np.mean([r.length for r in results])
+                    wandb_results["eval/field/length"] = np.mean([r.length for r in results if not r.siege])
+                    wandb_results["eval/siege/length"] = np.mean([r.length for r in results if r.siege])
 
-                for i, p in enumerate(pools):
-                    wandb_results[f"eval/pool/{p}/is_success"] = np.mean([r.pooldata[i] for r in results])
+                    for i, p in enumerate(pools):
+                        wandb_results[f"eval/pool/{p}/is_success"] = np.mean([r.pooldata[i] for r in results])
 
-                if os.getenv("NO_WANDB") != "true":
-                    with dblock(db, WORKER_ID):
-                        with wandb_init(run) as irun:
-                            irun.log(copy.deepcopy(wandb_results))
-                else:
-                    print("WANDB RESULTS (skipped):\n%s" % wandb_results)
+                    if os.getenv("NO_WANDB") != "true":
+                        with dblock(db, WORKER_ID):
+                            with wandb_init(run) as irun:
+                                irun.log(copy.deepcopy(wandb_results))
+                    else:
+                        print("WANDB RESULTS (skipped):\n%s" % wandb_results)
 
-                # LOG.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
-                #     run.id,
-                #     np.mean(rewards["StupidAI"] + rewards["BattleAI"]),
-                #     np.mean(lengths["StupidAI"] + lengths["BattleAI"]),
-                #     np.mean(net_values["StupidAI"] + net_values["BattleAI"]),
-                #     np.mean(is_successes["StupidAI"] + is_successes["BattleAI"]),
-                # ))
+                    # LOG.debug("Evaluated %s: reward=%d length=%d net_value=%d is_success=%.2f" % (
+                    #     run.id,
+                    #     np.mean(rewards["StupidAI"] + rewards["BattleAI"]),
+                    #     np.mean(lengths["StupidAI"] + lengths["BattleAI"]),
+                    #     np.mean(net_values["StupidAI"] + net_values["BattleAI"]),
+                    #     np.mean(is_successes["StupidAI"] + is_successes["BattleAI"]),
+                    # ))
 
-                evaluated.append(agent_load_file)
+                    evaluated.append(agent_load_file)
 
-                # XXX: force "square" angles in wandb with Wall Clock axis
-                statedict["result"] = copy.deepcopy(wandb_results)
+                    # XXX: force "square" angles in wandb with Wall Clock axis
+                    statedict["result"] = copy.deepcopy(wandb_results)
+                    statsdb.close()
             except KeyboardInterrupt:
                 print("SIGINT received. Exiting gracefully.")
                 sys.exit(0)

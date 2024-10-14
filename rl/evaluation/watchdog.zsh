@@ -5,9 +5,15 @@
 
 USAGE="
 Usage: zsh rl/evaluation/watchdog.zsh N_WORKERS WORKER_ID GROUP
+
+Env vars:
+  EVALUATOR_DEVICE=auto                                       # auto / cpu / cuda
+  EVALUATOR_EPISODES=500                                      # any int
+  EVALUATOR_OPPONENT=both                                     # both / StupidAI / BattleAI
+  EVALUATOR_MAP=gym/generated/evaluation/88-7stack-300K.vmap  # any VCMI map path
 "
 
-CHECK_EVERY=90  # minutes
+CHECK_EVERY=120  # minutes
 
 N_WORKERS=$1
 WORKER_ID=$2

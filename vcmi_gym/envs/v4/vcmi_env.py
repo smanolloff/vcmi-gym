@@ -420,7 +420,7 @@ class VcmiEnv(gym.Env):
         assert vcmi_loglevel_global in self.__class__.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in self.__class__.VCMI_LOGLEVELS
         assert role in self.__class__.ROLES
-        assert opponent in self.__class__.OPPONENTS
+        assert opponent in self.__class__.OPPONENTS, f"{opponent} in {self.__class__.OPPONENTS}"
         assert conntype in ["thread", "proc"]
 
         self.action_space = self.__class__.ACTION_SPACE
