@@ -44,6 +44,8 @@ namespace Connector::V3 {
         const int randomObstacles_,
         const int townChance_,
         const int warmachineChance_,
+        const int tightFormationChance_,
+        const int randomTerrainChance_,
         const int manaMin_,
         const int manaMax_,
         const int swapSides_,
@@ -63,6 +65,8 @@ namespace Connector::V3 {
         randomObstacles(randomObstacles_),
         townChance(townChance_),
         warmachineChance(warmachineChance_),
+        tightFormationChance(tightFormationChance_),
+        randomTerrainChance(randomTerrainChance_),
         manaMin(manaMin_),
         manaMax(manaMax_),
         swapSides(swapSides_),
@@ -366,8 +370,8 @@ namespace Connector::V3 {
             randomObstacles,    // randomObstacles
             townChance,         // townChance
             warmachineChance,   // warmachineChance
-            0,                  // tightFormationChance
-            0,                  // randomTerrainChance
+            tightFormationChance,  // tightFormationChance
+            randomTerrainChance,  // randomTerrainChance
             manaMin,            // manaMin
             manaMax,            // manaMax
             swapSides,          // swapSides
@@ -456,6 +460,8 @@ namespace Connector::V3 {
                 const int &,         // randomObstacles
                 const int &,         // townChance
                 const int &,         // warmachineChance
+                const int &,         // tightFormationChance
+                const int &,         // randomTerrainChance
                 const int &,         // manaMin
                 const int &,         // manaMax
                 const int &,         // swapSides

@@ -198,6 +198,8 @@ def create_venv(LOG, env_cls, agent, mapname, role, opponent, wrappers, env_kwar
             random_obstacles=1,
             warmachine_chance=50,
             town_chance=0,
+            tight_formation_chance=20,
+            random_terrain_chance=100,
             mana_min=0,
             mana_max=0,
             swap_sides=agent.args.env.swap_sides,
