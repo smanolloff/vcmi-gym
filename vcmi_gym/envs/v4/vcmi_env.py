@@ -121,6 +121,7 @@ class VcmiEnv(gym.Env):
         warmachine_chance: int = 0,
         random_terrain_chance: int = 0,
         tight_formation_chance: int = 0,
+        battlefield_pattern: str = "",
         mana_min: int = 0,
         mana_max: int = 0,
         swap_sides: int = 0,
@@ -308,6 +309,11 @@ class VcmiEnv(gym.Env):
             VCMI `--tight-formation-chance` option. Specifies the percentage
             chance to set a tight formation for a hero's army.
             Default: 0
+
+        * battlefield_pattern (str)
+            VCMI `--battlefield-pattern` option, used to filter the
+            battlefield on which battles will be fought.
+            Default: ""
 
         * mana_min (int)
             VCMI `--mana-min` option. At the start of a battle, heroes will be
@@ -507,6 +513,7 @@ class VcmiEnv(gym.Env):
                 warmachine_chance,
                 random_terrain_chance,
                 tight_formation_chance,
+                battlefield_pattern,
                 mana_min,
                 mana_max,
                 swap_sides,

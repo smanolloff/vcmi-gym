@@ -46,6 +46,7 @@ namespace Connector::V3 {
         const int warmachineChance_,
         const int tightFormationChance_,
         const int randomTerrainChance_,
+        const std::string battlefieldPattern_,
         const int manaMin_,
         const int manaMax_,
         const int swapSides_,
@@ -67,6 +68,7 @@ namespace Connector::V3 {
         warmachineChance(warmachineChance_),
         tightFormationChance(tightFormationChance_),
         randomTerrainChance(randomTerrainChance_),
+        battlefieldPattern(battlefieldPattern_),
         manaMin(manaMin_),
         manaMax(manaMax_),
         swapSides(swapSides_),
@@ -372,6 +374,7 @@ namespace Connector::V3 {
             warmachineChance,   // warmachineChance
             tightFormationChance,  // tightFormationChance
             randomTerrainChance,  // randomTerrainChance
+            battlefieldPattern,  // battlefieldPattern
             manaMin,            // manaMin
             manaMax,            // manaMax
             swapSides,          // swapSides
@@ -462,6 +465,7 @@ namespace Connector::V3 {
                 const int &,         // warmachineChance
                 const int &,         // tightFormationChance
                 const int &,         // randomTerrainChance
+                const std::string &, // battlefieldPattern
                 const int &,         // manaMin
                 const int &,         // manaMax
                 const int &,         // swapSides

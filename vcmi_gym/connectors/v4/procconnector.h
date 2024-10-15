@@ -52,6 +52,7 @@ namespace Connector::V4::Proc {
         const int warmachineChance;
         const int tightFormationChance;
         const int randomTerrainChance;
+        const std::string battlefieldPattern;
         const int manaMin;
         const int manaMax;
         const int swapSides;
@@ -88,6 +89,7 @@ namespace Connector::V4::Proc {
             const int warmachineChance,
             const int tightFormationChance,
             const int randomTerrainChance,
+            const std::string battlefieldPattern,
             const int manaMin,
             const int manaMax,
             const int swapSides,

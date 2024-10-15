@@ -171,6 +171,7 @@ namespace Connector::V4::Thread {
         const int warmachineChance_,
         const int tightFormationChance_,
         const int randomTerrainChance_,
+        const std::string battlefieldPattern_,
         const int manaMin_,
         const int manaMax_,
         const int swapSides_,
@@ -196,6 +197,7 @@ namespace Connector::V4::Thread {
         warmachineChance(warmachineChance_),
         tightFormationChance(tightFormationChance_),
         randomTerrainChance(randomTerrainChance_),
+        battlefieldPattern(battlefieldPattern_),
         manaMin(manaMin_),
         manaMax(manaMax_),
         swapSides(swapSides_),
@@ -565,6 +567,7 @@ namespace Connector::V4::Thread {
             warmachineChance,   // warmachineChance
             tightFormationChance,  // tightFormationChance
             randomTerrainChance,  // randomTerrainChance
+            battlefieldPattern,  // battlefieldPattern
             manaMin,            // manaMin
             manaMax,            // manaMax
             swapSides,          // swapSides
