@@ -119,6 +119,8 @@ class VcmiEnv(gym.Env):
         random_obstacles: int = 0,
         town_chance: int = 0,
         warmachine_chance: int = 0,
+        random_terrain_chance: int = 0,
+        tight_formation_chance: int = 0,
         mana_min: int = 0,
         mana_max: int = 0,
         swap_sides: int = 0,
@@ -295,6 +297,15 @@ class VcmiEnv(gym.Env):
             If `0`, no war machines will be included in any army.
             If `100`, all 3 war machines will be included in each army.
             Default: 0
+
+        * random_terrain_chance (int)
+            VCMI `--random-terrain-chance` option. Specifies the percentage
+            chance to replace the battlefield's original terrain by a randomly
+            selected land-based terrain (i.e. excludes boats).
+
+        * tight_formation_chance (int)
+            VCMI `--tight-formation-chance` option. Specifies the percentage
+            chance to set a tight formation for a hero's army.
 
         * mana_min (int)
             VCMI `--mana-min` option. At the start of a battle, heroes will be
@@ -492,6 +503,8 @@ class VcmiEnv(gym.Env):
                 random_obstacles,
                 town_chance,
                 warmachine_chance,
+                random_terrain_chance,
+                tight_formation_chance,
                 mana_min,
                 mana_max,
                 swap_sides,

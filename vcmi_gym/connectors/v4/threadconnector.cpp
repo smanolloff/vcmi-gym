@@ -169,6 +169,8 @@ namespace Connector::V4::Thread {
         const int randomObstacles_,
         const int townChance_,
         const int warmachineChance_,
+        const int tightFormationChance_,
+        const int randomTerrainChance_,
         const int manaMin_,
         const int manaMax_,
         const int swapSides_,
@@ -192,6 +194,8 @@ namespace Connector::V4::Thread {
         randomObstacles(randomObstacles_),
         townChance(townChance_),
         warmachineChance(warmachineChance_),
+        tightFormationChance(tightFormationChance_),
+        randomTerrainChance(randomTerrainChance_),
         manaMin(manaMin_),
         manaMax(manaMax_),
         swapSides(swapSides_),
@@ -559,6 +563,8 @@ namespace Connector::V4::Thread {
             randomObstacles,    // randomObstacles
             townChance,         // townChance
             warmachineChance,   // warmachineChance
+            tightFormationChance,  // tightFormationChance
+            randomTerrainChance,  // randomTerrainChance
             manaMin,            // manaMin
             manaMax,            // manaMax
             swapSides,          // swapSides

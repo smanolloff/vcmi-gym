@@ -37,6 +37,8 @@ namespace Connector::V4 {
                 const int &,         // randomObstacles
                 const int &,         // townChance
                 const int &,         // warmachineChance
+                const int &,         // tightFormationChance
+                const int &,         // randomTerrainChance
                 const int &,         // manaMin
                 const int &,         // manaMax
                 const int &,         // swapSides
@@ -69,6 +71,8 @@ namespace Connector::V4 {
                 const int &,         // randomObstacles
                 const int &,         // townChance
                 const int &,         // warmachineChance
+                const int &,         // tightFormationChance
+                const int &,         // randomTerrainChance
                 const int &,         // manaMin
                 const int &,         // manaMax
                 const int &,         // swapSides

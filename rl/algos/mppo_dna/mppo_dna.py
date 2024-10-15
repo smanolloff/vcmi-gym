@@ -74,6 +74,8 @@ class EnvArgs:
     random_obstacles: int = 1
     town_chance: int = 0
     warmachine_chance: int = 0
+    random_terrain_chance: int = 0
+    tight_formation_chance: int = 0
     mana_min: int = 0
     mana_max: int = 0
     swap_sides: int = 0

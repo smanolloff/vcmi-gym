@@ -289,6 +289,8 @@ namespace Connector::V1 {
             randomObstacles,    // randomObstacles
             0,                  // townChance
             0,                  // warmachineChance
+            0,                  // tightFormationChance
+            0,                  // randomTerrainChance
             0,                  // manaMin
             0,                  // manaMax
             swapSides,          // swapSides

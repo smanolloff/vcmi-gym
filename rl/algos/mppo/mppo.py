@@ -584,12 +584,21 @@ def main(args, agent_cls=Agent):
 
     common.validate_tags(args.tags)
 
-    if args.seed >= 0:
-        seed = args.seed
-    elif agent and agent.state.seed >= 0:
-        seed = agent.state.seed
-    else:
-        seed = np.random.randint(2**31)
+    seed = 0
+
+    # XXX: seed logic is buggy, do not use
+    #      (this seed was never used to re-play trainings anyway)
+    #      Just generate a random non-0 seed every time
+
+    # if args.seed:
+    #     seed = args.seed
+    # elif agent and agent.state.seed:
+    #     seed = agent.state.seed
+    # else:
+
+    # XXX: make sure the new seed is never 0
+    while seed == 0:
+        seed = np.random.randint(2**31 - 1)
 
     wrappers = args.env_wrappers
 

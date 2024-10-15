@@ -366,6 +366,8 @@ namespace Connector::V3 {
             randomObstacles,    // randomObstacles
             townChance,         // townChance
             warmachineChance,   // warmachineChance
+            0,                  // tightFormationChance
+            0,                  // randomTerrainChance
             manaMin,            // manaMin
             manaMax,            // manaMax
             swapSides,          // swapSides

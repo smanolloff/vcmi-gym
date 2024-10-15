@@ -123,8 +123,8 @@ config = {
     "tags": ["Map-pools", "StupidAI", "obstacles-random", "v4"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
-        # "gym/generated/4096/4096-mixstack-100K-01.vmap",
-        "gym/generated/4096/4x1024.vmap"
+        "gym/generated/4096/4096-mixstack-100K-01.vmap",
+        # "gym/generated/4096/4x1024.vmap"
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -241,6 +241,8 @@ config = {
         "random_obstacles": 1,
         "town_chance": 20,
         "warmachine_chance": 40,
+        "random_terrain_chance": 100,
+        "tight_formation_chance": 20,
         "mana_min": 0,
         "mana_max": 0,
         "swap_sides": 0,
