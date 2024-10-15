@@ -243,6 +243,7 @@ config = {
         "warmachine_chance": 40,
         "random_terrain_chance": 100,
         "tight_formation_chance": 20,
+        "battlefield_pattern": "",
         "mana_min": 0,
         "mana_max": 0,
         "swap_sides": 0,

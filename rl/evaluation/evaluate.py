@@ -505,7 +505,11 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
 
     tmpdir = os.path.join(cwd, "tmp")
     os.makedirs(tmpdir, exist_ok=True)
-    statsdbpath = os.path.join(tmpdir, f"evaluate-{N_WORKERS}-{WORKER_ID}.sqlite3")
+
+    statsdbpath = os.getenv(
+        "EVALUATOR_DATABASE",
+        os.path.join(tmpdir, f"evaluate-{N_WORKERS}-{WORKER_ID}.sqlite3")
+    )
 
     script_parts = [
         "DROP TABLE IF EXISTS stats;",
