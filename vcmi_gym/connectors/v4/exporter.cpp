@@ -17,8 +17,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "AI/MMAI/schema/v4/constants.h"
-#include "AI/MMAI/schema/v4/types.h"
+#include "schema/v4/constants.h"
+#include "schema/v4/types.h"
 #include "exporter.h"
 
 namespace Connector::V4 {

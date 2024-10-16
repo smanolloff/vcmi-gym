@@ -22,8 +22,8 @@
 #include <cstdio>
 #include <iostream>
 
-#include "AI/MMAI/schema/base.h"
-#include "AI/MMAI/schema/v3/types.h"
+#include "schema/base.h"
+#include "schema/v3/types.h"
 #include "common.h"
 
 namespace Connector::V3 {

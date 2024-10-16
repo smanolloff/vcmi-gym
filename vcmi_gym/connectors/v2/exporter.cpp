@@ -17,7 +17,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "AI/MMAI/schema/v2/constants.h"
+#include "schema/v2/constants.h"
 #include "exporter.h"
 
 namespace Connector::V2 {

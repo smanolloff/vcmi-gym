@@ -24,8 +24,8 @@
 #include <atomic>
 #include <deque>
 
-#include "AI/MMAI/schema/base.h"
-#include "AI/MMAI/schema/v4/types.h"
+#include "schema/base.h"
+#include "schema/v4/types.h"
 #include "common.h"
 #include "exporter.h"
 

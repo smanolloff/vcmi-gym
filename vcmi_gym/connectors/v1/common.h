@@ -27,8 +27,8 @@
 #include <pybind11/functional.h>
 #include <filesystem>
 
-#include "AI/MMAI/schema/base.h"
-#include "AI/MMAI/schema/v1/types.h"
+#include "schema/base.h"
+#include "schema/v1/types.h"
 
 #define VERBOSE true  // no effect on release builds
 

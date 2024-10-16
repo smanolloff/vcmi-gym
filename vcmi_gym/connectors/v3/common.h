@@ -22,8 +22,8 @@
 #include <thread>
 #include <filesystem>
 
-#include "AI/MMAI/schema/base.h"
-#include "AI/MMAI/schema/v3/types.h"
+#include "schema/base.h"
+#include "schema/v3/types.h"
 
 #include <pybind11/numpy.h>
 

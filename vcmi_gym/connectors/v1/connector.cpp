@@ -15,8 +15,8 @@
 // =============================================================================
 
 #include "connector.h"
-#include "AI/MMAI/schema/v1/constants.h"
-#include "AI/MMAI/schema/v1/types.h"
+#include "schema/v1/constants.h"
+#include "schema/v1/types.h"
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"

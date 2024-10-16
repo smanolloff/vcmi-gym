@@ -15,9 +15,9 @@
 // =============================================================================
 
 #include "threadconnector.h"
-#include "AI/MMAI/schema/base.h"
-#include "AI/MMAI/schema/v4/constants.h"
-#include "AI/MMAI/schema/v4/types.h"
+#include "schema/base.h"
+#include "schema/v4/constants.h"
+#include "schema/v4/types.h"
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"

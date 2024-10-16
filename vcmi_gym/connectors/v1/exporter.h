@@ -16,9 +16,9 @@
 
 #pragma once
 
-#include "AI/MMAI/schema/base.h"
-#include "AI/MMAI/schema/v1/types.h"
-#include "AI/MMAI/schema/v1/constants.h"
+#include "schema/base.h"
+#include "schema/v1/types.h"
+#include "schema/v1/constants.h"
 
 namespace Connector::V1 {
     using namespace MMAI::Schema;

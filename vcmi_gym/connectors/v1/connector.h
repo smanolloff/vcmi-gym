@@ -23,8 +23,8 @@
 #include <iostream>
 #include <string>
 
-#include "AI/MMAI/schema/base.h"
-#include "AI/MMAI/schema/v1/types.h"
+#include "schema/base.h"
+#include "schema/v1/types.h"
 #include "common.h"
 
 namespace Connector::V1 {
