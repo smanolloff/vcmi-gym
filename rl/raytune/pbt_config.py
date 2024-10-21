@@ -57,7 +57,7 @@ config = {
             "ent_coef": linlist(0, 0.1, n=11),
             "gamma": linlist(0.6, 0.999, n=13),
             "max_grad_norm": linlist(0.5, 10, n=11),
-            "num_steps": [128, 256, 512],
+            "num_steps": [256, 512, 1024, 2048],
 
             # PPO-vanilla specific
             "lr_schedule": {"start": explist(1e-5, 2e-4, n=20)},
@@ -84,15 +84,16 @@ config = {
         #       a set of "initial" values for its next iteration.
         #
         "initial_hyperparams": {
-            # "lr_schedule": {"mode": "const", "start": 1.1e-5},
-            # "ent_coef": 0.02,
-            # "gae_lambda": 0.95,
-            # "gamma": 0.99,
-            # "max_grad_norm": 6,
-            # "num_minibatches": 2,
-            # "num_steps": 128,
-            # "update_epochs": 10,
-            # "vf_coef": 1.2,
+            "lr_schedule": {"mode": "const", "start": 0.00001},
+            "ent_coef": 0.005,
+            "gae_lambda": 0.99,
+            "gamma": 0.96575,
+            "max_grad_norm": 0.5,
+            "num_minibatches": 2,
+            "num_steps": 512,
+            "update_epochs": 2,
+            "vf_coef": 1.05,
+            "norm_adv": 0
         },
 
         "resumes": [],  # trial_id will be appended here when resuming (trial_id != run_id)
@@ -117,7 +118,7 @@ config = {
     # Initial checkpoint to start from
     # "agent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
     # "agent_load_file": "rl/models/model-PBT-mppo-defender-20240521_112358.79ad0_00000:v1/agent.pt",
-    "agent_load_file": None,
+    "agent_load_file": "/Users/simo/Projects/vcmi-gym/rl/models/Defender model:v5/agent-migrated.pt",
 
     # "agent_load_file": None,
     "tags": ["Map-pools", "StupidAI", "obstacles-random", "v4"],
@@ -231,7 +232,7 @@ config = {
     "env": {
         "reward_dmg_factor": 5,
         "step_reward_fixed": 0,
-        "step_reward_frac": -0.003,
+        "step_reward_frac": -0.001,
         "step_reward_mult": 1,
         "term_reward_mult": 0,
         "reward_clip_tanh_army_frac": 1,
@@ -239,10 +240,10 @@ config = {
         "reward_dynamic_scaling": False,
         "random_heroes": 1,
         "random_obstacles": 1,
-        "town_chance": 20,
+        "town_chance": 10,
         "warmachine_chance": 40,
         "random_terrain_chance": 100,
-        "tight_formation_chance": 20,
+        "tight_formation_chance": 0,
         "battlefield_pattern": "",
         "mana_min": 0,
         "mana_max": 0,
@@ -253,7 +254,7 @@ config = {
         "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 4,
+    "env_version": 3,
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None

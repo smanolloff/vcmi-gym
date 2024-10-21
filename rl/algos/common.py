@@ -149,6 +149,8 @@ def create_venv(env_cls, args, seed):
                     defender_model=args.opponent_load_file,
                 )
                 env_kwargs[args.mapside] = "MMAI_USER"
+                env_kwargs.pop("conntype", None)
+                env_kwargs.pop("reward_dynamic_scaling", None)
             else:
                 raise Exception("Unexpected env version: %s" % version)
 

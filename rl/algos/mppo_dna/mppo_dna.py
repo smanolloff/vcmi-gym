@@ -416,6 +416,19 @@ class AgentNN(nn.Module):
             x = self.attention(x, attn_mask)
         return self.critic(self.extract_features(x))
 
+    def get_action(self, x, mask, attn_mask=None, action=None, deterministic=False):
+        if self.attention:
+            x = self.attention(x, attn_mask)
+        features = self.extract_features(x)
+        action_logits = self.actor(features)
+        dist = common.CategoricalMasked(logits=action_logits, mask=mask)
+        if action is None:
+            if deterministic:
+                action = torch.argmax(dist.probs, dim=1)
+            else:
+                action = dist.sample()
+        return action, dist.log_prob(action), dist.entropy(), dist
+
     def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
         if self.attention:
             x = self.attention(x, attn_mask)
@@ -441,10 +454,10 @@ class AgentNN(nn.Module):
             if b_obs.shape == self.observation_space.shape:
                 b_obs = b_obs.unsqueeze(dim=0)
                 b_mask = b_mask.unsqueeze(dim=0)
-                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _ = self.get_action(b_obs, b_mask, deterministic=True)
                 return b_env_action[0].cpu().item()
             else:
-                b_env_action, _, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _ = self.get_action(b_obs, b_mask, deterministic=True)
                 return b_env_action.cpu().numpy()
 
 
@@ -554,10 +567,10 @@ class JitAgent(nn.Module):
         self.critic = nn.Identity()
         self.env_version = 0
 
-    # Inference (deterministic)
+    # Inference
     # XXX: attention is not handled here
     @torch.jit.export
-    def predict(self, obs, mask) -> int:
+    def predict(self, obs, mask, deterministic: bool = False) -> int:
         b_obs = obs.unsqueeze(dim=0)
         b_mask = mask.unsqueeze(dim=0)
 
@@ -574,7 +587,11 @@ class JitAgent(nn.Module):
 
         action_logits = self.actor(features)
         probs = self.categorical_masked(logits0=action_logits, mask=b_mask)
-        action = torch.argmax(probs, dim=1)
+
+        if deterministic:
+            action = torch.argmax(probs, dim=1)
+        else:
+            action = self.sample(probs, action_logits)
 
         return action.int().item()
 
@@ -594,10 +611,10 @@ class JitAgent(nn.Module):
     def get_value(self, obs) -> float:
         b_obs = obs.unsqueeze(dim=0)
         split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
-        features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
-            self.features_extractor1_policy_misc(split[0]),
-            self.features_extractor1_policy_stacks(split[1]),
-            self.features_extractor1_policy_hexes(split[2])
+        features = self.features_extractor2_value(torch.cat(dim=1, tensors=(
+            self.features_extractor1_value_misc(split[0]),
+            self.features_extractor1_value_stacks(split[1]),
+            self.features_extractor1_value_hexes(split[2])
         )))
 
         value = self.critic(features)
@@ -618,6 +635,14 @@ class JitAgent(nn.Module):
         logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
         probs = torch.nn.functional.softmax(logits, dim=-1)
         return probs
+
+    @torch.jit.export
+    def sample(self, probs: torch.Tensor, action_logits: torch.Tensor) -> torch.Tensor:
+        num_events = action_logits.size()[-1]
+        probs_2d = probs.reshape(-1, num_events)
+        samples_2d = torch.multinomial(probs_2d, 1, True).T
+        batch_shape = action_logits.size()[:-1]
+        return samples_2d.reshape(batch_shape)
 
 
 def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda):
@@ -710,7 +735,7 @@ def main(args):
 
     common.validate_tags(args.tags)
 
-    seed = 0
+    seed = args.seed
 
     # XXX: seed logic is buggy, do not use
     #      (this seed was never used to re-play trainings anyway)
@@ -723,8 +748,8 @@ def main(args):
     # else:
 
     # XXX: make sure the new seed is never 0
-    while seed == 0:
-        seed = np.random.randint(2**31 - 1)
+    # while seed == 0:
+    #     seed = np.random.randint(2**31 - 1)
 
     wrappers = args.env_wrappers
 
@@ -742,15 +767,14 @@ def main(args):
     obs_space = VcmiEnv.OBSERVATION_SPACE
     act_space = VcmiEnv.ACTION_SPACE
 
-    # TODO: robust mechanism ensuring these don't get mixed up
-    assert VcmiEnv.STATE_SEQUENCE == ["misc", "stacks", "hexes"]
-    obs_dims = dict(
-        misc=VcmiEnv.STATE_SIZE_MISC,
-        stacks=VcmiEnv.STATE_SIZE_STACKS,
-        hexes=VcmiEnv.STATE_SIZE_HEXES,
-    )
-
     if agent is None:
+        # TODO: robust mechanism ensuring these don't get mixed up
+        assert VcmiEnv.STATE_SEQUENCE == ["misc", "stacks", "hexes"]
+        obs_dims = dict(
+            misc=VcmiEnv.STATE_SIZE_MISC,
+            stacks=VcmiEnv.STATE_SIZE_STACKS,
+            hexes=VcmiEnv.STATE_SIZE_HEXES,
+        )
         agent = Agent(args, obs_space, act_space, obs_dims, device=device)
 
     # Legacy models with offset actions
@@ -861,7 +885,7 @@ def main(args):
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
                     attn_mask = next_attnmask if attn else None
-                    action, logprob, _, _, _ = agent.NN_policy.get_action_and_value(
+                    action, logprob, _, _ = agent.NN_policy.get_action(
                         next_obs,
                         next_mask,
                         attn_mask=attn_mask
@@ -937,7 +961,7 @@ def main(args):
                     end = start + minibatch_size_policy
                     mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, _, _ = agent.NN_policy.get_action_and_value(
+                    _, newlogprob, entropy, _ = agent.NN_policy.get_action(
                         b_obs[mb_inds],
                         b_masks[mb_inds],
                         action=b_actions.long()[mb_inds],
@@ -1005,7 +1029,7 @@ def main(args):
                     mb_attn_masks = b_attn_masks[mb_inds] if attn else None
                     # Compute policy and value targets
                     with torch.no_grad():
-                        _, _, _, old_action_dist, _ = old_NN_policy.get_action_and_value(b_obs[mb_inds], b_masks[mb_inds])
+                        _, _, _, old_action_dist = old_NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds])
                         value_target = agent.NN_value.get_value(
                             b_obs[mb_inds],
                             attn_mask=mb_attn_masks
@@ -1190,8 +1214,8 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="/Users/simo/Projects/vcmi-gym/vcmi/rel/bin/simotest.pt",
-        agent_load_file=None,
+        agent_load_file="/Users/simo/Projects/vcmi-gym/rl/models/Defender model:v5/agent-migrated.pt",
+        # agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
         rollouts_per_mapchange=0,
@@ -1265,7 +1289,7 @@ def debug_args():
             conntype="thread"
         ),
         env_wrappers=[],
-        env_version=4,
+        env_version=3,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
             attention=None,

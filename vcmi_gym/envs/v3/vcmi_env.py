@@ -83,7 +83,7 @@ class VcmiEnv(gym.Env):
 
     def __init__(
         self,
-        mapname: str,
+        mapname: str = "gym/A1.vmap",
         seed: Optional[int] = None,
         render_mode: str = "ansi",
         max_steps: int = 500,

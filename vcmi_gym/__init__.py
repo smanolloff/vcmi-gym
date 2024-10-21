@@ -55,5 +55,5 @@ common_opts = dict(disable_env_checker=True, order_enforce=False)
 
 gymnasium.register(id="VCMI-v1", entry_point="vcmi_gym:VcmiEnv_v1", **common_opts)
 gymnasium.register(id="VCMI-v2", entry_point="vcmi_gym:VcmiEnv_v2", **common_opts)
-# gymnasium.register(id="VCMI-v3", entry_point="vcmi_gym:VcmiEnv_v3", **common_opts)
+gymnasium.register(id="VCMI-v3", entry_point="vcmi_gym:VcmiEnv_v3", **common_opts)
 gymnasium.register(id="VCMI-v4", entry_point="vcmi_gym:VcmiEnv_v4", **common_opts)
