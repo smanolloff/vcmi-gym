@@ -10,21 +10,15 @@ needed to produce VCMI combat AI models.
 
 ## Project state
 
-The project is in a late stage of active development. The gym environment
-is stable and AIs can be successfully trained, although the optimal NN
-architecture and RL algorithm for the task are yet to be discovered (a
-process which involves a *lot* of experimentation).
+Models trained by vcmi-gym can be loaded in VCMI through the changes proposed
+in this pull request: https://github.com/vcmi/vcmi/pull/4788. When the VCMI
+team accepts the contribution, vcmi-gym's models will become readily available
+in VCMI through the VCMI mod ecosystem. 
 
-An RL model is [currently in training](https://wandb.ai/s-manolloff/vcmi-gym),
-but the progress is slow due to the resource-constrained harware environment it
-is trained on.
-
-### Future plans
-
-And as soon the RL model is able to surpass VCMI's default "BattleAI" bot
-performance (even by a small fraction), the project will advance to its final
-stage, involving collaboration with the VCMI devs to come up with
-a strategy for rolling out pre-trained AI models (e.g. as a VCMI mod).
+Training new models is an ongoing effort and does not block players from using
+the already trained MMAI models once released, as they enhance gameplay
+experience by adding engaging and unpredictable behaviour of the enemy troops
+during battle.
 
 ## Project architecture
 
