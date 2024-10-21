@@ -198,8 +198,9 @@ def create_venv(LOG, env_cls, agent, mapname, role, opponent, wrappers, env_kwar
             random_obstacles=1,
             warmachine_chance=50,
             town_chance=0,
-            tight_formation_chance=20,
+            tight_formation_chance=0,
             random_terrain_chance=100,
+            battlefield_pattern=os.getenv("EVALUATOR_BATTLEFIELD_PATTERN", ""),
             mana_min=0,
             mana_max=0,
             swap_sides=agent.args.env.swap_sides,
@@ -578,11 +579,13 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 for k, v in flatten_dict(metadata, sep=".").items():
                     wandb_results[f"eval/metadata/{k}"] = v
 
+                layouts = [False, True] if os.getenv("EVALUATOR_SIEGE", None) == 1 else [False]
+                print("Siege: %s" % layouts)
                 env_opponents = os.getenv("EVALUATOR_OPPONENT", "both")
                 opponents = ["StupidAI", "BattleAI"] if env_opponents == "both" else [env_opponents]
                 for opponent in opponents:
                     print("Opponent: %s" % opponent)
-                    for siege in [False, True]:
+                    for siege in layouts:
                         tstart = time.time()
 
                         print(f"Connecting to {statsdbpath}")
@@ -657,12 +660,15 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     m = os.path.basename(vmap)
 
                     wandb_results["eval/all/is_success"] = np.mean([r.is_success for r in results])
-                    wandb_results["eval/field/is_success"] = np.mean([r.is_success for r in results if not r.siege])
-                    wandb_results["eval/siege/is_success"] = np.mean([r.is_success for r in results if r.siege])
-
                     wandb_results["eval/all/length"] = np.mean([r.length for r in results])
-                    wandb_results["eval/field/length"] = np.mean([r.length for r in results if not r.siege])
-                    wandb_results["eval/siege/length"] = np.mean([r.length for r in results if r.siege])
+
+                    # wandb breaks if NaN is given
+                    if any(not r.siege for r in results):
+                        wandb_results["eval/field/is_success"] = np.mean([r.is_success for r in results if not r.siege])
+                        wandb_results["eval/field/length"] = np.mean([r.length for r in results if not r.siege])
+                    if any(r.siege for r in results):
+                        wandb_results["eval/siege/is_success"] = np.mean([r.is_success for r in results if r.siege])
+                        wandb_results["eval/siege/length"] = np.mean([r.length for r in results if r.siege])
 
                     for i, p in enumerate(pools):
                         wandb_results[f"eval/pool/{p}/is_success"] = np.mean([r.pooldata[i] for r in results])
