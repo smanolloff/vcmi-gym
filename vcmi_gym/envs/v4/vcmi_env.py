@@ -80,12 +80,10 @@ class VcmiEnv(gym.Env):
 
     # NOTE: removing action=0 to prevent agents from freely retreating for now
     ACTION_SPACE = gym.spaces.Discrete(N_ACTIONS)
-    OBSERVATION_SPACE = gym.spaces.Box(
-        low=STATE_VALUE_NA,
-        high=1,
-        shape=(STATE_SIZE,),
-        dtype=np.float32
-    )
+    OBSERVATION_SPACE = gym.spaces.Dict({
+        "observation": gym.spaces.Box(low=STATE_VALUE_NA, high=1, shape=(STATE_SIZE,), dtype=np.float32),
+        "action_mask": gym.spaces.Box(low=0, high=1, shape=(N_ACTIONS,), dtype=bool)
+    })
 
     STATE_SIZE_MISC = STATE_SIZE_MISC
     STATE_SIZE_HEXES = STATE_SIZE_HEXES
@@ -565,7 +563,9 @@ class VcmiEnv(gym.Env):
         term = res.is_battle_over
         rew, rew_unclipped = self.calc_reward(analysis, res)
 
-        obs = res.state
+        res.actmask[0] = False  # prevent retreats for now
+        obs = {"observation": res.state, "action_mask": res.actmask}
+
         trunc = self.analyzer.actions_count >= self.max_steps
 
         self._update_vars_after_step(res, rew, rew_unclipped, term, trunc, analysis)
@@ -593,7 +593,9 @@ class VcmiEnv(gym.Env):
         if self.render_each_step:
             self.render()
 
-        return self.result.state, {"side": self.result.side}
+        obs = {"observation": self.result.state, "action_mask": self.result.actmask}
+        info = {"side": self.result.side}
+        return obs, info
 
     @tracelog
     def render(self):
@@ -630,12 +632,6 @@ class VcmiEnv(gym.Env):
     def __del__(self):
         self.close()
 
-    @tracelog
-    def action_mask(self):
-        mask = self.result.actmask
-        mask[0] = False  # prevent retreats for now
-        return mask
-
     # To use attnmask, code in pyconnector.py and BAI/v1/state.cpp
     # must be uncommented and both VCMI and connector must be recompiled.
     def attn_mask(self):
@@ -647,7 +643,7 @@ class VcmiEnv(gym.Env):
 
     @staticmethod
     def decode_obs(obs):
-        return Decoder.decode(obs)
+        return Decoder.decode(obs["observation"])
 
     #
     # private

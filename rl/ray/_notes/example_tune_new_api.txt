@@ -1,0 +1,180 @@
+**Rephrased question:**
+How can I use Ray Tune with a custom algorithm class in RLlib's new API stack?
+
+**Answer:**
+To use **Ray Tune** with a **custom algorithm class** in RLlib's new API, you need to:
+1. Define your custom algorithm by subclassing RLlib's `Algorithm`.
+2. Register this custom algorithm with RLlib.
+3. Set up Ray Tune to use this custom algorithm for hyperparameter tuning.
+
+Here's a step-by-step guide:
+
+### Steps to Use Ray Tune with a Custom Algorithm in RLlib
+
+#### Step 1: Define Your Custom Algorithm
+You will need to create a custom algorithm by subclassing RLlib's `Algorithm` class or one of its variants.
+
+Here’s an example of a simple custom algorithm:
+
+```python
+from ray.rllib.algorithms.algorithm import Algorithm, AlgorithmConfig
+from ray.rllib.utils.annotations import override
+
+class CustomAlgorithm(Algorithm):
+    @override(Algorithm)
+    def training_step(self):
+        # Custom logic for each training iteration
+        # Example: Return some random reward (replace with actual training logic)
+        return {"episode_reward_mean": 42}  # Dummy value, replace with your logic
+
+# Define configuration for your custom algorithm
+class CustomAlgorithmConfig(AlgorithmConfig):
+    def __init__(self):
+        super().__init__(algo_class=CustomAlgorithm)
+
+    # Add any custom configurations here if needed
+    # Example: self.learning_rate = 0.01
+```
+
+In this example:
+- `CustomAlgorithm` extends RLlib's base `Algorithm` and implements the `training_step()` method.
+- `CustomAlgorithmConfig` is a subclass of `AlgorithmConfig` to configure your custom algorithm.
+
+#### Step 2: Register Your Custom Algorithm with RLlib
+RLlib needs to know about your custom algorithm. To do that, you register it using the `register_trainable()` method in Ray.
+
+```python
+from ray.tune.registry import register_trainable
+
+# Register the custom algorithm with RLlib
+register_trainable("CustomAlgorithm", CustomAlgorithm)
+```
+
+#### Step 3: Set Up Ray Tune for Hyperparameter Tuning
+You can now set up Ray Tune using the registered custom algorithm. You can configure hyperparameters in the same way as with standard RLlib algorithms.
+
+Here’s an example:
+
+```python
+import ray
+from ray import tune
+from ray.tune.search.hyperopt import HyperOptSearch
+from ray.tune.schedulers import ASHAScheduler
+
+# Initialize Ray
+ray.init()
+
+# Define the search space for hyperparameters to tune
+search_space = (
+    CustomAlgorithmConfig()
+    .environment(env="CartPole-v1")  # Set the environment
+    .training(
+        lr=tune.loguniform(1e-4, 1e-2),  # Hyperparameter to tune (learning rate)
+        gamma=tune.uniform(0.9, 0.999)   # Hyperparameter to tune (discount factor)
+    )
+)
+
+# Define the scheduler and search algorithm for Ray Tune
+scheduler = ASHAScheduler(metric="episode_reward_mean", mode="max")
+search_algo = HyperOptSearch(metric="episode_reward_mean", mode="max")
+
+# Set up Ray Tune Tuner
+tuner = tune.Tuner(
+    trainable="CustomAlgorithm",  # Name of the custom algorithm you registered
+    param_space=search_space.to_dict(),  # Convert config to dictionary for Tune
+    tune_config=tune.TuneConfig(
+        scheduler=scheduler,
+        search_alg=search_algo,
+        num_samples=10  # Number of hyperparameter tuning trials
+    ),
+)
+
+# Run the tuning job
+results = tuner.fit()
+
+# Display the best trial's results
+best_trial = results.get_best_result(metric="episode_reward_mean", mode="max")
+print(f"Best trial's config: {best_trial.config}")
+print(f"Best trial's final reward: {best_trial.metrics['episode_reward_mean']}")
+```
+
+### Key Components:
+- **Custom Algorithm**: You subclass RLlib's `Algorithm` and define custom training logic in `training_step()`.
+- **Registering the Algorithm**: You use `register_trainable()` to register your custom algorithm with RLlib and Ray Tune.
+- **Ray Tune Configuration**: Ray Tune uses the same `Tuner` setup as with standard RLlib algorithms. You provide a hyperparameter search space and optionally use a search algorithm (e.g., `HyperOptSearch`) and a scheduler (e.g., `ASHAScheduler`).
+
+### Full Example:
+
+```python
+import ray
+from ray import tune
+from ray.rllib.algorithms.algorithm import Algorithm, AlgorithmConfig
+from ray.rllib.utils.annotations import override
+from ray.tune.registry import register_trainable
+from ray.tune.schedulers import ASHAScheduler
+from ray.tune.search.hyperopt import HyperOptSearch
+
+# Step 1: Define the custom algorithm
+class CustomAlgorithm(Algorithm):
+    @override(Algorithm)
+    def training_step(self):
+        # Implement your custom training logic here
+        # Returning a random reward for demonstration purposes
+        return {"episode_reward_mean": 42}  # Dummy reward, replace with real logic
+
+# Step 2: Define configuration for the custom algorithm
+class CustomAlgorithmConfig(AlgorithmConfig):
+    def __init__(self):
+        super().__init__(algo_class=CustomAlgorithm)
+        # You can add other custom configuration options here
+        # self.learning_rate = 0.001
+
+# Step 3: Register the custom algorithm with Ray
+register_trainable("CustomAlgorithm", CustomAlgorithm)
+
+# Step 4: Use Ray Tune with the custom algorithm
+def run_tune():
+    # Initialize Ray
+    ray.init()
+
+    # Define hyperparameter search space
+    search_space = (
+        CustomAlgorithmConfig()
+        .environment(env="CartPole-v1")
+        .training(
+            lr=tune.loguniform(1e-4, 1e-2),  # Tune learning rate
+            gamma=tune.uniform(0.9, 0.999)  # Tune discount factor
+        )
+    )
+
+    # Scheduler and search algorithm
+    scheduler = ASHAScheduler(metric="episode_reward_mean", mode="max")
+    search_algo = HyperOptSearch(metric="episode_reward_mean", mode="max")
+
+    # Create the Ray Tune tuner
+    tuner = tune.Tuner(
+        trainable="CustomAlgorithm",  # Use the registered custom algorithm
+        param_space=search_space.to_dict(),  # Convert the search space to a dict
+        tune_config=tune.TuneConfig(
+            scheduler=scheduler,
+            search_alg=search_algo,
+            num_samples=10  # Number of hyperparameter tuning trials
+        ),
+    )
+
+    # Run the tuning job
+    results = tuner.fit()
+
+    # Output the best trial
+    best_trial = results.get_best_result(metric="episode_reward_mean", mode="max")
+    print(f"Best trial's config: {best_trial.config}")
+    print(f"Best trial's final reward: {best_trial.metrics['episode_reward_mean']}")
+
+if __name__ == "__main__":
+    run_tune()
+```
+
+### Summary:
+1. **Define a custom algorithm** by subclassing `Algorithm` and implementing your custom training logic in `training_step()`.
+2. **Register the custom algorithm** with Ray Tune using `register_trainable()`.
+3. **Set up Ray Tune** to tune the custom algorithm using `Tuner`, with a hyperparameter search space defined in your custom configuration (`CustomAlgorithmConfig`).

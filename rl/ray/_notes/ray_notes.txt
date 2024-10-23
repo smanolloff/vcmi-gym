@@ -1,0 +1,8 @@
+BC + PPO:
+https://github.com/ray-project/ray/blob/39cbdcc9c4104d0c5bbf23ead3a2e2c4bd14d417/rllib/examples/offline_rl/train_w_bc_finetune_w_ppo.py#L132
+
+LSTM:
+https://github.com/ray-project/ray/blob/ray-2.37.0/rllib/examples/rl_modules/classes/lstm_containing_rlm.py
+
+Action masking:
+https://github.com/ray-project/ray/blob/ray-2.37.0/rllib/examples/rl_modules/classes/action_masking_rlm.py
