@@ -23,14 +23,13 @@ class MPPO_Encoder(nn.Module):
 
         self.shared = shared
         self.inference_only = inference_only
-
-        # XXX: These "critic_encoder" variable is accessed externally:
-        #   https://github.com/ray-project/ray/blob/ray-2.37.0/rllib/algorithms/ppo/ppo_rl_module.py#L99
-        #   Using the same var means critic encoder will be
-        #   simply deleted if not needed (e.g. during inference)
         self.encoder = EncoderNN(netconfig, action_space, observation_space, obs_dims)
 
-        # XXX: critic_encoder must be UNDEFINED if encoder is shared
+        # XXX: The "critic_encoder" variable is needed by PPORLModule
+        #   Using the same var here means critic encoder will be
+        #   simply deleted by PPORLModule if not needed (e.g. during inference)
+        #
+        # XXX: critic_encoder must be UNDEFINED if shared is True
         if not shared:
             self.critic_encoder = EncoderNN(netconfig, action_space, observation_space, obs_dims)
 

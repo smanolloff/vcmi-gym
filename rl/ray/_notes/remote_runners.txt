@@ -1,0 +1,77 @@
+The async nature of remote runners may produce confusing logging.
+
+For example, this config:
+    evaluation_num_env_runners=2,           # 0 => evaluate in main process
+    evaluation_duration=3,                  # per evaluation env runner!
+    metrics_num_episodes_for_smoothing=4,
+
+yields 2 remote runners, 2 and 1 episodes each.
+
+The logs, however, indicate there are 7 total episodes from each worker:
+
+pid=17731 net_value -162812, peek -162812.0
+pid=17731 net_value -17893,  peek -90352.5
+pid=17728 net_value -133782, peek -133782.0
+pid=17731 net_value -7231,   peek -62645.333333333336
+pid=17731 net_value -3026,   peek -47740.5
+pid=17728 net_value -368036, peek -250909.0
+pid=17728 net_value -841,    peek -167553.0
+
+(the above is logged by the on_episode_end() callback)
+
+The training result (after evaluation) contains this:
+  "net_value": -104829.0,
+
+^^^ is the CORRECT value - it is the average of the first 3 episodes:
+
+pid=17731 net_value -162812, peek -162812.0
+pid=17731 net_value -17893,  peek -90352.5
+pid=17728 net_value -133782, peek -133782.0
+
+The runners just "run" episodes until terminated which may happen with a delay.
+====================================
+
+  evaluation_num_env_runners=2,           # 0 => evaluate in main process
+  evaluation_duration=6,                  # per evaluation env runner!
+  metrics_num_episodes_for_smoothing=4,
+
+(SingleAgentEnvRunner pid=20980) Logged {'net_value': -121222, 'is_success': False}, peek[net_value]: -121222.0, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20980) Logged {'net_value': -23233, 'is_success': False}, peek[net_value]: -72227.5, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20974) Logged {'net_value': -120545, 'is_success': False}, peek[net_value]: -120545.0, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20980) Logged {'net_value': -409132, 'is_success': False}, peek[net_value]: -184529.0, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20980) Logged {'net_value': -5591, 'is_success': False}, peek[net_value]: -139794.5, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20974) Logged {'net_value': -21128, 'is_success': False}, peek[net_value]: -70836.5, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20974) Logged {'net_value': -321264, 'is_success': False}, peek[net_value]: -154312.33333333334, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20980) Logged {'net_value': -925873, 'is_success': False}, peek[net_value]: -340957.25, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20980) Logged {'net_value': -87822, 'is_success': False}, peek[net_value]: -357104.5, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20974) Logged {'net_value': -3745, 'is_success': False}, peek[net_value]: -116670.5, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20974) Logged {'net_value': -875520, 'is_success': False}, peek[net_value]: -305414.25, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20980) Logged {'net_value': -176369, 'is_success': False}, peek[net_value]: -298913.75, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20980) Logged {'net_value': -17250, 'is_success': False}, peek[net_value]: -301828.5, peek[is_success]: 0.0
+(SingleAgentEnvRunner pid=20974) Logged {'net_value': -78675, 'is_success': False}, peek[net_value]: -319801.0, peek[is_success]: 0.0
+
+ipdb> result["evaluation"]["env_runners"]["net_value"]
+-193689.25
+
+Avg of first 6 res (as logged): -116808.5
+Avg of res. 3..6 (as logged): -139099.0
+
+Avg. of first 3 res for pid 20980: -184529.0
+Avg. of first 3 res for pid 20974: -154312.33333333334
+
+First 3 eps. of each pid:
+pid=20980) Logged {'net_value': -121222, 'is_success': False}, peek[net_value]: -121222.0, peek[is_success]: 0.0
+pid=20980) Logged {'net_value': -23233, 'is_success': False}, peek[net_value]: -72227.5, peek[is_success]: 0.0
+pid=20980) Logged {'net_value': -409132, 'is_success': False}, peek[net_value]: -184529.0, peek[is_success]: 0.0
+pid=20974) Logged {'net_value': -120545, 'is_success': False}, peek[net_value]: -120545.0, peek[is_success]: 0.0
+pid=20974) Logged {'net_value': -21128, 'is_success': False}, peek[net_value]: -70836.5, peek[is_success]: 0.0
+pid=20974) Logged {'net_value': -321264, 'is_success': False}, peek[net_value]: -154312.33333333334, peek[is_success]: 0.0
+
+values = [-121222, -23233, -409132, -120545, -21128, -321264]
+combs = list(itertools.combinations(values, 4))
+ind =  [np.mean(x) for x in combs].index(-193689.25)
+combs[ind]
+# => (-23233, -409132, -21128, -321264)
+
+so, from the first 3 episodes of each env, it used the last 2 of each
+... smart.

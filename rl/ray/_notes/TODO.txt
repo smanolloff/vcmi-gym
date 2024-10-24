@@ -1,0 +1,13 @@
+Add to MMAI::BAI's supplementary data:
+- is creature bank?
+- fort level (-1..3)
+- data for each hero:
+  - name
+  - army formation
+
+Use this in the MPPO_Callback to accumulate results
+
+TODO: check if evaluation metrics are reported under different key?
+
+
+

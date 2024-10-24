@@ -827,7 +827,6 @@ def main(args, agent_cls=Agent):
 
                     with torch.no_grad():
                         # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                        import ipdb; ipdb.set_trace()  # noqa
                         old_approx_kl = (-logratio).mean()
                         approx_kl = ((ratio - 1) - logratio).mean()
                         clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]

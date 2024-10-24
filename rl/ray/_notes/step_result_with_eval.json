@@ -1,77 +1,398 @@
-// result after 1 call to algorithm.step() WITH evaluation
-// (evaluation_interval was 1 => triggered after first train step)
-// This is what tune sees when calling trainable.step()
-// anything here can be used as a tune metric
 {
+    "config": {
+        "_AlgorithmConfig__prior_exploration_config": {
+            "type": "StochasticSampling"
+        },
+        "_disable_action_flattening": false,
+        "_disable_execution_plan_api": -1,
+        "_disable_initialize_loss_from_dummy_batch": false,
+        "_disable_preprocessor_api": false,
+        "_dont_auto_sync_env_runner_states": false,
+        "_enable_rl_module_api": -1,
+        "_env_to_module_connector": null,
+        "_evaluation_parallel_to_training_wo_thread": false,
+        "_fake_gpus": false,
+        "_is_atari": false,
+        "_learner_class": null,
+        "_learner_connector": null,
+        "_model_config": {
+            "evaluating": false,
+            "network": {
+                "actor": {
+                    "in_features": 512,
+                    "out_features": 2312,
+                    "t": "Linear"
+                },
+                "attention": null,
+                "critic": {
+                    "in_features": 512,
+                    "out_features": 1,
+                    "t": "Linear"
+                },
+                "features_extractor1_hexes": [{"out_features": 8,"t": "LazyLinear"},{"t": "LeakyReLU"},{"t": "Flatten"}],
+                "features_extractor1_misc": [{"out_features": 4,"t": "LazyLinear"},{"t": "LeakyReLU"}],
+                "features_extractor1_stacks": [{"out_features": 8,"t": "LazyLinear"},{"t": "LeakyReLU"},{"t": "Flatten"}],
+                "features_extractor2": [{"in_features": 1484,"out_features": 512,"t": "Linear"},{"t": "LeakyReLU"}]
+            },
+            "obs_dims": {
+                "hexes": 10725,
+                "misc": 4,
+                "stacks": 2000
+            },
+            "vf_share_layers": true
+        },
+        "_module_to_env_connector": null,
+        "_per_module_overrides": {},
+        "_rl_module_spec": null,
+        "_run_training_always_in_thread": false,
+        "_tf_policy_handles_more_than_one_loss": false,
+        "_torch_grad_scaler_class": null,
+        "_torch_lr_scheduler_classes": null,
+        "action_mask_key": "action_mask",
+        "action_space": null,
+        "actions_in_input_normalized": false,
+        "add_default_connectors_to_env_to_module_pipeline": true,
+        "add_default_connectors_to_learner_pipeline": true,
+        "add_default_connectors_to_module_to_env_pipeline": true,
+        "algorithm_config_overrides_per_module": {},
+        "always_attach_evaluation_results": -1,
+        "auto_wrap_old_gym_envs": -1,
+        "batch_mode": "truncate_episodes",
+        "callbacks": "<TorchCompileWhatToCompile.FORWARD_TRAIN: 'forward_train'>",
+        "checkpoint_trainable_policies_only": false,
+        "class": "<class 'ray.rllib.evaluation.collectors.simple_list_collector.SimpleListCollector'>",
+        "clip_actions": false,
+        "clip_param": 0.3,
+        "clip_rewards": null,
+        "compress_observations": false,
+        "count_steps_by": "env_steps",
+        "create_env_on_driver": false,
+        "custom_async_evaluation_function": -1,
+        "custom_eval_function": null,
+        "custom_resources_per_env_runner": {},
+        "dataset_num_iters_per_learner": null,
+        "delay_between_env_runner_restarts_s": 10.0,
+        "disable_env_checking": false,
+        "eager_max_retraces": 20,
+        "eager_tracing": true,
+        "enable_async_evaluation": -1,
+        "enable_connectors": true,
+        "enable_env_runner_and_connector_v2": true,
+        "enable_rl_module_and_learner": true,
+        "enable_tf1_exec_eagerly": false,
+        "entropy_coeff": 0.0,
+        "entropy_coeff_schedule": null,
+        "env": "VCMI",
+        "env_config": {
+            "mapname": "gym/A1.vmap",
+            "sparse_info": true
+        },
+        "env_runner_cls": null,
+        "env_runner_health_probe_timeout_s": 30,
+        "env_runner_restore_timeout_s": 1800,
+        "env_task_fn": null,
+        "episode_lookback_horizon": 1,
+        "evaluation_config": {
+            "env_config": {
+                "mapname": "gym/A2.vmap",
+                "sparse_info": true
+            },
+            "explore": false
+        },
+        "evaluation_duration": 1,
+        "evaluation_duration_unit": "episodes",
+        "evaluation_force_reset_envs_before_iteration": true,
+        "evaluation_interval": 1,
+        "evaluation_num_env_runners": 0,
+        "evaluation_parallel_to_training": false,
+        "evaluation_sample_timeout_s": 120.0,
+        "exploration_config": {},
+        "explore": false,
+        "export_native_model_files": false,
+        "extra_python_environs_for_driver": {},
+        "extra_python_environs_for_worker": {},
+        "fake_sampler": false,
+        "framework": "torch",
+        "gamma": 0.8,
+        "grad_clip": 5,
+        "grad_clip_by": "global_norm",
+        "ignore_env_runner_failures": false,
+        "in_evaluation": false,
+        "input": "sampler",
+        "input_compress_columns": ["obs","new_obs"],
+        "input_config": {},
+        "input_filesystem": null,
+        "input_filesystem_kwargs": {},
+        "input_read_episodes": false,
+        "input_read_method": "read_parquet",
+        "input_read_method_kwargs": {},
+        "input_read_sample_batches": false,
+        "input_read_schema": {},
+        "input_spaces_jsonable": true,
+        "iter_batches_kwargs": {},
+        "keep_per_episode_custom_metrics": false,
+        "kl_coeff": 0.2,
+        "kl_target": 0.01,
+        "lambda": 1.0,
+        "learner_config_dict": {},
+        "local_gpu_idx": 0,
+        "local_tf_session_args": {
+            "inter_op_parallelism_threads": 8,
+            "intra_op_parallelism_threads": 8
+        },
+        "log_gradients": true,
+        "log_level": "DEBUG",
+        "log_sys_usage": false,
+        "logger_config": {
+            "prefix": "MPPO_Logger_prefix",
+            "type": "<function AlgorithmConfig.DEFAULT_POLICY_MAPPING_FN at 0x348e57b50>"
+        },
+        "logger_creator": null,
+        "lr": 0.001,
+        "lr_schedule": null,
+        "map_batches_kwargs": {},
+        "materialize_data": false,
+        "materialize_mapped_data": true,
+        "max_num_env_runner_restarts": 1000,
+        "max_requests_in_flight_per_env_runner": 2,
+        "metrics_episode_collection_timeout_s": 60.0,
+        "metrics_num_episodes_for_smoothing": 100,
+        "min_sample_timesteps_per_iteration": 0,
+        "min_time_s_per_iteration": null,
+        "min_train_timesteps_per_iteration": 0,
+        "minibatch_size": 3,
+        "model": {
+            "_disable_action_flattening": false,
+            "_disable_preprocessor_api": false,
+            "_time_major": false,
+            "_use_default_native_models": -1,
+            "always_check_shapes": false,
+            "attention_dim": 64,
+            "attention_head_dim": 32,
+            "attention_init_gru_gate_bias": 2.0,
+            "attention_memory_inference": 50,
+            "attention_memory_training": 50,
+            "attention_num_heads": 1,
+            "attention_num_transformer_units": 1,
+            "attention_position_wise_mlp_dim": 32,
+            "attention_use_n_prev_actions": 0,
+            "attention_use_n_prev_rewards": 0,
+            "conv_activation": "relu",
+            "conv_bias_initializer": null,
+            "conv_bias_initializer_config": null,
+            "conv_filters": null,
+            "conv_kernel_initializer": null,
+            "conv_kernel_initializer_config": null,
+            "conv_transpose_bias_initializer": null,
+            "conv_transpose_bias_initializer_config": null,
+            "conv_transpose_kernel_initializer": null,
+            "conv_transpose_kernel_initializer_config": null,
+            "custom_action_dist": null,
+            "custom_model": null,
+            "custom_model_config": {},
+            "custom_preprocessor": null,
+            "dim": 84,
+            "encoder_latent_dim": null,
+            "fcnet_activation": "tanh",
+            "fcnet_bias_initializer": null,
+            "fcnet_bias_initializer_config": null,
+            "fcnet_hiddens": [256,256],
+            "fcnet_weights_initializer": null,
+            "fcnet_weights_initializer_config": null,
+            "framestack": true,
+            "free_log_std": false,
+            "grayscale": false,
+            "log_std_clip_param": 20.0,
+            "lstm_bias_initializer": null,
+            "lstm_bias_initializer_config": null,
+            "lstm_cell_size": 256,
+            "lstm_use_prev_action": false,
+            "lstm_use_prev_action_reward": -1,
+            "lstm_use_prev_reward": false,
+            "lstm_weights_initializer": null,
+            "lstm_weights_initializer_config": null,
+            "max_seq_len": 20,
+            "no_final_linear": false,
+            "post_fcnet_activation": "relu",
+            "post_fcnet_bias_initializer": null,
+            "post_fcnet_bias_initializer_config": null,
+            "post_fcnet_hiddens": [],
+            "post_fcnet_weights_initializer": null,
+            "post_fcnet_weights_initializer_config": null,
+            "use_attention": false,
+            "use_lstm": false,
+            "vf_share_layers": false,
+            "zero_mean": true
+        },
+        "normalize_actions": false,
+        "num_consecutive_env_runner_failures_tolerance": 100,
+        "num_cpus_for_main_process": 1,
+        "num_cpus_per_env_runner": 1,
+        "num_cpus_per_learner": 1,
+        "num_env_runners": 0,
+        "num_envs_per_env_runner": 1,
+        "num_epochs": 1,
+        "num_gpus": 0,
+        "num_gpus_per_env_runner": 0,
+        "num_gpus_per_learner": 0,
+        "num_learners": 0,
+        "observation_filter": "NoFilter",
+        "observation_fn": null,
+        "observation_space": null,
+        "off_policy_estimation_methods": {},
+        "offline_sampling": false,
+        "ope_split_batch_by_episode": true,
+        "optimizer": {},
+        "output": null,
+        "output_compress_columns": ["obs","new_obs"],
+        "output_config": {},
+        "output_filesystem": null,
+        "output_filesystem_kwargs": {},
+        "output_max_file_size": 67108864,
+        "output_max_rows_per_file": null,
+        "output_write_episodes": true,
+        "output_write_method": "write_parquet",
+        "output_write_method_kwargs": {},
+        "placement_strategy": "PACK",
+        "policies": {
+            "default_policy": [null,null,null,null]
+        },
+        "policies_to_train": null,
+        "policy_map_cache": -1,
+        "policy_map_capacity": 100,
+        "policy_mapping_fn": "<class 'rl.ray.mppo.mppo_logger.MPPO_Logger'>",
+        "policy_states_are_swappable": false,
+        "postprocess_inputs": false,
+        "prelearner_buffer_class": null,
+        "prelearner_buffer_kwargs": {},
+        "prelearner_class": null,
+        "prelearner_module_synch_period": 10,
+        "preprocessor_pref": "deepmind",
+        "recreate_failed_env_runners": false,
+        "remote_env_batch_wait_ms": 0,
+        "remote_worker_envs": false,
+        "render_env": false,
+        "replay_sequence_length": null,
+        "restart_failed_sub_environments": false,
+        "rollout_fragment_length": "auto",
+        "sample_collector": "<class 'rl.ray.mppo.mppo.MPPO_Config'>",
+        "sample_timeout_s": 30.0,
+        "sampler_perf_stats_ema_coef": null,
+        "seed": null,
+        "sgd_minibatch_size": -1,
+        "shuffle_batch_per_epoch": true,
+        "shuffle_buffer_size": 0,
+        "simple_optimizer": false,
+        "sync_filters_on_rollout_workers_timeout_s": 10.0,
+        "synchronize_filters": -1,
+        "tf_session_args": {
+            "allow_soft_placement": true,
+            "device_count": {
+                "CPU": 1
+            },
+            "gpu_options": {
+                "allow_growth": true
+            },
+            "inter_op_parallelism_threads": 2,
+            "intra_op_parallelism_threads": 2,
+            "log_device_placement": false
+        },
+        "torch_compile_learner": false,
+        "torch_compile_learner_dynamo_backend": "aot_eager",
+        "torch_compile_learner_dynamo_mode": null,
+        "torch_compile_learner_what_to_compile": "<class 'rl.ray.mppo.mppo_callbacks.MPPO_Callbacks'>",
+        "torch_compile_worker": false,
+        "torch_compile_worker_dynamo_backend": "aot_eager",
+        "torch_compile_worker_dynamo_mode": null,
+        "torch_ddp_kwargs": {},
+        "torch_skip_nan_gradients": false,
+        "train_batch_size": 4000,
+        "train_batch_size_per_learner": 6,
+        "update_worker_filter_stats": true,
+        "use_critic": true,
+        "use_gae": true,
+        "use_kl_loss": true,
+        "use_worker_filter_stats": true,
+        "validate_env_runners_after_construction": true,
+        "vf_clip_param": 10.0,
+        "vf_loss_coeff": 1.0,
+        "vf_share_layers": -1,
+        "worker_cls": -1
+    },
+    "date": "2024-10-24_15-34-53",
+    "done": false,
     "env_runners": {
         "agent_episode_returns_mean": {
-            "default_agent": -981.3
+            "default_agent": -981.3680813098666
         },
-        "episode_duration_sec_mean": 0.0,
+        "episode_duration_sec_mean": 0.017250499688088894,
         "episode_len_max": 4,
         "episode_len_mean": 4.0,
         "episode_len_min": 4,
-        "episode_return_max": -981.3,
-        "episode_return_mean": -981.3,
-        "episode_return_min": -981.3,
+        "episode_return_max": -981.3680813098666,
+        "episode_return_mean": -981.3680813098666,
+        "episode_return_min": -981.3680813098666,
+        "is_success": false,
         "module_episode_returns_mean": {
-            "default_policy": -981.3
+            "default_policy": -981.3680813098666
         },
+        "net_value": -15,
         "num_agent_steps_sampled": {
-            "default_agent": 512
+            "default_agent": 6
         },
         "num_agent_steps_sampled_lifetime": {
-            "default_agent": 512
+            "default_agent": 6
         },
-        "num_env_steps_sampled": 512,
-        "num_env_steps_sampled_lifetime": 512,
-        "num_episodes": 128,
+        "num_env_steps_sampled": 6,
+        "num_env_steps_sampled_lifetime": 6,
+        "num_episodes": 1,
         "num_module_steps_sampled": {
-            "default_policy": 512
+            "default_policy": 6
         },
         "num_module_steps_sampled_lifetime": {
-            "default_policy": 512
+            "default_policy": 6
         },
-        "sample": 1.6
+        "sample": 0.04665224999189377
     },
-    // evaluation only:
     "evaluation": {
         "env_runners": {
             "agent_episode_returns_mean": {
-                "default_agent": 974.3
+                "default_agent": 974.339873706624
             },
-            "episode_duration_sec_mean": 0.0,
+            "episode_duration_sec_mean": 0.026065874844789505,
             "episode_len_max": 4,
             "episode_len_mean": 4.0,
             "episode_len_min": 4,
-            "episode_return_max": 974.3,
-            "episode_return_mean": 974.3,
-            "episode_return_min": 974.3,
+            "episode_return_max": 974.339873706624,
+            "episode_return_mean": 974.339873706624,
+            "episode_return_min": 974.339873706624,
+            "is_success": true,
             "module_episode_returns_mean": {
-                "default_policy": 974.3
+                "default_policy": 974.339873706624
             },
+            "net_value": 5019,
             "num_agent_steps_sampled": {
-                "default_agent": 400
+                "default_agent": 4
             },
             "num_agent_steps_sampled_lifetime": {
-                "default_agent": 400
+                "default_agent": 4
             },
-            "num_env_steps_sampled": 400,
-            "num_env_steps_sampled_lifetime": 1424,
-            "num_episodes": 100,
+            "num_env_steps_sampled": 4,
+            "num_env_steps_sampled_lifetime": 10,
+            "num_episodes": 1,
             "num_module_steps_sampled": {
-                "default_policy": 400
+                "default_policy": 4
             },
             "num_module_steps_sampled_lifetime": {
-                "default_policy": 400
+                "default_policy": 4
             },
-            "sample": 0.7
+            "sample": 0.050511750392615795
         },
-        "num_agent_steps_sampled_lifetime": 400,
-        "num_env_steps_sampled_lifetime": 400,
-        "num_episodes_lifetime": 100,
-        "num_healthy_workers": 2,
-        "num_in_flight_async_reqs": 3,
+        "num_agent_steps_sampled_lifetime": 4,
+        "num_env_steps_sampled_lifetime": 4,
+        "num_episodes_lifetime": 1,
+        "num_healthy_workers": 0,
+        "num_in_flight_async_reqs": 0,
         "num_remote_worker_restarts": 0
     },
     "fault_tolerance": {
@@ -79,48 +400,58 @@
         "num_in_flight_async_reqs": 0,
         "num_remote_worker_restarts": 0
     },
+    "hostname": "Simeons-MacBook-Pro.local",
+    "iterations_since_restore": 1,
     "learners": {
         "__all_modules__": {
-            "learner_connector_timer": 0.0,
-            "num_env_steps_trained": 640,
-            "num_module_steps_trained": 640,
+            "learner_connector_timer": 0.0016257921233773232,
+            "num_env_steps_trained": 8,
+            "num_module_steps_trained": 8,
             "num_non_trainable_parameters": 0,
             "num_trainable_parameters": 1948245
         },
         "default_policy": {
             "curr_entropy_coeff": 0.0,
-            "curr_kl_coeff": 0.3,
-            "default_optimizer_learning_rate": 0.0,
-            "entropy": 3.2,
-            "gradients_default_optimizer_global_norm": 0.0,
-            "mean_kl_loss": 0.0,
-            "module_train_batch_size_mean": 640,
-            "num_module_steps_trained": 640,
+            "curr_kl_coeff": 0.10000000149011612,
+            "default_optimizer_learning_rate": 0.001,
+            "entropy": 3.2050561904907227,
+            "gradients_default_optimizer_global_norm": 11.636354446411133,
+            "mean_kl_loss": 0.0008198329014703631,
+            "module_train_batch_size_mean": 8,
+            "num_module_steps_trained": 8,
             "num_non_trainable_parameters": 0,
             "num_trainable_parameters": 1948245,
-            "policy_loss": 0.3,
-            "total_loss": 10.3,
-            "vf_explained_var": -0.0,
-            "vf_loss": 10.0,
-            "vf_loss_unclipped": 561401.9
+            "policy_loss": 0.11030388623476028,
+            "total_loss": 5.712268829345703,
+            "vf_explained_var": -0.000033736228942871094,
+            "vf_loss": 5.601800918579102,
+            "vf_loss_unclipped": 126787.0
         }
     },
+    "node_ip": "127.0.0.1",
     "num_agent_steps_sampled_lifetime": {
-        "default_agent": 512
+        "default_agent": 6
     },
-    "num_env_steps_sampled_lifetime": 512,
-    "num_env_steps_trained_lifetime": 640,
-    "num_episodes_lifetime": 128,
+    "num_env_steps_sampled_lifetime": 6,
+    "num_env_steps_trained_lifetime": 8,
+    "num_episodes_lifetime": 1,
+    "pid": 72321,
+    "time_since_restore": 1.2017018795013428,
+    "time_this_iter_s": 1.2017018795013428,
+    "time_total_s": 1.2017018795013428,
     "timers": {
-        "env_runner_sampling_timer": 1.6,
-        "evaluation_iteration_throughput": 0.0,      // evaluation only
-        "evaluation_iteration_time_sec": 0.7,        // evaluation only
-        "learner_update_timer": 2.0,
-        "restore_eval_workers_time_sec": 0.0,        // evaluation only
-        "restore_workers_time_sec": 0.0,
-        "synch_eval_env_connectors_time_sec": 0.0,   // evaluation only
-        "synch_weights": 0.0,
-        "training_iteration_time_sec": 3.7,
-        "training_step_time_sec": 3.7
-    }
+        "env_runner_sampling_timer": 0.047468582168221474,
+        "evaluation_iteration_throughput": 0.0,
+        "evaluation_iteration_time_sec": 0.0588841438293457,
+        "learner_update_timer": 0.042504625394940376,
+        "restore_eval_workers_time_sec": 0.00004935264587402344,
+        "restore_workers_time_sec": 0.000005245208740234375,
+        "synch_eval_env_connectors_time_sec": 0.00008487701416015625,
+        "synch_weights": 1.050866125151515,
+        "training_iteration_time_sec": 1.1420700550079346,
+        "training_step_time_sec": 1.1419193744659424
+    },
+    "timestamp": 1729773293,
+    "training_iteration": 1,
+    "trial_id": "default"
 }

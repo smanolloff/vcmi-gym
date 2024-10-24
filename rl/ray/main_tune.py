@@ -9,31 +9,19 @@
 import ray.tune
 import os
 from vcmi_gym import VcmiEnv_v4
-from .mppo import MPPO_Config, MPPO_Algorithm
-
-
-#
-# XXX: this directly initializes an Algorithm instance.
-# However, with PBT it will be typically initialized by ray Tune.
-# https://docs.ray.io/en/latest/tune/api/doc/ray.tune.Tuner.html
-#
+from .mppo import (
+    MPPO_Algorithm,
+    MPPO_Config,
+    MPPO_Callback,
+    MPPO_Logger,
+)
 
 config = MPPO_Config()
 
-#
-# AlgorithmConfig:
-# https://docs.ray.io/en/releases-2.35.0/rllib/package_ref/algorithm.html#configuration-methods
-#
-# HOWEVER, docs are not up-to-date it seems.
-# Best to look at the __init__ source, e.g. for environment:
-# https://github.com/ray-project/ray/blob/ray-2.37.0/rllib/algorithms/algorithm_config.py#L324-L337
-#
-
+# Most of the `resources()` is moved to `env_runners()`
 config.resources(
-    placement_strategy="PACK",
-    num_gpus=0,  # @OldAPIStack
-    _fake_gpus=False,  # @OldAPIStack
     num_cpus_for_main_process=1,
+    placement_strategy="PACK",
 )
 
 config.framework(
@@ -47,47 +35,76 @@ config.api_stack(
 
 config.environment(
     env="VCMI",
-    env_config={"mapname": "gym/A1.vmap"},
-    observation_space=None,     # inferred?
-    action_space=None,          # inferred?
-    clip_rewards=None,
-    # normalize_actions=True,       # not used for Discrete action space
-    # clip_actions=False,           # not used for Discrete action space
-    # disable_env_checking=False,   # should be for MultiAgentEnv-only
+    env_config=dict(
+        mapname="gym/A1.vmap",
+        sparse_info=True,
+        external_config={"evaluation": True}
+    ),
+    action_mask_key="action_mask",  # not used as of ray-2.38.0
+    action_space=None,              # inferred from env
+    clip_actions=False,             #
+    clip_rewards=None,              #
+    disable_env_checking=False,     # one-time calls to step and reset
+    is_atari=False,                 #
+    normalize_actions=False,        # ignored for Discrete action space
+    observation_space=None,         # inferred from env
+    render_env=False,               #
 )
 
 config.env_runners(
-    num_env_runners=0,          # 0=sample in main process
-    num_envs_per_env_runner=1,  # i.e. vec_env.num_envs
-    num_cpus_per_env_runner=1,
-    num_gpus_per_env_runner=0,
-    custom_resources_per_env_runner={},
-    validate_env_runners_after_construction=True,
-    sample_timeout_s=30.0,
     add_default_connectors_to_env_to_module_pipeline=True,
     add_default_connectors_to_module_to_env_pipeline=True,
-    episode_lookback_horizon=1,
-    rollout_fragment_length="auto",
     batch_mode="truncate_episodes",
-    explore=False,
     compress_observations=False,
+    custom_resources_per_env_runner={},
+    env_runner_cls=None,
+    env_to_module_connector=None,
+    episode_lookback_horizon=1,
+    explore=False,
+    max_requests_in_flight_per_env_runner=2,
+    module_to_env_connector=None,
+    num_cpus_per_env_runner=1,
+    num_env_runners=0,          # 0 => sample in main process
+    num_envs_per_env_runner=1,  # i.e. vec_env.num_envs
+    num_gpus_per_env_runner=0,
+    rollout_fragment_length="auto",
+    update_worker_filter_stats=True,
+    use_worker_filter_stats=True,
+    sample_timeout_s=30.0,
+    validate_env_runners_after_construction=True,
 )
 
 config.learners(
-    num_learners=0,             # 0=learn in main process
+    num_learners=0,             # 0 => learn in main process
     num_gpus_per_learner=0,
     num_cpus_per_learner=1,
 )
 
+# !!! This is the API as of ray-2.38.0
+# !!! It *will* change in future releases
 config.training(
+    clip_param=0.3,
+    entropy_coeff=0.0,
     gamma=0.8,
-    lr=0.001,
     grad_clip=5,
-    grad_clip_by="global_norm",           # global_norm = nn.utils.clip_grad_norm_(model.parameters)
-    # train_batch_size_per_learner=None,  # for multi-learner setups
+    grad_clip_by="global_norm",       # global_norm = nn.utils.clip_grad_norm_(model.parameters)
+    kl_coeff=0.2,
+    kl_target=0.01,
+    lambda_=1.0,
+    lr=0.001,
+    minibatch_size=3,
+    num_epochs=1,
+    train_batch_size_per_learner=6,  # i.e. batch_size; or mppo's num_steps when n_envs=1
+    shuffle_batch_per_epoch=True,
+    use_critic=True,
+    use_gae=True,
+    use_kl_loss=True,
+    vf_clip_param=10.0,
+    vf_loss_coeff=1.0,
 )
 
-# config.callbacks()
+config.callbacks(MPPO_Callback)
+
 # config.multi_agent()
 # config.offline_data()
 
@@ -110,57 +127,63 @@ config.training(
 # on distributed setups.
 # (e.g. 10 workers running in parallel mean sigificantly faster rollouts)
 
-# https://docs.ray.io/en/releases-2.35.0/rllib/package_ref/doc/ray.rllib.algorithms.algorithm_config.AlgorithmConfig.evaluation.html
 config.evaluation(
-    evaluation_interval=500,    # training iterations (i.e. rollouts)
-    evaluation_duration=100,
+    evaluation_interval=1,      # in training iterations (i.e. rollouts)
+    evaluation_duration=1,      # per evaluation env runner!
     evaluation_duration_unit="episodes",
     evaluation_sample_timeout_s=120.0,
-    evaluation_parallel_to_training=False,  # rollouts are too quick for this
+    evaluation_parallel_to_training=False,  # training is too fast for this
     evaluation_force_reset_envs_before_iteration=True,
     evaluation_config=MPPO_Config.overrides(
         explore=False,
-        env_config=dict(mapname="gym/A2.vmap")
+        env_config=dict(
+            mapname="gym/A2.vmap",
+            sparse_info=True,
+            external_config={"evaluation": True}
+        ),
+        model_config=dict(evaluating=True),
     ),
-    evaluation_num_env_runners=2,
+    evaluation_num_env_runners=0,  # 0 => evaluate in main process
+
+    # TODO: my evaluator function here?
+    #       For testing siege/no siege, also logging the custom metrics
+    custom_evaluation_function=None,
 
     # off_policy_estimation_methods={},     # relevant for offline observations
     # ope_split_batch_by_episode=True,      # relevant for offline observations
 )
 
-# This "reporting" seems to directly affect the training
-# e.g. see this comment:
-# https://github.com/ray-project/ray/blob/ray-2.37.0/rllib/algorithms/dreamerv3/dreamerv3.py#L136
 config.reporting(
     metrics_num_episodes_for_smoothing=100,
-    # metrics_episode_collection_timeout_s=60.0,  # seems used in v2 only? maybe now moved to c++?
     keep_per_episode_custom_metrics=False,
 
+    # XXX: seems used in old API only? maybe in v2 it's moved to c++?
+    # metrics_episode_collection_timeout_s=60.0,
+
     # Repeat training_step() until some criteria is met
-    min_time_s_per_iteration=None,
-    min_train_timesteps_per_iteration=0,
-    min_sample_timesteps_per_iteration=0,
+    # Use 0/none for 1 training_step() per 1 algorithm.step()
+    # XXX: Metrics are broken for >1 training_step anyway:
+    #      https://github.com/ray-project/ray/pull/48136
+    # min_time_s_per_iteration=None,
+    # min_train_timesteps_per_iteration=0,
+    # min_sample_timesteps_per_iteration=0,
 )
 
 config.checkpointing(
-    export_native_model_files=False,            # will also .pt files in checkpoints
+    export_native_model_files=False,            # will also save .pt files in checkpoints
     checkpoint_trainable_policies_only=False,
 )
 
-# https://docs.ray.io/en/releases-2.35.0/rllib/package_ref/doc/ray.rllib.algorithms.algorithm_config.AlgorithmConfig.debugging.html
-# XXX: define a custom logger:
-#      https://github.com/ray-project/ray/blob/master/python/ray/tune/logger/logger.py#L35
-# config.debugging(
-#     # logger_creator=None,
-#     # logger_config=None,
-#     log_level="WARN",
-#     log_sys_usage=False,
-#     seed=None,
-# )
+config.debugging(
+    logger_config=dict(type=MPPO_Logger, prefix="MPPO_Logger_prefix"),
+    log_level="DEBUG",
+    log_sys_usage=False,
+    seed=None,
+)
 
 config.fault_tolerance(
-    ignore_env_runner_failures=False,
     recreate_failed_env_runners=False,      # XXX: set to true for production
+    ignore_env_runner_failures=False,
     max_num_env_runner_restarts=1000,
     delay_between_env_runner_restarts_s=10.0,
     restart_failed_sub_environments=False,
@@ -170,7 +193,8 @@ config.fault_tolerance(
 )
 
 config.rl_module(
-    model_config_dict={
+    model_config={
+        "evaluating": False,
         "vf_share_layers": True,
         "obs_dims": {"misc": 4, "stacks": 2000, "hexes": 10725},
         "network": {
@@ -206,7 +230,7 @@ if __name__ == "__main__":
     ray.tune.registry.register_env("VCMI", lambda cfg: VcmiEnv_v4(**cfg))
     ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
 
-    checkpoint_config = ray.train.CheckpointConfig(num_to_keep=10)
+    checkpoint_config = ray.train.CheckpointConfig(num_to_keep=3)
     run_config = ray.train.RunConfig(
         name="newray-test",
         verbose=False,
