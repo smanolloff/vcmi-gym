@@ -604,16 +604,21 @@ def main(args, agent_cls=Agent):
 
     if args.env_version == 1:
         from vcmi_gym import VcmiEnv_v1 as VcmiEnv
+        obs_space = VcmiEnv.OBSERVATION_SPACE
     elif args.env_version == 2:
         from vcmi_gym import VcmiEnv_v2 as VcmiEnv
+        obs_space = VcmiEnv.OBSERVATION_SPACE
     elif args.env_version == 3:
         from vcmi_gym import VcmiEnv_v3 as VcmiEnv
+        obs_space = VcmiEnv.OBSERVATION_SPACE
     elif args.env_version == 4:
         from vcmi_gym import VcmiEnv_v4 as VcmiEnv
+        print("Using legacy observation space wrapper")
+        wrappers.append(dict(module="vcmi_gym", cls="LegacyObservationSpaceWrapper"))
+        obs_space = VcmiEnv.OBSERVATION_SPACE["observation"]
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
-    obs_space = VcmiEnv.OBSERVATION_SPACE
     act_space = VcmiEnv.ACTION_SPACE
 
     # TODO: robust mechanism ensuring these don't get mixed up
@@ -822,6 +827,7 @@ def main(args, agent_cls=Agent):
 
                     with torch.no_grad():
                         # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                        import ipdb; ipdb.set_trace()  # noqa
                         old_approx_kl = (-logratio).mean()
                         approx_kl = ((ratio - 1) - logratio).mean()
                         clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
@@ -979,8 +985,8 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        agent_load_file="simotest.pt",
-        # agent_load_file=None,
+        # agent_load_file="simotest.pt",
+        agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
         rollouts_per_mapchange=0,
@@ -1000,13 +1006,13 @@ def debug_args():
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
         envmaps=["gym/generated/4096/4x1024.vmap"],
         # num_steps=64,
-        num_steps=256,
+        num_steps=4,
         gamma=0.8,
         gae_lambda=0.8,
-        num_minibatches=4,
+        num_minibatches=2,
         # num_minibatches=16,
         # update_epochs=2,
-        update_epochs=10,
+        update_epochs=2,
         norm_adv=True,
         clip_coef=0.3,
         clip_vloss=True,

@@ -541,9 +541,22 @@ class VcmiEnv(gym.Env):
 
         # required to init vars
         self._reset_vars(self.connector.reset())
+        self.rst_count = 0
+        self.act_count = 0
 
     @tracelog
     def step(self, action):
+        if action > 0 and action % 3 == 0:
+            res = (self.OBSERVATION_SPACE.sample(), -action, True, False, {"action": action, "step": self.act_count, "term": True, "net_value": self.act_count, "is_success": 0})
+        else:
+            res = (self.OBSERVATION_SPACE.sample(), -action, False, False, {"action": action, "step": self.act_count, "term": False})
+
+        res[0]["observation"][0] = action  # embed action in obs
+        res[0]["observation"][1] = res[2]  # embed term in obs
+        print(res[-1])
+        self.act_count += 1
+        return res
+
         if (self.terminated or self.truncated) and action != -1:
             raise Exception("Reset needed")
 
@@ -585,16 +598,19 @@ class VcmiEnv(gym.Env):
 
     @tracelog
     def reset(self, seed=None, options=None):
+        print("> Reset %d" % self.rst_count)
         super().reset(seed=seed)
 
         result = self.connector.reset()
         self._reset_vars(result)
-
         if self.render_each_step:
             self.render()
 
         obs = {"observation": self.result.state, "action_mask": self.result.actmask}
-        info = {"side": self.result.side}
+        info = {"side": self.result.side, "reset": self.rst_count, "hash": 0}
+        obs["observation"][0] = -1
+        obs["observation"][1] = self.rst_count
+        self.rst_count += 1
         return obs, info
 
     @tracelog
@@ -706,7 +722,7 @@ class VcmiEnv(gym.Env):
     def build_info(res, term, trunc, analysis, rewclip_total, rewclip_max, sparse_info):
         # Performance optimization
         if not (term or trunc) and sparse_info:
-            return {"side": res.side}
+            return {"side": res.side, "step": analysis.actions_count_ep, "id": id(analysis)}
 
         # XXX: do not use constructor args (bypasses validations)
         info = InfoDict()

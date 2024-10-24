@@ -1,0 +1,126 @@
+// result after 1 call to algorithm.step() WITH evaluation
+// (evaluation_interval was 1 => triggered after first train step)
+// This is what tune sees when calling trainable.step()
+// anything here can be used as a tune metric
+{
+    "env_runners": {
+        "agent_episode_returns_mean": {
+            "default_agent": -981.3
+        },
+        "episode_duration_sec_mean": 0.0,
+        "episode_len_max": 4,
+        "episode_len_mean": 4.0,
+        "episode_len_min": 4,
+        "episode_return_max": -981.3,
+        "episode_return_mean": -981.3,
+        "episode_return_min": -981.3,
+        "module_episode_returns_mean": {
+            "default_policy": -981.3
+        },
+        "num_agent_steps_sampled": {
+            "default_agent": 512
+        },
+        "num_agent_steps_sampled_lifetime": {
+            "default_agent": 512
+        },
+        "num_env_steps_sampled": 512,
+        "num_env_steps_sampled_lifetime": 512,
+        "num_episodes": 128,
+        "num_module_steps_sampled": {
+            "default_policy": 512
+        },
+        "num_module_steps_sampled_lifetime": {
+            "default_policy": 512
+        },
+        "sample": 1.6
+    },
+    // evaluation only:
+    "evaluation": {
+        "env_runners": {
+            "agent_episode_returns_mean": {
+                "default_agent": 974.3
+            },
+            "episode_duration_sec_mean": 0.0,
+            "episode_len_max": 4,
+            "episode_len_mean": 4.0,
+            "episode_len_min": 4,
+            "episode_return_max": 974.3,
+            "episode_return_mean": 974.3,
+            "episode_return_min": 974.3,
+            "module_episode_returns_mean": {
+                "default_policy": 974.3
+            },
+            "num_agent_steps_sampled": {
+                "default_agent": 400
+            },
+            "num_agent_steps_sampled_lifetime": {
+                "default_agent": 400
+            },
+            "num_env_steps_sampled": 400,
+            "num_env_steps_sampled_lifetime": 1424,
+            "num_episodes": 100,
+            "num_module_steps_sampled": {
+                "default_policy": 400
+            },
+            "num_module_steps_sampled_lifetime": {
+                "default_policy": 400
+            },
+            "sample": 0.7
+        },
+        "num_agent_steps_sampled_lifetime": 400,
+        "num_env_steps_sampled_lifetime": 400,
+        "num_episodes_lifetime": 100,
+        "num_healthy_workers": 2,
+        "num_in_flight_async_reqs": 3,
+        "num_remote_worker_restarts": 0
+    },
+    "fault_tolerance": {
+        "num_healthy_workers": 0,
+        "num_in_flight_async_reqs": 0,
+        "num_remote_worker_restarts": 0
+    },
+    "learners": {
+        "__all_modules__": {
+            "learner_connector_timer": 0.0,
+            "num_env_steps_trained": 640,
+            "num_module_steps_trained": 640,
+            "num_non_trainable_parameters": 0,
+            "num_trainable_parameters": 1948245
+        },
+        "default_policy": {
+            "curr_entropy_coeff": 0.0,
+            "curr_kl_coeff": 0.3,
+            "default_optimizer_learning_rate": 0.0,
+            "entropy": 3.2,
+            "gradients_default_optimizer_global_norm": 0.0,
+            "mean_kl_loss": 0.0,
+            "module_train_batch_size_mean": 640,
+            "num_module_steps_trained": 640,
+            "num_non_trainable_parameters": 0,
+            "num_trainable_parameters": 1948245,
+            "policy_loss": 0.3,
+            "total_loss": 10.3,
+            "vf_explained_var": -0.0,
+            "vf_loss": 10.0,
+            "vf_loss_unclipped": 561401.9
+        }
+    },
+    "num_agent_steps_sampled_lifetime": {
+        "default_agent": 512
+    },
+    "num_env_steps_sampled_lifetime": 512,
+    "num_env_steps_trained_lifetime": 640,
+    "num_episodes_lifetime": 128,
+    "timers": {
+        "env_runner_sampling_timer": 1.6,
+        "evaluation_iteration_throughput": 0.0,      // evaluation only
+        "evaluation_iteration_time_sec": 0.7,        // evaluation only
+        "learner_update_timer": 2.0,
+        "restore_eval_workers_time_sec": 0.0,        // evaluation only
+        "restore_workers_time_sec": 0.0,
+        "synch_eval_env_connectors_time_sec": 0.0,   // evaluation only
+        "synch_weights": 0.0,
+        "training_iteration_time_sec": 3.7,
+        "training_step_time_sec": 3.7
+    }
+}

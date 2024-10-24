@@ -22,24 +22,6 @@ class MPPO_Config(PPOConfig):
         self.enable_rl_module_and_learner = True
         self.enable_env_runner_and_connector_v2 = True
 
-        self.lr_schedule = None
-        self.lr = 5e-5
-        self.train_batch_size = 512             #
-        self.minibatch_size = 128               # num_minibatches = b_size/mb_size
-        self.num_epochs = 30
-        self.lambda_ = 1.0                      # gae_lambda
-        self.vf_loss_coeff = 1.0
-        self.entropy_coeff = 0.0
-        self.clip_param = 0.3
-        self.vf_clip_param = 10.0
-        self.grad_clip = None
-        self.num_env_runners = 2
-
-        self.use_kl_loss = True
-        self.kl_coeff = 0.2
-        self.kl_target = 0.01
-        self.entropy_coeff_schedule = None
-
     # @override(PPOConfig)
     def get_default_rl_module_spec(self):
         return RLModuleSpec(module_class=MPPO_RLModule)

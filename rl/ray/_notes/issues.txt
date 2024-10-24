@@ -1,0 +1,20 @@
+Issues in 2.37.0:
+
+* MAJOR:
+  PPO batches are not shuffled
+  fixed in master: https://github.com/ray-project/ray/pull/47458
+  This is critical to PPO.
+
+* minor:
+  PPO adds an extra terminal observation which means batch sizes increase
+  proportionally to the number of episodes.
+  E.g. 512 steps with avg. 50 terminations would result in 562 steps.
+  The "terminal" observations are passed through the NN but the "critic"
+  value is unused in GAE calculations, and their "actor" logits are masked
+  in KL loss calculations. I checked and they have no effect on the loss calc.
+  Effect on me: useless samples are fed through the NN
+
+* trivial:
+  Different distributions are used for KL loss and surrogate loss calculations.
+  Left a PR here: https://github.com/ray-project/ray/pull/47889/files#r1814477847
+  Effect on me: none (I use the same distributions)

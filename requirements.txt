@@ -10,7 +10,7 @@ gymnasium
 onnx-pytorch
 
 ray[tune]
-ray[rllib]==2.37.0
+ray[rllib]==2.38.0
 
 # Nightly ray builds
 #ray @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl

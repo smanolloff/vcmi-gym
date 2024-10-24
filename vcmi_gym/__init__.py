@@ -30,7 +30,7 @@ from .envs.v3.vcmi_env import VcmiEnv as VcmiEnv_v3
 from .envs.v4.vcmi_env import VcmiEnv as VcmiEnv_v4
 
 from .envs.util.dual_env import DualEnvController, DualEnvClient
-from .envs.util.wrappers import LegacyActionSpaceWrapper
+from .envs.util.wrappers import LegacyActionSpaceWrapper, LegacyObservationSpaceWrapper
 from .tools.test_helper import TestHelper
 
 all = [
@@ -49,6 +49,7 @@ all = [
     InfoDict,
     TestHelper,
     LegacyActionSpaceWrapper,
+    LegacyObservationSpaceWrapper
 ]
 
 common_opts = dict(disable_env_checker=True, order_enforce=False)

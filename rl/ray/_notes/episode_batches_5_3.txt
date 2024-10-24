@@ -1,0 +1,66 @@
+train_batch_size_per_learner=5,  # i.e. batch_size; or mppo's num_steps when n_envs=1
+mini_batch_size_per_learner=3,   # i.e. minibatch_size
+
+****
+The 5 steps result in a batch with 7 "entries"!
+1 entry = obs, action, info, ...
+Each term step adds 2 entries - the term obs + the post-reset obs
+The term obs has dummy action (same as the prev) & reward (0).
+
+batch: 0,1,2,3,4,5,6
+minibatch 1: entries 0,1,2
+minibatch 2: entries 3,4,5
+minibatch 3: entries 6,0,1  <-- end-of-batch reached, re-use entries from the start
+^ XXX: the entries are just ordinal ids 0..6, they do not correspond to the "action" below
+****
+
+> Reset 0
+*** _forward_inference() ***
+{'action': 0, 'step': 0, 'term': False}
+*** _forward_inference() ***
+{'action': 1, 'step': 1, 'term': False}
+*** _forward_inference() ***
+{'action': 2, 'step': 2, 'term': False}
+*** _forward_inference() ***
+{'action': 3, 'step': 3, 'term': True}
+> Reset 1
+*** _forward_inference() ***
+{'action': 4, 'step': 4, 'term': False}
+
+// we can see the action "3" and "5" repeated
+// (last obs is not even terminal, but is *last*)
+// rewards for repeated actions are hard-coded 0 (by chance my env also returned 0)
+// Obs legend: the first 2 numbers contain useful info:
+//  [-1, rst_count, ...] for reset observations
+//  [action, terminated, ...] for step observations
+
+> /Users/simo/Projects/vcmi-gym/.venv/lib/python3.10/site-packages/ray/rllib/core/learner/learner.py(1341)_update_from_batch_or_episodes()
+ipdb> batch["default_policy"]["obs"]["observation"][:,0:5]
+tensor([[-1.0000e+00,  0.0000e+00,  1.5000e-05,  1.5000e-05,  1.0000e+00],  // state=reset, action_in_batch=0
+        [ 0.0000e+00,  0.0000e+00, -6.5323e-01, -7.4450e-01,  7.1662e-01],  // state=(last_action=0), action_in_batch=1
+        [ 1.0000e+00,  0.0000e+00,  7.9621e-01,  8.0431e-01, -4.9219e-01],  // state=(last_action=1), action_in_batch=2
+        [ 2.0000e+00,  0.0000e+00, -3.7515e-01,  8.1097e-03, -2.7668e-01],  // state=(last_action=2), action_in_batch=3
+        [ 3.0000e+00,  1.0000e+00, -6.0578e-01,  7.5629e-01, -8.0554e-01],  // state=(last_action=3, TERM=true), action_in_batch=3)
+        [-1.0000e+00,  1.0000e+00,  1.5000e-05,  1.5000e-05,  1.0000e+00],  // reset=reset, action=4
+        [ 4.0000e+00,  0.0000e+00, -1.4655e-01, -3.5639e-01,  7.5539e-01]]) // state=(last_action=4, action=1)
+
+*** _forward_train(): torch.Size([3, 12729])
+> /Users/simo/Projects/vcmi-gym/rl/ray/mppo/mppo_rl_module.py(96)_forward_train()
+ipdb> batch["obs"]["observation"][:,0:5]
+tensor([[-1.0000e+00,  0.0000e+00,  1.5000e-05,  1.5000e-05,  1.0000e+00],
+        [ 0.0000e+00,  0.0000e+00, -6.5323e-01, -7.4450e-01,  7.1662e-01],
+        [ 1.0000e+00,  0.0000e+00,  7.9621e-01,  8.0431e-01, -4.9219e-01]])
+
+*** _forward_train(): torch.Size([3, 12729])
+> /Users/simo/Projects/vcmi-gym/rl/ray/mppo/mppo_rl_module.py(96)_forward_train()
+ipdb> batch["obs"]["observation"][:,0:5]
+tensor([[ 2.0000e+00,  0.0000e+00, -3.7515e-01,  8.1097e-03, -2.7668e-01],
+        [ 3.0000e+00,  1.0000e+00, -6.0578e-01,  7.5629e-01, -8.0554e-01],
+        [-1.0000e+00,  1.0000e+00,  1.5000e-05,  1.5000e-05,  1.0000e+00]])
+
+*** _forward_train(): torch.Size([3, 12729])
+> /Users/simo/Projects/vcmi-gym/rl/ray/mppo/mppo_rl_module.py(96)_forward_train()
+ipdb> batch["obs"]["observation"][:,0:5]
+tensor([[ 4.0000e+00,  0.0000e+00, -1.4655e-01, -3.5639e-01,  7.5539e-01],
+        [-1.0000e+00,  0.0000e+00,  1.5000e-05,  1.5000e-05,  1.0000e+00],
+        [ 0.0000e+00,  0.0000e+00, -6.5323e-01, -7.4450e-01,  7.1662e-01]])
