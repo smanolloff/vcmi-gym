@@ -1,24 +1,14 @@
-# Test code from
-# https://github.com/ray-project/ray/blob/master/rllib/algorithms/ppo/ppo.py
-
-# Run with:
-#
-#   python -m rl.ray.main
-#
-
 import ray.tune
-from vcmi_gym import VcmiEnv_v4
-from .mppo import MPPO_Config, MPPO_Callback, MPPO_Logger
+import vcmi_gym
+from .pbt_config import pbt_config
+from . import MPPO_Config, MPPO_Callback, MPPO_Logger
 
-#
-# XXX: this script directly initializes an Algorithm instance.
-# However, with PBT it will be typically initialized by ray Tune.
-# https://docs.ray.io/en/latest/tune/api/doc/ray.tune.Tuner.html
-#
+env_cls = getattr(vcmi_gym, pbt_config["env"]["cls"])
 
-config = MPPO_Config()
-config.callbacks(MPPO_Callback)  # this cannot go in master_config
-config.master_config(
+algo_config = MPPO_Config()
+algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
+
+master_config = dict(
     # Most of the `resources()` is moved to `env_runners()`
     resources=dict(
         num_cpus_for_main_process=1,
@@ -34,8 +24,11 @@ config.master_config(
     environment=dict(
         env="VCMI",
         env_config=dict(
-            mapname="gym/A1.vmap",
-            sparse_info=True
+            pbt_config["env"]["kwargs_common"],
+            user_timeout=3600,
+            vcmi_timeout=3600,
+            boot_timeout=3600,
+            **pbt_config["env"]["kwargs_train"]
         ),
         action_mask_key="action_mask",  # not used as of ray-2.38.0
         action_space=None,              # inferred from env
@@ -86,9 +79,9 @@ config.master_config(
         kl_target=0.01,
         lambda_=1.0,
         lr=0.001,
-        minibatch_size=3,
+        minibatch_size=20,
         num_epochs=1,
-        train_batch_size_per_learner=6,  # i.e. batch_size; or mppo's num_steps when n_envs=1
+        train_batch_size_per_learner=100,  # i.e. batch_size; or mppo's num_steps when n_envs=1
         shuffle_batch_per_epoch=True,
         use_critic=True,
         use_gae=True,
@@ -98,30 +91,10 @@ config.master_config(
     ),
     multi_agent=dict(),
     offline_data=dict(),
-    #
-    # XXX: local MPPO had 1 evaluation/hr (2~8K rollouts/hr)
-    # This is mostly due to training being much slower than experience collection
-    # (eval is vs. BattleAI).
-    # Switching to BattleAI will slow down training ~5-10x times.
-    #
-    # An evaluation (500 episodes) takes = ~30 min (on the PC).
-    #
-    # If evaluation_interval=1000:
-    #   For StupidAI training:
-    #   * new evaluation every 10..30 mins
-    #   * => up to 3 evaluators will run in parallel
-    #   For BattleAI training:
-    #   * new evaluation every 50..300 mins
-    #   * => up to 1 evaluators will run in parallel
-    #
-    # This is all based on local benchmarks, may be COMPLETELY different
-    # on distributed setups.
-    # (e.g. 10 workers running in parallel mean sigificantly faster rollouts)
-    #
     evaluation=dict(
-        evaluation_num_env_runners=3,           # 0 => evaluate in main process
-        evaluation_interval=1,                  # in training iterations (i.e. rollouts)
-        evaluation_duration=50,                 # split between runners
+        evaluation_interval=1,                  # !!! MUST BE 1 (to ensure tune sees eval results)
+        evaluation_num_env_runners=0,           # 0 => evaluate in main process
+        evaluation_duration=5,                 # split between runners
         evaluation_duration_unit="episodes",
         evaluation_sample_timeout_s=120.0,
         evaluation_parallel_to_training=False,  # training is too fast for this
@@ -129,10 +102,12 @@ config.master_config(
         evaluation_config=MPPO_Config.overrides(
             explore=False,
             env_config=dict(
-                mapname="gym/generated/evaluation/8x64.vmap",
-                random_heroes=1,
-                sparse_info=True,
-            )
+                pbt_config["env"]["kwargs_common"],
+                user_timeout=3600,
+                vcmi_timeout=3600,
+                boot_timeout=3600,
+                **pbt_config["env"]["kwargs_eval"]
+            ),
         ),
 
         # TODO: my evaluator function here?
@@ -145,30 +120,31 @@ config.master_config(
     reporting=dict(
         # metrics_num_episodes_for_smoothing=6,   # auto-set (custom logic)
         keep_per_episode_custom_metrics=False,
+        log_gradients=True,
 
-        # XXX: seems used in old API only? maybe in v2 it's moved to c++?
-        # metrics_episode_collection_timeout_s=60.0,
+        # metrics_episode_collection_timeout_s=60.0,  # seems old API
 
-        # Repeat training_step() until some criteria is met
-        # Use 0/none for 1 training_step() per 1 algorithm.step()
-        # XXX: Metrics are broken for >1 training_step anyway:
-        #      https://github.com/ray-project/ray/pull/48136
-        # min_time_s_per_iteration=None,
-        # min_train_timesteps_per_iteration=0,
-        # min_sample_timesteps_per_iteration=0,
+        # Used to call .training_step() multiple times in one .train(),
+        # but MPPO_Algorithm expects 1 training_step() call (loops internally)
+        # (see user.training_step_duration_s)
+        min_time_s_per_iteration=None,
+        min_train_timesteps_per_iteration=0,
+        min_sample_timesteps_per_iteration=0,
     ),
     checkpointing=dict(
-        export_native_model_files=False,            # will also save .pt files in checkpoints
+        export_native_model_files=True,            # for torch .pt files in checkpoints
         checkpoint_trainable_policies_only=False,
     ),
     debugging=dict(
+        # MPPO_Logger currently logs nothing.
+        # It's mostly used to supressing a deprecation warning.
         logger_config=dict(type=MPPO_Logger, prefix="MPPO_Logger_prefix"),
         log_level="DEBUG",
         log_sys_usage=False,
         seed=None,
     ),
     fault_tolerance=dict(
-        recreate_failed_env_runners=False,      # XXX: set to true for production
+        recreate_failed_env_runners=False,      # XXX: useful for Amazon SPOT
         ignore_env_runner_failures=False,
         max_num_env_runner_restarts=1000,
         delay_between_env_runner_restarts_s=10.0,
@@ -178,49 +154,49 @@ config.master_config(
         env_runner_restore_timeout_s=1800,
     ),
     rl_module=dict(
-        model_config={
-            "evaluating": False,
-            "vf_share_layers": True,
-            "obs_dims": {"misc": 4, "stacks": 2000, "hexes": 10725},
-            "network": {
-                "attention": None,
-                "features_extractor1_misc": [
-                    {"t": "LazyLinear", "out_features": 4},
-                    {"t": "LeakyReLU"},
-                ],
-                "features_extractor1_stacks": [
-                    {"t": "LazyLinear", "out_features": 8},
-                    {"t": "LeakyReLU"},
-                    {"t": "Flatten"},
-                ],
-                "features_extractor1_hexes": [
-                    {"t": "LazyLinear", "out_features": 8},
-                    {"t": "LeakyReLU"},
-                    {"t": "Flatten"},
-                ],
-                "features_extractor2": [
-                    {"t": "Linear", "in_features": 1484, "out_features": 512},
-                    {"t": "LeakyReLU"},
-                ],
-                "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},
-                "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
-            }
-        }
+        model_config=dict(
+            env_version=4,
+            vf_share_layers=pbt_config["vf_share_layers"],
+            obs_dims=dict(
+                misc=env_cls.STATE_SIZE_MISC,
+                stacks=env_cls.STATE_SIZE_STACKS,
+                hexes=env_cls.STATE_SIZE_HEXES,
+            ),
+            network=pbt_config["network"]
+        )
     ),
-    # MPPO-specific config (not default to ray)
+    # MPPO-specific pbt_config (not default to ray)
     user=dict(
         experiment_name="newray-test",
+        training_step_duration_s=pbt_config["training_step_duration_s"],
         wandb_project=None,
         wandb_old_run_id=None,
-        wandb_log_interval=1,
+        wandb_log_interval_s=pbt_config["wandb_log_interval_s"],
+        hyperparam_mutations=pbt_config["hyperparam_mutations"]
     )
 )
 
-if __name__ == "__main__":
-    ray.tune.registry.register_env("VCMI", lambda cfg: VcmiEnv_v4(**cfg))
 
-    # Build a Algorithm object from the config and run 1 training iteration.
-    algo = config.build()
-    res = algo.train()
-    res = algo.train()
-    print("Done.")
+def convert_to_param_space(mutations):
+    res = {}
+    for k, v in mutations.items():
+        if isinstance(v, dict):
+            res[k] = convert_to_param_space(v)
+        elif isinstance(v, list):
+            res[k] = ray.tune.choice(v)
+        else:
+            assert isinstance(v, ray.tune.search.sample.Domain)
+    return res
+
+
+algo_config.master_config(master_config)
+
+if __name__ == "__main__":
+    ray.tune.registry.register_env("VCMI", lambda cfg: env_cls(**cfg))
+    algo = algo_config.build()
+
+    for i in range(2):
+        res = algo.train()
+        print("Result from training step %d:\n%s" % (i, res))
+
+    print("Done")

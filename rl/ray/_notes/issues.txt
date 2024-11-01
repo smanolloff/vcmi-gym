@@ -1,9 +1,24 @@
-Issues in 2.37.0:
+Issues in 2.38.0:
 
-* MAJOR:
-  PPO batches are not shuffled
-  fixed in master: https://github.com/ray-project/ray/pull/47458
-  This is critical to PPO.
+* moderate:
+  tune calls trainable.step() once per perturbation
+  then calls trainable.log_result() ->
+    -> which calls MPPOCallback.on_train_result() to return tune metrics
+
+  Eval results are used by tune
+  => on_train_result MUST have eval results
+  => algo config.evaluation_interval MUST BE 1
+
+  However, this means wandb metrics will be logged very rarely (just on perturb)
+  ... on_train_result() is also the ONLY useful callback for wandb logging
+  => Workaround:
+    1. Override Algorithm.step() to actually step N times
+      - call super() N times and store/aggregate specific metrics:
+        - TIME_THIS_ITER_S (summed accross the N sub-iterations)
+        - TIMESTEPS_THIS_ITER (summed) - if available
+        - EPISODES_THIS_ITER (summed) - if available
+        - any user-defined metrics (eval/net_value, etc.)
+      - return (only) the aggregated metrics
 
 * minor:
   PPO adds an extra terminal observation which means batch sizes increase

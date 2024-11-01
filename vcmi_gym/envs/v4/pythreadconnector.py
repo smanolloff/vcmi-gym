@@ -139,7 +139,7 @@ class PyThreadConnector():
             if self.finished.is_set():
                 return
 
-            if self.thread:
+            if hasattr(self, "thread"):
                 try:
                     if self.thread.is_alive():
                         self._connector.shutdown()

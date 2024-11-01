@@ -29,8 +29,9 @@ class MPPO_Encoder(nn.Module):
         #   Using the same var here means critic encoder will be
         #   simply deleted by PPORLModule if not needed (e.g. during inference)
         #
-        # XXX: critic_encoder must be UNDEFINED if shared is True
-        if not shared:
+        if shared:
+            pass  # critic_encoder must be UNDEFINED if shared is True
+        else:
             self.critic_encoder = EncoderNN(netconfig, action_space, observation_space, obs_dims)
 
     def forward(self, batch) -> torch.Tensor:

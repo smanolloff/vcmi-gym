@@ -1,0 +1,81 @@
+PBT perturbs every 1 hour.
+So far, I had configured tune with:
+  perturbation_interval=1
+  time_attr="training_iteration"
+
+...using a Trainable where 1 training iteration = 1 hour
+The problem with newray is 1 training iteration = 1 rollout
+
+========== OPTION 1 (chosen) ============
+Configure tune with:
+  perturbation_interval=3600
+  time_attr="time_total_s"
+  metric="train/ep_rew_mean"
+
+Configure newray with:
+  evaluation_interval=N  // preferrably such that there's at least 1 eval/hr
+
+Pros:
+  * simple (no method overrides needed)
+Cons:
+  * PBT uses a train/ instead of eval/ metric
+
+Q: how does PBT aggregate the metric?
+A: does not (uses the last result only)
+
+========== OPTION 2 ============
+Configure tune with:
+  perturbation_interval=1
+  time_attr="training_iteration"
+  metric="eval/success_rate"
+
+Configure newray with:
+  evaluation_interval=1
+
+To use just 1 training iteration/hr, I must override .training_step() like so:
+
+    def training_step(self, ...)
+        wandb.log({"trial/iteration": self.iteration}, commit=False)
+        if self.iteration == 0:
+            // log wandb code
+            // log git commit, git diff (if dirty) -- but maybe in tune's `setup` callback
+
+        tstart = now()
+        results = []
+        temp_logger = MetricsLogger()
+        training_steps = 0
+        while tstart + 3600 < now():
+            temp_logger.log_dict(super().training_step())
+            training_steps += 1
+            if training_steps % self.config.user["training_steps_per_wandb_log"] == 0:
+                results = main_logger2.reduce(return_stats_obj=False)
+                // KEY REMAP LOGIC for results (nested dict w/ string keys + numeric values)
+                // to a flat dict (required by wandb.log)
+
+        // after loop, log trial/iteration
+        self.cfg["skip_wandb_log_code"] = (self.iteration > 0)
+        self.cfg["trial_id"] = self.trial_id
+        args = self.algo.Args(wandb.run.id, wandb.run.group, **self.cfg)
+        self.agent, rew_mean, value_mean = self.algo.main(args)
+        return {"rew_mean": rew_mean, "value_mean": value_mean}
+
+        return temp_logger.reduce()
+
+Pros:
+  * PBT uses latest eval metric
+  * eval is done exactly once per perturbation
+Cons: none
+  * aggregating metrics will be difficult (some are avg, others - acc, third - last, etc.)
+
+
+[Tuner::fit] result = Trainble.train
+  [Trainable::train] result = self.step()
+    [MPPO_Algorithm::step] for i in range(5): results.append(super())
+      [Algorithm::step] ...
+    [MPPO_Algorithm::step] TODO: return reduced results
+  [Trainable::train] add training_iteration, time_total_s to `result`
+  [Trainable::train] self.log_result(result)
+    [Algorithm::log_result] self.callbacks.on_train_result(...)
+      [MPPO_Callback] ... my logic
+
+
