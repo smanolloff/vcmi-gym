@@ -134,7 +134,7 @@ class VcmiEnv(gym.Env):
         reward_dynamic_scaling: bool = False,
         conntype: str = "proc",
         other_env: Optional["VcmiEnv"] = None,
-        transient_config: dict = {}
+        nostart: bool = False
     ):
         # Initialization code here
 
@@ -464,7 +464,6 @@ class VcmiEnv(gym.Env):
         self.term_reward_mult = term_reward_mult
         self.allow_retreat = allow_retreat
         self.other_env = other_env
-        self.transient_config = transient_config
         # </params>
 
         self.logger = log.get_logger("VcmiEnv-v4", vcmienv_loglevel)
@@ -594,6 +593,7 @@ class VcmiEnv(gym.Env):
         if self.render_each_step:
             self.render()
 
+        self.result.actmask[0] = False  # prevent retreats for now
         obs = {"observation": self.result.state, "action_mask": self.result.actmask}
         info = {"side": self.result.side}
         return obs, info
