@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from ray.rllib.utils.annotations import override
 from ray.rllib.algorithms import PPO, PPOConfig
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
-from ray.rllib.core import DEFAULT_MODULE_ID
 from ray.rllib.utils.metrics.metrics_logger import MetricsLogger
 from wandb.util import json_dumps_safer
 

@@ -1,5 +1,6 @@
 import re
 import wandb
+from datetime import datetime
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.utils.annotations import override
 
@@ -58,7 +59,7 @@ class MPPO_Callback(DefaultCallbacks):
     @override(DefaultCallbacks)
     def on_episode_end(self, metrics_logger, env, episode, env_runner, **kwargs):
         info = episode.get_infos()[-1]
-
+        print("episode with len=%d at %s!" % (episode.agent_steps(), datetime.isoformat(datetime.now())))
         # TODO: different metrics based on info
         #       (requires changes in VCMI and VcmiEnv)
         #   eval/all/open/...
@@ -132,7 +133,6 @@ class MPPO_Callback(DefaultCallbacks):
             "train/num_timesteps": t[NUM_ENV_STEPS_SAMPLED],
             "train/global/num_episodes": tg[NUM_EPISODES_LIFETIME],
             "train/global/num_timesteps": tg[NUM_ENV_STEPS_SAMPLED_LIFETIME],
-            "train/global/num_rollouts": tg[NUM_ENV_STEPS_TRAINED_LIFETIME],
         }
 
         # Not present otherwise
@@ -193,7 +193,7 @@ class MPPO_Callback(DefaultCallbacks):
                 wandb.log(*args, **dict({"commit": False}, **kwargs))
         else:
             def wandb_log(*args, **kwargs):
-                print("*** WANDB LOG: %s %s" % (args, kwargs))
+                print("*** WANDB LOG AT %s: %s %s" % (datetime.isoformat(datetime.now()), args, kwargs))
 
         self.wandb_log = wandb_log
 

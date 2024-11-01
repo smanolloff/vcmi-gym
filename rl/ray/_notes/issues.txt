@@ -1,6 +1,15 @@
 Issues in 2.38.0:
 
 * moderate:
+  ray creates 2 local environments even if there runners > 0.
+  This prevents conntype=thread as the local runners are in the main proc.
+  Workaround: just create a DummyEnv if workers>0 && worker_id==0
+
+* major:
+  evaluation with N episodes continues for N more episodes
+  Opened PR: https://github.com/ray-project/ray/pull/48499
+
+* moderate:
   tune calls trainable.step() once per perturbation
   then calls trainable.log_result() ->
     -> which calls MPPOCallback.on_train_result() to return tune metrics
