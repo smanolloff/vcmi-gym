@@ -221,14 +221,40 @@ def convert_to_param_space(mutations):
     return res
 
 
+# Even if there are remote runners, ray still creates 2 local runners
+# It does not use them for anything except inferring action/observation spaces
+class DummyEnv(env_cls):
+    def __init__(self, *args, **kwargs):
+        self.action_space = env_cls.ACTION_SPACE
+        self.observation_space = env_cls.OBSERVATION_SPACE
+        pass
+
+    def step(self, *args, **kwargs):
+        raise Exception("step() called on DummyEnv")
+
+    def reset(self, *args, **kwargs):
+        raise Exception("reset() called on DummyEnv")
+
+    def render(self, *args, **kwargs):
+        raise Exception("render() called on DummyEnv")
+
+    def close(self, *args, **kwargs):
+        pass
+
+
 if __name__ == "__main__":
     algo_config = MPPO_Config()
     algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
     algo_config.master_config(build_master_config(pbt_config))
 
-    import ipdb; ipdb.set_trace()  # noqa
+    # ray.tune.registry.register_env("VCMI", lambda cfg: (print("NEW ENV WITH INDEX: %s" % cfg.worker_index), env_cls(**cfg)))
+    def env_creator(cfg):
+        if cfg.num_workers > 0 and cfg.worker_index == 0:
+            return DummyEnv()
+        else:
+            return env_cls(**cfg)
 
-    ray.tune.registry.register_env("VCMI", lambda cfg: env_cls(**cfg))
+    ray.tune.registry.register_env("VCMI", env_creator)
     ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
 
     checkpoint_config = ray.train.CheckpointConfig(num_to_keep=3)

@@ -13,7 +13,6 @@ from ray.rllib.utils.metrics import (
     LEARNER_RESULTS,
     NUM_ENV_STEPS_SAMPLED,
     NUM_ENV_STEPS_SAMPLED_LIFETIME,
-    NUM_ENV_STEPS_TRAINED_LIFETIME,
     NUM_EPISODES,
     NUM_EPISODES_LIFETIME,
 )
@@ -59,7 +58,8 @@ class MPPO_Callback(DefaultCallbacks):
     @override(DefaultCallbacks)
     def on_episode_end(self, metrics_logger, env, episode, env_runner, **kwargs):
         info = episode.get_infos()[-1]
-        print("episode with len=%d at %s!" % (episode.agent_steps(), datetime.isoformat(datetime.now())))
+        # print("episode with len=%d at %s!" % (episode.agent_steps(), datetime.isoformat(datetime.now())))
+
         # TODO: different metrics based on info
         #       (requires changes in VCMI and VcmiEnv)
         #   eval/all/open/...
@@ -141,6 +141,10 @@ class MPPO_Callback(DefaultCallbacks):
 
         if algorithm.config.log_gradients:
             to_log["learn/grad_"] = l[f"gradients_{DEFAULT_OPTIMIZER}_global_norm"]
+
+        result["train/net_value"] = to_log["train/net_value"]
+        result["train/is_success"] = to_log["train/is_success"]
+        result["train/ep_rew_mean"] = to_log["train/ep_rew_mean"]
 
         self.wandb_log(to_log, commit=commit)
 

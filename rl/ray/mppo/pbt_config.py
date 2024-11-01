@@ -1,12 +1,13 @@
 from .util import linlist, explist
 
 pbt_config = {
-    "metric": "eval/is_success",
+    # "metric": "eval/is_success",
+    "metric": "train/ep_rew_mean",
     "population_size": 2,
     "quantile_fraction": 0.5,
     "wandb_log_interval_s": 5,
     "training_step_duration_s": 10,
-    "evaluation_episodes": 100,
+    "evaluation_episodes": 300,
 
     # XXX: this dict must match the AlgorithmConfig variables structure
     "hyperparam_mutations": {
@@ -17,7 +18,7 @@ pbt_config = {
 
         # NOTE: train_batch_size MUST be divisible by:
         #       train_env_runners * rollout_fragment_length
-        "train_batch_size_per_learner": [256, 512, 1024, 2048],
+        "train_batch_size_per_learner": [500, 1000, 2000, 4000],
 
         "use_kl_loss": [0, 1],
         "kl_coeff": linlist(0.01, 0.5, n=9),
@@ -100,15 +101,15 @@ pbt_config = {
             "StupidAI": 0.002
         },
         "eval": {
-            "runners": 1,  # 0=use main process
+            "runners": 2,  # 0=use main process
             "kwargs": {
                 "mapname": "gym/generated/evaluation/8x64.vmap",
                 "opponent": "BattleAI",
-                "conntype": "proc"
+                "conntype": "thread"
             },
         },
         "train": {
-            "runners": 5,  # 0=use main process
+            "runners": 2,  # 0=use main process
             "kwargs": {
                 "mapname": "gym/generated/4096/4096-mixstack-100K-01.vmap",
                 "opponent": "StupidAI",
@@ -138,6 +139,7 @@ pbt_config = {
                 "user_timeout": 60,
                 "vcmi_timeout": 60,
                 "boot_timeout": 300,
+                "max_steps": 100,
                 "sparse_info": True,
             },
         },

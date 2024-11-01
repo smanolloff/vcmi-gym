@@ -3,7 +3,7 @@ import vcmi_gym
 from wandb.util import json_dumps_safer
 from .pbt_config import pbt_config
 from . import MPPO_Config, MPPO_Callback
-from .pbt_main import build_master_config
+from .pbt_main import build_master_config, DummyEnv
 
 env_cls = getattr(vcmi_gym, pbt_config["env"]["cls"])
 
@@ -31,7 +31,7 @@ pbt_config = {
     "lr": 0.001,
     "minibatch_size": 20,
     "num_epochs": 1,
-    "train_batch_size_per_learner": 10000,
+    "train_batch_size_per_learner": 500,
     "shuffle_batch_per_epoch": True,
     "use_critic": True,
     "use_gae": True,
@@ -88,14 +88,14 @@ pbt_config = {
         # Either eval or train env MUST BE proc
         # (ray always creates a local env for both)
         "eval": {
-            "runners": 8,  # 0=use main process
+            "runners": 0,  # 0=use main process
             "kwargs": {
                 "conntype": "thread",
-                "opponent": "StupidAI",
+                "opponent": "BattleAI",
             },
         },
         "train": {
-            "runners": 8,  # 0=use main process
+            "runners": 0,  # 0=use main process
             "kwargs": {
                 "conntype": "thread",
                 "opponent": "StupidAI",
@@ -134,27 +134,6 @@ pbt_config = {
 }
 
 
-# Even if there are remote runners, ray still creates 2 local runners
-# It does not use them for anything except inferring action/observation spaces
-class DummyEnv(env_cls):
-    def __init__(self, *args, **kwargs):
-        self.action_space = env_cls.ACTION_SPACE
-        self.observation_space = env_cls.OBSERVATION_SPACE
-        pass
-
-    def step(self, *args, **kwargs):
-        raise Exception("step() called on DummyEnv")
-
-    def reset(self, *args, **kwargs):
-        raise Exception("reset() called on DummyEnv")
-
-    def render(self, *args, **kwargs):
-        raise Exception("render() called on DummyEnv")
-
-    def close(self, *args, **kwargs):
-        pass
-
-
 if __name__ == "__main__":
     algo_config = MPPO_Config()
     algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
@@ -162,6 +141,7 @@ if __name__ == "__main__":
 
     # ray.tune.registry.register_env("VCMI", lambda cfg: (print("NEW ENV WITH INDEX: %s" % cfg.worker_index), env_cls(**cfg)))
     def env_creator(cfg):
+        import ipdb; ipdb.set_trace()  # noqa
         if cfg.num_workers > 0 and cfg.worker_index == 0:
             return DummyEnv()
         else:
