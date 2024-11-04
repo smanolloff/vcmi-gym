@@ -89,6 +89,7 @@ class VcmiEnv(gym.Env):
     STATE_SIZE_HEXES = STATE_SIZE_HEXES
     STATE_SIZE_STACKS = STATE_SIZE_STACKS
     STATE_SEQUENCE = STATE_SEQUENCE
+    ENV_VERSION = 4
 
     def __init__(
         self,
@@ -632,12 +633,6 @@ class VcmiEnv(gym.Env):
 
     def __del__(self):
         self.close()
-
-    # To use attnmask, code in pyconnector.py and BAI/v1/state.cpp
-    # must be uncommented and both VCMI and connector must be recompiled.
-    def attn_mask(self):
-        # return self.result.attnmask
-        raise Exception("attn_mask disabled for performance reasons")
 
     def decode(self):
         return self.__class__.decode_obs(self.result.state)

@@ -1,6 +1,33 @@
 Issues in 2.38.0:
 
 * moderate:
+  ray does not allow to specify customization of for env runners
+  (no runner_cls, neither health_check functions are customizable)
+  Quick workaround: use user_timeout > training_step_duration_s (i.e. > 1h)
+  Suggested fix:
+  1. Implement health-check in VCMI's BAI which simply returns OK
+  2. Expose a health_check() method in VcmiEnv
+  3. In MPPO_Callback.on_episode_end, every N episodes iterate
+      over all env runners and do a health check.
+      NOTE: this will reset VCMI connector timers OR will bring down the worker
+      PROBLEM: on_episode_result is invoked in the env runner itself, I have
+               no access to the rest of the runners...
+      WORKAROUND:
+        During training, check eval runners as part of training_step()
+        During evaluation: in MPPO_Algorithm, override .evaluate() and start
+              a thread which periodically checks train runners and is
+              stopped+joined via try/finally() block
+
+  4. Set `recreate_failed_env_runners=True` fault tolerance config
+
+* severe:
+  ray's Algorithm.__init__ casts the config passed in by Tune
+  to an AlgorithmConfig object *before* calling super().__init__().
+  This removes the "__trial_info__" key from config and super (aka. Trainable)
+  is unable to initialize properly...
+  Opened PR: https://github.com/ray-project/ray/pull/48529
+
+* moderate:
   ray creates 2 local environments even if there runners > 0.
   This prevents conntype=thread as the local runners are in the main proc.
   Workaround: just create a DummyEnv if workers>0 && worker_id==0

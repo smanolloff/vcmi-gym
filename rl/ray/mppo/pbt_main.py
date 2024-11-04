@@ -1,6 +1,13 @@
-import ray.tune
 import os
+import json
+
+# These env vars must be set *before* importing ray/wandb modules
+os.environ["RAY_DEDUP_LOGS"] = "0"
+os.environ["WANDB_SILENT"] = "true"
+
+import ray.tune
 import vcmi_gym
+import datetime
 from ray.rllib.utils import deep_update
 from .pbt_config import pbt_config
 from .util import deepmerge
@@ -188,6 +195,7 @@ def build_master_config(cfg):
         ),
         rl_module=dict(
             model_config=dict(
+                env_version=env_cls.ENV_VERSION,
                 vf_share_layers=cfg["vf_share_layers"],
                 obs_dims=dict(
                     misc=env_cls.STATE_SIZE_MISC,
@@ -199,11 +207,12 @@ def build_master_config(cfg):
         ),
         # MPPO-specific cfg (not default to ray)
         user=dict(
-            experiment_name="newray-test",
+            wandb_project=cfg["wandb_project"],
+            experiment_name=cfg["experiment_name"].format(datetime=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")),
             training_step_duration_s=cfg["training_step_duration_s"],
-            wandb_project=None,
             wandb_old_run_id=None,
             wandb_log_interval_s=cfg["wandb_log_interval_s"],
+            env_runner_keepalive_interval_s=cfg["env_runner_keepalive_interval_s"],
             hyperparam_mutations=cfg["hyperparam_mutations"]
         )
     )
@@ -242,24 +251,36 @@ class DummyEnv(env_cls):
         pass
 
 
+# ray.tune.registry.register_env("VCMI", lambda cfg: (print("NEW ENV WITH INDEX: %s" % cfg.worker_index), env_cls(**cfg)))
+def make_env_creator(env_cls):
+    def env_creator(cfg):
+        if cfg.num_workers > 0 and cfg.worker_index == 0:
+            return DummyEnv()
+        else:
+            print(f"Env kwargs: {json.dumps(cfg)}")
+            return env_cls(**cfg)
+    return env_creator
+
+
 if __name__ == "__main__":
     algo_config = MPPO_Config()
     algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
     algo_config.master_config(build_master_config(pbt_config))
 
-    # ray.tune.registry.register_env("VCMI", lambda cfg: (print("NEW ENV WITH INDEX: %s" % cfg.worker_index), env_cls(**cfg)))
-    def env_creator(cfg):
-        if cfg.num_workers > 0 and cfg.worker_index == 0:
-            return DummyEnv()
-        else:
-            return env_cls(**cfg)
+    if (
+        algo_config.evaluation_num_env_runners == 0
+        and algo_config.num_env_runners == 0
+        and algo_config.env_config["conntype"] == "thread"
+        and algo_config.evaluation_config["env_config"]["conntype"] == "thread"
+    ):
+        raise Exception("Both 'train' and 'eval' runners are local -- at least one must have conntype='proc'")
 
-    ray.tune.registry.register_env("VCMI", env_creator)
+    ray.tune.registry.register_env("VCMI", make_env_creator(env_cls))
     ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
 
     checkpoint_config = ray.train.CheckpointConfig(num_to_keep=3)
     run_config = ray.train.RunConfig(
-        name="newray-test",
+        name=algo_config.user["experiment_name"],
         verbose=False,
         failure_config=ray.train.FailureConfig(max_failures=-1),
         checkpoint_config=checkpoint_config,
@@ -282,7 +303,7 @@ if __name__ == "__main__":
         perturbation_interval=1,
         hyperparam_mutations=algo_config.user["hyperparam_mutations"],
         quantile_fraction=pbt_config["quantile_fraction"],
-        log_config=True,  # used for reconstructing the cfg schedule
+        log_config=True,  # used for reconstructing the PBT schedule
         require_attrs=True,
         synch=True,
     )

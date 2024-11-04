@@ -1,37 +1,41 @@
 from .util import linlist, explist
 
 pbt_config = {
+    # "wandb_project": "newray",
+    "wandb_project": None,
+    "experiment_name": "newray-{datetime}",
     # "metric": "eval/is_success",
     "metric": "train/ep_rew_mean",
     "population_size": 2,
     "quantile_fraction": 0.5,
     "wandb_log_interval_s": 5,
-    "training_step_duration_s": 10,
+    "training_step_duration_s": 3600,
     "evaluation_episodes": 300,
+    "env_runner_keepalive_interval_s": 15,  # smaller than VCMI timeouts
 
     # XXX: this dict must match the AlgorithmConfig variables structure
     "hyperparam_mutations": {
         "entropy_coeff": linlist(0, 0.1, n=11),
-        "clip_param": linlist(0.1, 0.7, n=7),
-        "gamma": linlist(0.6, 0.999, n=13),
-        "grad_clip": linlist(0.5, 10, n=11),
+        # "clip_param": linlist(0.1, 0.7, n=7),
+        # "gamma": linlist(0.6, 0.999, n=13),
+        # "grad_clip": linlist(0.5, 10, n=11),
 
-        # NOTE: train_batch_size MUST be divisible by:
-        #       train_env_runners * rollout_fragment_length
-        "train_batch_size_per_learner": [500, 1000, 2000, 4000],
+        # # NOTE: train_batch_size MUST be divisible by:
+        # #       train_env_runners * rollout_fragment_length
+        # # "train_batch_size_per_learner": [500, 1000, 2000, 4000],
 
-        "use_kl_loss": [0, 1],
-        "kl_coeff": linlist(0.01, 0.5, n=9),
-        "kl_target": explist(0.001, 0.1, n=9),
-        "lr": explist(1e-5, 2e-4, n=20),
-        "lambda_": linlist(0.5, 0.99, n=20),
-        "minibatch_size": [32, 64, 128],
-        "num_epochs": linlist(1, 20, n=10, dtype=int),
-        "vf_loss_coeff": linlist(0.1, 2, n=9),
-        "vf_clip_param": linlist(0.1, 100, n=19),
-        "env_config": {  # affects training env only
-            "term_reward_mult": [0, 5]
-        }
+        # "use_kl_loss": [0, 1],
+        # "kl_coeff": linlist(0.01, 0.5, n=9),
+        # "kl_target": explist(0.001, 0.1, n=9),
+        # "lr": explist(1e-5, 2e-4, n=20),
+        # "lambda_": linlist(0.5, 0.99, n=20),
+        # "minibatch_size": [32, 64, 128],
+        # "num_epochs": linlist(1, 20, n=10, dtype=int),
+        # "vf_loss_coeff": linlist(0.1, 2, n=9),
+        # "vf_clip_param": linlist(0.1, 100, n=19),
+        # "env_config": {  # affects training env only
+        #     "term_reward_mult": [0, 5]
+        # }
     },
 
     # Values below are used only if NOT present in hyperparam_mutations
@@ -46,7 +50,7 @@ pbt_config = {
     "lr": 0.001,
     "minibatch_size": 20,
     "num_epochs": 1,
-    "train_batch_size_per_learner": 100,
+    "train_batch_size_per_learner": 2048,
     "shuffle_batch_per_epoch": True,
     "use_critic": True,
     "use_gae": True,
@@ -83,8 +87,13 @@ pbt_config = {
         "cpu_demand": {
             # As measured on Mac M1.
             # XXX: will probably differ on other CPUs. Might need a matrix.
-            "BattleAI": 1,
-            "StupidAI": 0.6
+            # "BattleAI": 1,
+            # "StupidAI": 0.6
+
+            # XXX: using fake values because both eval and train runners are
+            #      constantly running => ray cannot start all 4 population
+            "BattleAI": 0.1,
+            "StupidAI": 0.1
         },
         "episode_duration_s": {
             # Needed for properly setting "evaluation_sample_timeout_s"
@@ -101,15 +110,15 @@ pbt_config = {
             "StupidAI": 0.002
         },
         "eval": {
-            "runners": 2,  # 0=use main process
+            "runners": 1,  # 0=use main process
             "kwargs": {
                 "mapname": "gym/generated/evaluation/8x64.vmap",
                 "opponent": "BattleAI",
-                "conntype": "thread"
+                "conntype": "proc"
             },
         },
         "train": {
-            "runners": 2,  # 0=use main process
+            "runners": 1,  # 0=use main process
             "kwargs": {
                 "mapname": "gym/generated/4096/4096-mixstack-100K-01.vmap",
                 "opponent": "StupidAI",
@@ -136,7 +145,7 @@ pbt_config = {
                 "mana_min": 0,
                 "mana_max": 0,
                 "swap_sides": 0,
-                "user_timeout": 60,
+                "user_timeout": 60,  # MUST be < one rollout duration
                 "vcmi_timeout": 60,
                 "boot_timeout": 300,
                 "max_steps": 100,
@@ -144,6 +153,4 @@ pbt_config = {
             },
         },
     },
-    "experiment_name": "newray-test",  # overwritten via cmd-line args
-    "wandb_project": "vcmi-gym",
 }
