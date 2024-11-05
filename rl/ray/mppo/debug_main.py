@@ -3,7 +3,7 @@ import vcmi_gym
 from wandb.util import json_dumps_safer
 from .pbt_config import pbt_config
 from . import MPPO_Config, MPPO_Callback
-from .pbt_main import build_master_config, DummyEnv, make_env_creator
+from .pbt_main import build_master_config, make_env_creator
 
 env_cls = getattr(vcmi_gym, pbt_config["env"]["cls"])
 
@@ -15,11 +15,16 @@ pbt_config = {
     "population_size": 2,
     "quantile_fraction": 0.5,
     "wandb_log_interval_s": 5,
-    "training_step_duration_s": 30,
-    "evaluation_episodes": 100,
+    "training_step_duration_s": 3000,
+    "evaluation_episodes": 10,
     "env_runner_keepalive_interval_s": 5,  # must be smaller than "user_timeout"
 
-    "hyperparam_mutations": {},
+    "hyperparam_mutations": {
+        "vf_clip_param": [0.1, 0.2, 0.3],
+        "env_config": {  # affects training env only
+            "term_reward_mult": [0, 5]
+        }
+    },
 
     "clip_param": 0.3,
     "entropy_coeff": 0.0,
@@ -32,7 +37,7 @@ pbt_config = {
     "lr": 0.001,
     "minibatch_size": 20,
     "num_epochs": 1,
-    "train_batch_size_per_learner": 2048,
+    "train_batch_size_per_learner": 100,
     "shuffle_batch_per_epoch": True,
     "use_critic": True,
     "use_gae": True,
@@ -91,15 +96,15 @@ pbt_config = {
         "eval": {
             "runners": 0,  # 0=use main process
             "kwargs": {
-                "opponent": "BattleAI",
+                "opponent": "StupidAI",
                 "conntype": "proc",
             },
         },
         "train": {
-            "runners": 1,  # 0=use main process
+            "runners": 0,  # 0=use main process
             "kwargs": {
                 "opponent": "StupidAI",
-                "conntype": "proc",
+                "conntype": "thread",
             },
         },
         "common": {
@@ -132,7 +137,8 @@ pbt_config = {
         },
     },
     "experiment_name": "newray-test",  # overwritten via cmd-line args
-    "wandb_project": None #"vcmi-gym",
+    "resume_from": "",  #
+    "wandb_project": "newray",  # "vcmi-gym",
 }
 
 

@@ -8,12 +8,18 @@ os.environ["WANDB_SILENT"] = "true"
 import ray.tune
 import vcmi_gym
 import datetime
+import pathlib
+import pygit2
 from ray.rllib.utils import deep_update
 from .pbt_config import pbt_config
 from .util import deepmerge
 from . import MPPO_Algorithm, MPPO_Config, MPPO_Callback, MPPO_Logger
 
 env_cls = getattr(vcmi_gym, pbt_config["env"]["cls"])
+
+# i.e. vcmi-gym root:
+vcmi_gym_root = next(p for p in pathlib.Path(__file__).parents if p.name == "vcmi-gym")
+data_path = vcmi_gym_root.joinpath("data").absolute()
 
 
 def calculate_fragment_duration_s(cfg, train_env_cfg, eval_env_cfg):
@@ -56,6 +62,8 @@ def build_master_config(cfg):
     fragment_duration_headroom = 10
     sample_timeout_s = fragment_duration_s * fragment_duration_headroom
     print(f"Using sample_timeout_s={sample_timeout_s:.1f}")
+
+    git = pygit2.Repository(vcmi_gym_root)
 
     return dict(
         # Most of the `resources()` is moved to `env_runners()`
@@ -207,13 +215,18 @@ def build_master_config(cfg):
         ),
         # MPPO-specific cfg (not default to ray)
         user=dict(
+            source_config=cfg,
+            vcmi_gym_root=vcmi_gym_root,
+            git_head=str(git.head.target),
+            git_is_dirty=any(git.diff().patch),
             wandb_project=cfg["wandb_project"],
             experiment_name=cfg["experiment_name"].format(datetime=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")),
+            resume_from=cfg["resume_from"],
             training_step_duration_s=cfg["training_step_duration_s"],
             wandb_old_run_id=None,
             wandb_log_interval_s=cfg["wandb_log_interval_s"],
             env_runner_keepalive_interval_s=cfg["env_runner_keepalive_interval_s"],
-            hyperparam_mutations=cfg["hyperparam_mutations"]
+            hyperparam_mutations=cfg["hyperparam_mutations"],
         )
     )
 
@@ -278,76 +291,81 @@ if __name__ == "__main__":
     ray.tune.registry.register_env("VCMI", make_env_creator(env_cls))
     ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
 
-    checkpoint_config = ray.train.CheckpointConfig(num_to_keep=3)
-    run_config = ray.train.RunConfig(
-        name=algo_config.user["experiment_name"],
-        verbose=False,
-        failure_config=ray.train.FailureConfig(max_failures=-1),
-        checkpoint_config=checkpoint_config,
-        # stop={"rew_mean": pbt_config["_raytune"]["target_ep_rew_mean"]},
-        # callbacks=[TBXDummyCallback()],
-        storage_path=os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data"))
-    )
+    if algo_config.user["resume_from"]:
+        tuner = ray.tune.Tuner.restore(
+            path=data_path.joinpath("newray-%s", algo_config.user["resume_from"]),
+            trainable="MPPO",
+        )
+    else:
+        checkpoint_config = ray.train.CheckpointConfig(num_to_keep=3)
+        run_config = ray.train.RunConfig(
+            name=algo_config.user["experiment_name"],
+            verbose=False,
+            failure_config=ray.train.FailureConfig(max_failures=-1),
+            checkpoint_config=checkpoint_config,
+            # stop={"rew_mean": pbt_config["_raytune"]["target_ep_rew_mean"]},
+            # callbacks=[TBXDummyCallback()],
+            storage_path=str(data_path)
+        )
 
-    # Hyperparams are used twice here:
-    # 1. In PBT's `hyperparam_mutations` (as lists of values) - used
-    #    for perturbations.
-    # 2. In Tuner's `param_space` (as tune.choice objects) - used
-    #    for initial sampling
+        # Hyperparams are used twice here:
+        # 1. In PBT's `hyperparam_mutations` (as lists of values) - used
+        #    for perturbations.
+        # 2. In Tuner's `param_space` (as tune.choice objects) - used
+        #    for initial sampling
 
-    # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.PopulationBasedTraining.html
-    scheduler = ray.tune.schedulers.PopulationBasedTraining(
-        metric=pbt_config["metric"],
-        mode="max",
-        time_attr="training_iteration",
-        perturbation_interval=1,
-        hyperparam_mutations=algo_config.user["hyperparam_mutations"],
-        quantile_fraction=pbt_config["quantile_fraction"],
-        log_config=True,  # used for reconstructing the PBT schedule
-        require_attrs=True,
-        synch=True,
-    )
+        # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.schedulers.PopulationBasedTraining.html
+        scheduler = ray.tune.schedulers.PopulationBasedTraining(
+            metric=pbt_config["metric"],
+            mode="max",
+            time_attr="training_iteration",
+            perturbation_interval=1,
+            hyperparam_mutations=algo_config.user["hyperparam_mutations"],
+            quantile_fraction=pbt_config["quantile_fraction"],
+            log_config=True,  # used for reconstructing the PBT schedule
+            require_attrs=True,
+            synch=True,
+        )
 
-    # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.TuneConfig.html#ray.tune.TuneConfig
-    tune_config = ray.tune.TuneConfig(
-        trial_name_creator=lambda t: t.trial_id,
-        trial_dirname_creator=lambda t: t.trial_id,
-        scheduler=scheduler,
-        reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
-        num_samples=pbt_config["population_size"],
-        search_alg=None
-    )
+        # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.TuneConfig.html#ray.tune.TuneConfig
+        tune_config = ray.tune.TuneConfig(
+            trial_name_creator=lambda t: t.trial_id,
+            trial_dirname_creator=lambda t: t.trial_id,
+            scheduler=scheduler,
+            reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
+            num_samples=pbt_config["population_size"],
+            search_alg=None
+        )
 
-    #
-    # XXX: no use in limiting cluster or worker resources
-    #      Calculating the appropriate population_size is enough
-    #      (it is essentially the limit for number of spawned workers)
-    #      => don't impose any additional limits here to avoid confusion
-    #      GPU must be non-0 to be available at all => set to 0.01 if cuda is available
-    #
-    # ray.init() by default uses num_cpus=os.cpu_count(), num_gpus=torch.cuda.device_count()
-    # However, if GPU is 0 then CUDA is always unavailable in the workers => set to 0.01
-    #
-    # resources = ray.tune.PlacementGroupFactory([{
-    #     "CPU": 0.01,
-    #     "GPU": 0.01 if torch.cuda.is_available() else 0
-    # }])
+        #
+        # XXX: no use in limiting cluster or worker resources
+        #      Calculating the appropriate population_size is enough
+        #      (it is essentially the limit for number of spawned workers)
+        #      => don't impose any additional limits here to avoid confusion
+        #      GPU must be non-0 to be available at all => set to 0.01 if cuda is available
+        #
+        # ray.init() by default uses num_cpus=os.cpu_count(), num_gpus=torch.cuda.device_count()
+        # However, if GPU is 0 then CUDA is always unavailable in the workers => set to 0.01
+        #
+        # resources = ray.tune.PlacementGroupFactory([{
+        #     "CPU": 0.01,
+        #     "GPU": 0.01 if torch.cuda.is_available() else 0
+        # }])
 
-    # trainable = ray.tune.with_parameters(trainable_cls, initargs=initargs)
-    # trainable = ray.tune.with_resources(trainable, resources=resources)
+        # trainable = ray.tune.with_parameters(trainable_cls, initargs=initargs)
+        # trainable = ray.tune.with_resources(trainable, resources=resources)
 
-    for k, v in convert_to_param_space(algo_config.user["hyperparam_mutations"]).items():
-        assert hasattr(algo_config, k)
-        if isinstance(v, dict):
-            deep_update(getattr(algo_config, k), v)
-        else:
-            setattr(algo_config, k, v)
+        for k, v in convert_to_param_space(algo_config.user["hyperparam_mutations"]).items():
+            assert hasattr(algo_config, k)
+            if isinstance(v, dict):
+                deep_update(getattr(algo_config, k), v)
+            else:
+                setattr(algo_config, k, v)
 
-    tuner = ray.tune.Tuner(
-        trainable="MPPO",
-        run_config=run_config,
-        tune_config=tune_config,
-        param_space=algo_config,
-    )
-
-    tuner.fit()
+        tuner = ray.tune.Tuner(
+            trainable="MPPO",
+            run_config=run_config,
+            tune_config=tune_config,
+            param_space=algo_config,
+        )
+        tuner.fit()

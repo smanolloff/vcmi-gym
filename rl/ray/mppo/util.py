@@ -1,4 +1,6 @@
 import copy
+import random
+import string
 
 
 # "n" exponentially distributed numbers in the range [low, high]
@@ -58,3 +60,8 @@ def common_dict(a, b):
 def get_divisors(n, nmin=0):
     divisors = [i for i in range(n // 2, nmin, -1) if n % i == 0]
     return divisors
+
+
+def gen_id(n=8):
+    population = string.ascii_lowercase + string.digits
+    return str.join("", random.choices(population, k=n))

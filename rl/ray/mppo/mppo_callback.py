@@ -1,18 +1,21 @@
-from datetime import datetime
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.utils.annotations import override
 
 from ray.rllib.utils.metrics import (
     ENV_RUNNER_RESULTS,
+    ENV_RUNNER_SAMPLING_TIMER,
     EPISODE_LEN_MEAN,
     EPISODE_RETURN_MEAN,
     EVALUATION_RESULTS,
     FAULT_TOLERANCE_STATS,
     LEARNER_RESULTS,
+    LEARNER_UPDATE_TIMER,
     NUM_ENV_STEPS_SAMPLED,
     NUM_ENV_STEPS_SAMPLED_LIFETIME,
     NUM_EPISODES,
     NUM_EPISODES_LIFETIME,
+    SYNCH_WORKER_WEIGHTS_TIMER,
+    TIMERS,
 )
 
 from ray.rllib.core.learner.learner import (
@@ -80,27 +83,28 @@ class MPPO_Callback(DefaultCallbacks):
     @override(DefaultCallbacks)
     def on_train_result(self, algorithm, metrics_logger, result, **kwargs):
         # XXX: `result` is the return value of MPPO_Algorithm.training_step()
-        # XXX: Do NOT use metrics_logger.peek() (some metrics are reset there)
+        #      + additional metrics added by Algorithm (eval, FT, etc.)
+        # XXX: Do NOT use metrics_logger.peek() as some metrics are reset to 0
 
         eg = result[EVALUATION_RESULTS]
         e = result[EVALUATION_RESULTS][ENV_RUNNER_RESULTS]
         ft = result[FAULT_TOLERANCE_STATS]
 
         to_log = {
-            "eval/global/num_episodes": eg[NUM_EPISODES_LIFETIME],
-            "eval/global/num_timesteps": eg[NUM_ENV_STEPS_SAMPLED_LIFETIME],
-            "eval/net_value": e["user/net_value"],
-            "eval/is_success": e["user/is_success"],
-            "eval/ep_len_mean": e[EPISODE_LEN_MEAN],
-            "eval/ep_rew_mean": e[EPISODE_RETURN_MEAN],
-            "eval/num_episodes": e[NUM_EPISODES],
-            "eval/num_timesteps": e[NUM_ENV_STEPS_SAMPLED],
-            "remote/eval_healthy_workers": eg["num_healthy_workers"],
-            "remote/eval_worker_inflight_reqs": eg["num_in_flight_async_reqs"],
-            "remote/eval_worker_restarts": eg["num_remote_worker_restarts"],
-            "remote/train_healthy_workers": ft["num_healthy_workers"],
-            "remote/train_worker_inflight_reqs": ft["num_in_flight_async_reqs"],
-            "remote/train_worker_restarts": ft["num_remote_worker_restarts"],
+            "eval/global/num_episodes": int(eg[NUM_EPISODES_LIFETIME]),
+            "eval/global/num_timesteps": int(eg[NUM_ENV_STEPS_SAMPLED_LIFETIME]),
+            "eval/net_value": float(e["user/net_value"]),
+            "eval/is_success": float(e["user/is_success"]),
+            "eval/ep_len_mean": float(e[EPISODE_LEN_MEAN]),
+            "eval/ep_rew_mean": float(e[EPISODE_RETURN_MEAN]),
+            "eval/num_episodes": int(e[NUM_EPISODES]),
+            "eval/num_timesteps": int(e[NUM_ENV_STEPS_SAMPLED]),
+            "remote/eval_healthy_workers": int(eg["num_healthy_workers"]),
+            "remote/eval_worker_inflight_reqs": int(eg["num_in_flight_async_reqs"]),
+            "remote/eval_worker_restarts": int(eg["num_remote_worker_restarts"]),
+            "remote/train_healthy_workers": float(ft["num_healthy_workers"]),
+            "remote/train_worker_inflight_reqs": float(ft["num_in_flight_async_reqs"]),
+            "remote/train_worker_restarts": float(ft["num_remote_worker_restarts"]),
         }
 
         # Add tune metrics to the result (must be top-level)
@@ -116,32 +120,36 @@ class MPPO_Callback(DefaultCallbacks):
         t = result[ENV_RUNNER_RESULTS]
         tg = result
 
+        # XXX: explicit type casts to convert Stat objects to numeric values
         to_log = {
-            "learn/entropy": l[ENTROPY_KEY],
-            "learn/explained_var": l[LEARNER_RESULTS_VF_EXPLAINED_VAR_KEY],
-            "learn/kl_loss": l[LEARNER_RESULTS_KL_KEY],
-            "learn/policy_loss": l[POLICY_LOSS_KEY],
-            "learn/vf_loss": l[VF_LOSS_KEY],
-            "learn/vf_loss_unclipped": l[LEARNER_RESULTS_VF_LOSS_UNCLIPPED_KEY],
-            "train/net_value": t["user/net_value"],
-            "train/is_success": t["user/is_success"],
-            "train/ep_len_mean": t[EPISODE_LEN_MEAN],
-            "train/ep_rew_mean": t[EPISODE_RETURN_MEAN],
-            "train/num_episodes": t[NUM_EPISODES],
-            "train/num_timesteps": t[NUM_ENV_STEPS_SAMPLED],
-            "train/global/num_episodes": tg[NUM_EPISODES_LIFETIME],
-            "train/global/num_timesteps": tg[NUM_ENV_STEPS_SAMPLED_LIFETIME],
+            "learn/entropy": float(l[ENTROPY_KEY]),
+            "learn/explained_var": float(l[LEARNER_RESULTS_VF_EXPLAINED_VAR_KEY]),
+            "learn/kl_loss": float(l[LEARNER_RESULTS_KL_KEY]),
+            "learn/policy_loss": float(l[POLICY_LOSS_KEY]),
+            "learn/vf_loss": float(l[VF_LOSS_KEY]),
+            "learn/vf_loss_unclipped": float(l[LEARNER_RESULTS_VF_LOSS_UNCLIPPED_KEY]),
+            "learn/update_time_mean": float(result[TIMERS][LEARNER_UPDATE_TIMER]),
+            "train/net_value": float(t["user/net_value"]),
+            "train/is_success": float(t["user/is_success"]),
+            "train/ep_len_mean": float(t[EPISODE_LEN_MEAN]),
+            "train/ep_rew_mean": float(t[EPISODE_RETURN_MEAN]),
+            "train/num_episodes": int(t[NUM_EPISODES]),
+            "train/num_timesteps": int(t[NUM_ENV_STEPS_SAMPLED]),
+            "train/global/num_episodes": int(tg[NUM_EPISODES_LIFETIME]),
+            "train/global/num_timesteps": int(tg[NUM_ENV_STEPS_SAMPLED_LIFETIME]),
+            "train/batch_sampling_time_mean": float(result[TIMERS][ENV_RUNNER_SAMPLING_TIMER]),
+            "train/sync_weights_time_mean": float(result[TIMERS][SYNCH_WORKER_WEIGHTS_TIMER]),
         }
 
         # Not present otherwise
         if algorithm.config.use_kl_loss:
-            to_log["learn/kl_coef"] = l[LEARNER_RESULTS_CURR_KL_COEFF_KEY]
+            to_log["learn/kl_coef"] = float(l[LEARNER_RESULTS_CURR_KL_COEFF_KEY])
 
         if algorithm.config.log_gradients:
-            to_log["learn/grad_"] = l[f"gradients_{DEFAULT_OPTIMIZER}_global_norm"]
+            to_log["learn/grad_"] = float(l[f"gradients_{DEFAULT_OPTIMIZER}_global_norm"])
 
-        result["train/net_value"] = to_log["train/net_value"]
-        result["train/is_success"] = to_log["train/is_success"]
-        result["train/ep_rew_mean"] = to_log["train/ep_rew_mean"]
+        result["train/net_value"] = float(to_log["train/net_value"])
+        result["train/is_success"] = float(to_log["train/is_success"])
+        result["train/ep_rew_mean"] = float(to_log["train/ep_rew_mean"])
 
         algorithm.wandb_log(to_log, commit=commit)

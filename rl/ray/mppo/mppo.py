@@ -4,12 +4,13 @@ import time
 import wandb
 import datetime
 import threading
+import pygit2
+import tempfile
 from dataclasses import dataclass
 from ray.rllib.utils.annotations import override
 from ray.rllib.algorithms import PPO, PPOConfig
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 from ray.rllib.core import DEFAULT_MODULE_ID
-from ray.rllib.utils.metrics.metrics_logger import MetricsLogger
 from ray.rllib.policy.sample_batch import (
     DEFAULT_POLICY_ID
 )
@@ -19,6 +20,7 @@ from wandb.util import json_dumps_safer
 
 from .mppo_rl_module import MPPO_RLModule
 from .mppo_logger import get_logger
+from .util import gen_id
 
 # from .mppo_learner import MPPO_Learner
 
@@ -41,7 +43,12 @@ class MPPO_Config(PPOConfig):
     # User-defined config (not used by ray)
     def user(
         self,
+        source_config: dict,
+        vcmi_gym_root: str,
+        git_head: str,
+        git_is_dirty: bool,
         experiment_name: str,
+        resume_from: str | None,
         training_step_duration_s: int,
         hyperparam_mutations: dict,
         wandb_project: str | None,
@@ -50,7 +57,12 @@ class MPPO_Config(PPOConfig):
         env_runner_keepalive_interval_s: int,
     ):
         self.user = {
+            "source_config": source_config,
             "experiment_name": experiment_name,
+            "vcmi_gym_root": vcmi_gym_root,
+            "git_head": git_head,
+            "git_is_dirty": git_is_dirty,
+            "resume_from": resume_from,
             "training_step_duration_s": training_step_duration_s,
             "hyperparam_mutations": hyperparam_mutations,
             "wandb_project": wandb_project,
@@ -163,7 +175,6 @@ class MPPO_Algorithm(PPO):
         # XXX: there's no `on_training_step_start` callback => log this here
         self.wandb_log({"trial/iteration": self.iteration})
 
-        temp_logger = MetricsLogger()
         started_at = time.time()
         logged_at = started_at
         training_step_duration_s = self.config.user["training_step_duration_s"]
@@ -175,18 +186,21 @@ class MPPO_Algorithm(PPO):
             #       instances where different runners may run with different
             #       speeds?
             while True:
-                temp_logger.log_dict(super().training_step())
+                if os.getenv("DEBUG"):
+                    import ipdb; ipdb.set_trace()  # noqa
+                result = super().training_step()
                 now = time.time()
 
                 # Call custom MPPO-specific callback once every N seconds
                 if (now - logged_at) > wandb_log_interval_s:
-                    self.callbacks.on_train_subresult(self, temp_logger.reduce(return_stats_obj=False))
+                    # NOTE: do not call self.metrics.reduce (resets values)
+                    self.callbacks.on_train_subresult(self, result)
                     logged_at = now
 
                 if (now - started_at) > training_step_duration_s:
                     break
 
-        return temp_logger.reduce()
+        return result
 
     @override(PPO)
     def evaluate(self, *args, **kwargs):
@@ -198,7 +212,7 @@ class MPPO_Algorithm(PPO):
     def save_checkpoint(self, checkpoint_dir):
         res = super().save_checkpoint(checkpoint_dir)
 
-        if not (wandb.run and re.match(r"^.+_0+1$", self.trial_id)):
+        if not (wandb.run and re.match(r"^.+_0+$", self.trial_id)):
             return res
 
         learner = self.learner_group.get_checkpointable_components()[0][1]
@@ -208,18 +222,17 @@ class MPPO_Algorithm(PPO):
         rl_module.jsave(model_file)
 
         config_file = os.path.join(checkpoint_dir, "master_config.json")
-        # TRIAL_INFO key contains nono-serializable (by wandb) values
+
+        # TRIAL_INFO key contains non-serializable (by wandb) values
         with open(config_file, "w") as f:
             f.write(json_dumps_safer({k: v for k, v in self.config.to_dict().items() if k != TRIAL_INFO}))
 
-        art = wandb.Artifact(name="model.pt", type="model")
+        art = wandb.Artifact(name="model", type="model")
         art.description = f"Snapshot of model from {time.ctime(time.time())}"
         art.ttl = datetime.timedelta(days=7)
         art.metadata["step"] = wandb.run.step
-
-        art.add_directory(checkpoint_dir, name="checkpoint")
-        # art.add_file(model_file, name="jit-model.pt")
-        # art.add_file(config_file, name="master_config.json")
+        art.add_dir(checkpoint_dir)
+        wandb.run.log_artifact(art)
 
         return res
 
@@ -243,11 +256,13 @@ class MPPO_Algorithm(PPO):
             run_id = "%s_%s" % (old_run_id.split("_")[0], self.trial_id.split("_")[1])
             print("Will resume run as id %s (Trial ID is %s)" % (run_id, self.trial_id))
         else:
-            run_id = self.trial_id
+            run_id = gen_id() if self.trial_id == "default" else self.trial_id
             print("Will start new run %s" % run_id)
 
         run_name = self.trial_name
-        if self.trial_name != "default":
+        if self.trial_name == "default":
+            run_name = f"{datetime.datetime.now().isoformat()}-debug-{run_id}"
+        else:
             run_name = "T%d" % int(self.trial_name.split("_")[-1])
 
         self.ns.run_id = run_id
@@ -257,7 +272,7 @@ class MPPO_Algorithm(PPO):
             wandb.init(
                 project=self.config.user["wandb_project"],
                 group=self.config.user["experiment_name"],
-                id=self.ns.run_id,
+                id=gen_id() if self.ns.run_id == "default" else self.ns.run_id,
                 name=self.ns.run_name,
                 resume="allow",
                 reinit=True,
@@ -267,10 +282,7 @@ class MPPO_Algorithm(PPO):
                 sync_tensorboard=False,
             )
 
-            # TODO: check if "code saving" works as expected:
-            #       https://docs.wandb.ai/guides/track/log/
-            # self._wandb_log_code()  # superseded by wandb_log_git
-            # self._wandb_log_git()  # superseded by "code saving" profile setting
+            self._wandb_log_git_diff()  # superseded by "code saving" profile setting
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
@@ -278,7 +290,7 @@ class MPPO_Algorithm(PPO):
                 wandb.log(*args, **dict({"commit": False}, **kwargs))
         else:
             def wandb_log(*args, **kwargs):
-                print("*** WANDB LOG AT %s: %s %s" % (datetime.datetime.isoformat(datetime.datetime.now()), args, kwargs))
+                print("*** WANDB LOG AT %s: %s %s" % (datetime.datetime.now().isoformat(), args, kwargs))
 
         self.wandb_log = wandb_log
 
@@ -298,17 +310,20 @@ class MPPO_Algorithm(PPO):
         ))
 
     def _wandb_log_hyperparams(self):
+        to_log = {}
+
         for k, v in self.config.user["hyperparam_mutations"].items():
-            if k == "train":
-                for k1, v1 in v:
-                    assert hasattr(self.config, k1), f"hasattr(self.config, {k1})"
+            if k == "env_config":
+                for k1, v1 in v.items():
+                    assert k1 in self.config.env_config, f"{k1} in self.config.env_config"
                     assert "/" not in k1
-                    self.wandb_log(f"train/{k1}", getattr(self.config, k1))
-            if k == "env":
-                for k1, v1 in v:
-                    assert hasattr(self.config.env_config, k1), f"hasattr(self.config.env_config, {k1})"
-                    assert "/" not in k1
-                    self.wandb_log(f"env/{k1}", getattr(self.config.env_config, k1))
+                    to_log[f"params/env.{k1}"] = self.config.env_config[k1]
+            else:
+                assert hasattr(self.config, k), f"hasattr(self.config, {k})"
+                assert "/" not in k
+                to_log[f"params/{k}"] = getattr(self.config, k)
+
+        self.wandb_log(to_log)
 
     # XXX: There's already a wandb "code saving" profile setting
     #      It saves only requirements.txt and the git metadata which is enough
@@ -326,14 +341,35 @@ class MPPO_Algorithm(PPO):
 
     # XXX: There's already a wandb "code saving" profile setting
     #      See https://docs.wandb.ai/guides/track/log/
-    # def _wandb_log_git(self):
-    #     repo = pygit2.Repository(".")
-    #     commit = str(repo.head.target)
-    #     diff = repo.diff()  # By default, diffs unstaged changes
-    #     if diff.stats.files_changed > 0:
-    #         print("Patch:\n%s" % diff.patch)
-    #     else:
-    #         print("No diff")
+    #      but it's NOT WORKING (says couldnt find git commit for this run)
+    #      (maybe it requires logging my entire codebase?)
+    def _wandb_log_git_diff(self):
+        import os
+        if not os.getenv("DEBUG"):
+            return
+
+        # if self.iteration > 0 or not self._is_golden_trial():
+        #     return
+
+        git = pygit2.Repository(os.path.dirname(__file__))
+        head = str(git.head.target)
+        assert head == self.config.user["git_head"]
+
+        art = wandb.Artifact(name="git-diff", type="text")
+        art.description = f"Git diff for HEAD@{head} from {time.ctime(time.time())}"
+
+        with tempfile.NamedTemporaryFile(mode='w+', delete=True) as temp_file:
+            art.metadata["head"] = head
+            temp_file.write(git.diff().patch)
+            temp_file.flush()
+            art.add_file(temp_file.name, name="diff.patch")
+            wandb.run.log_artifact(art)
+            # no need to wait (wandb creates a local copy of the file to upload)
+            # art.wait()
+
+    # The first trial in an experiment (e.g. "ff859_00000")
+    def _is_golden_trial(self):
+        return re.match(r"^.+_0+$", self.trial_id)
 
 
 class EnvRunnerKeepalive:
