@@ -40,6 +40,7 @@ def update_config_value(cfg, path, value):
     return old_value, new_value
 
 
+# Get specific hyperparam values values from runtime_cfg
 def extract_initial_hyperparams(runtime_cfg, hyperparam_mutations, res=None):
     if res is None:
         res = {}

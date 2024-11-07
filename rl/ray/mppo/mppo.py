@@ -1,11 +1,12 @@
-import re
+import datetime
 import os
+import pygit2
+import re
+import tempfile
+import threading
 import time
 import wandb
-import datetime
-import threading
-import pygit2
-import tempfile
+
 from dataclasses import dataclass
 from ray.rllib.utils.annotations import override
 from ray.rllib.algorithms import PPO, PPOConfig
@@ -20,12 +21,50 @@ from wandb.util import json_dumps_safer
 
 from .mppo_rl_module import MPPO_RLModule
 from .mppo_logger import get_logger
-from .util import gen_id
-
-# from .mppo_learner import MPPO_Learner
+from . import util
 
 
 class MPPO_Config(PPOConfig):
+    # InitInfo contains stuff accessed only during initialization
+    # (e.g. only when iteration is 0 -- typically needed for wandb init)
+    @dataclass
+    class InitInfo:
+        experiment_name: str
+        timestamp: str
+        git_head: str
+        git_is_dirty: bool
+        init_method: str
+        init_argument: str | None
+        wandb_project: str | None
+        hyperparam_values: dict | None = None
+        master_overrides: dict | None = None
+        checkpoint_load_dir: str | None = None
+        model_load_file: str | None = None
+        tune_config: dict | None = None
+
+        def __post_init__(self):
+            util.validate_dataclass_fields(self)
+
+    @dataclass
+    class UserConfig:
+        # Accessed throughought the entire run
+        training_step_duration_s: int
+        wandb_log_interval_s: int
+        env_runner_keepalive_interval_s: int
+        env_cls: str
+
+        # Not needed at runtime, but placed here for convenience
+        hyperparam_mutations: dict
+
+        # Accessed during initialization (iteration==0) only
+        init_info: "MPPO_Config.InitInfo"
+        init_history: list  # cannot use list[InitInfo] (breaks validation)
+
+        def __post_init__(self):
+            if isinstance(self.init_info, dict):
+                self.init_info = MPPO_Config.InitInfo(**self.init_info)
+            util.validate_dataclass_fields(self)
+
     def __init__(self):
         super().__init__(algo_class=MPPO_Algorithm)
         self.enable_rl_module_and_learner = True
@@ -41,35 +80,13 @@ class MPPO_Config(PPOConfig):
         return {}
 
     # User-defined config (not used by ray)
-    def user(
-        self,
-        source_config: dict,
-        vcmi_gym_root: str,
-        git_head: str,
-        git_is_dirty: bool,
-        experiment_name: str,
-        resume_from: str | None,
-        training_step_duration_s: int,
-        hyperparam_mutations: dict,
-        wandb_project: str | None,
-        wandb_old_run_id: str | None,
-        wandb_log_interval_s: int,
-        env_runner_keepalive_interval_s: int,
-    ):
-        self.user = {
-            "source_config": source_config,
-            "experiment_name": experiment_name,
-            "vcmi_gym_root": vcmi_gym_root,
-            "git_head": git_head,
-            "git_is_dirty": git_is_dirty,
-            "resume_from": resume_from,
-            "training_step_duration_s": training_step_duration_s,
-            "hyperparam_mutations": hyperparam_mutations,
-            "wandb_project": wandb_project,
-            "wandb_old_run_id": wandb_old_run_id,
-            "wandb_log_interval_s": wandb_log_interval_s,
-            "env_runner_keepalive_interval_s": env_runner_keepalive_interval_s,
-        }
+    # Keys are passed as regular key-value pairs for a reason:
+    # they are part of "master_config" and must be JSON-serializable.
+    # The `User` data structure is used for validation purposes.
+    def user(self, **kwargs):
+        # History items may not conform to the current InitInfo structure
+        # => leave them as plain dicts
+        self.user = self.UserConfig(**kwargs)
 
     #
     # Usage:
@@ -109,14 +126,17 @@ class MPPO_Config(PPOConfig):
 
     def _validate(self):
         assert self.evaluation_interval == 1, "Tune expects eval results on each iteration"
-        assert self.user["training_step_duration_s"] > 0
-        assert self.user["wandb_log_interval_s"] > 0
-        assert self.user["wandb_log_interval_s"] <= self.user["training_step_duration_s"]
-        assert re.match(r"^[\w_-]+$", self.user["experiment_name"]), self.user["experiment_name"]
-        if self.user["wandb_project"] is not None:
-            assert re.match(r"^[\w_-]+$", self.user["wandb_project"]), self.user["wandb_project"]
-        if self.user["wandb_old_run_id"] is not None:
-            assert re.match(r"^[\w_-]+$", self.user["wandb_old_run_id"]), self.user["wandb_old_run_id"]
+
+        assert self.user.training_step_duration_s > 0
+        assert self.user.wandb_log_interval_s > 0
+        assert self.user.wandb_log_interval_s <= self.user.training_step_duration_s
+
+        ii = self.user.init_info
+        assert re.match(r"^[\w_-]+$", ii.experiment_name), ii.experiment_name
+
+        if ii.wandb_project is not None:
+            assert re.match(r"^[\w_-]+$", ii.wandb_project), ii.wandb_project
+
         if self.num_learners > 0:
             # We can't setup wandb via self.learner_group.foreach_learner(...)
             #   1. if worker is restarted, it won't have wandb setup
@@ -125,6 +145,19 @@ class MPPO_Config(PPOConfig):
             #   3. I don't understand how multi-learner setup works yet
             #       (e.g. how are losses/gradients from N learners combined)
             raise Exception("TODO(simo): wandb setup in remote learners is not implemented")
+
+        def validate_hyperparam_mutations(mut):
+            for k, v in mut.items():
+                if isinstance(v, list):
+                    assert all(isinstance(v1, (int, float)) for v1 in v), (
+                        f"hyperparam_mutations for (possibly nested) key {repr(k)} contains invalid value types"
+                    )
+                elif isinstance(v, dict):
+                    validate_hyperparam_mutations(v)
+                else:
+                    raise Exception(f"Invalid hyperparam value type for (possibly nested) key {repr(k)}")
+
+        validate_hyperparam_mutations(self.user.hyperparam_mutations or {})
 
 
 class MPPO_Algorithm(PPO):
@@ -141,12 +174,18 @@ class MPPO_Algorithm(PPO):
         return MPPO_Config()
 
     @override(PPO)
+    def __init__(self, *args, **kwargs):
+        util.silence_log_noise()
+        super().__init__(*args, **kwargs)
+
+    @override(PPO)
     def setup(self, config: MPPO_Config):
         print("SELF.TRIAL_ID: %s" % self.trial_id)
+        import ipdb, os; ipdb.set_trace() if os.getenv("DEBUG") else ...  # noqa
         assert hasattr(config, "_master_config"), "call .master_config() on the MPPO_Config first"
         self.ns = MPPO_Algorithm.Namespace(
             master_config=config._master_config,
-            log_interval=config.user["wandb_log_interval_s"]
+            log_interval=config.user.wandb_log_interval_s
         )
 
         # self.logger.debug("*** SETUP: %s" % json_dumps_safer(config.to_dict()))
@@ -159,27 +198,22 @@ class MPPO_Algorithm(PPO):
         self._wandb_add_watch()
         self._wandb_log_hyperparams()
 
-        # TODO: implement restore of previously trained model + optimizer
-        #       (for a NEW experiment, not resuming):
-        #           self.restore_from_path("data/newray-test/01800_00001/checkpoint_000000")
-        #
-        #       Optionally, reset iteration:
-        #           self._iteration == 0
-        #
-        #       Optionally, load learners only:
-        #           path = "data/newray-test/01800_00001/checkpoint_000000/learner_group"
-        #           self.learner_group.restore_from_path()
-
     @override(PPO)
     def training_step(self):
         # XXX: there's no `on_training_step_start` callback => log this here
         self.wandb_log({"trial/iteration": self.iteration})
 
+        if os.getenv("DEBUG"):
+            if self.iteration == 0:
+                # XXX: self.iteration is always 0 during setup(), must load here
+                self._maybe_load_learner_group()
+                self._maybe_load_model()
+
         started_at = time.time()
         logged_at = started_at
-        training_step_duration_s = self.config.user["training_step_duration_s"]
-        wandb_log_interval_s = self.config.user["wandb_log_interval_s"]
-        keepalive_interval_s = self.config.user["env_runner_keepalive_interval_s"]
+        training_step_duration_s = self.config.user.training_step_duration_s
+        wandb_log_interval_s = self.config.user.wandb_log_interval_s
+        keepalive_interval_s = self.config.user.env_runner_keepalive_interval_s
 
         with EnvRunnerKeepalive(self.eval_env_runner_group, keepalive_interval_s, self.logger):
             # XXX: will this fixed-time step be problematic with ray SPOT
@@ -197,14 +231,14 @@ class MPPO_Algorithm(PPO):
                     self.callbacks.on_train_subresult(self, result)
                     logged_at = now
 
-                if (now - started_at) > training_step_duration_s:
+                if (now - started_at) > training_step_duration_s or os.getenv("DEBUG"):
                     break
 
         return result
 
     @override(PPO)
     def evaluate(self, *args, **kwargs):
-        keepalive_interval_s = self.config.user["env_runner_keepalive_interval_s"]
+        keepalive_interval_s = self.config.user.env_runner_keepalive_interval_s
         with EnvRunnerKeepalive(self.env_runner_group, keepalive_interval_s, self.logger):
             return super().evaluate(*args, **kwargs)
 
@@ -249,15 +283,8 @@ class MPPO_Algorithm(PPO):
     #
 
     def _wandb_init(self):
-        old_run_id = self.config.user["wandb_old_run_id"]
-
-        if old_run_id:
-            assert re.match(r"^[0-9a-z]+_[0-9]+$", old_run_id), f"bad id to resume: {old_run_id}"
-            run_id = "%s_%s" % (old_run_id.split("_")[0], self.trial_id.split("_")[1])
-            print("Will resume run as id %s (Trial ID is %s)" % (run_id, self.trial_id))
-        else:
-            run_id = gen_id() if self.trial_id == "default" else self.trial_id
-            print("Will start new run %s" % run_id)
+        run_id = util.gen_id() if self.trial_id == "default" else self.trial_id
+        print("W&B Run ID is %s" % run_id)
 
         run_name = self.trial_name
         if self.trial_name == "default":
@@ -268,10 +295,10 @@ class MPPO_Algorithm(PPO):
         self.ns.run_id = run_id
         self.ns.run_name = run_name
 
-        if self.config.user["wandb_project"]:
+        if self.config.user.init_info.wandb_project:
             wandb.init(
-                project=self.config.user["wandb_project"],
-                group=self.config.user["experiment_name"],
+                project=self.config.user.init_info.wandb_project,
+                group=self.config.user.init_info.experiment_name,
                 id=gen_id() if self.ns.run_id == "default" else self.ns.run_id,
                 name=self.ns.run_name,
                 resume="allow",
@@ -312,7 +339,7 @@ class MPPO_Algorithm(PPO):
     def _wandb_log_hyperparams(self):
         to_log = {}
 
-        for k, v in self.config.user["hyperparam_mutations"].items():
+        for k, v in self.config.user.hyperparam_mutations.items():
             if k == "env_config":
                 for k1, v1 in v.items():
                     assert k1 in self.config.env_config, f"{k1} in self.config.env_config"
@@ -353,7 +380,7 @@ class MPPO_Algorithm(PPO):
 
         git = pygit2.Repository(os.path.dirname(__file__))
         head = str(git.head.target)
-        assert head == self.config.user["git_head"]
+        assert head == self.config.user.init_info.git_head
 
         art = wandb.Artifact(name="git-diff", type="text")
         art.description = f"Git diff for HEAD@{head} from {time.ctime(time.time())}"
@@ -370,6 +397,38 @@ class MPPO_Algorithm(PPO):
     # The first trial in an experiment (e.g. "ff859_00000")
     def _is_golden_trial(self):
         return re.match(r"^.+_0+$", self.trial_id)
+
+    def _maybe_load_learner_group(self):
+        return
+        if "experiment" not in self.config.user["load_options"]:
+            return
+
+        path = util.to_abspath(self.config.user["load_options"]["learner_group"]["path"])
+        self.logger.warning(f"Loading learner group from {path}")
+        self.learner_group.restore_from_path(path)
+        self._broadcast_weights()
+
+    # XXX: this works for PPO, but do other algos use more policies?
+    def _maybe_load_model(self):
+        return
+        if "model" not in self.config.user["load_options"]:
+            return
+
+        mapping = self.config.user["load_options"]["model"]["layer_mapping"]
+        path = util.to_abspath(self.config.user["load_options"]["model"]["path"])
+        self.logger.warning(f"Loading learner model from {path}")
+        self.learner_group.foreach_learner(lambda l: l.module[DEFAULT_POLICY_ID].jload(path, mapping))
+        self._broadcast_weights()
+
+    def _broadcast_weights(self):
+        opts = dict(from_worker_or_learner_group=self.learner_group, inference_only=True)
+
+        self.logger.info("Broadcasting learner weights to env runners")
+        self.env_runner_group.sync_weights(**opts)
+
+        if self.eval_env_runner_group is not None:
+            self.logger.info("Broadcasting learner weights to eval env runners")
+            self.eval_env_runner_group.sync_weights(**opts)
 
 
 class EnvRunnerKeepalive:

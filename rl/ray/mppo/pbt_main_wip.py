@@ -3,30 +3,20 @@ import os
 os.environ["RAY_DEDUP_LOGS"] = "0"
 os.environ["WANDB_SILENT"] = "true"
 
-import ast
-import argparse
 import ray.tune
 import vcmi_gym
 import datetime
 import pygit2
 import json
 import copy
-import wandb
-import tempfile
-import dataclasses
-import pathlib
 from ray.rllib.utils import deep_update
+from .pbt_config import pbt_config
 from . import util
-from . import MPPO_Algorithm, MPPO_Config, MPPO_EnvRunner, MPPO_EvalEnvRunner, MPPO_Callback, MPPO_Logger
-
-env_cls = vcmi_gym.VcmiEnv_v4
+from . import MPPO_Algorithm, MPPO_Config, MPPO_Callback, MPPO_Logger
 
 # Silence here in order to supress messages from local runners
 # Silence once more in algo init to supress messages from remote runners
 util.silence_log_noise()
-
-WANDB_PROJECT = "newray"
-
 
 def calculate_fragment_duration_s(cfg, train_env_cfg, eval_env_cfg):
     if "train_batch_size_per_learner" in cfg["hyperparam_mutations"]:
@@ -60,7 +50,7 @@ def calculate_fragment_duration_s(cfg, train_env_cfg, eval_env_cfg):
 
 
 def build_master_config(cfg):
-    # env_cls = getattr(vcmi_gym, cfg["env"]["cls"])
+    env_cls = getattr(vcmi_gym, cfg["env"]["cls"])
     train_env_cfg = util.deepmerge(cfg["env"]["common"], cfg["env"]["train"])
     eval_env_cfg = util.deepmerge(cfg["env"]["common"], cfg["env"]["eval"])
     fragment_duration_s = calculate_fragment_duration_s(cfg, train_env_cfg, eval_env_cfg)
@@ -69,6 +59,8 @@ def build_master_config(cfg):
     fragment_duration_headroom = 10
     sample_timeout_s = fragment_duration_s * fragment_duration_headroom
     print(f"Using sample_timeout_s={sample_timeout_s:.1f}")
+
+    git = pygit2.Repository(util.vcmigym_root_path)
 
     return dict(
         # Most of the `resources()` is moved to `env_runners()`
@@ -102,7 +94,7 @@ def build_master_config(cfg):
             batch_mode="truncate_episodes",
             compress_observations=False,
             custom_resources_per_env_runner={},
-            # env_runner_cls=MPPO_EnvRunner,
+            env_runner_cls=None,
             env_to_module_connector=None,
             episode_lookback_horizon=1,
             explore=False,
@@ -161,7 +153,6 @@ def build_master_config(cfg):
                 num_cpus_per_env_runner=cfg["env"]["cpu_demand"][eval_env_cfg["kwargs"]["opponent"]],
                 num_gpus_per_env_runner=0,
                 num_envs_per_env_runner=1,
-                # env_runner_cls=MPPO_EvalEnvRunner,
             ),
 
             # TODO: my evaluator function here?
@@ -219,20 +210,19 @@ def build_master_config(cfg):
                 network=cfg["network"]
             )
         ),
-        # MPPO-specific cfg, not default to ray
-        # (additionally populated manually later)
+        # MPPO-specific cfg (not default to ray)
         user=dict(
-            env_cls=cfg["env"]["cls"],
+            source_config=cfg,
+            git_head=str(git.head.target),
+            git_is_dirty=any(git.diff().patch),
+            wandb_project=cfg["wandb_project"],
+            experiment_name=cfg["experiment_name"].format(datetime=datetime.datetime.now().strftime("%Y%m%d_%H%M%S")),
+            load_options=cfg["load_options"],
             training_step_duration_s=cfg["training_step_duration_s"],
+            wandb_old_run_id=None,
             wandb_log_interval_s=cfg["wandb_log_interval_s"],
             env_runner_keepalive_interval_s=cfg["env_runner_keepalive_interval_s"],
-
-            # Not needed at runtime, but placed here for convenience:
             hyperparam_mutations=cfg["hyperparam_mutations"],
-
-            # Populated later:
-            init_info=None,
-            init_history=[],
         )
     )
 
@@ -270,174 +260,142 @@ def convert_to_param_space(mutations):
     return res
 
 
+# ray.tune.registry.register_env("VCMI", lambda cfg: (print("NEW ENV WITH INDEX: %s" % cfg.worker_index), env_cls(**cfg)))
+def make_env_creator(env_cls):
+    # Even if there are remote runners, ray still needs the local runners
+    # It doesn't really use them as envs, though => use dummy ones
+    class DummyEnv(env_cls):
+        def __init__(self, *args, **kwargs):
+            self.action_space = env_cls.ACTION_SPACE
+            self.observation_space = env_cls.OBSERVATION_SPACE
+            pass
 
-# # ray.tune.registry.register_env("VCMI", lambda cfg: (print("NEW ENV WITH INDEX: %s" % cfg.worker_index), env_cls(**cfg)))
-# def make_env_creator(env_cls):
-#     # Even if there are remote runners, ray still needs the local runners
-#     # It doesn't really use them as envs, though => use dummy ones
-#     class DummyEnv(env_cls):
-#         def __init__(self, *args, **kwargs):
-#             self.action_space = env_cls.ACTION_SPACE
-#             self.observation_space = env_cls.OBSERVATION_SPACE
-#             pass
+        def step(self, *args, **kwargs):
+            raise Exception("step() called on DummyEnv")
 
-#         def step(self, *args, **kwargs):
-#             raise Exception("step() called on DummyEnv")
+        def reset(self, *args, **kwargs):
+            raise Exception("reset() called on DummyEnv")
 
-#         def reset(self, *args, **kwargs):
-#             raise Exception("reset() called on DummyEnv")
+        def render(self, *args, **kwargs):
+            raise Exception("render() called on DummyEnv")
 
-#         def render(self, *args, **kwargs):
-#             raise Exception("render() called on DummyEnv")
+        def close(self, *args, **kwargs):
+            pass
 
-#         def close(self, *args, **kwargs):
-#             pass
+    def env_creator(cfg):
+        if cfg.num_workers > 0 and cfg.worker_index == 0:
+            return DummyEnv()
+        else:
+            print(f"Env kwargs: {json.dumps(cfg)}")
+            return env_cls(**cfg)
 
-#     def env_creator(cfg):
-#         if cfg.num_workers > 0 and cfg.worker_index == 0:
-#             return DummyEnv()
-#         else:
-#             print(f"Env kwargs: {json.dumps(cfg)}")
-#             return env_cls(**cfg)
-
-#     return env_creator
-
-
-class DummyEnv(env_cls):
-    def __init__(self, *args, **kwargs):
-        self.action_space = env_cls.ACTION_SPACE
-        self.observation_space = env_cls.OBSERVATION_SPACE
-        pass
-
-    def step(self, *args, **kwargs):
-        raise Exception("step() called on DummyEnv")
-
-    def reset(self, *args, **kwargs):
-        raise Exception("reset() called on DummyEnv")
-
-    def render(self, *args, **kwargs):
-        raise Exception("render() called on DummyEnv")
-
-    def close(self, *args, **kwargs):
-        pass
+    return env_creator
 
 
-def env_creator(cfg):
-    if cfg.num_workers > 0 and cfg.worker_index == 0:
-        return DummyEnv()
-    else:
-        print(f"Env kwargs: {json.dumps(cfg)}")
-        return env_cls(**cfg)
+if __name__ == "__main__":
+    algo_config = MPPO_Config()
+    algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
 
+    initial_hyperparams = {}
+    init_history = []
 
-def new_tuner(opts):
-    # All cases below will result in a new W&B Run
-    # The config used depends on the init method
-    assert opts.experiment_name is not None
-    master_config = None
-    hyperparam_values = None
-    checkpoint_load_dir = None
-
-    def load_ray_checkpoint(path):
-        # Same as "load_ray_checkout"
-        master_config = json.loads(f"{checkpoint_dir}/master_config.json")
-        hyperparam_values = util.common_dict(
-            a=master_config["user"]["hyperparam_mutations"],
-            b=master_config,
-            strict=True
-        )
-
-        # No sense in loading from file after loading from checkpoint
-        # => set `model_load_file` to None
-        master_config["user"]["model_load_file"] = None
-
-        return master_config, hyperparam_values
-
-    def load_wandb_artifact(artifact):
-        tempdir = tempfile.TemporaryDirectory()
-        artifact.download(tempdir)
-        master_config, hyperparam_values = load_ray_checkpoint(tempdir.name)
-        return master_config, hyperparam_values, tempdir
+    opts = parse_cmdline_options()
+    master_overrides = opts.master_overrides
+    experiment_name = opts.experiment_name
+    tempdir = None
 
     match opts.init_method:
-        # Same as "load_wandb_artifact" but for run's latest artifact
-        case "load_wandb_run":
-            assert len(opts.init_argument.split("/")) == 3, "wandb run format: s-manolloff/<project>/<run_id>"
-            run = wandb.Api().run(opts.init_argument)
+        case "resume_wandb_run":
+            run = wandb.Api().run(f"s-manolloff/newray/{opts.init_argument}")
+            master_config = copy.deepcopy(run.config)
+            init_history = master_config["user"]["init_history"]
+            initial_hyperparams=util.common_dict(
+                a=master_config["user"]["hyperparam_mutations"],
+                b=master_config,
+                strict=True
+            )
+
+            tempdir = tempfile.TemporaryDirectory()
             artifact = next(a for a in reversed(run.logged_artifacts()) if a.type == "model")
-
-            (
-                master_config,
-                hyperparam_values,
-                checkpoint_load_dir
-            ) = load_wandb_artifact(artifact)
-
+            artifact.download(tempdir)
+            config_overrides.append("model_load_file=None")
         case "load_wandb_artifact":
-            artifact = wandb.Api().artifact(opts.init_argument)
-
-            (
-                master_config,
-                hyperparam_values,
-                checkpoint_load_dir
-            ) = load_wandb_artifact(artifact)
-
+            # ^ New wandb run
+            # Here, we only load the (non-ray) master_config.json
+            ...
         case "load_ray_checkpoint":
-            # must have a .name attribute
-            checkpoint_load_dir = pathlib.Path(opts.init_argument)
-            master_config, hyperparam_values = load_ray_checkpoint(checkpoint_load_dir.name)
-
-        case "load_config_file":
+            # ^ New wandb run
+            # Here, we only load the (non-ray) master_config.json
+            # Later, algo will load stuff from the actual checkpoint
+            master_config = json.loads(f"{opts.init_argument}/master_config.json")
+            source_config = master_config["user"]["source_config"]
+            init_history = master_config["user"]["init_history"]
+            initial_hyperparams=util.common_dict(
+                a=source_config["hyperparam_mutations"],
+                b=master_config,
+                strict=True
+            )
+            config_overrides.append("model_load_file=None")
+        case "read_config_file":
+            # ^ New wandb run
             source_config = json.loads(opts.init_argument)
-            master_config = build_master_config(source_config)
-
         case "default":
             # ^ New wandb run
             from .pbt_config import pbt_config
             source_config = copy.deepcopy(pbt_config)
-            master_config = build_master_config(source_config)
-
         case _:
             raise Exception(f"Unknown init source: {opts.init_argument}")
 
-    # should be present at this point
-    assert master_config
-
-    master_overrides = {}
+    overrides = {}
 
     # config_overrides is a list of "path.to.key=value"
-    for co in (opts.master_overrides or []):
+    for co in config_overrides:
         name, value = co.split("=")
-        oldvalue, newvalue = update_config_value(master_config, name, value)
+        oldvalue, newvalue = update_config_value(source_config, name, value)
         if oldvalue != newvalue:
-            master_overrides[name] = [oldvalue, newvalue]
+            overrides[name] = [oldvalue, newvalue]
 
     git = pygit2.Repository(util.vcmigym_root_path)
-    now = datetime.datetime.now()
-
-    init_info = MPPO_Config.InitInfo(
-        experiment_name=opts.experiment_name.format(datetime=now.strftime("%Y%m%d_%H%M%S")),
-        timestamp=now.astimezone().isoformat(),
+    init_history.append(dict(
+        timestamp=datetime.datetime.now().astimezone().isoformat(),
         git_head=str(git.head.target),
         git_is_dirty=any(git.diff().patch),
         init_method=opts.init_method,
         init_argument=opts.init_argument,
-        wandb_project=WANDB_PROJECT,
-        checkpoint_load_dir=checkpoint_load_dir.name if checkpoint_load_dir else None,
-        hyperparam_values=hyperparam_values,
-        master_overrides=master_overrides,
-    )
+        initial_hyperparams=initial_hyperparams,
+        overrides=overrides,
+        source_config=source_config,  # contains overriden values
+    ))
 
-    # This info is used during setup and is also recorded in history
-    master_config["user"]["init_info"] = init_info
-    master_config["user"]["init_history"].append(init_info)
-
-    # Validation: dict -> UserConfig -> dict
-    master_config["user"] = dataclasses.asdict(MPPO_Config.UserConfig(**master_config["user"]))
-
-    # env_cls = getattr(vcmi_gym, master_config["user"]["env_cls"])
-
-    ray.tune.registry.register_env("VCMI", env_creator)
+    env_cls = getattr(vcmi_gym, source_config["env"]["cls"])
+    ray.tune.registry.register_env("VCMI", make_env_creator(env_cls))
     ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
+
+    master_config = build_master_config(source_config, init_history)
+    algo_config.master_config(master_config)
+
+    # # NOTE: Relative load paths are interpreted w.r.t. VCMI_GYM root dir
+    # "local_load_options": {
+    #     "master_config_path": "data/newray-20241105_000738/35091_00000/checkpoint_000027/master_config.json",
+    #     "learner_group_path": "data/newray-20241105_000738/35091_00000/checkpoint_000027/learner_group",
+    #     "jit_model_path": "data/newray-20241105_000738/35091_00000/checkpoint_000027/jit-model.pt",
+    #     "jit_model_mapping": {
+    #         # rlmodule <=> model layer
+    #         "encoder.encoder": "encoder_actor",
+    #         "pi": "actor",
+    #         "vf": "critic",
+    #     }
+    # },
+
+
+
+    # XXX: Tuner.restore() still does not work (with PBT at least) as of 2.38.0
+    # (goes idle after the first iteration)
+
+    if "master_config" in pbt_config["local_load_options"]:
+        pbt_config = json.loads(pbt_config["local_load_options"]["master_config"]["path"])
+    else:
+        master_config = build_master_config(pbt_config)
 
     algo_config = MPPO_Config()
     algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
@@ -453,7 +411,7 @@ def new_tuner(opts):
 
     checkpoint_config = ray.train.CheckpointConfig(num_to_keep=3)
     run_config = ray.train.RunConfig(
-        name=opts.experiment_name,
+        name=algo_config.user["experiment_name"],
         verbose=False,
         failure_config=ray.train.FailureConfig(max_failures=-1),
         checkpoint_config=checkpoint_config,
@@ -474,7 +432,7 @@ def new_tuner(opts):
         mode="max",
         time_attr="training_iteration",
         perturbation_interval=1,
-        hyperparam_mutations=algo_config.user.hyperparam_mutations,
+        hyperparam_mutations=algo_config.user["hyperparam_mutations"],
         quantile_fraction=pbt_config["quantile_fraction"],
         log_config=True,  # used for reconstructing the PBT schedule
         require_attrs=True,
@@ -509,7 +467,7 @@ def new_tuner(opts):
     # trainable = ray.tune.with_parameters(trainable_cls, initargs=initargs)
     # trainable = ray.tune.with_resources(trainable, resources=resources)
 
-    for k, v in convert_to_param_space(algo_config.user.hyperparam_mutations).items():
+    for k, v in convert_to_param_space(algo_config.user["hyperparam_mutations"]).items():
         assert hasattr(algo_config, k)
         if isinstance(v, dict):
             deep_update(getattr(algo_config, k), v)
@@ -523,64 +481,4 @@ def new_tuner(opts):
         param_space=algo_config,
     )
 
-    return tuner, checkpoint_load_dir
-
-
-# XXX: PBT restore is broken in 2.38.0, I locally fixed it in pip
-#      PR: https://github.com/ray-project/ray/pull/48616
-def resume_tuner(opts):
-    # Resuming will resume the W&B runs as well
-    assert opts.experiment_name is None
-    restore_path = util.to_abspath(opts.init_argument)
-    print("*** RESUMING EXPERIMENT FROM %s ***" % restore_path)
-
-    # Trial ID will be the same => wandb run will be the same
-    # Iteration will be >0 => any initial config
-    # (e.g. old_wandb_run, model_load_file) will be ignored.
-    # We can't change anything here:
-    # Tuner docs are clear that the restored config must be *identical*
-    assert not opts.master_overrides, "Overrides not allowed when resuming"
-    return ray.tune.Tuner.restore(path=str(restore_path), trainable="MPPO")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-n", "--experiment-name", metavar="<name>", default="MPPO-{datetime}", help="Experiment name (if starting a new experiment)")
-    parser.add_argument("-m", "--init-method", metavar="<method>", default="default", help="Init method")
-    parser.add_argument("-a", "--init-argument", metavar="<argument>", help="Init argument")
-    parser.add_argument('-o', "--master-overrides", metavar="<cfgpath>=<value>", action='append', help='Master config overrides')
-    parser.formatter_class = argparse.RawDescriptionHelpFormatter
-    parser.epilog = """
-
-Init methods:
-  default               Build master_config from pbt_config.py
-  load_config_file      Build master_config from a JSON file
-  load_ray_checkpoint   Load master_config and models from a ray checkpoint
-  load_wandb_artifact   Load master_config and models from a W&B artifact
-  load_wandb_run        Load master_config and models from a W&B run's latest artifact
-  resume_experiment     Seamlessly resume an experiment from a path (no changes allowed)
-
-Example:
-  python -m rl.ray.mppo.main ...
-
-  ... -n "MPPO-test-{datetime}"
-  ... -m load_wandb_run -a s-manolloff/newray/35091_00000 -n "MPPO-test-{datetime}"
-  ... -m load_wandb_artifact -a s-manolloff/newray/model.pt:v52
-  ... -m resume_experiment -a data/MPPO-20241106_163258
-
-"""
-
-    opts = parser.parse_args()
-
-    if opts.init_method == "resume_experiment":
-        tuner = resume_tuner(opts)
-        checkpoint_dir = None
-    else:
-        tuner, checkpoint_dir = new_tuner(opts)
-
-    try:
-        import ipdb; ipdb.set_trace()  # noqa
-        tuner.fit()
-    finally:
-        if isinstance(checkpoint_dir, tempfile.TemporaryDirectory):
-            checkpoint_dir.cleanup()
+    tuner.fit()

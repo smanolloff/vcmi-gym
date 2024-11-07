@@ -1,9 +1,11 @@
 import ray.tune
 import vcmi_gym
 from wandb.util import json_dumps_safer
+
 from .pbt_config import pbt_config
-from . import MPPO_Config, MPPO_Callback
-from .pbt_main import build_master_config, make_env_creator
+from .pbt_main import build_master_config, env_creator #make_env_creator
+from . import MPPO_Config, MPPO_Callback, MPPO_Algorithm
+
 
 env_cls = getattr(vcmi_gym, pbt_config["env"]["cls"])
 
@@ -11,11 +13,39 @@ algo_config = MPPO_Config()
 algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
 
 pbt_config = {
-    "metric": "eval/is_success",
+    # "wandb_project": "newray",
+    "wandb_project": None,
+    "experiment_name": "resumetest-1-{datetime}",
+
+    # Relative paths are interpreted w.r.t. VCMI_GYM root dir
+    "load_options": {
+        # Resume entire tune experiment
+        "experiment": {
+            "path": "data/newray-20241105_000738",
+        },
+
+        # Load policy & optimizer from a checkpoint
+        "learner_group": {
+            "path": "data/newray-20241105_000738/35091_00000/checkpoint_000030/learner_group",
+        },
+
+        # # Load model from a JIT file
+        # "model": {
+        #     "path": "data/newray-20241105_000738/35091_00000/checkpoint_000027/jit-model.pt",
+        #     # rlmodule <=> model layer
+        #     "layer_mapping": {
+        #         "encoder.encoder": "encoder_actor",
+        #         "pi": "actor",
+        #         "vf": "critic",
+        #     }
+        # }
+    },
+
+    "metric": "train/ep_rew_mean",
     "population_size": 2,
     "quantile_fraction": 0.5,
     "wandb_log_interval_s": 5,
-    "training_step_duration_s": 3000,
+    "training_step_duration_s": 15,
     "evaluation_episodes": 10,
     "env_runner_keepalive_interval_s": 5,  # must be smaller than "user_timeout"
 
@@ -94,10 +124,10 @@ pbt_config = {
         # Either eval or train env MUST BE proc
         # (ray always creates a local env for both)
         "eval": {
-            "runners": 0,  # 0=use main process
+            "runners": 1,  # 0=use main process
             "kwargs": {
                 "opponent": "StupidAI",
-                "conntype": "proc",
+                "conntype": "thread",
             },
         },
         "train": {
@@ -136,16 +166,38 @@ pbt_config = {
             },
         },
     },
-    "experiment_name": "newray-test",  # overwritten via cmd-line args
-    "resume_from": "",  #
-    "wandb_project": "newray",  # "vcmi-gym",
 }
 
 
 if __name__ == "__main__":
     algo_config = MPPO_Config()
     algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
-    algo_config.master_config(build_master_config(pbt_config))
+
+    init_info = MPPO_Config.InitInfo(
+        experiment_name="aaa",
+        timestamp="2000-01-01T00:00:00",
+        git_head="git-head",
+        git_is_dirty=False,
+        init_method="init_method",
+        init_argument="init_argument",
+        wandb_project=None,
+        checkpoint_load_dir=None,
+        hyperparam_values={},
+        master_overrides={},
+    )
+
+    master_config = build_master_config(pbt_config)
+
+    # This info is used during setup and is also recorded in history
+    master_config["user"]["init_info"] = init_info
+    master_config["user"]["init_history"].append(init_info)
+
+    env_cls = getattr(vcmi_gym, master_config["user"]["env_cls"])
+    # ray.tune.registry.register_env("VCMI", make_env_creator(env_cls))
+    ray.tune.registry.register_env("VCMI", env_creator)
+    ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
+
+    algo_config.master_config(master_config)
 
     if (
         algo_config.evaluation_num_env_runners == 0
@@ -155,7 +207,7 @@ if __name__ == "__main__":
     ):
         raise Exception("Both 'train' and 'eval' runners are local -- at least one must have conntype='proc'")
 
-    ray.tune.registry.register_env("VCMI", make_env_creator(env_cls))
+    # ray.tune.registry.register_env("VCMI", make_env_creator(env_cls))
     algo = algo_config.build()
 
     for i in range(2):

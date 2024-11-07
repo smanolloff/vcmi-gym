@@ -1,5 +1,4 @@
 import torch
-from torch.distributions.categorical import Categorical
 from torch.utils.mobile_optimizer import optimize_for_mobile
 
 from ray.rllib.utils.annotations import override
@@ -9,6 +8,7 @@ from ray.rllib.models.torch.torch_distributions import TorchCategorical
 
 from .mppo_encoder import MPPO_Encoder
 from . import netutil
+from . import util
 
 MASK_VALUE = torch.tensor(torch.finfo(torch.float32).min, dtype=torch.float32)
 
@@ -72,7 +72,27 @@ class MPPO_RLModule(PPOTorchRLModule):
         self.vf = netutil.layer_init(netutil.build_layer(netcfg.critic, obs_dims), gain=1.0)
 
     #
-    # JIT export-related
+    # JIT import
+    #
+
+    def jload(self, jagent_file, layer_mapping=None):
+        jmodel = torch.jit.load(jagent_file)
+
+        if not layer_mapping:
+            # rlmodule <=> jmodel layer
+            layer_mapping = {
+                "encoder.encoder": "encoder_actor",
+                "pi": "actor",
+                "vf": "critic",
+            }
+
+        for rl_attr, model_attr in layer_mapping.items():
+            rlmodule_layer = util.get_nested_attr(self, rl_attr)
+            jmodel_layer = util.get_nested_attr(jmodel, model_attr)
+            rlmodule_layer.load_state_dict(jmodel_layer.state_dict(), strict=True)
+
+    #
+    # JIT export
     #
 
     def jsave(self, jagent_file, optimized=False):
@@ -148,7 +168,7 @@ class JitModel(torch.nn.Module):
         b_mask = mask.unsqueeze(dim=0)
         latent = self.encoder_actor(b_obs)
         action_logits = self.actor(latent)
-        probs = self.categorical_masked(logits0=action_logits, mask=b_mask)
+        probs = self.categorical_masked(action_logits, b_mask)
         action = torch.argmax(probs, dim=1) if deterministic else self.sample(probs, action_logits)
         return action.int().item()
 

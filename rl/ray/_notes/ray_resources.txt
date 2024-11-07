@@ -1,0 +1,21 @@
+> Eval and train runners are up all the time, but are NOT used simultaneously
+> Resources used (as measured on Mac M2):
+  * 0.5 CPU for StupidAI
+  * 1.0 CPU for BattleAI
+
+For 2 eval + 4 train workers
+> ray allocates 4 CPU
+> real usage is 2 CPU
+
+Introduce new custom resources:
+* eval_cpu
+* train_cpu
+
+1 real CPU = 1 eval_cpu AND 1 train_cpu
+
+=> For 2 eval + 4 train workers:
+> ray allocates 2 eval_cpu + 2 train_cpu on a node with total 2 physical CPU
+
+To start a node with these custom resources:
+https://docs.ray.io/en/latest/ray-core/scheduling/resources.html#specifying-node-resources
+

@@ -1,5 +1,29 @@
 Issues in 2.38.0:
 
+* moderate/high:
+  ray has separate env runners for eval and train, but they never need to
+  run simultaneously (eval workers sit idle during training and vice versa)
+  In a cloud setup that is a waste of money -- eval workers will sit idle
+  most of the time.
+  TODO: see if using custom resources solves this,
+    e.g. split default "CPU" resource into "eval_cpu"+"train_cpu"
+    Example:
+    - BattleAI (eval) uses 1 real CPU => resource needed: eval_cpu=1
+    - StupidAI (train) uses 0.5 real CPU => resource needed: train_cpu=0.5
+
+    If a machine with CPU=2 has {"eval_cpu": 2, "train_cpu": 2}
+    => can host 2 eval and 4 train runners simultaneously
+
+    To start a node with these custom resources:
+    https://docs.ray.io/en/latest/ray-core/scheduling/resources.html#specifying-node-resources
+
+
+* moderate:
+  resuming PBT experiment still does not work:
+  it does restore all trials correctly, but runs only 1 iteration then goes idle
+  I recall the same issue thing with earlier ray versions.
+  Opened PR: https://github.com/ray-project/ray/pull/48616
+
 * moderate:
   ray does not allow to specify customization of for env runners
   (no runner_cls, neither health_check functions are customizable)
