@@ -10,22 +10,19 @@ import vcmi_gym
 import datetime
 import pygit2
 import json
-import copy
 import wandb
 import tempfile
 import dataclasses
 import pathlib
-from ray.rllib.utils import deep_update
-from . import util
-from . import MPPO_Algorithm, MPPO_Config, MPPO_EnvRunner, MPPO_EvalEnvRunner, MPPO_Callback, MPPO_Logger
+import multiprocessing
 
-env_cls = vcmi_gym.VcmiEnv_v4
+from ray.rllib.utils import deep_update
+
+from . import MPPO_Algorithm, MPPO_Config, util
 
 # Silence here in order to supress messages from local runners
 # Silence once more in algo init to supress messages from remote runners
 util.silence_log_noise()
-
-WANDB_PROJECT = "newray"
 
 
 def calculate_fragment_duration_s(cfg, train_env_cfg, eval_env_cfg):
@@ -60,7 +57,7 @@ def calculate_fragment_duration_s(cfg, train_env_cfg, eval_env_cfg):
 
 
 def build_master_config(cfg):
-    # env_cls = getattr(vcmi_gym, cfg["env"]["cls"])
+    env_cls = getattr(vcmi_gym, cfg["env"]["cls"])
     train_env_cfg = util.deepmerge(cfg["env"]["common"], cfg["env"]["train"])
     eval_env_cfg = util.deepmerge(cfg["env"]["common"], cfg["env"]["eval"])
     fragment_duration_s = calculate_fragment_duration_s(cfg, train_env_cfg, eval_env_cfg)
@@ -69,172 +66,6 @@ def build_master_config(cfg):
     fragment_duration_headroom = 10
     sample_timeout_s = fragment_duration_s * fragment_duration_headroom
     print(f"Using sample_timeout_s={sample_timeout_s:.1f}")
-
-    return dict(
-        # Most of the `resources()` is moved to `env_runners()`
-        resources=dict(
-            num_cpus_for_main_process=1,
-            placement_strategy="PACK",
-        ),
-        framework=dict(
-            framework="torch",
-        ),
-        api_stack=dict(
-            enable_rl_module_and_learner=True,
-            enable_env_runner_and_connector_v2=True
-        ),
-        environment=dict(
-            env="VCMI",
-            env_config=train_env_cfg["kwargs"],
-            action_mask_key="action_mask",  # not used as of ray-2.38.0
-            action_space=None,              # inferred from env
-            clip_actions=False,             #
-            clip_rewards=None,              #
-            disable_env_checking=False,     # one-time calls to step and reset
-            is_atari=False,                 #
-            normalize_actions=False,        # ignored for Discrete action space
-            observation_space=None,         # inferred from env
-            render_env=False,               #
-        ),
-        env_runners=dict(
-            add_default_connectors_to_env_to_module_pipeline=True,
-            add_default_connectors_to_module_to_env_pipeline=True,
-            batch_mode="truncate_episodes",
-            compress_observations=False,
-            custom_resources_per_env_runner={},
-            # env_runner_cls=MPPO_EnvRunner,
-            env_to_module_connector=None,
-            episode_lookback_horizon=1,
-            explore=False,
-            max_requests_in_flight_per_env_runner=1,  # buggy, see https://github.com/ray-project/ray/pull/48499
-            module_to_env_connector=None,
-            num_env_runners=train_env_cfg["runners"],
-            num_cpus_per_env_runner=cfg["env"]["cpu_demand"][train_env_cfg["kwargs"]["opponent"]],
-            num_gpus_per_env_runner=0,
-            num_envs_per_env_runner=1,  # i.e. vec_env.num_envs. MUST BE 1 (or amend fragment_size)
-            rollout_fragment_length="auto",  # manually choosing a value is too complex
-            update_worker_filter_stats=True,
-            use_worker_filter_stats=True,
-            sample_timeout_s=sample_timeout_s,
-            validate_env_runners_after_construction=True,
-        ),
-        learners=dict(
-            num_learners=0,             # 0 => learn in main process
-            num_gpus_per_learner=0,
-            num_cpus_per_learner=1,
-        ),
-        # !!! This is the API as of ray-2.38.0
-        # !!! It *will* change in future releases
-        training=dict(
-            clip_param=cfg["clip_param"],
-            entropy_coeff=cfg["entropy_coeff"],
-            gamma=cfg["gamma"],
-            grad_clip=cfg["grad_clip"],
-            grad_clip_by=cfg["grad_clip_by"],
-            kl_coeff=cfg["kl_coeff"],
-            kl_target=cfg["kl_target"],
-            lambda_=cfg["lambda_"],
-            lr=cfg["lr"],
-            minibatch_size=cfg["minibatch_size"],
-            num_epochs=cfg["num_epochs"],
-            train_batch_size_per_learner=cfg["train_batch_size_per_learner"],  # i.e. batch_size; or mppo's num_steps when n_envs=1
-            shuffle_batch_per_epoch=cfg["shuffle_batch_per_epoch"],
-            use_critic=cfg["use_critic"],
-            use_gae=cfg["use_gae"],
-            use_kl_loss=cfg["use_kl_loss"],
-            vf_clip_param=cfg["vf_clip_param"],
-            vf_loss_coeff=cfg["vf_loss_coeff"],
-        ),
-        multi_agent=dict(),
-        offline_data=dict(),
-        evaluation=dict(
-            evaluation_interval=1,  # !!! MUST BE 1
-            evaluation_num_env_runners=eval_env_cfg["runners"],
-            evaluation_duration=cfg["evaluation_episodes"],
-            evaluation_duration_unit="episodes",
-            evaluation_sample_timeout_s=120.0,
-            evaluation_parallel_to_training=False,
-            evaluation_force_reset_envs_before_iteration=True,
-            evaluation_config=MPPO_Config.overrides(
-                explore=False,
-                env_config=eval_env_cfg["kwargs"],
-                num_cpus_per_env_runner=cfg["env"]["cpu_demand"][eval_env_cfg["kwargs"]["opponent"]],
-                num_gpus_per_env_runner=0,
-                num_envs_per_env_runner=1,
-                # env_runner_cls=MPPO_EvalEnvRunner,
-            ),
-
-            # TODO: my evaluator function here?
-            #       For testing siege/no siege, also logging the custom metrics
-            custom_evaluation_function=None,
-
-            # off_policy_estimation_methods={},     # relevant for offline observations
-            # ope_split_batch_by_episode=True,      # relevant for offline observations
-        ),
-        reporting=dict(
-            # metrics_num_episodes_for_smoothing=6,   # auto-set (custom logic)
-            keep_per_episode_custom_metrics=False,
-            log_gradients=True,
-
-            # metrics_episode_collection_timeout_s=60.0,  # seems old API
-
-            # Used to call .training_step() multiple times in one .train(),
-            # but MPPO_Algorithm expects 1 training_step() call (loops internally)
-            # (see user.training_step_duration_s)
-            min_time_s_per_iteration=None,
-            min_train_timesteps_per_iteration=0,
-            min_sample_timesteps_per_iteration=0,
-        ),
-        checkpointing=dict(
-            export_native_model_files=False,            # for torch .pt files in checkpoints
-            checkpoint_trainable_policies_only=False,
-        ),
-        debugging=dict(
-            # MPPO_Logger currently logs nothing.
-            # It's mostly used to supressing a deprecation warning.
-            logger_config=dict(type=MPPO_Logger, prefix="MPPO_Logger_prefix"),
-            log_level="DEBUG",
-            log_sys_usage=False,
-            seed=None,
-        ),
-        fault_tolerance=dict(
-            recreate_failed_env_runners=False,      # XXX: useful for Amazon SPOT
-            ignore_env_runner_failures=False,
-            max_num_env_runner_restarts=1000,
-            delay_between_env_runner_restarts_s=10.0,
-            restart_failed_sub_environments=False,
-            num_consecutive_env_runner_failures_tolerance=100,
-            env_runner_health_probe_timeout_s=30,
-            env_runner_restore_timeout_s=1800,
-        ),
-        rl_module=dict(
-            model_config=dict(
-                env_version=env_cls.ENV_VERSION,
-                vf_share_layers=cfg["vf_share_layers"],
-                obs_dims=dict(
-                    misc=env_cls.STATE_SIZE_MISC,
-                    stacks=env_cls.STATE_SIZE_STACKS,
-                    hexes=env_cls.STATE_SIZE_HEXES,
-                ),
-                network=cfg["network"]
-            )
-        ),
-        # MPPO-specific cfg, not default to ray
-        # (additionally populated manually later)
-        user=dict(
-            env_cls=cfg["env"]["cls"],
-            training_step_duration_s=cfg["training_step_duration_s"],
-            wandb_log_interval_s=cfg["wandb_log_interval_s"],
-            env_runner_keepalive_interval_s=cfg["env_runner_keepalive_interval_s"],
-
-            # Not needed at runtime, but placed here for convenience:
-            hyperparam_mutations=cfg["hyperparam_mutations"],
-
-            # Populated later:
-            init_info=None,
-            init_history=[],
-        )
-    )
 
 
 def update_config_value(cfg, path, value):
@@ -270,64 +101,37 @@ def convert_to_param_space(mutations):
     return res
 
 
+def make_env_creator(env_id):
+    env_cls = util.get_env_cls(env_id)
 
-# # ray.tune.registry.register_env("VCMI", lambda cfg: (print("NEW ENV WITH INDEX: %s" % cfg.worker_index), env_cls(**cfg)))
-# def make_env_creator(env_cls):
-#     # Even if there are remote runners, ray still needs the local runners
-#     # It doesn't really use them as envs, though => use dummy ones
-#     class DummyEnv(env_cls):
-#         def __init__(self, *args, **kwargs):
-#             self.action_space = env_cls.ACTION_SPACE
-#             self.observation_space = env_cls.OBSERVATION_SPACE
-#             pass
+    # Even if there are remote runners, ray still needs the local runners
+    # It doesn't really use them as envs, though => use dummy ones
+    class DummyEnv(env_cls):
+        def __init__(self, *args, **kwargs):
+            self.action_space = env_cls.ACTION_SPACE
+            self.observation_space = env_cls.OBSERVATION_SPACE
+            pass
 
-#         def step(self, *args, **kwargs):
-#             raise Exception("step() called on DummyEnv")
+        def step(self, *args, **kwargs):
+            raise Exception("step() called on DummyEnv")
 
-#         def reset(self, *args, **kwargs):
-#             raise Exception("reset() called on DummyEnv")
+        def reset(self, *args, **kwargs):
+            raise Exception("reset() called on DummyEnv")
 
-#         def render(self, *args, **kwargs):
-#             raise Exception("render() called on DummyEnv")
+        def render(self, *args, **kwargs):
+            raise Exception("render() called on DummyEnv")
 
-#         def close(self, *args, **kwargs):
-#             pass
+        def close(self, *args, **kwargs):
+            pass
 
-#     def env_creator(cfg):
-#         if cfg.num_workers > 0 and cfg.worker_index == 0:
-#             return DummyEnv()
-#         else:
-#             print(f"Env kwargs: {json.dumps(cfg)}")
-#             return env_cls(**cfg)
+    def env_creator(cfg):
+        if cfg.num_workers > 0 and cfg.worker_index == 0:
+            return DummyEnv()
+        else:
+            print(f"Env kwargs: {json.dumps(cfg)}")
+            return env_cls(**cfg)
 
-#     return env_creator
-
-
-class DummyEnv(env_cls):
-    def __init__(self, *args, **kwargs):
-        self.action_space = env_cls.ACTION_SPACE
-        self.observation_space = env_cls.OBSERVATION_SPACE
-        pass
-
-    def step(self, *args, **kwargs):
-        raise Exception("step() called on DummyEnv")
-
-    def reset(self, *args, **kwargs):
-        raise Exception("reset() called on DummyEnv")
-
-    def render(self, *args, **kwargs):
-        raise Exception("render() called on DummyEnv")
-
-    def close(self, *args, **kwargs):
-        pass
-
-
-def env_creator(cfg):
-    if cfg.num_workers > 0 and cfg.worker_index == 0:
-        return DummyEnv()
-    else:
-        print(f"Env kwargs: {json.dumps(cfg)}")
-        return env_cls(**cfg)
+    return env_creator
 
 
 def new_tuner(opts):
@@ -349,7 +153,7 @@ def new_tuner(opts):
 
         # No sense in loading from file after loading from checkpoint
         # => set `model_load_file` to None
-        master_config["user"]["model_load_file"] = None
+        master_config["user"]["init_info"]["model_load_file"] = None
 
         return master_config, hyperparam_values
 
@@ -386,15 +190,14 @@ def new_tuner(opts):
             checkpoint_load_dir = pathlib.Path(opts.init_argument)
             master_config, hyperparam_values = load_ray_checkpoint(checkpoint_load_dir.name)
 
-        case "load_config_file":
-            source_config = json.loads(opts.init_argument)
-            master_config = build_master_config(source_config)
+        case "load_json_config":
+            master_config = json.loads(opts.init_argument)
 
-        case "default":
-            # ^ New wandb run
-            from .pbt_config import pbt_config
-            source_config = copy.deepcopy(pbt_config)
-            master_config = build_master_config(source_config)
+        case "load_python_config":
+            import importlib
+            modpath = opts.init_argument or ".pbt_config"
+            mod = importlib.import_module(modpath, package=__package__)
+            master_config = mod.load()
 
         case _:
             raise Exception(f"Unknown init source: {opts.init_argument}")
@@ -421,7 +224,7 @@ def new_tuner(opts):
         git_is_dirty=any(git.diff().patch),
         init_method=opts.init_method,
         init_argument=opts.init_argument,
-        wandb_project=WANDB_PROJECT,
+        wandb_project=opts.wandb_project,
         checkpoint_load_dir=checkpoint_load_dir.name if checkpoint_load_dir else None,
         hyperparam_values=hyperparam_values,
         master_overrides=master_overrides,
@@ -434,13 +237,11 @@ def new_tuner(opts):
     # Validation: dict -> UserConfig -> dict
     master_config["user"] = dataclasses.asdict(MPPO_Config.UserConfig(**master_config["user"]))
 
-    # env_cls = getattr(vcmi_gym, master_config["user"]["env_cls"])
-
-    ray.tune.registry.register_env("VCMI", env_creator)
+    env_id = master_config["environment"]["env"]
+    ray.tune.registry.register_env(env_id, make_env_creator(env_id))
     ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
 
     algo_config = MPPO_Config()
-    algo_config.callbacks(MPPO_Callback)  # this cannot go in master_config
     algo_config.master_config(master_config)
 
     if (
@@ -474,7 +275,7 @@ def new_tuner(opts):
         mode="max",
         time_attr="training_iteration",
         perturbation_interval=1,
-        hyperparam_mutations=algo_config.user.hyperparam_mutations,
+        hyperparam_mutations=algo_config.user_config.hyperparam_mutations,
         quantile_fraction=pbt_config["quantile_fraction"],
         log_config=True,  # used for reconstructing the PBT schedule
         require_attrs=True,
@@ -509,7 +310,7 @@ def new_tuner(opts):
     # trainable = ray.tune.with_parameters(trainable_cls, initargs=initargs)
     # trainable = ray.tune.with_resources(trainable, resources=resources)
 
-    for k, v in convert_to_param_space(algo_config.user.hyperparam_mutations).items():
+    for k, v in convert_to_param_space(algo_config.user_config.hyperparam_mutations).items():
         assert hasattr(algo_config, k)
         if isinstance(v, dict):
             deep_update(getattr(algo_config, k), v)
@@ -544,20 +345,24 @@ def resume_tuner(opts):
 
 
 if __name__ == "__main__":
+    vcmi_gym.register_envs()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--experiment-name", metavar="<name>", default="MPPO-{datetime}", help="Experiment name (if starting a new experiment)")
     parser.add_argument("-m", "--init-method", metavar="<method>", default="default", help="Init method")
     parser.add_argument("-a", "--init-argument", metavar="<argument>", help="Init argument")
-    parser.add_argument('-o', "--master-overrides", metavar="<cfgpath>=<value>", action='append', help='Master config overrides')
+    parser.add_argument("-o", "--master-overrides", metavar="<cfgpath>=<value>", action='append', help='Master config overrides')
+    parser.add_argument("-w", "--wandb-project", metavar="<project>", default="newray", help="W&B project ('' disables W&B)")
+    parser.add_argument("--num-cpus", metavar="<cpus>", help="CPU count for this node (default: auto)")
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.epilog = """
 
 Init methods:
-  default               Build master_config from pbt_config.py
-  load_config_file      Build master_config from a JSON file
+  load_python_config*   Load master_config from a PY module's load() function (default: .pbt_config)
+  load_json_config      Load master_config from a JSON file
   load_ray_checkpoint   Load master_config and models from a ray checkpoint
-  load_wandb_artifact   Load master_config and models from a W&B artifact
-  load_wandb_run        Load master_config and models from a W&B run's latest artifact
+  load_wandb_artifact   Load a ray checkpoint from a W&B artifact
+  load_wandb_run        Load a ray checkpoint from a W&B run's latest artifact
   resume_experiment     Seamlessly resume an experiment from a path (no changes allowed)
 
 Example:
@@ -579,7 +384,16 @@ Example:
         tuner, checkpoint_dir = new_tuner(opts)
 
     try:
-        import ipdb; ipdb.set_trace()  # noqa
+        ncpus = opts.num_cpus or multiprocessing.cpu_count()
+
+        # To add remote machines to the ray cluster:
+        # $ ray start --address=<HEAD_NODE_IP>:6379 --node-ip-address=<WORKER_NODE_IP>
+
+        ray.init(
+            # address="HEAD_NODE_IP:6379",
+            resources={"train_cpu": ncpus, "eval_cpu": ncpus}
+        )
+
         tuner.fit()
     finally:
         if isinstance(checkpoint_dir, tempfile.TemporaryDirectory):

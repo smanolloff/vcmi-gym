@@ -6,6 +6,7 @@ import logging
 import re
 import dataclasses
 import typing
+import gymnasium as gym
 
 # i.e. vcmi-gym root:
 vcmigym_root_path = next(p for p in pathlib.Path(__file__).parents if p.name == "vcmi-gym")
@@ -54,14 +55,15 @@ def linlist(low, high, n=100, dtype=float):
     return list(map(lambda i: dtype(low + x*i), range(n)))
 
 
-def deepmerge(a: dict, b: dict, allow_new=True, update_existing=True, path=[]):
-    if len(path) == 0:
+# Merge b into a, optionally preventing new keys; does not mutate inputs
+def deepmerge(a: dict, b: dict, in_place=False, allow_new=True, update_existing=True, path=[]):
+    if len(path) == 0 and not in_place:
         a = copy.deepcopy(a)
 
     for key in b:
         if key in a:
             if isinstance(a[key], dict) and isinstance(b[key], dict):
-                deepmerge(a[key], b[key], allow_new, update_existing, path + [str(key)])
+                deepmerge(a[key], b[key], in_place, allow_new, update_existing, path + [str(key)])
             elif update_existing and a[key] != b[key]:
                 a[key] = b[key]
         elif allow_new:
@@ -148,7 +150,13 @@ def calculate_fragment_duration_s(batch_sizes, n_runners, step_duration_s):
     max_fragment_length = max(batch_sizes) / max(1, n_runners)
     step_duration_s = step_duration_s
     fragment_duration_s = max_fragment_length * step_duration_s
-    print(f"Estimated time for collecting samples: {fragment_duration_s:.1f}s")
+
+    print(
+        f"Estimated time for collecting samples: {fragment_duration_s:.1f}s"
+        " (max_batch_size=%d, n_runners=%d, step_duration_s=%s)" % (
+            max(batch_sizes), max(1, n_runners), step_duration_s
+        )
+    )
 
     # Maximum allowed time for sample collection (hard-coded)
     max_fragment_duration_s = 30
@@ -175,7 +183,13 @@ def calc_train_sample_timeout_s(batch_sizes, n_runners, step_duration_s, headroo
     return sample_timeout_s
 
 
-def calc_eval_sample_timeout_s(n_episodes, n_runners, max_episode_len, step_duration_s, headroom=10):
+def calc_eval_sample_timeout_s(n_episodes, n_runners, step_duration_s, max_episode_len, headroom=10):
     max_episode_duration_s = max_episode_len * step_duration_s
     sample_timeout_s = max_episode_duration_s * headroom
     return sample_timeout_s
+
+
+def get_env_cls(gym_env_name):
+    env_spec = gym.envs.registration.registry[gym_env_name]
+    env_cls = gym.envs.registration.load_env_creator(env_spec.entry_point)
+    return env_cls

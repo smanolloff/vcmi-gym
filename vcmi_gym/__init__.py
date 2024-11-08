@@ -33,7 +33,18 @@ from .envs.util.dual_env import DualEnvController, DualEnvClient
 from .envs.util.wrappers import LegacyActionSpaceWrapper, LegacyObservationSpaceWrapper
 from .tools.test_helper import TestHelper
 
+
+def register_envs():
+    common_opts = dict(disable_env_checker=True, order_enforce=False)
+    for v in [1, 2, 3, 4]:
+        env_id = f"VCMI-v{v}"
+        entry_point = f"vcmi_gym:VcmiEnv_v{v}"
+        if env_id not in gymnasium.envs.registration.registry:
+            gymnasium.register(id=env_id, entry_point=entry_point, **common_opts)
+
+
 all = [
+    register_envs,
     VcmiEnv_v1,
     VcmiEnv_v2,
     VcmiEnv_v3,
@@ -51,10 +62,3 @@ all = [
     LegacyActionSpaceWrapper,
     LegacyObservationSpaceWrapper
 ]
-
-common_opts = dict(disable_env_checker=True, order_enforce=False)
-
-gymnasium.register(id="VCMI-v1", entry_point="vcmi_gym:VcmiEnv_v1", **common_opts)
-gymnasium.register(id="VCMI-v2", entry_point="vcmi_gym:VcmiEnv_v2", **common_opts)
-gymnasium.register(id="VCMI-v3", entry_point="vcmi_gym:VcmiEnv_v3", **common_opts)
-gymnasium.register(id="VCMI-v4", entry_point="vcmi_gym:VcmiEnv_v4", **common_opts)
