@@ -20,7 +20,7 @@ from ray.tune.result import TRIAL_INFO
 from wandb.util import json_dumps_safer
 
 from .mppo_rl_module import MPPO_RLModule
-from .mppo_env_runners import MPPO_TrainEnv, MPPO_EvalEnv
+from .mppo_env_runners import TrainEnv, EvalEnv
 from .mppo_logger import MPPO_Logger, get_logger
 from .mppo_callback import MPPO_Callback
 from . import util
@@ -30,7 +30,7 @@ class MPPO_Config(PPOConfig):
     # ID for gym and tune envs must be different
     # (the tune env has uses a custom env_creator with version validation)
     # If IDs are the same, ray sometimes uses the default gym env creator
-    ENV_TUNE_ID = "VCMI_TUNE_ID"
+    ENV_TUNE_ID = "MPPO_VCMI"
     ENV_VERSION_CHECK_KEY = "_version"
 
     @dataclass
@@ -110,7 +110,7 @@ class MPPO_Config(PPOConfig):
                 batch_mode="truncate_episodes",
                 compress_observations=False,
                 custom_resources_per_env_runner={},
-                env_runner_cls=MPPO_TrainEnv,
+                env_runner_cls=TrainEnv,
                 env_to_module_connector=None,
                 episode_lookback_horizon=1,
                 explore=False,
@@ -167,7 +167,7 @@ class MPPO_Config(PPOConfig):
                     num_cpus_per_env_runner=0,  # see notes/ray_resources.txt
                     num_gpus_per_env_runner=0,
                     num_envs_per_env_runner=1,
-                    env_runner_cls=MPPO_EvalEnv),
+                    env_runner_cls=EvalEnv),
                 custom_evaluation_function=None)
             .reporting(
                 metrics_num_episodes_for_smoothing=1000,   # auto-set (custom logic)
@@ -359,7 +359,7 @@ class MPPO_Algorithm(PPO):
     @override(PPO)
     def setup(self, config: MPPO_Config):
         print("SELF.TRIAL_ID: %s" % self.trial_id)
-        self.ns = MPPO_Algorithm.Namespace(
+        self.ns = self.Namespace(
             master_config=config._master_config,
             log_interval=config.user_config.wandb_log_interval_s
         )

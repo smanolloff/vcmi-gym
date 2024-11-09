@@ -16,9 +16,9 @@ class MPPO_Env(SingleAgentEnvRunner):
 # => use separate classes for eval and train
 
 
-class MPPO_TrainEnv(MPPO_Env):
+class TrainEnv(MPPO_Env):
     pass
 
 
-class MPPO_EvalEnv(MPPO_Env):
+class EvalEnv(MPPO_Env):
     pass
