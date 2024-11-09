@@ -7,6 +7,9 @@ import re
 import dataclasses
 import typing
 import gymnasium as gym
+import vcmi_gym
+
+vcmi_gym.register_envs()
 
 # i.e. vcmi-gym root:
 vcmigym_root_path = next(p for p in pathlib.Path(__file__).parents if p.name == "vcmi-gym")
@@ -110,26 +113,43 @@ def to_abspath(strpath):
     return str(vcmigym_root_path.joinpath(path))
 
 
-# Create a dict with A's keys and B's values (if present)
+# Create a dict with keys from A and values from B (if present)
 def common_dict(a, b, strict=False):
     res = {}
-    for key in a:
-        assert isinstance(key, str)
+    for key_a in a:
+        # XXX: AlgorithmConfig.to_dict() plays smart and renames keys
+        key_b = "lambda" if key_a == "lambda_" else key_a
 
-        if key not in b:
-            assert not strict, f"b['{key}']: not found"
+        assert isinstance(key_a, str)
+
+        if key_b not in b:
+            assert not strict, f"b[{repr(key_b)}]: not found"
             continue
 
-        if isinstance(key[a], dict):
-            assert isinstance(b[key], dict), f"b['{key}']: expected dict, got: {type(b[key])}"
-            res[key] = common_dict(a[key], b[key])
+        if isinstance(a[key_a], dict):
+            assert isinstance(b[key_b], dict), f"b[{repr(key_b)}]: expected dict, got: {type(b[key_b])}"
+            res[key_a] = common_dict(a[key_a], b[key_b], strict)
         else:
-            assert isinstance(a[key], list), f"a['{key}']: expected list, got: {type(a[key])}"
-            assert isinstance(a[key], (int, float, str)), f"a['{key}']: expected int/float/str, got: {type(a[key])}"
-            assert key not in res, f"res['{key}']: already exists"
-            res[key] = b[key]
+            assert isinstance(a[key_a], list), f"a[{repr(key_a)}]: expected list, got: {type(a[key_a])}"
+            assert isinstance(b[key_b], (int, float, str)), f"b[{repr(key_b)}]: expected int/float/str, got: {type(b[key_b])}"
+            assert key_a not in res, f"res[{repr(key_a)}]: already exists"
+            res[key_a] = b[key_b]
 
     return res
+
+
+# Flatten dict:
+# {"a": 1, "b": {"c": 2, "d": 3}}
+# => {"a": 1, "b.c": 2, "b.d": 3}
+def flatten_dict(d, parent_key='', sep='.'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 
 def validate_dataclass_fields(obj):

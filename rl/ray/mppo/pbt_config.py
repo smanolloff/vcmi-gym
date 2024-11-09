@@ -7,8 +7,8 @@ def load():
     # => use gym registry
     # (assuming caller has invoked vcmi_gym.register_envs() already)
 
-    env_id = "VCMI-v4"
-    env_cls = util.get_env_cls(env_id)
+    env_gym_id = "VCMI-v4"
+    env_cls = util.get_env_cls(env_gym_id)
 
     env_kwargs_common = {
         "random_terrain_chance": 100,
@@ -37,10 +37,10 @@ def load():
     }
 
     train_opponent = "StupidAI"
-    train_env_runners = 2
+    train_env_runners = 1
 
     eval_opponent = "BattleAI"
-    eval_env_runners = 2
+    eval_env_runners = 1
     eval_episodes = 10
 
     # XXX: this dict must match the AlgorithmConfig variables structure...
@@ -85,7 +85,6 @@ def load():
     return dict(
         # TRAIN runners
         environment={
-            "env": env_id,
             "env_config": util.deepmerge(env_kwargs_common, {
                 "mapname": "gym/generated/4096/4096-mixstack-100K-01.vmap",
                 "opponent": "StupidAI",
@@ -97,7 +96,7 @@ def load():
                 "reward_clip_tanh_army_frac": 1,
                 "reward_army_value_ref": 500,
                 "reward_dynamic_scaling": False,
-                "conntype": "thread"
+                "conntype": "proc"
             }),
         },
 
@@ -116,7 +115,7 @@ def load():
                 "env_config": util.deepmerge(env_kwargs_common, {
                     "mapname": "gym/generated/evaluation/8x64.vmap",
                     "opponent": "BattleAI",
-                    "conntype": "thread"
+                    "conntype": "proc"
                 }),
                 "custom_resources_per_env_runner": {
                     "train_cpu": 0,
@@ -191,32 +190,37 @@ def load():
             #
             # General
             #
-
+            "env_gym_id": env_gym_id,
             "env_runner_keepalive_interval_s": 15,  # smaller than VCMI timeouts
-            "experiment_name": "MPPO-{timestamp}",  # --experiment-name
-            "wandb_project": "newray",              # --wandb-project
-            "wandb_log_interval_s": 60,
+            "wandb_log_interval_s": 0,
+            "model_load_file": "",
+            "model_load_mapping": {
+                "encoder.encoder": "encoder_actor",
+                "pi": "actor",
+                "vf": "critic",
+            },
 
             #
             # Tune
             #
-
             "hyperparam_mutations": hyperparam_mutations,
             "hyperparam_values": {},
+            "metric": "train/ep_rew_mean",
             "population_size": 1,
             "quantile_fraction": 0.3,
             "training_step_duration_s": 15,
 
             #
-            # Auto-updated, do NOT modify
+            # Updated programatically, do NOT edit here
             #
             "checkpoint_load_dir": None,
-            "git_head": "unset",
-            "git_is_dirty": False,
-            "master_overrides": {},
-            "model_load_file": None,
-            "init_argument": "unset",
-            "init_method": "unset",
-            "timestamp": "unset",
+            "experiment_name": None,      # --experiment-name
+            "git_head": None,
+            "git_is_dirty": None,
+            "master_overrides": None,     # --overrides
+            "init_argument": None,        # --init-argument
+            "init_method": None,          # --init-method
+            "timestamp": None,
+            "wandb_project": None,        # --wandb-project
         },
     )

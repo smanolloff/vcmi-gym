@@ -27,17 +27,25 @@ from . import util
 
 
 class MPPO_Config(PPOConfig):
+    # ID for gym and tune envs must be different
+    # (the tune env has uses a custom env_creator with version validation)
+    # If IDs are the same, ray sometimes uses the default gym env creator
+    ENV_TUNE_ID = "VCMI_TUNE_ID"
+    ENV_VERSION_CHECK_KEY = "_version"
+
     @dataclass
     class UserConfig:
         # General
+        env_gym_id: str
         env_runner_keepalive_interval_s: int
         experiment_name: str
-        wandb_project: str | None
+        wandb_project: str
         wandb_log_interval_s: int
 
         # Tune
         hyperparam_mutations: dict
         hyperparam_values: dict
+        metric: str
         population_size: int
         quantile_fraction: float
         training_step_duration_s: int
@@ -46,8 +54,9 @@ class MPPO_Config(PPOConfig):
         git_head: str
         git_is_dirty: bool
         master_overrides: dict
-        model_load_file: str | None
-        checkpoint_load_dir: str | None
+        model_load_file: str
+        model_load_mapping: dict
+        checkpoint_load_dir: str
         init_argument: str
         init_method: str
         timestamp: str
@@ -65,9 +74,12 @@ class MPPO_Config(PPOConfig):
         self.enable_env_runner_and_connector_v2 = True
         self._master_config = None
 
-        env_id = "VCMI-v4"
-        env_cls = util.get_env_cls(env_id)
+        env_gym_id = "VCMI-v4"
+        env_cls = util.get_env_cls(env_gym_id)
         env_cfg = {"conntype": "proc"}
+
+        # Sanity-checking in restored experiments
+        env_cfg[self.ENV_VERSION_CHECK_KEY] = env_cls.ENV_VERSION
 
         (
             # Default config
@@ -81,7 +93,7 @@ class MPPO_Config(PPOConfig):
                 enable_rl_module_and_learner=True,
                 enable_env_runner_and_connector_v2=True)
             .environment(
-                env=env_id,
+                env=self.ENV_TUNE_ID,
                 env_config=env_cfg,
                 action_mask_key="action_mask",  # not used as of ray-2.38.0
                 action_space=None,
@@ -203,13 +215,15 @@ class MPPO_Config(PPOConfig):
                     },
                     vf_share_layers=True))
             .user(
+                env_gym_id=env_gym_id,
                 env_runner_keepalive_interval_s=15,
                 experiment_name="MPPO-default",
-                wandb_project=None,
+                wandb_project="",
                 wandb_log_interval_s=60,
 
                 hyperparam_mutations={},
                 hyperparam_values={},
+                metric="train/ep_rew_mean",
                 population_size=1,
                 quantile_fraction=0.5,
                 training_step_duration_s=3600,
@@ -217,8 +231,14 @@ class MPPO_Config(PPOConfig):
                 git_head="",
                 git_is_dirty=False,
                 master_overrides={},
-                model_load_file=None,
-                checkpoint_load_dir=None,
+                model_load_file="",
+                model_load_mapping={
+                    # rlmodule-to-model layer mapping
+                    "encoder.encoder": "encoder_actor",
+                    "pi": "actor",
+                    "vf": "critic",
+                },
+                checkpoint_load_dir="",
                 init_argument="default",
                 init_method="default",
                 timestamp="2000-01-01T00:00:00")
@@ -267,6 +287,7 @@ class MPPO_Config(PPOConfig):
             # )
 
         self._validate()
+        return self
 
     # XXX: Temp fix until https://github.com/ray-project/ray/pull/48529 is merged
     def update_from_dict(self, config):
@@ -288,7 +309,7 @@ class MPPO_Config(PPOConfig):
         assert uc.wandb_log_interval_s <= uc.training_step_duration_s
         assert re.match(r"^[\w_-]+$", uc.experiment_name), uc.experiment_name
 
-        if uc.wandb_project is not None:
+        if uc.wandb_project:
             assert re.match(r"^[\w_-]+$", uc.wandb_project), uc.wandb_project
 
         if self.num_learners > 0:
@@ -358,11 +379,12 @@ class MPPO_Algorithm(PPO):
         # XXX: there's no `on_training_step_start` callback => log this here
         self.wandb_log({"trial/iteration": self.iteration})
 
-        if os.getenv("DEBUG"):
-            if self.iteration == 0:
-                # XXX: self.iteration is always 0 during setup(), must load here
-                self._maybe_load_learner_group()
-                self._maybe_load_model()
+        # import ipdb; ipdb.set_trace()  # noqa
+
+        if self.iteration == 0:
+            # XXX: self.iteration is always 0 during setup(), must load here
+            self._maybe_load_learner_group()
+            self._maybe_load_model()
 
         started_at = time.time()
         logged_at = started_at
@@ -401,27 +423,25 @@ class MPPO_Algorithm(PPO):
     def save_checkpoint(self, checkpoint_dir):
         res = super().save_checkpoint(checkpoint_dir)
 
-        if not (wandb.run and re.match(r"^.+_0+$", self.trial_id)):
-            return res
-
         learner = self.learner_group.get_checkpointable_components()[0][1]
 
         rl_module = learner.module[DEFAULT_MODULE_ID]
         model_file = os.path.join(checkpoint_dir, "jit-model.pt")
         rl_module.jsave(model_file)
 
-        config_file = os.path.join(checkpoint_dir, "master_config.json")
+        config_file = os.path.join(checkpoint_dir, "mppo_config.json")
 
         # TRIAL_INFO key contains non-serializable (by wandb) values
         with open(config_file, "w") as f:
             f.write(json_dumps_safer({k: v for k, v in self.config.to_dict().items() if k != TRIAL_INFO}))
 
-        art = wandb.Artifact(name="model", type="model")
-        art.description = f"Snapshot of model from {time.ctime(time.time())}"
-        art.ttl = datetime.timedelta(days=7)
-        art.metadata["step"] = wandb.run.step
-        art.add_dir(checkpoint_dir)
-        wandb.run.log_artifact(art)
+        if wandb.run and self._is_golden_trial():
+            art = wandb.Artifact(name="model", type="model")
+            art.description = f"Snapshot of model from {time.ctime(time.time())}"
+            art.ttl = datetime.timedelta(days=7)
+            art.metadata["step"] = wandb.run.step
+            art.add_dir(checkpoint_dir)
+            wandb.run.log_artifact(art)
 
         return res
 
@@ -439,7 +459,7 @@ class MPPO_Algorithm(PPO):
 
     def _wandb_init(self):
         run_id = util.gen_id() if self.trial_id == "default" else self.trial_id
-        print("W&B Run ID is %s" % run_id)
+        print("W&B Run ID is %s (project: %s)" % (run_id, self.config.user_config.wandb_project))
 
         run_name = self.trial_name
         if self.trial_name == "default":
@@ -454,7 +474,7 @@ class MPPO_Algorithm(PPO):
             wandb.init(
                 project=self.config.user_config.wandb_project,
                 group=self.config.user_config.experiment_name,
-                id=gen_id() if self.ns.run_id == "default" else self.ns.run_id,
+                id=util.gen_id() if self.ns.run_id == "default" else self.ns.run_id,
                 name=self.ns.run_name,
                 resume="allow",
                 reinit=True,
@@ -464,7 +484,7 @@ class MPPO_Algorithm(PPO):
                 sync_tensorboard=False,
             )
 
-            self._wandb_log_git_diff()  # superseded by "code saving" profile setting
+            self._wandb_log_git_diff()
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
@@ -492,47 +512,23 @@ class MPPO_Algorithm(PPO):
         ))
 
     def _wandb_log_hyperparams(self):
-        to_log = {}
-
-        for k, v in self.config.user_config.hyperparam_mutations.items():
-            if k == "env_config":
-                for k1, v1 in v.items():
-                    assert k1 in self.config.env_config, f"{k1} in self.config.env_config"
-                    assert "/" not in k1
-                    to_log[f"params/env.{k1}"] = self.config.env_config[k1]
-            else:
-                assert hasattr(self.config, k), f"hasattr(self.config, {k})"
-                assert "/" not in k
-                to_log[f"params/{k}"] = getattr(self.config, k)
+        to_log = util.common_dict(
+            self.config.user_config.hyperparam_mutations,
+            self.config.to_dict(),
+            strict=True
+        )
 
         if to_log:
-            self.wandb_log(to_log)
-
-    # XXX: There's already a wandb "code saving" profile setting
-    #      It saves only requirements.txt and the git metadata which is enough
-    #      See https://docs.wandb.ai/guides/track/log/
-    # def _wandb_log_code(self):
-    #     # https://docs.wandb.ai/ref/python/run#log_code
-    #     # XXX: "path" is relative to `ray_root`
-    #     this_file = pathlib.Path(__file__)
-    #     ray_root = this_file.parent.parent.absolute()
-    #     # TODO: log requirements.txt as well
-    #     wandb.run.log_code(
-    #         root=ray_root,
-    #         include_fn=lambda path: path.endswith(".py"),
-    #     )
+            self.logger.info(f"Hyperparam values: {json_dumps_safer(to_log)}")
+            self.wandb_log({f"params/{k}": v for k, v in util.flatten_dict(to_log).items()})
 
     # XXX: There's already a wandb "code saving" profile setting
     #      See https://docs.wandb.ai/guides/track/log/
-    #      but it's NOT WORKING (says couldnt find git commit for this run)
-    #      (maybe it requires logging my entire codebase?)
+    #      but it's not working
+    #      (maybe it requires specifying a directory containing .git)
     def _wandb_log_git_diff(self):
-        import os
-        if not os.getenv("DEBUG"):
+        if self.iteration > 0 or not self._is_golden_trial():
             return
-
-        # if self.iteration > 0 or not self._is_golden_trial():
-        #     return
 
         git = pygit2.Repository(os.path.dirname(__file__))
         head = str(git.head.target)
@@ -547,7 +543,7 @@ class MPPO_Algorithm(PPO):
             temp_file.flush()
             art.add_file(temp_file.name, name="diff.patch")
             wandb.run.log_artifact(art)
-            # no need to wait (wandb creates a local copy of the file to upload)
+            # no need to wait for upload (log_artifact creates a local copy)
             # art.wait()
 
     # The first trial in an experiment (e.g. "ff859_00000")
@@ -555,23 +551,21 @@ class MPPO_Algorithm(PPO):
         return re.match(r"^.+_0+$", self.trial_id)
 
     def _maybe_load_learner_group(self):
-        return
-        if "experiment" not in self.config.user["load_options"]:
+        if not self.config.user_config.checkpoint_load_dir:
             return
 
-        path = util.to_abspath(self.config.user["load_options"]["learner_group"]["path"])
+        path = util.to_abspath("%s/learner_group" % self.config.user_config.checkpoint_load_dir)
         self.logger.warning(f"Loading learner group from {path}")
         self.learner_group.restore_from_path(path)
         self._broadcast_weights()
 
     # XXX: this works for PPO, but do other algos use more policies?
     def _maybe_load_model(self):
-        return
-        if "model" not in self.config.user["load_options"]:
+        if not self.config.user_config.model_load_file:
             return
 
-        mapping = self.config.user["load_options"]["model"]["layer_mapping"]
-        path = util.to_abspath(self.config.user["load_options"]["model"]["path"])
+        mapping = self.config.user_config.model_load_mapping
+        path = util.to_abspath(self.config.user_config.model_load_path)
         self.logger.warning(f"Loading learner model from {path}")
         self.learner_group.foreach_learner(lambda l: l.module[DEFAULT_POLICY_ID].jload(path, mapping))
         self._broadcast_weights()
@@ -582,7 +576,7 @@ class MPPO_Algorithm(PPO):
         self.logger.info("Broadcasting learner weights to env runners")
         self.env_runner_group.sync_weights(**opts)
 
-        if self.eval_env_runner_group is not None:
+        if self.eval_env_runner_group:
             self.logger.info("Broadcasting learner weights to eval env runners")
             self.eval_env_runner_group.sync_weights(**opts)
 

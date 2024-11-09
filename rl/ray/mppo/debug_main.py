@@ -13,7 +13,7 @@ if __name__ == "__main__":
     now = datetime.datetime.now()
     master_config = pbt_config.load()
 
-    debug_overrides = dict(
+    debug_cfg = dict(
         # TRAIN runners
         environment={
             "env_config": {
@@ -26,7 +26,7 @@ if __name__ == "__main__":
             },
         },
         env_runners={
-            "num_env_runners": 0,
+            "num_env_runners": 1,
         },
         # EVAL runners
         evaluation={
@@ -45,38 +45,33 @@ if __name__ == "__main__":
         },
         user={
             "env_runner_keepalive_interval_s": 60,
-            "experiment_name": f"test-{now.strftime('%Y%m%d_%H%M%S')}",
-            "wandb_project": None,
             "wandb_log_interval_s": 0,
+            "model_load_file": "",
 
-            # These will be replaced (not merged)
+            # these dicts need to be replaced (not merged)
             # "hyperparam_mutations": {"vf_clip_param": [0.1, 0.2, 0.3]},
             # "hyperparam_values": {},
-
+            "metric": "train/ep_rew_mean",
             "population_size": 1,
             "quantile_fraction": 0.3,
             "training_step_duration_s": 30,
+
+            # Typically added via cmdline args:
+            "checkpoint_load_dir": "",
+            "experiment_name": f"test-{now.strftime('%Y%m%d_%H%M%S')}",
+            "git_head": "git_head",
+            "git_is_dirty": False,
+            "init_method": "init_method",
+            "init_argument": "init_argument",
+            "master_overrides": {},
+            "timestamp": "2000-01-01T00:00:00",
+            "wandb_project": "",
         }
     )
 
-    # Typically added via cmdline args
-    new_keys = dict(
-        checkpoint_load_dir=None,
-        git_head="git_head",
-        git_is_dirty=False,
-        master_overrides=None,
-        model_load_file=None,
-        init_method="init_method",
-        init_argument="init_argument",
-        timestamp="2000-01-01T00:00:00",
-    )
-
-    master_config = util.deepmerge(master_config, debug_overrides, allow_new=False, update_existing=True)
-
-    user_config = master_config["user"]
-    user_config["hyperparam_mutations"] = {}
-    user_config["hyperparam_values"] = {}
-    util.deepmerge(user_config, new_keys, in_place=True, allow_new=True, update_existing=False)
+    master_config = util.deepmerge(master_config, debug_cfg, allow_new=False, update_existing=True)
+    master_config["user"]["hyperparam_mutations"] = {}
+    master_config["user"]["hyperparam_values"] = {}
 
     env_id = master_config["environment"]["env"]
     ray.tune.registry.register_env(env_id, make_env_creator(env_id))
