@@ -4,10 +4,9 @@ import datetime
 import ray
 from wandb.util import json_dumps_safer
 
-from .pbt_main import make_env_creator
-from . import pbt_config, MPPO_Config, MPPO_Algorithm
+from . import pbt_config, MIMPALA_Config, MIMPALA_Algorithm
 from ..common.common_config import ENV_TUNE_ID
-from ..common import util
+from ..common import common_main, util
 
 
 if __name__ == "__main__":
@@ -28,7 +27,7 @@ if __name__ == "__main__":
             },
         },
         env_runners={
-            "num_env_runners": 1,
+            "num_env_runners": 0,
         },
         # EVAL runners
         evaluation={
@@ -43,7 +42,7 @@ if __name__ == "__main__":
                 },
             },
             "evaluation_duration": 10,
-            "evaluation_num_env_runners": 1,
+            "evaluation_num_env_runners": 0,
         },
         user={
             "env_runner_keepalive_interval_s": 60,
@@ -76,15 +75,15 @@ if __name__ == "__main__":
     master_config["user"]["hyperparam_values"] = {}
 
     env_gym_id = master_config["user"]["env_gym_id"]
-    ray.tune.registry.register_env(ENV_TUNE_ID, make_env_creator(env_gym_id))
-    ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
+    ray.tune.registry.register_env(ENV_TUNE_ID, common_main.make_env_creator(env_gym_id))
+    ray.tune.registry.register_trainable("MPPO", MIMPALA_Algorithm)
 
     ray.init(
         # address="HEAD_NODE_IP:6379",
         resources={"train_cpu": 8, "eval_cpu": 8}
     )
 
-    algo_config = MPPO_Config()
+    algo_config = MIMPALA_Config()
     algo_config.master_config(master_config)
     algo = algo_config.build()
 

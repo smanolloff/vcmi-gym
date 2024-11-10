@@ -166,7 +166,7 @@ def save_checkpoint(algo, checkpoint_dir):
     model_file = os.path.join(checkpoint_dir, "jit-model.pt")
     rl_module.jsave(model_file)
 
-    config_file = os.path.join(checkpoint_dir, "mppo_config.json")
+    config_file = os.path.join(checkpoint_dir, "algo_config.json")
 
     # TRIAL_INFO key contains non-serializable (by wandb) values
     savecfg = {k: v for k, v in algo.config.to_dict().items() if k != TRIAL_INFO}

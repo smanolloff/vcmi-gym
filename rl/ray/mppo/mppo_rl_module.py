@@ -102,7 +102,7 @@ class MPPO_RLModule(PPOTorchRLModule):
 
         # 1. Init clean NNs
 
-        clean_encoder = Common_Encoder(
+        clean_encoder = common_encoder.Common_Encoder(
             self.model_config["vf_share_layers"],
             self.config.inference_only,
             self.config.action_space,

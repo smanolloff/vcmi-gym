@@ -1,0 +1,162 @@
+// on_train_result call #1
+{
+    "_mean_num_episode_ts_received": 500.0,
+    "_mean_num_episode_ts_received_using_reduced_metrics": 500.0,
+    "config": {},
+    "date": "2024-11-10_18-33-38",
+    "done": false,
+    "env_runners": {
+        "agent_episode_returns_mean": {
+            "default_agent": -51.36105528276757
+        },
+        "episode_duration_sec_mean": 0.012978653982281685,
+        "episode_len_max": 5,
+        "episode_len_mean": 3.1,
+        "episode_len_min": 1,
+        "episode_return_max": 40.98790312756147,
+        "episode_return_mean": -51.36105528276757,
+        "episode_return_min": -436.652221065866,
+        "module_episode_returns_mean": {
+            "default_policy": -51.36105528276757
+        },
+        "num_agent_steps_sampled": {
+            "default_agent": 500
+        },
+        "num_agent_steps_sampled_lifetime": {
+            "default_agent": 7500
+        },
+        "num_env_steps_sampled": 500,
+        "num_env_steps_sampled_lifetime": 7500,
+        "num_episodes": 57,
+        "num_module_steps_sampled": {
+            "default_policy": 500
+        },
+        "num_module_steps_sampled_lifetime": {
+            "default_policy": 7500
+        },
+        "sample": 1.8151758501853648,
+        "time_between_sampling": 6.791755527724286,
+        "user/is_success": 0.0,
+        "user/net_value": -15.0
+    },
+    "eval/is_success": 0.1,
+    "eval/net_value": -69.0,
+    "evaluation": {
+        "env_runners": {
+            "agent_episode_returns_mean": {
+                "default_agent": -93.0504106941495
+            },
+            "episode_duration_sec_mean": 0.144825391843915,
+            "episode_len_max": 100,
+            "episode_len_mean": 29.7,
+            "episode_len_min": 1,
+            "episode_return_max": 188.33867273468783,
+            "episode_return_mean": -93.0504106941495,
+            "episode_return_min": -810.964234832059,
+            "module_episode_returns_mean": {
+                "default_policy": -93.0504106941495
+            },
+            "num_agent_steps_sampled": {
+                "default_agent": 297
+            },
+            "num_agent_steps_sampled_lifetime": {
+                "default_agent": 297
+            },
+            "num_env_steps_sampled": 297,
+            "num_env_steps_sampled_lifetime": 2797,
+            "num_episodes": 10,
+            "num_module_steps_sampled": {
+                "default_policy": 297
+            },
+            "num_module_steps_sampled_lifetime": {
+                "default_policy": 297
+            },
+            "sample": 1.5126618314534426,
+            "user/is_success": 0.1,
+            "user/net_value": -69.0
+        },
+        "num_agent_steps_sampled_lifetime": 297,
+        "num_env_steps_sampled_lifetime": 297,
+        "num_episodes_lifetime": 10,
+        "num_healthy_workers": 0,
+        "num_in_flight_async_reqs": 0,
+        "num_remote_worker_restarts": 0
+    },
+    "fault_tolerance": {
+        "num_healthy_workers": 0,
+        "num_in_flight_async_reqs": 0,
+        "num_remote_worker_restarts": 0
+    },
+    "hostname": "Simeons-MacBook-Pro.local",
+    "iterations_since_restore": 1,
+    "learner_group": {
+        "actor_manager_num_outstanding_async_reqs": 0.0,
+        "learner_group_ts_dropped": 0.0
+    },
+    "learners": {
+        "__all_modules__": {
+            "episodes_to_batch_timer": 0.019655294961671625,
+            "gpu_loader_load_to_gpu_timer": 0.005564621343141254,
+            "gpu_loader_queue_wait_timer": 1.8733590673387204,
+            "learner_thread_in_queue_wait_timer": 0.0013845158111787873,
+            "learner_thread_update_timer": 0.09500545528559387,
+            "num_env_steps_trained": 500,
+            "num_module_steps_trained": 511,
+            "num_non_trainable_parameters": 0.0,
+            "num_trainable_parameters": 1948245.0,
+            "ray_get_episodes_timer": 0.00136446715101311
+        },
+        "default_policy": {
+            "curr_entropy_coeff": 0.0,
+            "default_optimizer_learning_rate": 0.001,
+            "entropy": 3.1226325035095215,
+            "gradients_default_optimizer_global_norm": 0.45921653509140015,
+            "mean_pi_loss": 0.01802666299045086,
+            "mean_vf_loss": 0.5895466804504395,
+            "module_train_batch_size_mean": 519.9992861199999,
+            "num_module_steps_trained": 511,
+            "num_non_trainable_parameters": 0.0,
+            "num_trainable_parameters": 1948245.0,
+            "pi_loss": 9.013331413269043,
+            "total_loss": 0.6075733304023743,
+            "vf_loss": 294.7733459472656
+        },
+        "num_env_steps_sampled_lifetime": 529.8005,
+        "queue_size_gpu_loader_queue": 1.0,
+        "queue_size_learner_thread_queue": 1.0,
+        "queue_size_results_queue": 1.0
+    },
+    "mean_num_episode_lists_received": 1.0,
+    "mean_num_learner_group_update_called": 1.0,
+    "node_ip": "127.0.0.1",
+    "num_agent_steps_sampled_lifetime": {
+        "default_agent": 2500
+    },
+    "num_env_steps_sampled_lifetime": 2500,
+    "num_env_steps_trained_lifetime": 2000,
+    "num_episodes_lifetime": 123,
+    "num_training_step_calls_since_last_synch_worker_weights": 0,
+    "num_weight_broadcasts": 5,
+    "pid": 27859,
+    "time_since_restore": 50.41371393203735,
+    "time_this_iter_s": 50.41371393203735,
+    "time_total_s": 50.41371393203735,
+    "timers": {
+        "evaluation_iteration_throughput": 0.0,
+        "evaluation_iteration_time_sec": 1.5222179889678955,
+        "learner_update_timer": 0.02892111932063009,
+        "restore_eval_workers_time_sec": 0.000014066696166992188,
+        "restore_workers_time_sec": 0.000014066696166992188,
+        "sample": 1.851294399840731,
+        "synch_eval_env_connectors_time_sec": 0.0001380443572998047,
+        "synch_weights": 0.0005302313942070863,
+        "training_iteration_time_sec": 48.89057993888855,
+        "training_step_time_sec": 48.89039206504822
+    },
+    "timestamp": 1731256418,
+    "train/ep_rew_mean": -51.36105528276757,
+    "train/is_success": 0.0,
+    "train/net_value": -15.0,
+    "training_iteration": 1,
+    "trial_id": "default"
+}

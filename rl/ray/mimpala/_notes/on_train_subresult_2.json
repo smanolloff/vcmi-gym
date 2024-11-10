@@ -1,0 +1,90 @@
+// on_train_subresult call #2 with values
+{
+    "_mean_num_episode_ts_received": "Stats(500.0; len=1; reduce=mean; ema=0.01)",
+    "_mean_num_episode_ts_received_using_reduced_metrics": "Stats(500.0; len=1; reduce=mean; ema=0.01)",
+    "env_runners": {
+        "agent_episode_returns_mean": {
+            "default_agent": "Stats(-66.77988565963611; len=10; reduce=mean; win=10)"
+        },
+        "episode_duration_sec_mean": "Stats(0.10693068336695433; len=10; reduce=mean; win=10)",
+        "episode_len_max": "Stats(100; len=10; reduce=max; win=10)",
+        "episode_len_mean": "Stats(22.5; len=10; reduce=mean; win=10)",
+        "episode_len_min": "Stats(1; len=10; reduce=min; win=10)",
+        "episode_return_max": "Stats(421.9350993115299; len=10; reduce=max; win=10)",
+        "episode_return_mean": "Stats(-66.77988565963611; len=10; reduce=mean; win=10)",
+        "episode_return_min": "Stats(-937.9966589358387; len=10; reduce=min; win=10)",
+        "module_episode_returns_mean": {
+            "default_policy": "Stats(-66.77988565963611; len=10; reduce=mean; win=10)"
+        },
+        "num_agent_steps_sampled": {
+            "default_agent": "Stats(500; len=1; reduce=sum)"
+        },
+        "num_agent_steps_sampled_lifetime": {
+            "default_agent": "Stats(1500; len=1; reduce=sum)"
+        },
+        "num_env_steps_sampled": "Stats(500; len=1; reduce=sum)",
+        "num_env_steps_sampled_lifetime": "Stats(1500; len=1; reduce=sum)",
+        "num_episodes": "Stats(24; len=1; reduce=sum)",
+        "num_module_steps_sampled": {
+            "default_policy": "Stats(500; len=1; reduce=sum)"
+        },
+        "num_module_steps_sampled_lifetime": {
+            "default_policy": "Stats(1500; len=1; reduce=sum)"
+        },
+        "sample": "Stats(2.5309044782044365; len=1; reduce=mean; ema=0.01)",
+        "time_between_sampling": "Stats(45.549292208626866; len=1; reduce=mean; ema=0.01)",
+        "user/is_success": "Stats(0.6; len=10; reduce=mean; win=10)",
+        "user/net_value": "Stats(-25.5; len=10; reduce=mean; win=10)"
+    },
+    "learner_group": {
+        "actor_manager_num_outstanding_async_reqs": "Stats(0.0; len=1; reduce=mean; ema=0.01)",
+        "learner_group_ts_dropped": "Stats(0.0; len=1; reduce=mean; ema=0.01)"
+    },
+    "learners": {
+        "__all_modules__": {
+            "episodes_to_batch_timer": "Stats(0.023357290774583817; len=1; reduce=mean; ema=0.01)",
+            "gpu_loader_load_to_gpu_timer": "Stats(0.005617499351501465; len=1; reduce=mean; ema=0.01)",
+            "gpu_loader_queue_wait_timer": "Stats(2.5957578755915165; len=1; reduce=mean; ema=0.01)",
+            "learner_thread_in_queue_wait_timer": "Stats(0.0014169703885436881; len=1; reduce=mean; ema=0.01)",
+            "learner_thread_update_timer": "Stats(nan; len=0; reduce=mean; ema=0.01)",
+            "num_env_steps_trained": "Stats(500; len=1; reduce=sum)",
+            "num_module_steps_trained": "Stats(539; len=1; reduce=sum)",
+            "num_non_trainable_parameters": "Stats(0; len=1; reduce=mean; ema=0.01)",
+            "num_trainable_parameters": "Stats(1948245; len=1; reduce=mean; ema=0.01)",
+            "ray_get_episodes_timer": "Stats(0.001712709665298462; len=1; reduce=mean; ema=0.01)"
+        },
+        "default_policy": {
+            "curr_entropy_coeff": "Stats(0.0; len=1; reduce=mean; win=1)",
+            "default_optimizer_learning_rate": "Stats(0.001; len=1; reduce=mean; win=1)",
+            "entropy": "Stats(3.1712498664855957; len=1; reduce=mean; win=1)",
+            "gradients_default_optimizer_global_norm": "Stats(1.1520229578018188; len=1; reduce=mean; win=1)",
+            "mean_pi_loss": "Stats(-0.14525344967842102; len=1; reduce=mean; win=1)",
+            "mean_vf_loss": "Stats(1.065255045890808; len=1; reduce=mean; win=1)",
+            "module_train_batch_size_mean": "Stats(539; len=1; reduce=mean; ema=0.01)",
+            "num_module_steps_trained": "Stats(539; len=1; reduce=sum)",
+            "num_non_trainable_parameters": "Stats(0; len=1; reduce=mean; ema=0.01)",
+            "num_trainable_parameters": "Stats(1948245; len=1; reduce=mean; ema=0.01)",
+            "pi_loss": "Stats(-72.62672424316406; len=1; reduce=mean; win=1)",
+            "total_loss": "Stats(0.9200016260147095; len=1; reduce=mean; win=1)",
+            "vf_loss": "Stats(532.6275024414062; len=1; reduce=mean; win=1)"
+        },
+        "num_env_steps_sampled_lifetime": "Stats(500; len=1; reduce=mean; ema=0.01)",
+        "queue_size_gpu_loader_queue": "Stats(1; len=1; reduce=mean; ema=0.01)",
+        "queue_size_learner_thread_queue": "Stats(1; len=1; reduce=mean; ema=0.01)"
+    },
+    "mean_num_episode_lists_received": "Stats(1.0; len=1; reduce=mean; ema=0.01)",
+    "mean_num_learner_group_update_called": "Stats(1.0; len=1; reduce=mean; ema=0.01)",
+    "num_agent_steps_sampled_lifetime": {
+        "default_agent": "Stats(1000; len=1; reduce=sum)"
+    },
+    "num_env_steps_sampled_lifetime": "Stats(1000; len=1; reduce=sum)",
+    "num_env_steps_trained_lifetime": "Stats(500; len=1; reduce=sum)",
+    "num_episodes_lifetime": "Stats(62; len=1; reduce=sum)",
+    "num_training_step_calls_since_last_synch_worker_weights": "Stats(0; len=1; reduce=sum)",
+    "num_weight_broadcasts": "Stats(2; len=1; reduce=sum)",
+    "timers": {
+        "learner_update_timer": "Stats(0.03456242362037301; len=1; reduce=mean; ema=0.01)",
+        "sample": "Stats(2.5623002610355616; len=1; reduce=mean; ema=0.01)",
+        "synch_weights": "Stats(0.0008015752956271171; len=1; reduce=mean; ema=0.01)"
+    }
+}

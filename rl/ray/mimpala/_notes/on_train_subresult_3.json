@@ -1,0 +1,91 @@
+// on_train_subresult call #3+
+{
+    "_mean_num_episode_ts_received": "",
+    "_mean_num_episode_ts_received_using_reduced_metrics": "",
+    "env_runners": {
+        "agent_episode_returns_mean": {
+            "default_agent": ""
+        },
+        "episode_duration_sec_mean": "",
+        "episode_len_max": "",
+        "episode_len_mean": "",
+        "episode_len_min": "",
+        "episode_return_max": "",
+        "episode_return_mean": "",
+        "episode_return_min": "",
+        "module_episode_returns_mean": {
+            "default_policy": ""
+        },
+        "num_agent_steps_sampled": {
+            "default_agent": ""
+        },
+        "num_agent_steps_sampled_lifetime": {
+            "default_agent": ""
+        },
+        "num_env_steps_sampled": "",
+        "num_env_steps_sampled_lifetime": "",
+        "num_episodes": "",
+        "num_module_steps_sampled": {
+            "default_policy": ""
+        },
+        "num_module_steps_sampled_lifetime": {
+            "default_policy": ""
+        },
+        "sample": "",
+        "time_between_sampling": "",
+        "user/is_success": "",
+        "user/net_value": ""
+    },
+    "learner_group": {
+        "actor_manager_num_outstanding_async_reqs": "",
+        "learner_group_ts_dropped": ""
+    },
+    "learners": {
+        "__all_modules__": {
+            "episodes_to_batch_timer": "",
+            "gpu_loader_load_to_gpu_timer": "",
+            "gpu_loader_queue_wait_timer": "",
+            "learner_thread_in_queue_wait_timer": "",
+            "learner_thread_update_timer": "",
+            "num_env_steps_trained": "",
+            "num_module_steps_trained": "",
+            "num_non_trainable_parameters": "",
+            "num_trainable_parameters": "",
+            "ray_get_episodes_timer": ""
+        },
+        "default_policy": {
+            "curr_entropy_coeff": "",
+            "default_optimizer_learning_rate": "",
+            "entropy": "",
+            "gradients_default_optimizer_global_norm": "",
+            "mean_pi_loss": "",
+            "mean_vf_loss": "",
+            "module_train_batch_size_mean": "",
+            "num_module_steps_trained": "",
+            "num_non_trainable_parameters": "",
+            "num_trainable_parameters": "",
+            "pi_loss": "",
+            "total_loss": "",
+            "vf_loss": ""
+        },
+        "num_env_steps_sampled_lifetime": "",
+        "queue_size_gpu_loader_queue": "",
+        "queue_size_learner_thread_queue": "",
+        "queue_size_results_queue": ""
+    },
+    "mean_num_episode_lists_received": "",
+    "mean_num_learner_group_update_called": "",
+    "num_agent_steps_sampled_lifetime": {
+        "default_agent": ""
+    },
+    "num_env_steps_sampled_lifetime": "",
+    "num_env_steps_trained_lifetime": "",
+    "num_episodes_lifetime": "",
+    "num_training_step_calls_since_last_synch_worker_weights": "",
+    "num_weight_broadcasts": "",
+    "timers": {
+        "learner_update_timer": "",
+        "sample": "",
+        "synch_weights": ""
+    }
+}
