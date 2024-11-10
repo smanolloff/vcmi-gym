@@ -72,7 +72,6 @@ def load():
 
     calculated_eval_sample_timeout = util.calc_eval_sample_timeout_s(
         eval_episodes,
-        eval_env_runners,
         ai_stats["step_duration_s"][eval_opponent],
         100,
     )

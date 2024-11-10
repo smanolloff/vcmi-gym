@@ -33,7 +33,7 @@ class MIMPALA_Config(IMPALAConfig):
             grad_clip=5,
             grad_clip_by="global_norm",  # global_norm = nn.utils.clip_grad_norm_(model.parameters)
             lr=0.001,
-            minibatch_size=32,
+            minibatch_size=None,  # IMPALA does not use minibatches
             num_epochs=1,
             train_batch_size_per_learner=500,
             shuffle_batch_per_epoch=True,

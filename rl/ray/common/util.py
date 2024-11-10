@@ -203,7 +203,7 @@ def calc_train_sample_timeout_s(batch_sizes, n_runners, step_duration_s, headroo
     return sample_timeout_s
 
 
-def calc_eval_sample_timeout_s(n_episodes, n_runners, step_duration_s, max_episode_len, headroom=10):
+def calc_eval_sample_timeout_s(n_episodes, step_duration_s, max_episode_len, headroom=10):
     max_episode_duration_s = max_episode_len * step_duration_s
     sample_timeout_s = max_episode_duration_s * headroom
     return sample_timeout_s

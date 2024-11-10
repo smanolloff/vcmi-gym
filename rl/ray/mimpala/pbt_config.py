@@ -55,9 +55,8 @@ def load():
         # "num_aggregation_workers": 0,
         "entropy_coeff": util.linlist(0, 0.1, n=11),
         "gamma": util.linlist(0.6, 0.999, n=13),
-        "grad_clip": util.linlist(0.5, 10, n=11),
+        "grad_clip": util.linlist(0.5, 5, n=10),
         "lr": util.explist(1e-5, 2e-4, n=20),
-        "minibatch_size": [25, 50, 100],
         "num_epochs": util.linlist(1, 20, n=10, dtype=int),
         # XXX: 1 obs = 45K, 10K => 450M
         "train_batch_size_per_learner": [2000, 5000, 10000],
@@ -75,7 +74,6 @@ def load():
 
     calculated_eval_sample_timeout = util.calc_eval_sample_timeout_s(
         eval_episodes,
-        eval_env_runners,
         ai_stats["step_duration_s"][eval_opponent],
         100,
     )
@@ -108,7 +106,7 @@ def load():
                 "train_cpu": ai_stats["cpu_usage"][train_opponent],
                 "eval_cpu": 0,
             },
-            "max_requests_in_flight_per_env_runner": 3,
+            "max_requests_in_flight_per_env_runner": 2,
             "num_env_runners": train_env_runners,
             "sample_timeout_s": calculated_train_sample_timeout
         },
