@@ -8,7 +8,7 @@ from ray.rllib.utils.annotations import override
 from ray.tune.logger import Logger
 
 
-class MPPO_Logger(Logger):
+class Common_Logger(Logger):
     # @override(Logger)
     # def _init(self):
     #     super().__init__(self)

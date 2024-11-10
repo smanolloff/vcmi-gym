@@ -1,247 +1,42 @@
-import datetime
-import os
-import pygit2
-import re
-import tempfile
-import threading
-import time
 import wandb
-
-from dataclasses import dataclass, asdict
+import time
 from ray.rllib.utils.annotations import override
 from ray.rllib.algorithms import PPO, PPOConfig
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
-from ray.rllib.core import DEFAULT_MODULE_ID
-from ray.rllib.policy.sample_batch import (
-    DEFAULT_POLICY_ID
-)
-
 from ray.tune.result import TRIAL_INFO
-from wandb.util import json_dumps_safer
 
-from .mppo_rl_module import MPPO_RLModule
-from .mppo_env_runners import TrainEnv, EvalEnv
-from .mppo_logger import MPPO_Logger, get_logger
 from .mppo_callback import MPPO_Callback
-from . import util
+from ..common import common_config, common_algorithm, common_logger, util
+from .mppo_rl_module import MPPO_RLModule
 
 
 class MPPO_Config(PPOConfig):
-    # ID for gym and tune envs must be different
-    # (the tune env has uses a custom env_creator with version validation)
-    # If IDs are the same, ray sometimes uses the default gym env creator
-    ENV_TUNE_ID = "MPPO_VCMI"
-    ENV_VERSION_CHECK_KEY = "_version"
-
-    @dataclass
-    class UserConfig:
-        # General
-        env_gym_id: str
-        env_runner_keepalive_interval_s: int
-        experiment_name: str
-        wandb_project: str
-        wandb_log_interval_s: int
-
-        # Tune
-        hyperparam_mutations: dict
-        hyperparam_values: dict
-        metric: str
-        population_size: int
-        quantile_fraction: float
-        training_step_duration_s: int
-
-        # Other
-        git_head: str
-        git_is_dirty: bool
-        master_overrides: dict
-        model_load_file: str
-        model_load_mapping: dict
-        checkpoint_load_dir: str
-        init_argument: str
-        init_method: str
-        timestamp: str
-
-        # XXX: validations support primitive data types only
-        def __post_init__(self):
-            util.validate_dataclass_fields(self)
-
-        def json_encode(self):
-            return asdict(self)
-
+    @override(PPOConfig)
     def __init__(self):
         super().__init__(algo_class=MPPO_Algorithm)
-        self.enable_rl_module_and_learner = True
-        self.enable_env_runner_and_connector_v2 = True
-        self._master_config = None
+        common_config.init(self, MPPO_Callback)
 
-        env_gym_id = "VCMI-v4"
-        env_cls = util.get_env_cls(env_gym_id)
-        env_cfg = {"conntype": "proc"}
-
-        # Sanity-checking in restored experiments
-        env_cfg[self.ENV_VERSION_CHECK_KEY] = env_cls.ENV_VERSION
-
-        (
-            # Default config
-            self
-            .resources(
-                num_cpus_for_main_process=1,
-                placement_strategy="PACK")
-            .framework(
-                framework="torch")
-            .api_stack(
-                enable_rl_module_and_learner=True,
-                enable_env_runner_and_connector_v2=True)
-            .environment(
-                env=self.ENV_TUNE_ID,
-                env_config=env_cfg,
-                action_mask_key="action_mask",  # not used as of ray-2.38.0
-                action_space=None,
-                clip_actions=False,
-                clip_rewards=None,
-                disable_env_checking=False,
-                is_atari=False,
-                normalize_actions=False,
-                observation_space=None,
-                render_env=False)
-            .env_runners(
-                add_default_connectors_to_env_to_module_pipeline=True,
-                add_default_connectors_to_module_to_env_pipeline=True,
-                batch_mode="truncate_episodes",
-                compress_observations=False,
-                custom_resources_per_env_runner={},
-                env_runner_cls=TrainEnv,
-                env_to_module_connector=None,
-                episode_lookback_horizon=1,
-                explore=False,
-                max_requests_in_flight_per_env_runner=1,  # buggy, see https://github.com/ray-project/ray/pull/48499
-                module_to_env_connector=None,
-                num_env_runners=0,
-                num_cpus_per_env_runner=0,  # see notes/ray_resources.txt
-                num_gpus_per_env_runner=0,
-                num_envs_per_env_runner=1,  # i.e. vec_env.num_envs
-                rollout_fragment_length="auto",  # manually choosing a value is too complex
-                update_worker_filter_stats=True,
-                use_worker_filter_stats=True,
-                sample_timeout_s=300,
-                validate_env_runners_after_construction=True)
-            .learners(
-                num_learners=0,             # 0 => learn in main process
-                num_gpus_per_learner=0,
-                num_cpus_per_learner=1)
-            # !!! This is the API as of ray-2.38.0
-            # !!! It *will* change in future releases
-            .training(
-                clip_param=0.3,
-                entropy_coeff=0.0,
-                gamma=0.8,
-                grad_clip=5,
-                grad_clip_by="global_norm",  # global_norm = nn.utils.clip_grad_norm_(model.parameters)
-                kl_coeff=0.2,
-                kl_target=0.01,
-                lambda_=1.0,
-                lr=0.001,
-                minibatch_size=20,
-                num_epochs=1,
-                train_batch_size_per_learner=500,
-                shuffle_batch_per_epoch=True,
-                use_critic=True,
-                use_gae=True,
-                use_kl_loss=True,
-                vf_clip_param=10.0,
-                vf_loss_coeff=1.0)
-            .callbacks(MPPO_Callback)
-            .multi_agent()
-            .offline_data()
-            .evaluation(
-                evaluation_interval=1,  # !!! MUST BE 1
-                evaluation_num_env_runners=0,
-                evaluation_duration=100,
-                evaluation_duration_unit="episodes",
-                evaluation_sample_timeout_s=120.0,
-                evaluation_parallel_to_training=False,
-                evaluation_force_reset_envs_before_iteration=True,
-                evaluation_config=dict(
-                    explore=False,
-                    env_config=env_cfg,
-                    num_cpus_per_env_runner=0,  # see notes/ray_resources.txt
-                    num_gpus_per_env_runner=0,
-                    num_envs_per_env_runner=1,
-                    env_runner_cls=EvalEnv),
-                custom_evaluation_function=None)
-            .reporting(
-                metrics_num_episodes_for_smoothing=1000,   # auto-set (custom logic)
-                keep_per_episode_custom_metrics=False,
-                log_gradients=True,
-                # metrics_episode_collection_timeout_s=60.0,  # seems old API
-                min_time_s_per_iteration=None,
-                min_train_timesteps_per_iteration=0,
-                min_sample_timesteps_per_iteration=0)
-            .checkpointing(
-                export_native_model_files=False,    # not needed (have custom export)
-                checkpoint_trainable_policies_only=False)
-            .debugging(
-                # MPPO_Logger currently logs nothing.
-                # It's mostly used to supressing a deprecation warning.
-                logger_config=dict(type=MPPO_Logger, prefix="MPPO_Logger_prefix"),
-                log_level="DEBUG",
-                log_sys_usage=False,
-                seed=None)
-            .fault_tolerance(
-                recreate_failed_env_runners=True,  # useful for Amazon SPOT?
-                ignore_env_runner_failures=False,
-                max_num_env_runner_restarts=100,
-                delay_between_env_runner_restarts_s=5.0,
-                restart_failed_sub_environments=False,
-                num_consecutive_env_runner_failures_tolerance=10,
-                env_runner_health_probe_timeout_s=30,
-                env_runner_restore_timeout_s=300)
-            .rl_module(
-                model_config=dict(
-                    env_version=env_cls.ENV_VERSION,
-                    network={
-                        "attention": None,
-                        "features_extractor1_misc": [{"t": "Flatten"}],
-                        "features_extractor1_stacks": [{"t": "Flatten"}],
-                        "features_extractor1_hexes": [{"t": "Flatten"}],
-                        "features_extractor2": [{"t": "LazyLinear", "out_features": 64}],
-                        "actor": {"t": "Linear", "in_features": 64, "out_features": 2312},
-                        "critic": {"t": "Linear", "in_features": 64, "out_features": 1}
-                    },
-                    obs_dims={
-                        "misc": env_cls.STATE_SIZE_MISC,
-                        "stacks": env_cls.STATE_SIZE_STACKS,
-                        "hexes": env_cls.STATE_SIZE_HEXES,
-                    },
-                    vf_share_layers=True))
-            .user(
-                env_gym_id=env_gym_id,
-                env_runner_keepalive_interval_s=15,
-                experiment_name="MPPO-default",
-                wandb_project="",
-                wandb_log_interval_s=60,
-
-                hyperparam_mutations={},
-                hyperparam_values={},
-                metric="train/ep_rew_mean",
-                population_size=1,
-                quantile_fraction=0.5,
-                training_step_duration_s=3600,
-
-                git_head="",
-                git_is_dirty=False,
-                master_overrides={},
-                model_load_file="",
-                model_load_mapping={
-                    # rlmodule-to-model layer mapping
-                    "encoder.encoder": "encoder_actor",
-                    "pi": "actor",
-                    "vf": "critic",
-                },
-                checkpoint_load_dir="",
-                init_argument="default",
-                init_method="default",
-                timestamp="2000-01-01T00:00:00")
+        # !!! This is the API as of ray-2.38.0
+        # !!! It *will* change in future releases
+        self.training(
+            clip_param=0.3,
+            entropy_coeff=0.0,
+            gamma=0.8,
+            grad_clip=5,
+            grad_clip_by="global_norm",  # global_norm = nn.utils.clip_grad_norm_(model.parameters)
+            kl_coeff=0.2,
+            kl_target=0.01,
+            lambda_=1.0,
+            lr=0.001,
+            minibatch_size=20,
+            num_epochs=1,
+            train_batch_size_per_learner=500,
+            shuffle_batch_per_epoch=True,
+            use_critic=True,
+            use_gae=True,
+            use_kl_loss=True,
+            vf_clip_param=10.0,
+            vf_loss_coeff=1.0
         )
 
     @override(PPOConfig)
@@ -253,99 +48,22 @@ class MPPO_Config(PPOConfig):
     def _model_config_auto_includes(self):
         return {}
 
-    # User-defined config (not used by ray)
-    # Keys are passed as regular key-value pairs for a reason:
-    # they are part of "master_config" and must be JSON-serializable.
-    # The `User` data structure is used for validation purposes.
     def user(self, **kwargs):
-        # History items may not conform to the current InitInfo structure
-        # => leave them as plain dicts
-        self.user_config = self.UserConfig(**kwargs)
-        return self
+        return common_config.configure_user(self, kwargs)
 
-    #
-    # Usage:
-    # mppo_config = MPPO_Config()
-    # mppo_config.master_config(
-    #   "resources": {...},         # instead of mppo_config.resources(...)
-    #   "environment": {...},       # instead of mppo_config.environment(...)
-    #   ...                         # ...etc
-    # )
-    #
     def master_config(self, cfg):
-        self._master_config = cfg
+        return common_config.configure_master(self, cfg)
 
-        for k, v in cfg.items():
-            getattr(self, k)(**v)
-
-        # Make sure all evaluated episodes fit into the metric window
-        # (discarding them is a pure waste of resources)
-        if isinstance(self.evaluation_duration, int) and self.evaluation_duration_unit == "episodes":
-            self.metrics_num_episodes_for_smoothing = self.evaluation_duration
-            # assert self.metrics_num_episodes_for_smoothing >= self.evaluation_duration, (
-            #     f"{self.metrics_num_episodes_for_smoothing} >= {self.evaluation_duration}"
-            # )
-
-        self._validate()
-        return self
-
-    # XXX: Temp fix until https://github.com/ray-project/ray/pull/48529 is merged
     def update_from_dict(self, config):
         if TRIAL_INFO in config:
             setattr(self, TRIAL_INFO, config[TRIAL_INFO])
         return super().update_from_dict(config)
 
-    #
-    # private
-    #
-
     def _validate(self):
-        assert self.evaluation_interval == 1, "Tune expects eval results on each iteration"
-
-        uc = self.user_config
-
-        assert uc.training_step_duration_s >= 0
-        assert uc.wandb_log_interval_s >= 0
-        assert uc.wandb_log_interval_s <= uc.training_step_duration_s
-        assert re.match(r"^[\w_-]+$", uc.experiment_name), uc.experiment_name
-
-        if uc.wandb_project:
-            assert re.match(r"^[\w_-]+$", uc.wandb_project), uc.wandb_project
-
-        if self.num_learners > 0:
-            # We can't setup wandb via self.learner_group.foreach_learner(...)
-            # wandb login must be ensured on all remotes prior to ray start
-            # (+I don't understand how multi-learner setup works yet)
-            raise Exception("TODO(simo): wandb setup in remote learners is not implemented")
-
-        def validate_hyperparam_mutations(mut):
-            for k, v in mut.items():
-                if isinstance(v, list):
-                    assert all(isinstance(v1, (int, float)) for v1 in v), (
-                        f"hyperparam_mutations for (possibly nested) key {repr(k)} contains invalid value types"
-                    )
-                elif isinstance(v, dict):
-                    validate_hyperparam_mutations(v)
-                else:
-                    raise Exception(f"Invalid hyperparam value type for (possibly nested) key {repr(k)}")
-
-        validate_hyperparam_mutations(self.user_config.hyperparam_mutations or {})
-
-        if self.env_config["conntype"] == "thread" and self.num_env_runners == 0:
-            raise Exception("Train runners are local and cannot have conntype='thread'")
-
-        if self.evaluation_config["env_config"]["conntype"] == "thread" and self.evaluation_num_env_runners == 0:
-            raise Exception("Eval runners are local and cannot have conntype='thread'")
+        return common_config.validate(self)
 
 
 class MPPO_Algorithm(PPO):
-    @dataclass
-    class Namespace:
-        master_config: dict
-        log_interval: int
-        run_id: str = None
-        run_name: str = None
-
     @classmethod
     @override(PPO)
     def get_default_config(cls):
@@ -358,33 +76,32 @@ class MPPO_Algorithm(PPO):
 
     @override(PPO)
     def setup(self, config: MPPO_Config):
-        print("SELF.TRIAL_ID: %s" % self.trial_id)
-        self.ns = self.Namespace(
+        print("trial_id: %s" % self.trial_id)
+        self.ns = common_algorithm.Namespace(
             master_config=config._master_config,
             log_interval=config.user_config.wandb_log_interval_s
         )
 
-        # self.logger.debug("*** SETUP: %s" % json_dumps_safer(config.to_dict()))
+        # algo.logger.debug("*** SETUP: %s" % wandb.util.json_dumps_safer(config.to_dict()))
         super().setup(config)
-        self._wandb_init()
-        self.logger = get_logger(self.ns.run_id, "DEBUG")  # *after* wandb init
+
+        common_algorithm.wandb_init(self)
+        self.logger = common_logger.get_logger(self.ns.run_id, "DEBUG")  # *after* wandb init
         self.logger.info("Logger initialized")
 
         # Must be *after* super().setup()
-        self._wandb_add_watch()
-        self._wandb_log_hyperparams()
+        common_algorithm.wandb_add_watch(self)
+        common_algorithm.wandb_log_hyperparams(self)
 
     @override(PPO)
     def training_step(self):
         # XXX: there's no `on_training_step_start` callback => log this here
         self.wandb_log({"trial/iteration": self.iteration})
 
-        # import ipdb; ipdb.set_trace()  # noqa
-
         if self.iteration == 0:
             # XXX: self.iteration is always 0 during setup(), must load here
-            self._maybe_load_learner_group()
-            self._maybe_load_model()
+            common_algorithm.maybe_load_learner_group(self)
+            common_algorithm.maybe_load_model(self)
 
         started_at = time.time()
         logged_at = started_at
@@ -392,12 +109,11 @@ class MPPO_Algorithm(PPO):
         wandb_log_interval_s = self.config.user_config.wandb_log_interval_s
         keepalive_interval_s = self.config.user_config.env_runner_keepalive_interval_s
 
-        with EnvRunnerKeepalive(self.eval_env_runner_group, keepalive_interval_s, self.logger):
+        with common_algorithm.EnvRunnerKeepalive(self.eval_env_runner_group, keepalive_interval_s, self.logger):
             # XXX: will this fixed-time step be problematic with ray SPOT
             #       instances where different runners may run with different
             #       speeds?
             while True:
-                time.sleep(5)
                 result = super().training_step()
                 now = time.time()
 
@@ -416,33 +132,15 @@ class MPPO_Algorithm(PPO):
     @override(PPO)
     def evaluate(self, *args, **kwargs):
         keepalive_interval_s = self.config.user_config.env_runner_keepalive_interval_s
-        with EnvRunnerKeepalive(self.env_runner_group, keepalive_interval_s, self.logger):
-            return super().evaluate(*args, **kwargs)
+        with common_algorithm.EnvRunnerKeepalive(self.env_runner_group, keepalive_interval_s, self.logger):
+            super().evaluate(*args, **kwargs)
+
+        return common_algorithm.evaluate(self, *args, **kwargs)
 
     @override(PPO)
     def save_checkpoint(self, checkpoint_dir):
         res = super().save_checkpoint(checkpoint_dir)
-
-        learner = self.learner_group.get_checkpointable_components()[0][1]
-
-        rl_module = learner.module[DEFAULT_MODULE_ID]
-        model_file = os.path.join(checkpoint_dir, "jit-model.pt")
-        rl_module.jsave(model_file)
-
-        config_file = os.path.join(checkpoint_dir, "mppo_config.json")
-
-        # TRIAL_INFO key contains non-serializable (by wandb) values
-        with open(config_file, "w") as f:
-            f.write(json_dumps_safer({k: v for k, v in self.config.to_dict().items() if k != TRIAL_INFO}))
-
-        if wandb.run and self._is_golden_trial():
-            art = wandb.Artifact(name="model", type="model")
-            art.description = f"Snapshot of model from {time.ctime(time.time())}"
-            art.ttl = datetime.timedelta(days=7)
-            art.metadata["step"] = wandb.run.step
-            art.add_dir(checkpoint_dir)
-            wandb.run.log_artifact(art)
-
+        common_algorithm.save_checkpoint(self, checkpoint_dir)
         return res
 
     # XXX: in case of SIGTERM/SIGINT, ray does not wait for cleanup to finish.
@@ -452,164 +150,3 @@ class MPPO_Algorithm(PPO):
         if wandb.run:
             wandb.finish(quiet=True)
         return super().cleanup(*args, **kwargs)
-
-    #
-    # private
-    #
-
-    def _wandb_init(self):
-        run_id = util.gen_id() if self.trial_id == "default" else self.trial_id
-        print("W&B Run ID is %s (project: %s)" % (run_id, self.config.user_config.wandb_project))
-
-        run_name = self.trial_name
-        if self.trial_name == "default":
-            run_name = f"{datetime.datetime.now().isoformat()}-debug-{run_id}"
-        else:
-            run_name = "T%d" % int(self.trial_name.split("_")[-1])
-
-        self.ns.run_id = run_id
-        self.ns.run_name = run_name
-
-        if self.config.user_config.wandb_project:
-            wandb.init(
-                project=self.config.user_config.wandb_project,
-                group=self.config.user_config.experiment_name,
-                id=util.gen_id() if self.ns.run_id == "default" else self.ns.run_id,
-                name=self.ns.run_name,
-                resume="allow",
-                reinit=True,
-                allow_val_change=True,
-                settings=wandb.Settings(_disable_stats=True, _disable_meta=True),
-                config=self.ns.master_config,
-                sync_tensorboard=False,
-            )
-
-            self._wandb_log_git_diff()
-
-            # For wandb.log, commit=True by default
-            # for wandb_log, commit=False by default
-            def wandb_log(*args, **kwargs):
-                wandb.log(*args, **dict({"commit": False}, **kwargs))
-        else:
-            def wandb_log(*args, **kwargs):
-                print("*** WANDB LOG AT %s: %s %s" % (datetime.datetime.now().isoformat(), args, kwargs))
-
-        self.wandb_log = wandb_log
-
-    def _wandb_add_watch(self):
-        if not wandb.run:
-            return
-
-        # XXX: wandb.watch() caused issues during serialization in oldray scripts
-        #      (it pollutes the model with non-serializable callbacks)
-        #      It seems ray's checkpointing works OK with it
-        assert self.learner_group.is_local
-        self.learner_group.foreach_learner(lambda l: wandb.watch(
-            l.module[DEFAULT_POLICY_ID].encoder.encoder,
-            log="all",
-            log_graph=True,
-            log_freq=1000
-        ))
-
-    def _wandb_log_hyperparams(self):
-        to_log = util.common_dict(
-            self.config.user_config.hyperparam_mutations,
-            self.config.to_dict(),
-            strict=True
-        )
-
-        if to_log:
-            self.logger.info(f"Hyperparam values: {json_dumps_safer(to_log)}")
-            self.wandb_log({f"params/{k}": v for k, v in util.flatten_dict(to_log).items()})
-
-    # XXX: There's already a wandb "code saving" profile setting
-    #      See https://docs.wandb.ai/guides/track/log/
-    #      but it's not working
-    #      (maybe it requires specifying a directory containing .git)
-    def _wandb_log_git_diff(self):
-        if self.iteration > 0 or not self._is_golden_trial():
-            return
-
-        git = pygit2.Repository(os.path.dirname(__file__))
-        head = str(git.head.target)
-        assert head == self.config.user_config.git_head
-
-        art = wandb.Artifact(name="git-diff", type="text")
-        art.description = f"Git diff for HEAD@{head} from {time.ctime(time.time())}"
-
-        with tempfile.NamedTemporaryFile(mode='w+', delete=True) as temp_file:
-            art.metadata["head"] = head
-            temp_file.write(git.diff().patch)
-            temp_file.flush()
-            art.add_file(temp_file.name, name="diff.patch")
-            wandb.run.log_artifact(art)
-            # no need to wait for upload (log_artifact creates a local copy)
-            # art.wait()
-
-    # The first trial in an experiment (e.g. "ff859_00000")
-    def _is_golden_trial(self):
-        return re.match(r"^.+_0+$", self.trial_id)
-
-    def _maybe_load_learner_group(self):
-        if not self.config.user_config.checkpoint_load_dir:
-            return
-
-        path = util.to_abspath("%s/learner_group" % self.config.user_config.checkpoint_load_dir)
-        self.logger.warning(f"Loading learner group from {path}")
-        self.learner_group.restore_from_path(path)
-        self._broadcast_weights()
-
-    # XXX: this works for PPO, but do other algos use more policies?
-    def _maybe_load_model(self):
-        if not self.config.user_config.model_load_file:
-            return
-
-        mapping = self.config.user_config.model_load_mapping
-        path = util.to_abspath(self.config.user_config.model_load_path)
-        self.logger.warning(f"Loading learner model from {path}")
-        self.learner_group.foreach_learner(lambda l: l.module[DEFAULT_POLICY_ID].jload(path, mapping))
-        self._broadcast_weights()
-
-    def _broadcast_weights(self):
-        opts = dict(from_worker_or_learner_group=self.learner_group, inference_only=True)
-
-        self.logger.info("Broadcasting learner weights to env runners")
-        self.env_runner_group.sync_weights(**opts)
-
-        if self.eval_env_runner_group:
-            self.logger.info("Broadcasting learner weights to eval env runners")
-            self.eval_env_runner_group.sync_weights(**opts)
-
-
-class EnvRunnerKeepalive:
-    def __init__(self, runner_group, interval, logger):
-        self.runner_group = runner_group
-        self.interval = interval
-        self.logger = logger
-
-    def __enter__(self):
-        self.logger.info("Starting env runner keepalive loop")
-        self.event = threading.Event()
-        self.thread = threading.Thread(target=self._loop, daemon=True)
-        # self.thread = threading.Thread(target=self._debug_loop, daemon=True)
-        self.thread.start()
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.logger.info("Stopping env runner keepalive loop...")
-        self.event.set()
-        self.thread.join()
-        self.logger.debug("Stopped env runner keepalive loop")
-
-    def _loop(self):
-        while not self.event.is_set():
-            self.event.wait(timeout=self.interval)
-            self.runner_group.foreach_worker(
-                func=lambda w: w.ping(),
-                timeout_seconds=10,  # should be instant
-                local_env_runner=False,
-            )
-
-    def _debug_loop(self):
-        def debug(w):
-            import ipdb; ipdb.set_trace()  # noqa
-        self.runner_group.foreach_worker(func=debug)

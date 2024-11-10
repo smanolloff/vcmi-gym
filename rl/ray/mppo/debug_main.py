@@ -5,8 +5,10 @@ import ray
 from wandb.util import json_dumps_safer
 
 from .pbt_main import make_env_creator
-from . import MPPO_Config, MPPO_Algorithm, util
-from . import pbt_config
+from . import pbt_config, MPPO_Config, MPPO_Algorithm
+from ..common.common_config import ENV_TUNE_ID
+from ..common import util
+
 
 if __name__ == "__main__":
     vcmi_gym.register_envs()
@@ -73,8 +75,8 @@ if __name__ == "__main__":
     master_config["user"]["hyperparam_mutations"] = {}
     master_config["user"]["hyperparam_values"] = {}
 
-    env_id = master_config["environment"]["env"]
-    ray.tune.registry.register_env(env_id, make_env_creator(env_id))
+    env_gym_id = master_config["user"]["env_gym_id"]
+    ray.tune.registry.register_env(ENV_TUNE_ID, make_env_creator(env_gym_id))
     ray.tune.registry.register_trainable("MPPO", MPPO_Algorithm)
 
     ray.init(

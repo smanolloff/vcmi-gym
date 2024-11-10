@@ -1,12 +1,72 @@
+from dataclasses import dataclass, field
 import torch
-from torch import nn
+import numpy as np
 from ray.rllib.core.columns import Columns
 from ray.rllib.core.models.base import ENCODER_OUT, ACTOR, CRITIC
 
-from . import netutil
+
+def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
+    initializable_layers = (
+        torch.nn.Linear,
+        torch.nn.Conv2d,
+        # TODO: other layers? Conv1d?
+    )
+
+    if isinstance(layer, initializable_layers):
+        torch.nn.init.orthogonal_(layer.weight, gain)
+        torch.nn.init.constant_(layer.bias, bias_const)
+
+    for mod in list(layer.modules())[1:]:
+        layer_init(mod, gain, bias_const)
+
+    return layer
 
 
-class MPPO_Encoder(nn.Module):
+def build_layer(spec, obs_dims):
+    kwargs = dict(spec)  # copy
+    t = kwargs.pop("t")
+
+    assert len(obs_dims) == 3  # [M, S, H]
+
+    for k, v in kwargs.items():
+        if v == "_M_":
+            kwargs[k] = obs_dims["misc"]
+        if v == "_H_":
+            assert obs_dims["hexes"] % 165 == 0
+            kwargs[k] = obs_dims["hexes"] // 165
+        if v == "_S_":
+            assert obs_dims["stacks"] % 20 == 0
+            kwargs[k] = obs_dims["stacks"] // 20
+
+    layer_cls = getattr(torch.nn, t, None) or globals()[t]
+    return layer_cls(**kwargs)
+
+
+@dataclass
+class NetConfig:
+    attention: dict = None
+    features_extractor1_misc: list[dict] = field(default_factory=list)
+    features_extractor1_stacks: list[dict] = field(default_factory=list)
+    features_extractor1_hexes: list[dict] = field(default_factory=list)
+    features_extractor2: list[dict] = field(default_factory=list)
+    actor: dict = field(default_factory=dict)
+    critic: dict = field(default_factory=dict)
+
+
+class Split(torch.nn.Module):
+    def __init__(self, split_size, dim):
+        super().__init__()
+        self.split_size = split_size
+        self.dim = dim
+
+    def forward(self, x):
+        return torch.split(x, self.split_size, self.dim)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(dim={self.dim}, split_size={self.split_size})"
+
+
+class Common_Encoder(torch.nn.Module):
     def __init__(
         self,
         shared,
@@ -50,15 +110,15 @@ class MPPO_Encoder(nn.Module):
         return {ENCODER_OUT: out}
 
 
-class EncoderNN(nn.Module):
+class EncoderNN(torch.nn.Module):
     def __init__(self, netconfig, action_space, observation_space, obs_dims):
         super().__init__()
 
-        self.obs_splitter = netutil.Split(list(obs_dims.values()), dim=1)
+        self.obs_splitter = Split(list(obs_dims.values()), dim=1)
 
         self.features_extractor1_misc = torch.nn.Sequential()
         for spec in netconfig.features_extractor1_misc:
-            layer = netutil.build_layer(spec, obs_dims)
+            layer = build_layer(spec, obs_dims)
             self.features_extractor1_misc.append(layer)
 
         dummy_outputs = []
@@ -68,14 +128,14 @@ class EncoderNN(nn.Module):
             dummy_outputs = [self.features_extractor1_misc(torch.randn([1, obs_dims["misc"]]))]
 
         for layer in self.features_extractor1_misc:
-            netutil.layer_init(layer)
+            layer_init(layer)
 
         self.features_extractor1_stacks = torch.nn.Sequential(
             torch.nn.Unflatten(dim=1, unflattened_size=[20, obs_dims["stacks"] // 20])
         )
 
         for spec in netconfig.features_extractor1_stacks:
-            layer = netutil.build_layer(spec, obs_dims)
+            layer = build_layer(spec, obs_dims)
             self.features_extractor1_stacks.append(layer)
 
         # dummy input to initialize lazy modules
@@ -83,14 +143,14 @@ class EncoderNN(nn.Module):
             dummy_outputs.append(self.features_extractor1_stacks(torch.randn([1, obs_dims["stacks"]])))
 
         for layer in self.features_extractor1_stacks:
-            netutil.layer_init(layer)
+            layer_init(layer)
 
         self.features_extractor1_hexes = torch.nn.Sequential(
             torch.nn.Unflatten(dim=1, unflattened_size=[165, obs_dims["hexes"] // 165])
         )
 
         for spec in netconfig.features_extractor1_hexes:
-            layer = netutil.build_layer(spec, obs_dims)
+            layer = build_layer(spec, obs_dims)
             self.features_extractor1_hexes.append(layer)
 
         # dummy input to initialize lazy modules
@@ -98,11 +158,11 @@ class EncoderNN(nn.Module):
             dummy_outputs.append(self.features_extractor1_hexes(torch.randn([1, obs_dims["hexes"]])))
 
         for layer in self.features_extractor1_hexes:
-            netutil.layer_init(layer)
+            layer_init(layer)
 
         self.features_extractor2 = torch.nn.Sequential()
         for spec in netconfig.features_extractor2:
-            layer = netutil.build_layer(spec, obs_dims)
+            layer = build_layer(spec, obs_dims)
             self.features_extractor2.append(layer)
 
         # dummy input to initialize lazy modules
@@ -110,7 +170,7 @@ class EncoderNN(nn.Module):
             self.features_extractor2(torch.cat(tuple(dummy_outputs), dim=1))
 
         for layer in self.features_extractor2:
-            netutil.layer_init(layer)
+            layer_init(layer)
 
     def forward(self, x) -> torch.Tensor:
         misc, stacks, hexes = self.obs_splitter(x)

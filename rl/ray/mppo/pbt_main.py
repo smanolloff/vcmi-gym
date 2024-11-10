@@ -17,7 +17,10 @@ import multiprocessing
 
 from ray.rllib.utils import deep_update
 
-from . import MPPO_Algorithm, MPPO_Config, util
+from . import MPPO_Algorithm, MPPO_Config
+from ..common.common_config import ENV_TUNE_ID, ENV_VERSION_CHECK_KEY
+from ..common import util
+
 
 # Silence here in order to supress messages from local runners
 # Silence once more in algo init to supress messages from remote runners
@@ -86,7 +89,7 @@ def make_env_creator(env_gym_id):
         else:
             print(f"Env kwargs: {json.dumps(cfg)}")
             env_kwargs = copy.deepcopy(cfg)
-            assert env_cls.ENV_VERSION == env_kwargs.pop(MPPO_Config.ENV_VERSION_CHECK_KEY)
+            assert env_cls.ENV_VERSION == env_kwargs.pop(ENV_VERSION_CHECK_KEY)
             return env_cls(**env_kwargs)
 
     return env_creator
@@ -185,7 +188,7 @@ def new_tuner(opts):
     util.deepmerge(master_config["user"], init_info, in_place=True, allow_new=False, update_existing=True)
 
     env_gym_id = master_config["user"]["env_gym_id"]
-    ray.tune.registry.register_env(MPPO_Config.ENV_TUNE_ID, make_env_creator(env_gym_id))
+    ray.tune.registry.register_env(ENV_TUNE_ID, make_env_creator(env_gym_id))
 
     # Extract hyperparam_values from old_algo_config dict:
     # NOTE: Hyperparams match the AlgorithmConfig *variables*
@@ -275,7 +278,7 @@ def resume_tuner(opts):
 
     # THe env ID is stored in the config, but we don't have access to it here
     assert opts.env_gym_id, "env ID is required when resuming an experiment"
-    ray.tune.registry.register_env(MPPO_Config.ENV_TUNE_ID, make_env_creator(opts.env_gym_id))
+    ray.tune.registry.register_env(ENV_TUNE_ID, make_env_creator(opts.env_gym_id))
 
     # Trial ID will be the same => wandb run will be the same
     # Iteration will be >0 => any initial config

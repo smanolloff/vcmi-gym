@@ -6,9 +6,8 @@ from ray.rllib.algorithms.ppo.torch.ppo_torch_rl_module import PPOTorchRLModule
 from ray.rllib.core.columns import Columns
 from ray.rllib.models.torch.torch_distributions import TorchCategorical
 
-from .mppo_encoder import MPPO_Encoder
-from . import netutil
-from . import util
+from ..common import common_rl_module, common_encoder
+from ..common.jit_model import JitModel
 
 MASK_VALUE = torch.tensor(torch.finfo(torch.float32).min, dtype=torch.float32)
 
@@ -29,29 +28,25 @@ class MPPO_RLModule(PPOTorchRLModule):
     @override(PPOTorchRLModule)
     def _forward_inference(self, batch, **kwargs):
         outs = super()._forward_inference(batch, **kwargs)
-        self._mask_action_dist_inputs(outs, batch[Columns.OBS]["action_mask"])
+        common_rl_module.mask_action_dist_inputs(outs, batch[Columns.OBS]["action_mask"])
         return outs
 
     @override(PPOTorchRLModule)
     def _forward_exploration(self, batch, **kwargs):
         outs = super()._forward_exploration(batch, **kwargs)
-        self._mask_action_dist_inputs(outs, batch[Columns.OBS]["action_mask"])
+        common_rl_module.mask_action_dist_inputs(outs, batch[Columns.OBS]["action_mask"])
         return outs
 
     @override(PPOTorchRLModule)
     def _forward_train(self, batch, **kwargs):
         outs = super()._forward_train(batch, **kwargs)
-        self._mask_action_dist_inputs(outs, batch[Columns.OBS]["action_mask"])
+        common_rl_module.mask_action_dist_inputs(outs, batch[Columns.OBS]["action_mask"])
         return outs
-
-    def _mask_action_dist_inputs(self, outs, mask):
-        k = Columns.ACTION_DIST_INPUTS
-        outs[k] = outs[k].where(mask, MASK_VALUE)
 
     @override(PPOTorchRLModule)
     def setup(self):
         obs_dims = self.model_config["obs_dims"]
-        netcfg = netutil.NetConfig(**self.model_config["network"])
+        netcfg = common_encoder.NetConfig(**self.model_config["network"])
 
         #
         # IMPORTANT:
@@ -59,7 +54,7 @@ class MPPO_RLModule(PPOTorchRLModule):
         # 2. Do not rename "vf_share_layers" key: needed by PPORLModule
         #
 
-        self.encoder = MPPO_Encoder(
+        self.encoder = common_encoder.Common_Encoder(
             self.model_config["vf_share_layers"],
             self.config.inference_only,
             self.config.action_space,
@@ -68,28 +63,15 @@ class MPPO_RLModule(PPOTorchRLModule):
             netcfg
         )
 
-        self.pi = netutil.layer_init(netutil.build_layer(netcfg.actor, obs_dims), gain=0.01)
-        self.vf = netutil.layer_init(netutil.build_layer(netcfg.critic, obs_dims), gain=1.0)
+        self.pi = common_encoder.layer_init(common_encoder.build_layer(netcfg.actor, obs_dims), gain=0.01)
+        self.vf = common_encoder.layer_init(common_encoder.build_layer(netcfg.critic, obs_dims), gain=1.0)
 
     #
     # JIT import
     #
 
     def jload(self, jagent_file, layer_mapping=None):
-        jmodel = torch.jit.load(jagent_file)
-
-        if not layer_mapping:
-            # rlmodule <=> jmodel layer
-            layer_mapping = {
-                "encoder.encoder": "encoder_actor",
-                "pi": "actor",
-                "vf": "critic",
-            }
-
-        for rl_attr, model_attr in layer_mapping.items():
-            rlmodule_layer = util.get_nested_attr(self, rl_attr)
-            jmodel_layer = util.get_nested_attr(jmodel, model_attr)
-            rlmodule_layer.load_state_dict(jmodel_layer.state_dict(), strict=True)
+        common_rl_module.jload(self, jagent_file, layer_mapping)
 
     #
     # JIT export
@@ -116,11 +98,11 @@ class MPPO_RLModule(PPOTorchRLModule):
     def _clean_clone(self):
         shared = self.model_config["vf_share_layers"]
         obs_dims = self.model_config["obs_dims"]
-        netcfg = netutil.NetConfig(**self.model_config["network"])
+        netcfg = common_encoder.NetConfig(**self.model_config["network"])
 
         # 1. Init clean NNs
 
-        clean_encoder = MPPO_Encoder(
+        clean_encoder = Common_Encoder(
             self.model_config["vf_share_layers"],
             self.config.inference_only,
             self.config.action_space,
@@ -129,8 +111,8 @@ class MPPO_RLModule(PPOTorchRLModule):
             netcfg
         )
 
-        clean_pi = netutil.layer_init(netutil.build_layer(netcfg.actor, obs_dims), gain=0.01)
-        clean_vf = netutil.layer_init(netutil.build_layer(netcfg.critic, obs_dims), gain=1.0)
+        clean_pi = common_encoder.layer_init(common_encoder.build_layer(netcfg.actor, obs_dims), gain=0.01)
+        clean_vf = common_encoder.layer_init(common_encoder.build_layer(netcfg.critic, obs_dims), gain=1.0)
 
         # 2. Load parameters
 
@@ -142,70 +124,3 @@ class MPPO_RLModule(PPOTorchRLModule):
             clean_encoder.critic_encoder.load_state_dict(self.encoder.critic_encoder.state_dict(), strict=True)
 
         return clean_encoder, clean_pi, clean_vf
-
-
-class JitModel(torch.nn.Module):
-    """ TorchScript version of Model """
-
-    def __init__(
-        self,
-        encoder_actor: torch.nn.Module,
-        encoder_critic: torch.nn.Module,
-        actor: torch.nn.Module,
-        critic: torch.nn.Module,
-        env_version: int,
-    ):
-        super().__init__()
-        self.encoder_actor = encoder_actor
-        self.encoder_critic = encoder_critic
-        self.actor = actor
-        self.critic = critic
-        self.env_version = env_version
-
-    @torch.jit.export
-    def predict(self, obs, mask, deterministic: bool = False) -> int:
-        b_obs = obs.unsqueeze(dim=0)
-        b_mask = mask.unsqueeze(dim=0)
-        latent = self.encoder_actor(b_obs)
-        action_logits = self.actor(latent)
-        probs = self.categorical_masked(action_logits, b_mask)
-        action = torch.argmax(probs, dim=1) if deterministic else self.sample(probs, action_logits)
-        return action.int().item()
-
-    @torch.jit.export
-    def forward(self, obs) -> torch.Tensor:
-        b_obs = obs.unsqueeze(dim=0)
-        latent = self.encoder_actor(b_obs)
-        return self.actor(latent)
-
-    @torch.jit.export
-    def get_value(self, obs) -> float:
-        b_obs = obs.unsqueeze(dim=0)
-        if self.encoder_critic is None:
-            latent = self.encoder_actor(b_obs)
-        else:
-            latent = self.encoder_critic(b_obs)
-        value = self.critic(latent)
-        return value.float().item()
-
-    @torch.jit.export
-    def get_version(self) -> int:
-        return self.env_version
-
-    # Implement SerializableCategoricalMasked as a function
-    # (lite interpreter does not support instantiating the class)
-    @torch.jit.export
-    def categorical_masked(self, logits0: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits0.dtype)
-        logits1 = torch.where(mask, logits0, mask_value)
-        logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
-        probs = torch.nn.functional.softmax(logits, dim=-1)
-        return probs
-
-    @torch.jit.export
-    def sample(self, probs: torch.Tensor, action_logits: torch.Tensor) -> torch.Tensor:
-        num_events = action_logits.size()[-1]
-        probs_2d = probs.reshape(-1, num_events)
-        samples_2d = torch.multinomial(probs_2d, 1, True).T
-        batch_shape = action_logits.size()[:-1]
-        return samples_2d.reshape(batch_shape)

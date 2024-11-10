@@ -2,7 +2,7 @@ from ray.rllib.utils.annotations import override
 from ray.rllib.env.single_agent_env_runner import SingleAgentEnvRunner
 
 
-class MPPO_Env(SingleAgentEnvRunner):
+class BaseEnv(SingleAgentEnvRunner):
     @override(SingleAgentEnvRunner)
     def ping(self) -> str:
         # Unwrap to bypass OrderEnforcing
@@ -16,9 +16,9 @@ class MPPO_Env(SingleAgentEnvRunner):
 # => use separate classes for eval and train
 
 
-class TrainEnv(MPPO_Env):
+class TrainEnv(BaseEnv):
     pass
 
 
-class EvalEnv(MPPO_Env):
+class EvalEnv(BaseEnv):
     pass
