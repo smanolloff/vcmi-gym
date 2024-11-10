@@ -8,6 +8,7 @@ pyyaml
 wandb
 gymnasium
 onnx-pytorch
+pygit2
 
 ray[tune]
 ray[rllib]==2.38.0

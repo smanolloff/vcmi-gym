@@ -133,8 +133,6 @@ class MIMPALA_Algorithm(IMPALA):
                     #      (i.e. result may be empty if no samples are ready)
                     if result:
                         self.callbacks.on_train_subresult(self, result)
-                        self.logger.debug("simulate heavy processing 10s...")
-                        time.sleep(10)
                     else:
                         self.logger.debug("no requests, sleep 1s")
                         time.sleep(1)
