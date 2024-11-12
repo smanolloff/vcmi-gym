@@ -104,6 +104,7 @@ class MIMPALA_Algorithm(IMPALA):
     def training_step(self):
         # XXX: there's no `on_training_step_start` callback => log this here
         self.wandb_log({"trial/iteration": self.iteration})
+        print(f"Training iteration: {self.iteration}")
 
         if self.iteration == 0:
             # XXX: self.iteration is always 0 during setup(), must load here
@@ -121,9 +122,7 @@ class MIMPALA_Algorithm(IMPALA):
             #       instances where different runners may run with different
             #       speeds?
             while True:
-                self.logger.debug("training_step: call super")
                 result = super().training_step()
-                self.logger.debug("training_step: done super")
                 now = time.time()
 
                 # Call custom MPPO-specific callback once every N seconds
@@ -134,12 +133,12 @@ class MIMPALA_Algorithm(IMPALA):
                     if result:
                         self.callbacks.on_train_subresult(self, result)
                     else:
-                        self.logger.debug("no requests, sleep 1s")
-                        time.sleep(1)
+                        # self.logger.debug("no requests, sleep 1s")
+                        time.sleep(0.1)
                     logged_at = now
 
-                self.logger.debug("training_step time left: %ds" % (training_step_duration_s - (now - started_at)))
-                if (now - started_at) > training_step_duration_s:
+                # self.logger.debug("training_step time left: %ds" % (training_step_duration_s - (now - started_at)))
+                if (now - started_at) > training_step_duration_s and result:
                     break
 
         return result

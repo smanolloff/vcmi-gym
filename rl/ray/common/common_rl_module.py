@@ -1,6 +1,7 @@
 import torch
 from torch.utils.mobile_optimizer import optimize_for_mobile
 from ray.rllib.core.columns import Columns
+from ray.rllib.core.models.base import CRITIC, ENCODER_OUT
 
 from . import common_encoder
 from . import util
@@ -12,6 +13,28 @@ def mask_action_dist_inputs(outs, mask):
     k = Columns.ACTION_DIST_INPUTS
     outs[k] = outs[k].where(mask, MASK_VALUE)
 
+
+# Overrides PPOTorchRLModule to call self.encoder.compute_values()
+# instead of self.encoder.critic_encoder.forward()
+def compute_values(rl_module, batch, embeddings=None):
+    if embeddings is None:
+        # Separate vf-encoder.
+        if hasattr(rl_module.encoder, "critic_encoder"):
+            batch_ = batch
+            if rl_module.is_stateful():
+                # The recurrent encoders expect a `(state_in, h)`  key in the
+                # input dict while the key returned is `(state_in, critic, h)`.
+                batch_ = batch.copy()
+                batch_[Columns.STATE_IN] = batch[Columns.STATE_IN][CRITIC]
+            embeddings = rl_module.encoder.compute_value(batch_)
+        # Shared encoder.
+        else:
+            embeddings = rl_module.encoder(batch)[ENCODER_OUT][CRITIC]
+
+    # Value head.
+    vf_out = rl_module.vf(embeddings)
+    # Squeeze out last dimension (single node value head).
+    return vf_out.squeeze(-1)
 
 #
 # JIT import

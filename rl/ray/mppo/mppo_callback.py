@@ -18,6 +18,8 @@ from ray.rllib.utils.metrics import (
     TIMERS,
 )
 
+from ray.rllib.utils.metrics.stats import Stats
+
 from ray.rllib.core.learner.learner import (
     DEFAULT_OPTIMIZER,
     ENTROPY_KEY,
@@ -93,12 +95,7 @@ class MPPO_Callback(DefaultCallbacks):
         to_log = {
             "eval/global/num_episodes": int(eg[NUM_EPISODES_LIFETIME]),
             "eval/global/num_timesteps": int(eg[NUM_ENV_STEPS_SAMPLED_LIFETIME]),
-            "eval/net_value": float(e["user/net_value"]),
-            "eval/is_success": float(e["user/is_success"]),
-            "eval/ep_len_mean": float(e[EPISODE_LEN_MEAN]),
-            "eval/ep_rew_mean": float(e[EPISODE_RETURN_MEAN]),
-            "eval/num_episodes": int(e[NUM_EPISODES]),
-            "eval/num_timesteps": int(e[NUM_ENV_STEPS_SAMPLED]),
+
             "remote/eval_healthy_workers": int(eg["num_healthy_workers"]),
             "remote/eval_worker_inflight_reqs": int(eg["num_in_flight_async_reqs"]),
             "remote/eval_worker_restarts": int(eg["num_remote_worker_restarts"]),
@@ -106,6 +103,21 @@ class MPPO_Callback(DefaultCallbacks):
             "remote/train_worker_inflight_reqs": float(ft["num_in_flight_async_reqs"]),
             "remote/train_worker_restarts": float(ft["num_remote_worker_restarts"]),
         }
+
+        # NOTE: eval metrics must be manually RESET
+        eval_metrics = {
+            "eval/net_value": "user/net_value",
+            "eval/is_success": "user/is_success",
+            "eval/ep_len_mean": EPISODE_LEN_MEAN,
+            "eval/ep_rew_mean": EPISODE_RETURN_MEAN,
+            "eval/num_episodes": NUM_EPISODES,
+            "eval/num_timesteps": NUM_ENV_STEPS_SAMPLED,
+        }
+
+        estats = metrics_logger.stats[EVALUATION_RESULTS][ENV_RUNNER_RESULTS]
+        for logname, statname in eval_metrics.items():
+            to_log[logname] = e[statname]
+            estats[statname] = Stats.similar_to(estats[statname])
 
         # Add tune metrics to the result (must be top-level)
         result["eval/net_value"] = to_log["eval/net_value"]

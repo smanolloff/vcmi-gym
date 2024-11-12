@@ -95,19 +95,36 @@ class Common_Encoder(torch.nn.Module):
             self.critic_encoder = EncoderNN(netconfig, action_space, observation_space, obs_dims)
 
     def forward(self, batch) -> torch.Tensor:
-        # XXX: if using LSTM:
-        # state = batch[Columns.STATE_IN][CRITIC]
-
+        # LSTM-only:
+        # state_actor = batch[Columns.STATE_IN][ACTOR]
+        # state_critic = batch[Columns.STATE_IN][CRITIC]
         obs = batch[Columns.OBS]["observation"]
         out = {ACTOR: self.encoder(obs)}
 
         if not self.inference_only:
             out[CRITIC] = out[ACTOR] if self.shared else self.critic_encoder(obs)
 
-        # XXX: if using LSTM:
-        # out[Columns.STATE_OUT] = {"h": ..., "c": ...}
+        # LSTM-only:
+        # out[Columns.STATE_OUT][ACTOR] = {"h": ..., "c": ...}
+        # out[Columns.STATE_OUT][CRITIC] = {"h": ..., "c": ...}
 
         return {ENCODER_OUT: out}
+
+    # XXX: custom encoder call by the RLModule's overriden compute_values()
+    def compute_value(self, batch) -> torch.Tensor:
+        # RLModule should directly use out[CRITIC] instead
+        assert not self.shared, "compute_values() should not be called when critic is shared"
+        assert not self.inference_only
+        assert hasattr(self, "critic_encoder")
+
+        # LSTM-only:
+        # state_actor = batch[Columns.STATE_IN][ACTOR]
+        # state_critic = batch[Columns.STATE_IN][CRITIC]
+        obs = batch[Columns.OBS]["observation"]
+
+        # XXX: compute_values is called during training (no output states needed)
+        #      The output is also a plain tensor as it's simply fed to the VF
+        return self.critic_encoder(obs)
 
 
 class EncoderNN(torch.nn.Module):

@@ -12,7 +12,8 @@ from ray.rllib.core import DEFAULT_MODULE_ID
 from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
 from ray.tune.result import TRIAL_INFO
 
-from . import common_logger
+from ray.rllib.utils import deep_update
+
 from . import util
 
 
@@ -23,6 +24,9 @@ class EnvRunnerKeepalive:
         self.logger = logger
 
     def __enter__(self):
+        if not self.runner_group:
+            return
+
         self.logger.info("Starting env runner keepalive loop")
         self.event = threading.Event()
         self.thread = threading.Thread(target=self._loop, daemon=True)
@@ -30,6 +34,9 @@ class EnvRunnerKeepalive:
         self.thread.start()
 
     def __exit__(self, exc_type, exc_value, traceback):
+        if not self.runner_group:
+            return
+
         self.logger.info("Stopping env runner keepalive loop...")
         self.event.set()
         self.thread.join()
@@ -213,3 +220,17 @@ def broadcast_weights(algo):
     if algo.eval_env_runner_group:
         algo.logger.info("Broadcasting learner weights to eval env runners")
         algo.eval_env_runner_group.sync_weights(**opts)
+
+
+# XXX: NOT working -- hyperparam values correspond
+# to AlgorithmConfig vars, not Algorithm
+def maybe_load_hyperparam_values(algo):
+    if is_golden_trial(algo):
+        for k, v in algo.config.user.hyperparam_values:
+            if isinstance(v, dict):
+                algo.logger.debug(f"Deeup-update hyperparam value: {k} with: {v}")
+                deep_update(getattr(algo, k), v)
+            else:
+                assert isinstance(v, (int, float)), f"isinstance({v}, (int, float)"
+                algo.logger.debug(f"Set hyperparam value: {k}={v}")
+                setattr(algo, k, v)

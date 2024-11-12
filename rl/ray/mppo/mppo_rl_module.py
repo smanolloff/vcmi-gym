@@ -44,6 +44,10 @@ class MPPO_RLModule(PPOTorchRLModule):
         return outs
 
     @override(PPOTorchRLModule)
+    def compute_values(self, batch, embeddings=None):
+        return common_rl_module.compute_values(self, batch, embeddings)
+
+    @override(PPOTorchRLModule)
     def setup(self):
         obs_dims = self.model_config["obs_dims"]
         netcfg = common_encoder.NetConfig(**self.model_config["network"])

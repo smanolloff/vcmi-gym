@@ -37,11 +37,11 @@ def load():
     }
 
     train_opponent = "StupidAI"
-    train_env_runners = 1
+    train_env_runners = 2
 
     eval_opponent = "BattleAI"
-    eval_env_runners = 1
-    eval_episodes = 10
+    eval_env_runners = 2
+    eval_episodes = 100
 
     # XXX: this dict must match the AlgorithmConfig variables structure...
     hyperparam_mutations = {
@@ -59,9 +59,9 @@ def load():
         "num_epochs": util.linlist(1, 20, n=10, dtype=int),
         "vf_loss_coeff": util.linlist(0.1, 2, n=9),
         "vf_clip_param": util.linlist(0.1, 100, n=19),
-        "env_config": {  # affects training env only
-            "term_reward_mult": [0, 5]
-        }
+        # "env_config": {  # affects training env only
+        #     "term_reward_mult": [0, 5]
+        # }
     }
 
     calculated_train_sample_timeout = util.calc_train_sample_timeout_s(
@@ -91,7 +91,7 @@ def load():
                 "step_reward_fixed": 0,
                 "step_reward_frac": -0.001,
                 "step_reward_mult": 1,
-                "term_reward_mult": 0,
+                "term_reward_mult": 1,
                 "reward_clip_tanh_army_frac": 1,
                 "reward_army_value_ref": 500,
                 "reward_dynamic_scaling": False,
@@ -191,7 +191,7 @@ def load():
             #
             "env_gym_id": env_gym_id,
             "env_runner_keepalive_interval_s": 15,  # smaller than VCMI timeouts
-            "wandb_log_interval_s": 0,
+            "wandb_log_interval_s": 60,
             "model_load_file": "",
             "model_load_mapping": {
                 "encoder.encoder": "encoder_actor",
@@ -205,9 +205,9 @@ def load():
             "hyperparam_mutations": hyperparam_mutations,
             "hyperparam_values": {},
             "metric": "train/ep_rew_mean",
-            "population_size": 1,
-            "quantile_fraction": 0.3,
-            "training_step_duration_s": 15,
+            "population_size": 3,
+            "quantile_fraction": 0.4,
+            "training_step_duration_s": 3600,
 
             #
             # Updated programatically, do NOT edit here

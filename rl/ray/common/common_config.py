@@ -128,7 +128,7 @@ def init(algo_config, cb):
                 env_runner_cls=EvalEnv),
             custom_evaluation_function=None)
         .reporting(
-            metrics_num_episodes_for_smoothing=1000,   # auto-set (custom logic)
+            metrics_num_episodes_for_smoothing=1000,
             keep_per_episode_custom_metrics=False,
             log_gradients=True,
             # metrics_episode_collection_timeout_s=60.0,  # seems old API
@@ -226,10 +226,9 @@ def configure_master(algo_config, cfg):
     # Make sure all evaluated episodes fit into the metric window
     # (discarding them is a pure waste of resources)
     if isinstance(algo_config.evaluation_duration, int) and algo_config.evaluation_duration_unit == "episodes":
-        algo_config.metrics_num_episodes_for_smoothing = algo_config.evaluation_duration
-        # assert algo_config.metrics_num_episodes_for_smoothing >= algo_config.evaluation_duration, (
-        #     f"{algo_config.metrics_num_episodes_for_smoothing} >= {algo_config.evaluation_duration}"
-        # )
+        assert algo_config.metrics_num_episodes_for_smoothing >= algo_config.evaluation_duration, (
+            f"{algo_config.metrics_num_episodes_for_smoothing} >= {algo_config.evaluation_duration}"
+        )
 
     validate(algo_config)
     return algo_config

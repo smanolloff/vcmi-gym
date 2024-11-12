@@ -10,11 +10,11 @@ class BaseEnv(SingleAgentEnvRunner):
         # Also, render() should be thread-safe (connector uses a lock)
         return str(bool(self.env.envs[0].unwrapped.render()))
 
-    def sample(self, *args, **kwargs):
-        print("SAMPLE CALLED AT %s: %s %s" % (datetime.datetime.now().isoformat(), args, kwargs))
-        res = super().sample(*args, **kwargs)
-        print("SAMPLE RETURNED %s" % datetime.datetime.now().isoformat())
-        return res
+    # def sample(self, *args, **kwargs):
+    #     print("SAMPLE CALLED AT %s: %s %s" % (datetime.datetime.now().isoformat(), args, kwargs))
+    #     res = super().sample(*args, **kwargs)
+    #     print("SAMPLE RETURNED %s" % datetime.datetime.now().isoformat())
+    #     return res
 
 
 # XXX: Can't set custom actor prefixes (tried __repr__, .actor_name(), etc.)

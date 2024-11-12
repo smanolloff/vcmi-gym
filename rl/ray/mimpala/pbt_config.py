@@ -37,11 +37,11 @@ def load():
     }
 
     train_opponent = "StupidAI"
-    train_env_runners = 1
+    train_env_runners = 2
 
     eval_opponent = "BattleAI"
-    eval_env_runners = 1
-    eval_episodes = 10
+    eval_env_runners = 2
+    eval_episodes = 100
 
     # XXX: this dict must match the AlgorithmConfig variables structure...
     hyperparam_mutations = {
@@ -97,7 +97,7 @@ def load():
                 "reward_clip_tanh_army_frac": 1,
                 "reward_army_value_ref": 500,
                 "reward_dynamic_scaling": False,
-                "conntype": "proc"
+                "conntype": "thread"
             }),
         },
 
@@ -106,7 +106,7 @@ def load():
                 "train_cpu": ai_stats["cpu_usage"][train_opponent],
                 "eval_cpu": 0,
             },
-            "max_requests_in_flight_per_env_runner": 2,
+            "max_requests_in_flight_per_env_runner": 1,
             "num_env_runners": train_env_runners,
             "sample_timeout_s": calculated_train_sample_timeout
         },
@@ -117,7 +117,7 @@ def load():
                 "env_config": util.deepmerge(env_kwargs_common, {
                     "mapname": "gym/generated/evaluation/8x64.vmap",
                     "opponent": "BattleAI",
-                    "conntype": "proc"
+                    "conntype": "thread"
                 }),
                 "custom_resources_per_env_runner": {
                     "train_cpu": 0,
@@ -185,13 +185,17 @@ def load():
             "vf_loss_coeff": 1.0,
         },
 
+        reporting={
+            "metrics_num_episodes_for_smoothing": 1000,
+        },
+
         user={
             #
             # General
             #
             "env_gym_id": env_gym_id,
             "env_runner_keepalive_interval_s": 15,  # smaller than VCMI timeouts
-            "wandb_log_interval_s": 0,
+            "wandb_log_interval_s": 60,
             "model_load_file": "",
             "model_load_mapping": {
                 "encoder.encoder": "encoder_actor",
@@ -205,9 +209,9 @@ def load():
             "hyperparam_mutations": hyperparam_mutations,
             "hyperparam_values": {},
             "metric": "train/ep_rew_mean",
-            "population_size": 1,
-            "quantile_fraction": 0.3,
-            "training_step_duration_s": 15,
+            "population_size": 3,
+            "quantile_fraction": 0.4,
+            "training_step_duration_s": 3600,
 
             #
             # Updated programatically, do NOT edit here

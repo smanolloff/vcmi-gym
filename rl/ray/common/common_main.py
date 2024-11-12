@@ -111,6 +111,19 @@ def load_wandb_artifact(artifact):
     return old_algo_config, tempdir
 
 
+def apply_and_summarize_overrides(master_config, master_overrides):
+    override_summary = {}
+
+    # config_overrides is a list of "path.to.key=value"
+    for co in (master_overrides or []):
+        name, value = co.split("=")
+        oldvalue, newvalue = override_config_value(master_config, name, value)
+        if oldvalue != newvalue:
+            override_summary[name] = [oldvalue, newvalue]
+
+    return override_summary
+
+
 def new_tuner(algo_config_cls, algo_cls, package_rel, opts):
     # All cases below will result in a new W&B Run
     # The config used depends on the init method
@@ -160,15 +173,6 @@ def new_tuner(algo_config_cls, algo_cls, package_rel, opts):
     else:
         assert master_config
 
-    master_overrides = {}
-
-    # config_overrides is a list of "path.to.key=value"
-    for co in (opts.master_overrides or []):
-        name, value = co.split("=")
-        oldvalue, newvalue = override_config_value(master_config, name, value)
-        if oldvalue != newvalue:
-            master_overrides[name] = [oldvalue, newvalue]
-
     git = pygit2.Repository(util.vcmigym_root_path)
     now = datetime.datetime.now()
 
@@ -177,7 +181,7 @@ def new_tuner(algo_config_cls, algo_cls, package_rel, opts):
         experiment_name=opts.experiment_name.format(datetime=now.strftime("%Y%m%d_%H%M%S")),
         git_head=str(git.head.target),
         git_is_dirty=any(git.diff().patch),
-        master_overrides=master_overrides,
+        master_overrides=apply_and_summarize_overrides(master_config, opts.master_overrides),
         init_argument=opts.init_argument,
         init_method=opts.init_method,
         timestamp=now.astimezone().isoformat(),
@@ -239,6 +243,19 @@ def new_tuner(algo_config_cls, algo_cls, package_rel, opts):
         synch=True,
     )
 
+    # Convert hyperparam lists to tune.choice() for initial tune value sampling
+    for k, v in convert_to_param_space(algo_config.user_config.hyperparam_mutations).items():
+        assert hasattr(algo_config, k)
+        if isinstance(v, dict):
+            deep_update(getattr(algo_config, k), v)
+        else:
+            setattr(algo_config, k, v)
+
+    if master_config["user"]["hyperparam_values"]:
+        searcher = ray.tune.search.BasicVariantGenerator(points_to_evaluate=[master_config["user"]["hyperparam_values"]])
+    else:
+        searcher = None
+
     # https://docs.ray.io/en/latest/tune/api/doc/ray.tune.TuneConfig.html#ray.tune.TuneConfig
     tune_config = ray.tune.TuneConfig(
         trial_name_creator=lambda t: t.trial_id,
@@ -246,15 +263,8 @@ def new_tuner(algo_config_cls, algo_cls, package_rel, opts):
         scheduler=scheduler,
         reuse_actors=False,  # XXX: False is much safer and ensures no state leaks
         num_samples=algo_config.user_config.population_size,
-        search_alg=None
+        search_alg=searcher
     )
-
-    for k, v in convert_to_param_space(algo_config.user_config.hyperparam_mutations).items():
-        assert hasattr(algo_config, k)
-        if isinstance(v, dict):
-            deep_update(getattr(algo_config, k), v)
-        else:
-            setattr(algo_config, k, v)
 
     tuner = ray.tune.Tuner(
         trainable=algo_cls.ALGO_NAME,

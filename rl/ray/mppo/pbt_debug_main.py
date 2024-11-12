@@ -27,7 +27,7 @@ if __name__ == "__main__":
             },
         },
         env_runners={
-            "num_env_runners": 1,
+            "num_env_runners": 0,
         },
         # EVAL runners
         evaluation={
@@ -42,7 +42,12 @@ if __name__ == "__main__":
                 },
             },
             "evaluation_duration": 10,
-            "evaluation_num_env_runners": 1,
+            "evaluation_num_env_runners": 0,
+        },
+        rl_module={
+            "model_config": {
+                "vf_share_layers": False,
+            }
         },
         user={
             "env_runner_keepalive_interval_s": 60,
@@ -70,9 +75,17 @@ if __name__ == "__main__":
         }
     )
 
+    # Simulate cmd-line overrides "path.to.key=value"
+    OVERRIDES = [
+        # "rl_module.model_config.vf_share_layers=False"
+    ]
+
     master_config = util.deepmerge(master_config, debug_cfg, allow_new=False, update_existing=True)
     master_config["user"]["hyperparam_mutations"] = {}
     master_config["user"]["hyperparam_values"] = {}
+
+    override_summary = common_main.apply_and_summarize_overrides(master_config, OVERRIDES),
+    print("*** OVERRIDE SUMMARY: %s" % override_summary)
 
     env_gym_id = master_config["user"]["env_gym_id"]
     ray.tune.registry.register_env(ENV_TUNE_ID, common_main.make_env_creator(env_gym_id))
