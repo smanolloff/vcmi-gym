@@ -251,6 +251,7 @@ class ChanFirst(nn.Module):
 class Split(nn.Module):
     def __init__(self, split_size, dim):
         super().__init__()
+
         self.split_size = split_size
         self.dim = dim
 
@@ -320,19 +321,13 @@ class AgentNN(nn.Module):
         layer_cls = getattr(torch.nn, t, None) or globals()[t]
         return layer_cls(**kwargs)
 
-    def __init__(self, network, action_space, observation_space, obs_dims):
+    def __init__(self, network, obs_dims):
         super().__init__()
 
-        self.observation_space = observation_space
-        self.action_space = action_space
         self.obs_dims = obs_dims
 
         assert isinstance(obs_dims, dict)
         assert list(obs_dims.keys()) == ["misc", "stacks", "hexes"]  # order is important
-
-        # 2 nonhex actions (RETREAT, WAIT) + 165 hexes*14 actions each
-        # Commented assert due to false positives on legacy models
-        # assert action_space.n == 2 + (165*14)
 
         if network.attention:
             layer = AgentNN.build_layer(network.attention, obs_dims)
@@ -451,7 +446,7 @@ class AgentNN(nn.Module):
             b_mask = torch.as_tensor(b_mask)
 
             # Return unbatched action if input was unbatched
-            if b_obs.shape == self.observation_space.shape:
+            if len(b_mask.shape) == 1:
                 b_obs = b_obs.unsqueeze(dim=0)
                 b_mask = b_mask.unsqueeze(dim=0)
                 b_env_action, _, _, _ = self.get_action(b_obs, b_mask, deterministic=True)
@@ -477,7 +472,7 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "observation_space", "action_space", "obs_dims", "state"]
+        attrs = ["args", "obs_dims", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -490,7 +485,7 @@ class Agent(nn.Module):
     @staticmethod
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
-        attrs = ["args", "observation_space", "action_space", "obs_dims", "state"]
+        attrs = ["args", "obs_dims", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -529,16 +524,14 @@ class Agent(nn.Module):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
         return torch.load(agent_file, map_location=device, weights_only=False)
 
-    def __init__(self, args, observation_space, action_space, obs_dims, state=None, device="cpu"):
+    def __init__(self, args, obs_dims, state=None, device="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
-        self.observation_space = observation_space  # needed for save/load
-        self.action_space = action_space  # needed for save/load
         self._optimizer_state = None  # needed for save/load
         self.obs_dims = obs_dims  # needed for save/load
-        self.NN_value = AgentNN(args.network, action_space, observation_space, obs_dims)
-        self.NN_policy = AgentNN(args.network, action_space, observation_space, obs_dims)
+        self.NN_value = AgentNN(args.network, obs_dims)
+        self.NN_policy = AgentNN(args.network, obs_dims)
         self.NN_value.to(device)
         self.NN_policy.to(device)
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
@@ -701,7 +694,7 @@ def main(args):
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     LOG.info("Out dir: %s" % out_dir)
 
-    num_envs = len(args.envmaps)
+    num_envs = args.num_envs
 
     lr_schedule_fn_value = common.schedule_fn(args.lr_schedule_value)
     lr_schedule_fn_policy = common.schedule_fn(args.lr_schedule_policy)
@@ -764,9 +757,6 @@ def main(args):
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
-    obs_space = VcmiEnv.OBSERVATION_SPACE
-    act_space = VcmiEnv.ACTION_SPACE
-
     if agent is None:
         # TODO: robust mechanism ensuring these don't get mixed up
         assert VcmiEnv.STATE_SEQUENCE == ["misc", "stacks", "hexes"]
@@ -775,7 +765,7 @@ def main(args):
             stacks=VcmiEnv.STATE_SIZE_STACKS,
             hexes=VcmiEnv.STATE_SIZE_HEXES,
         )
-        agent = Agent(args, obs_space, act_space, obs_dims, device=device)
+        agent = Agent(args, obs_dims, device=device)
 
     # Legacy models with offset actions
     if agent.NN_policy.actor.out_features == 2311:
@@ -794,9 +784,25 @@ def main(args):
     torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
     try:
-        envs = common.create_venv(VcmiEnv, args, seed=np.random.randint(2**31))
+        # A dummy env needs to be created to infer the action and obs space
+        # (use `create_venv` to enure the same wrappers are in place)
+        dummy_args = copy.deepcopy(args)
+        dummy_args.num_envs = 1
+        dummy_args.env.mapname = "gym/A1.vmap"
+        dummy_args.env.conntype = "proc"
+        dummy_venv = common.create_venv(VcmiEnv, dummy_args, [1])
 
-        [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
+        seeds = [np.random.randint(2**31) for i in range(args.num_envs)]
+        envs = common.create_venv(VcmiEnv, args, seeds)
+
+        # Do not use env_cls.OBSERVATION_SPACE
+        # (obs space is changed by a wrapper)
+        act_space = dummy_venv.envs[0].action_space
+        obs_space = dummy_venv.envs[0].observation_space
+        dummy_venv.close()
+        del dummy_venv
+
+        # [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         assert isinstance(act_space, gym.spaces.Discrete), "only discrete action space is supported"
 
@@ -874,6 +880,7 @@ def main(args):
             # XXX: eval during experience collection
             agent.eval()
 
+            # tstart = time.time()
             for step in range(0, args.num_steps):
                 obs[step] = next_obs
                 dones[step] = next_done
@@ -925,6 +932,9 @@ def main(args):
                 agent.state.global_timestep += num_envs
                 agent.state.current_second = int(time.time() - start_time)
                 agent.state.global_second = global_start_second + agent.state.current_second
+
+            # print("SAMPLE TIME: %.2f" % (time.time() - tstart))
+            # tstart = time.time()
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -1188,6 +1198,7 @@ def main(args):
 
             agent.state.current_rollout += 1
             save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
+            # print("TRAIN TIME: %.2f" % (time.time() - tstart))
 
     finally:
         common.maybe_save(0, 10e9, args, agent, out_dir)
@@ -1196,11 +1207,17 @@ def main(args):
 
     # Needed by PBT to save model after iteration ends
     # XXX: limit returned mean reward to only the rollouts in this iteration
-    return (
-        agent,
-        common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-agent.state.current_rollout:]),
-        common.safe_mean(list(agent.state.rollout_net_value_queue_1000)[-agent.state.current_rollout:]),
-    )
+    # XXX: but no more than the last 300 rollouts (esp. if training vs BattleAI)
+    ret_rew = common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-min(300, agent.state.current_rollout):])
+    ret_value = common.safe_mean(list(agent.state.rollout_net_value_queue_1000)[-min(300, agent.state.current_rollout):])
+
+    wandb_log({
+        "trial/ep_rew_mean": ret_rew,
+        "trial/ep_value_mean": ret_value,
+        "trial/num_rollouts": agent.state.current_rollout,
+    }, commit=True)  # commit on final log line
+
+    return (agent, ret_rew, ret_value)
 
 
 def debug_args():
@@ -1214,8 +1231,8 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        agent_load_file="/Users/simo/Projects/vcmi-gym/rl/models/Defender model:v5/agent-migrated.pt",
-        # agent_load_file=None,
+        # agent_load_file="/Users/simo/Projects/vcmi-gym/rl/models/Defender model:v5/agent-migrated.pt",
+        agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
         rollouts_per_mapchange=0,
@@ -1230,13 +1247,13 @@ def debug_args():
         max_saves=0,
         out_dir_template="data/mppo_dna-test/mppo_dna-test",
         opponent_load_file=None,
-        opponent_sbm_probs=[1, 0, 0],
+        opponent_sbm_probs=[0, 1, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
-        num_envs=1,
+        num_envs=4,
         num_steps=256,
         gamma=0.8,
         gae_lambda=0.9,
@@ -1288,39 +1305,33 @@ def debug_args():
             boot_timeout=0,
             conntype="thread"
         ),
-        env_wrappers=[],
-        env_version=3,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
+        env_wrappers=[dict(module="vcmi_gym", cls="LegacyObservationSpaceWrapper")],
+        env_version=4,
         network=dict(
             attention=None,
             features_extractor1_misc=[
                 # => (B, M)
-                dict(t="LazyLinear", out_features=16),
+                dict(t="LazyLinear", out_features=4),
                 dict(t="LeakyReLU"),
-                dict(t="Linear", in_features=16, out_features=4),
-                dict(t="LeakyReLU"),
-                # => (B, 2)
+                # => (B, 4)
             ],
             features_extractor1_stacks=[
                 # => (B, 20, S)
-                dict(t="LazyLinear", out_features=256),
+                dict(t="LazyLinear", out_features=8),
+                dict(t="LayerNorm", normalized_shape=[20, 8]),
                 dict(t="LeakyReLU"),
-                dict(t="Linear", in_features=256, out_features=32),
-                dict(t="LeakyReLU"),
-                dict(t="SelfAttention", edim=32, num_heads=1),
-                # => (B, 20, 16)
+                # => (B, 20, 8)
 
                 dict(t="Flatten"),
                 # => (B, 320)
             ],
             features_extractor1_hexes=[
                 # => (B, 165, H)
-                dict(t="LazyLinear", out_features=256),
+                dict(t="LazyLinear", out_features=8),
+                dict(t="LayerNorm", normalized_shape=[165, 8]),
                 dict(t="LeakyReLU"),
-                dict(t="Linear", in_features=256, out_features=16),
-                dict(t="LeakyReLU"),
-                dict(t="SelfAttention", edim=16, num_heads=1),
-                # => (B, 165, 16)
+                # => (B, 165, 8)
 
                 dict(t="Flatten"),
                 # => (B, 2640)

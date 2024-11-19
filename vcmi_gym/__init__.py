@@ -30,7 +30,11 @@ from .envs.v3.vcmi_env import VcmiEnv as VcmiEnv_v3
 from .envs.v4.vcmi_env import VcmiEnv as VcmiEnv_v4
 
 from .envs.util.dual_env import DualEnvController, DualEnvClient
-from .envs.util.wrappers import LegacyActionSpaceWrapper, LegacyObservationSpaceWrapper
+from .envs.util.wrappers import (
+    LegacyActionSpaceWrapper,
+    LegacyObservationSpaceWrapper,
+)
+
 from .tools.test_helper import TestHelper
 
 
@@ -60,5 +64,5 @@ all = [
     InfoDict,
     TestHelper,
     LegacyActionSpaceWrapper,
-    LegacyObservationSpaceWrapper
+    LegacyObservationSpaceWrapper,
 ]

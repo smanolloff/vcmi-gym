@@ -99,6 +99,8 @@ class MPPO_Algorithm(PPO):
     def training_step(self):
         # XXX: there's no `on_training_step_start` callback => log this here
         self.wandb_log({"trial/iteration": self.iteration})
+        print(f"Training iteration: {self.iteration}")
+        # import ipdb, os; ipdb.set_trace() if os.getenv("DEBUG") else ...  # noqa
 
         if self.iteration == 0:
             # XXX: self.iteration is always 0 during setup(), must load here
@@ -125,7 +127,7 @@ class MPPO_Algorithm(PPO):
                     self.callbacks.on_train_subresult(self, result)
                     logged_at = now
 
-                self.logger.debug("training_step time left: %ds" % (training_step_duration_s - (now - started_at)))
+                # self.logger.debug("training_step time left: %ds" % (training_step_duration_s - (now - started_at)))
                 if (now - started_at) > training_step_duration_s:
                     break
 

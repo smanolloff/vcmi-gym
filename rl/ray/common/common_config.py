@@ -235,7 +235,8 @@ def configure_master(algo_config, cfg):
 
 
 def validate(algo_config):
-    assert algo_config.evaluation_interval == 1, "Tune expects eval results on each iteration"
+    # XXX: for DreamerV3, evaluation_interval is not 0
+    # assert algo_config.evaluation_interval == 1, "Tune expects eval results on each iteration"
 
     uc = algo_config.user_config
 

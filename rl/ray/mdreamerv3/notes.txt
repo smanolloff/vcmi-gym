@@ -1,0 +1,15 @@
+References to observation (i.e. where dict obs might be an issue):
+
+WorldModel.forward_inference()
+WorldModel.forward_train()
+  - no mask needed
+
+
+
+DreamerModel.dream_trajectory_with_burn_in()
+DreamerModel.forward_inference()
+DreamerModel.forward_exploration()
+DreamerModel.forward_train()
+
+VectorDecoder
+

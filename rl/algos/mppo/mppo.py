@@ -632,6 +632,8 @@ def main(args, agent_cls=Agent):
     if agent is None:
         agent = Agent(args, obs_space, act_space, obs_dims, device=device)
 
+    import ipdb; ipdb.set_trace()  # noqa
+
     # Legacy models with offset actions
     if agent.NN.actor.out_features == 2311:
         print("Using legacy model with 2311 actions")

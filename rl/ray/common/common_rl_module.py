@@ -6,6 +6,8 @@ from ray.rllib.core.models.base import CRITIC, ENCODER_OUT
 from . import common_encoder
 from . import util
 
+# XXX: ??? why not just use -torch.inf (as in sheeprl)
+# MASK_VALUE = -torch.inf
 MASK_VALUE = torch.tensor(torch.finfo(torch.float32).min, dtype=torch.float32)
 
 
@@ -36,9 +38,6 @@ def compute_values(rl_module, batch, embeddings=None):
     # Squeeze out last dimension (single node value head).
     return vf_out.squeeze(-1)
 
-#
-# JIT import
-#
 
 def jload(rl_module, jagent_file, layer_mapping):
     jmodel = torch.jit.load(jagent_file)
@@ -56,57 +55,55 @@ def jload(rl_module, jagent_file, layer_mapping):
         jmodel_layer = util.get_nested_attr(jmodel, model_attr)
         rlmodule_layer.load_state_dict(jmodel_layer.state_dict(), strict=True)
 
-    #
-    # JIT export
-    #
 
-    def jsave(self, jagent_file, optimized=False):
-        print("Saving JIT agent to %s" % jagent_file)
-        shared = self.model_config["vf_share_layers"]
-        clean_encoder, clean_pi, clean_vf = self._clean_clone()
-        jmodel = torch.jit.script(JitModel(
-            encoder_actor=clean_encoder.encoder,
-            encoder_critic=None if shared else clean_encoder.critic_encoder,
-            actor=self.pi,
-            critic=self.vf,
-            env_version=self.model_config["env_version"]
-        ))
+def jsave(rl_module, jagent_file, optimized=False):
+    print("Saving JIT agent to %s" % jagent_file)
+    shared = rl_module.model_config["vf_share_layers"]
+    clean_encoder, clean_pi, clean_vf = _clean_clone(rl_module)
+    jmodel = torch.jit.script(JitModel(
+        encoder_actor=clean_encoder.encoder,
+        encoder_critic=None if shared else clean_encoder.critic_encoder,
+        actor=rl_module.pi,
+        critic=rl_module.vf,
+        env_version=rl_module.model_config["env_version"]
+    ))
 
-        if optimized:
-            jmodel = optimize_for_mobile(jmodel, preserved_methods=["get_version", "predict", "get_value"])
-            jmodel._save_for_lite_interpreter(jagent_file)
-        else:
-            torch.jit.save(jmodel, jagent_file)
+    if optimized:
+        jmodel = optimize_for_mobile(jmodel, preserved_methods=["get_version", "predict", "get_value"])
+        jmodel._save_for_lite_interpreter(jagent_file)
+    else:
+        torch.jit.save(jmodel, jagent_file)
 
-    def _clean_clone(self):
-        shared = self.model_config["vf_share_layers"]
-        obs_dims = self.model_config["obs_dims"]
-        netcfg = common_encoder.NetConfig(**self.model_config["network"])
 
-        # 1. Init clean NNs
+def _clean_clone(rl_module):
+    shared = rl_module.model_config["vf_share_layers"]
+    obs_dims = rl_module.model_config["obs_dims"]
+    netcfg = common_encoder.NetConfig(**rl_module.model_config["network"])
 
-        clean_encoder = common_encoder.Common_Encoder(
-            self.model_config["vf_share_layers"],
-            self.config.inference_only,
-            self.config.action_space,
-            self.config.observation_space,
-            obs_dims,
-            netcfg
-        )
+    # 1. Init clean NNs
 
-        clean_pi = common_encoder.layer_init(common_encoder.build_layer(netcfg.actor, obs_dims), gain=0.01)
-        clean_vf = common_encoder.layer_init(common_encoder.build_layer(netcfg.critic, obs_dims), gain=1.0)
+    clean_encoder = common_encoder.Common_Encoder(
+        rl_module.model_config["vf_share_layers"],
+        rl_module.config.inference_only,
+        rl_module.config.action_space,
+        rl_module.config.observation_space,
+        obs_dims,
+        netcfg
+    )
 
-        # 2. Load parameters
+    clean_pi = common_encoder.layer_init(common_encoder.build_layer(netcfg.actor, obs_dims), gain=0.01)
+    clean_vf = common_encoder.layer_init(common_encoder.build_layer(netcfg.critic, obs_dims), gain=1.0)
 
-        clean_encoder.encoder.load_state_dict(self.encoder.encoder.state_dict(), strict=True)
-        clean_pi.load_state_dict(self.pi.state_dict(), strict=True)
-        clean_vf.load_state_dict(self.vf.state_dict(), strict=True)
+    # 2. Load parameters
 
-        if not shared:
-            clean_encoder.critic_encoder.load_state_dict(self.encoder.critic_encoder.state_dict(), strict=True)
+    clean_encoder.encoder.load_state_dict(rl_module.encoder.encoder.state_dict(), strict=True)
+    clean_pi.load_state_dict(rl_module.pi.state_dict(), strict=True)
+    clean_vf.load_state_dict(rl_module.vf.state_dict(), strict=True)
 
-        return clean_encoder, clean_pi, clean_vf
+    if not shared:
+        clean_encoder.critic_encoder.load_state_dict(rl_module.encoder.critic_encoder.state_dict(), strict=True)
+
+    return clean_encoder, clean_pi, clean_vf
 
 
 class JitModel(torch.nn.Module):

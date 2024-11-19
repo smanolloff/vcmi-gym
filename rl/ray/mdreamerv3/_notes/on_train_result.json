@@ -1,0 +1,108 @@
+{
+    "timers": {
+        "sample": 11.055835960432887,
+        "learn": 5.044901832938194,
+        "synch_weights": 0.000003291293978691101,
+        "garbage_collection": 0.13159937597811222,
+        "training_iteration_time_sec": 16.241317749023438,
+        "restore_workers_time_sec": 0.000025987625122070312,
+        "training_step_time_sec": 16.241111993789673
+    },
+    "env_runners": {
+        "num_agent_steps_sampled": {
+            "default_agent": 1024
+        },
+        "num_episodes": 51,
+        "num_env_steps_sampled": 1024,
+        "num_module_steps_sampled_lifetime": {
+            "default_policy": 1047553
+        },
+        "num_agent_steps_sampled_lifetime": {
+            "default_agent": 1047553
+        },
+        "num_module_steps_sampled": {
+            "default_policy": 1024
+        },
+        "num_env_steps_sampled_lifetime": 1047553,
+        "episode_duration_sec_mean": 0.0,
+        "user/net_value": -34758.0,
+        "episode_return_min": -989.9977150250829,
+        "episode_len_min": 5,
+        "episode_len_max": 42,
+        "episode_return_mean": -506.5205236291886,
+        "episode_return_max": -179.77694600119588,
+        "episode_len_mean": 23.0,
+        "user/is_success": 0.0
+    },
+    "num_agent_steps_sampled_lifetime": {
+        "default_agent": 1024
+    },
+    "num_env_steps_sampled_lifetime": 1024,
+    "num_episodes_lifetime": 51,
+    "replay_buffer": {
+        "added_steps": 1024.0,
+        "capacity": 100000.0,
+        "replayed_steps": 0.0,
+        "size_num_episodes": 52.0,
+        "size_timesteps": 1024.0
+    },
+    "learners": {
+        "default_policy": {
+            "CRITIC_gradients_maxabs_after_clipping": "-inf",
+            "ACTOR_action_entropy": 7.7118316,
+            "ACTOR_gradients_maxabs_after_clipping": "-inf",
+            "ACTOR_value_targets_pct95_ema": -1.1920929E-7,
+            "WORLD_MODEL_gradients_maxabs_after_clipping": 5.9884253,
+            "CRITIC_L_slow_critic_regularization": 5.5412602,
+            "WORLD_MODEL_L_prediction": 682.6753,
+            "ACTOR_L_neg_entropy_term": -0.0023135499,
+            "ACTOR_L_total": -0.4033612,
+            "WORLD_MODEL_L_dynamics": 4.0810423,
+            "ACTOR_value_targets_pct5_ema": -7.4448127E-7,
+            "CRITIC_L_neg_logp_of_value_targets": 5.5412602,
+            "WORLD_MODEL_L_decoder": 676.4679,
+            "CRITIC_gradients_global_norm": 0.0,
+            "WORLD_MODEL_L_continue": 0.6661801,
+            "critic_learning_rate": 0.00003,
+            "WORLD_MODEL_L_total": 685.12396,
+            "total_loss": 686.5533,
+            "WORLD_MODEL_L_reward": 5.5412607,
+            "VALUE_TARGETS_H_BxT": -2.9443606E-7,
+            "ACTOR_gradients_global_norm": 0.0,
+            "WORLD_MODEL_gradients_global_norm": 196.3523,
+            "world_model_learning_rate": 0.0001,
+            "module_train_batch_size_mean": 32,
+            "WORLD_MODEL_L_representation": 4.0810423,
+            "num_module_steps_trained": 32,
+            "WORLD_MODEL_learned_initial_h": 7.808392E-7,
+            "CRITIC_L_total": 1.8327249,
+            "actor_learning_rate": 0.00003,
+            "ACTOR_L_neglogp_reinforce_term": -2.1617837
+        },
+        "__all_modules__": {
+            "num_module_steps_trained": 32,
+            "num_env_steps_trained": 32
+        }
+    },
+    "num_env_steps_trained_lifetime": 1024,
+    "num_grad_updates_lifetime": 1,
+    "actual_training_ratio": 1.0,
+    "fault_tolerance": {
+        "num_healthy_workers": 0,
+        "num_in_flight_async_reqs": 0,
+        "num_remote_worker_restarts": 0
+    },
+    "done": false,
+    "training_iteration": 1,
+    "trial_id": "default",
+    "date": "2024-11-14_18-43-33",
+    "timestamp": 1731602613,
+    "time_this_iter_s": 16.242536067962646,
+    "time_total_s": 16.242536067962646,
+    "pid": 85974,
+    "hostname": "Simeons-MacBook-Pro.local",
+    "node_ip": "127.0.0.1",
+    "config": {},
+    "time_since_restore": 16.242536067962646,
+    "iterations_since_restore": 1
+}

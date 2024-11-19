@@ -247,6 +247,7 @@ def create_venv(LOG, env_cls, agent, mapname, role, opponent, wrappers, env_kwar
 
         LOG.debug("Env kwargs: %s" % kwargs)
         env = env_cls(**kwargs)
+
         for wrapper_cls in wrappers:
             env = wrapper_cls(env)
         return env
@@ -395,7 +396,7 @@ def find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict, group):
 
 
 def find_agents(LOG, WORKER_ID, N_WORKERS, statedict, group):
-    if os.getenv("NO_WANDB") == "true":
+    if os.getenv("NO_WANDB") in ["1", "true"]:
         return find_local_agents(LOG, WORKER_ID, N_WORKERS, statedict)
     else:
         return find_remote_agents(LOG, WORKER_ID, N_WORKERS, statedict, group)
@@ -565,6 +566,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                         env_cls = vcmi_gym.VcmiEnv_v3
                     case 4:
                         env_cls = vcmi_gym.VcmiEnv_v4
+                        wrappers += [vcmi_gym.LegacyObservationSpaceWrapper]
                     case _:
                         raise Exception("unsupported env version: %d" % env_version)
 
@@ -579,7 +581,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                 for k, v in flatten_dict(metadata, sep=".").items():
                     wandb_results[f"eval/metadata/{k}"] = v
 
-                layouts = [False, True] if os.getenv("EVALUATOR_SIEGE", None) == 1 else [False]
+                layouts = [False, True] if os.getenv("EVALUATOR_SIEGE") in ["1", "true"] else [False]
                 print("Siege: %s" % layouts)
                 env_opponents = os.getenv("EVALUATOR_OPPONENT", "both")
                 opponents = ["StupidAI", "BattleAI"] if env_opponents == "both" else [env_opponents]
@@ -673,7 +675,7 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     for i, p in enumerate(pools):
                         wandb_results[f"eval/pool/{p}/is_success"] = np.mean([r.pooldata[i] for r in results])
 
-                    if os.getenv("NO_WANDB") != "true":
+                    if os.getenv("NO_WANDB") not in ["1", "true"]:
                         with dblock(db, WORKER_ID):
                             with wandb_init(run) as irun:
                                 irun.log(copy.deepcopy(wandb_results))

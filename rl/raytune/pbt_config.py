@@ -26,7 +26,7 @@ config = {
         #       $ NO_WANDB=true NO_SAVE=true python -m rl.algos.mppo.mppo
         #
         # """
-        "population_size": 5,
+        "population_size": 3,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -35,7 +35,7 @@ config = {
         # Needs to be between 0 and 0.5.
         # Setting it to 0 essentially implies doing no exploitation at all.
         # """
-        "quantile_fraction": 0.25,
+        "quantile_fraction": 0.5,
 
         # """
         # Perturbations will then be made based on the values here
@@ -57,7 +57,12 @@ config = {
             "ent_coef": linlist(0, 0.1, n=11),
             "gamma": linlist(0.6, 0.999, n=13),
             "max_grad_norm": linlist(0.5, 10, n=11),
-            "num_steps": [256, 512, 1024, 2048],
+
+            # 1 env:
+            # "num_steps": [256, 512, 1024, 2048],
+
+            # 4 envs:
+            "num_steps": [64, 128, 256, 512],
 
             # PPO-vanilla specific
             "lr_schedule": {"start": explist(1e-5, 2e-4, n=20)},
@@ -113,21 +118,22 @@ config = {
     #   = ~30..60 min (Mac)
     # "vsteps_total": 150_000,
     # "seconds_total": 1800,
-    "seconds_total": 3600,
+    # "seconds_total": 3600,
+    "seconds_total": 3*3600,  # 8x30min = 4h... (BattleAI is 8x slower)
 
     # Initial checkpoint to start from
-    # "agent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
+    "agent_load_file": None,
     # "agent_load_file": "rl/models/model-PBT-mppo-defender-20240521_112358.79ad0_00000:v1/agent.pt",
-    "agent_load_file": "/Users/simo/Projects/vcmi-gym/rl/models/Defender model:v5/agent-migrated.pt",
+    # "agent_load_file": "data/PBT-layernorm-20241115_204726/0f21f_00004/checkpoint_000032/agent.pt",
 
     # "agent_load_file": None,
-    "tags": ["Map-pools", "StupidAI", "obstacles-random", "v4"],
+    "tags": ["BattleAI", "obstacles-random", "v4"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
         "gym/generated/4096/4096-mixstack-100K-01.vmap",
         # "gym/generated/4096/4x1024.vmap"
     ],
-    "opponent_sbm_probs": [1, 0, 0],
+    "opponent_sbm_probs": [0, 1, 0],
     "opponent_load_file": None,
     # "opponent_load_file": "rl/models/Attacker model:v9/jit-agent.pt",
     # "opponent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
@@ -180,6 +186,7 @@ config = {
         "features_extractor1_stacks": [
             # => (B, 20, S)
             {"t": "LazyLinear", "out_features": 8},
+            {"t": "LayerNorm", "normalized_shape": [20, 8]},
             {"t": "LeakyReLU"},
             # => (B, 20, 8)
 
@@ -192,6 +199,7 @@ config = {
         "features_extractor1_hexes": [
             # => (B, 165, H)
             {"t": "LazyLinear", "out_features": 8},
+            {"t": "LayerNorm", "normalized_shape": [165, 8]},
             {"t": "LeakyReLU"},
             # => (B, 165, 8)
 
@@ -229,6 +237,26 @@ config = {
     "permasave_every": 0,   # no effect (NO_SAVE=true)
     "max_saves": 3,         # no effect (NO_SAVE=true)
     "out_dir_template": "data/{group_id}/{run_id}",  # relative project root
+
+    # TEST: 5K timesteps total (1000 vsteps if num_envs=5, 5000 if num_envs=1)
+    # BattleAI:
+    #   59s thread  / AsyncVectorEnv(5)
+    #   69s proc    / AsyncVectorEnv(5, daemon=False)
+    #   126s thread / SyncVectorEnv(1)
+    #   201s proc   / SyncVectorEnv(5)
+    # StupidAI:
+    #   9s thread   / SyncVectorEnv(1)
+    #
+    # num_steps=1024, num_envs=1, opponent=StupidAI, conntype=thread
+    #   TRAIN TIME: 2.05
+    #   SAMPLE TIME: 2.46
+    #
+    # num_steps=256, num_envs=4, opponent=BattleAI, conntype=thread
+    #   SAMPLE TIME: 12..16  (~7x slower)
+    #   TRAIN TIME: 2.16
+
+
+    "num_envs": 4,
     "env": {
         "reward_dmg_factor": 5,
         "step_reward_fixed": 0,
@@ -254,8 +282,10 @@ config = {
         "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 3,
-    "env_wrappers": [],
+    "env_version": 4,
+    "env_wrappers": [
+        dict(module="vcmi_gym", cls="LegacyObservationSpaceWrapper")
+    ],
     # Wandb already initialized when algo is invoked
     # "run_id": None
     # "group_id": None

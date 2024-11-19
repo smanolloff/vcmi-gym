@@ -21,6 +21,7 @@ from typing import Optional
 from ..util import log
 from .analyzer import Analyzer, ActionType
 from .decoder.decoder import Decoder
+from .decoder.other import HexAction
 
 from .pyprocconnector import (
     PyProcConnector,
@@ -545,25 +546,40 @@ class VcmiEnv(gym.Env):
         self._reset_vars(self.connector.reset())
 
     @tracelog
-    def step(self, action):
+    def step(self, action, fallback=False):
+        # print(".", end="", flush=True)
         if (self.terminated or self.truncated) and action != -1:
             raise Exception("Reset needed")
 
         # Prevent VCMI exceptions (mid-battle retreats are not handled)
         if action == 0 and not self.allow_retreat:
-            raise Exception("Retreat is not allowed")
+            if self.allow_invalid_actions:
+                self.logger.warn("Attempted a retreat action (action=%d), but retreat is not allowed" % action)
+                defend = self._compute_defend_action(self.result.state)
+                self.logger.warn("Falling to defend action=%d)" % defend)
+                return self.step(defend, fallback=True)
+            else:
+                self.logger.error("Attempted a retreat action (action=%d), but retreat is not allowed" % action)
 
         res = self.connector.step(action)
 
         if action in [-1, 0]:
             self._reset_vars(res)
 
-        if res.errcode > 0 and not self.allow_invalid_actions:
-            self.logger.warn("Attempted an invalid action (errcode=%d)" % res.errcode)
+        if res.errcode > 0:
+            if self.allow_invalid_actions:
+                self.logger.warn("Attempted an invalid action (action=%d, errcode=%d)" % (action, res.errcode))
+                assert not fallback, "action=%d is a fallback action, but is also invalid (errcode=%d)" % (action, res.errcode)
+                defend = self._compute_defend_action(res.state)
+                self.logger.warn("Falling back to defend action=%d" % defend)
+                return self.step(defend, fallback=True)
+            else:
+                self.logger.error("Attempted an invalid action (action=%d, errcode=%d)" % (action, res.errcode))
+                import ipdb, os; ipdb.set_trace() if os.getenv("DEBUG") else ...  # noqa
 
         analysis = self.analyzer.analyze(action, res)
         term = res.is_battle_over
-        rew, rew_unclipped = self.calc_reward(analysis, res)
+        rew, rew_unclipped = self.calc_reward(analysis, res, fallback)
 
         res.actmask[0] = False  # prevent retreats for now
         obs = {"observation": res.state, "action_mask": res.actmask}
@@ -639,7 +655,7 @@ class VcmiEnv(gym.Env):
 
     @staticmethod
     def decode_obs(obs):
-        return Decoder.decode(obs["observation"])
+        return Decoder.decode(obs)
 
     #
     # private
@@ -716,7 +732,7 @@ class VcmiEnv(gym.Env):
         # Return regular dict (wrappers insert arbitary keys)
         return dict(info)
 
-    def calc_reward(self, analysis, res):
+    def calc_reward(self, analysis, res, fallback=False):
         if res.errcode > 0:
             return -100, -100
 
@@ -733,7 +749,7 @@ class VcmiEnv(gym.Env):
             vdiff = -vdiff if res.side == 1 else vdiff
             rew += (self.term_reward_mult * vdiff)
 
-        rew += self._step_reward_calc
+        rew += (self._step_reward_calc * (3 + int(fallback)))
 
         # Visualize on https://www.desmos.com/calculator
         # In expression 1 type: s = 5000
@@ -748,3 +764,18 @@ class VcmiEnv(gym.Env):
         clipped *= self.reward_scaling_factor
 
         return clipped, rew
+
+    def _compute_defend_action(self, state):
+        bf = self.decode_obs(state)
+        astack = None
+        for stack in bf.stacks:
+            if stack.QUEUE_POS == 0:
+                astack = stack
+                break
+
+        if not astack:
+            raise Exception("Could not find active stack")
+
+        # Moving to self results in a defend action
+        h = bf.get_hex(astack.Y_COORD, astack.X_COORD)
+        return h.action(HexAction.MOVE)

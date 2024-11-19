@@ -41,27 +41,10 @@ def load():
 
     eval_opponent = "BattleAI"
     eval_env_runners = 2
-    eval_episodes = 100
+    eval_episodes = 10
 
     # XXX: this dict must match the AlgorithmConfig variables structure...
     hyperparam_mutations = {
-        "entropy_coeff": util.linlist(0, 0.1, n=11),
-        "clip_param": util.linlist(0.1, 0.7, n=7),
-        "gamma": util.linlist(0.6, 0.999, n=13),
-        "grad_clip": util.linlist(0.5, 10, n=11),
-        # "train_batch_size_per_learner": [500, 1000, 2000, 4000],
-        "use_kl_loss": [0, 1],
-        "kl_coeff": util.linlist(0.01, 0.5, n=9),
-        "kl_target": util.explist(0.001, 0.1, n=9),
-        "lr": util.explist(1e-5, 2e-4, n=20),
-        "lambda_": util.linlist(0.5, 0.99, n=20),
-        "minibatch_size": [32, 64, 128],
-        "num_epochs": util.linlist(1, 20, n=10, dtype=int),
-        "vf_loss_coeff": util.linlist(0.1, 2, n=9),
-        "vf_clip_param": util.linlist(0.1, 100, n=19),
-        # "env_config": {  # affects training env only
-        #     "term_reward_mult": [0, 5]
-        # }
     }
 
     calculated_train_sample_timeout = util.calc_train_sample_timeout_s(
@@ -105,7 +88,8 @@ def load():
                 "eval_cpu": 0,
             },
             "num_env_runners": train_env_runners,
-            "sample_timeout_s": calculated_train_sample_timeout
+            "sample_timeout_s": calculated_train_sample_timeout,
+            "rollout_fragment_length": 100,
         },
 
         # EVAL runners
@@ -125,7 +109,8 @@ def load():
             },
             "evaluation_num_env_runners": eval_env_runners,
             "evaluation_duration": eval_episodes,
-            "evaluation_sample_timeout_s": calculated_eval_sample_timeout
+            "evaluation_sample_timeout_s": calculated_eval_sample_timeout,
+            "evaluation_interval": 100,
         },
 
         rl_module={
@@ -136,53 +121,54 @@ def load():
                     "stacks": env_cls.STATE_SIZE_STACKS,
                     "hexes": env_cls.STATE_SIZE_HEXES,
                 },
-                "vf_share_layers": False,
                 "network": {
                     "attention": None,
                     "features_extractor1_misc": [
-                        {"t": "LazyLinear", "out_features": 4},
-                        {"t": "LeakyReLU"},
+                        {"t": "Dense", "units": 4},
+                        {"t": "ReLU", "negative_slope": 0.01},
                     ],
                     "features_extractor1_stacks": [
-                        {"t": "LazyLinear", "out_features": 8},
-                        {"t": "LeakyReLU"},
+                        {"t": "Dense", "units": 8},
+                        {"t": "ReLU", "negative_slope": 0.01},
                         {"t": "Flatten"},
                     ],
                     "features_extractor1_hexes": [
-                        {"t": "LazyLinear", "out_features": 8},
-                        {"t": "LeakyReLU"},
+                        {"t": "Dense", "units": 8},
+                        {"t": "ReLU", "negative_slope": 0.01},
                         {"t": "Flatten"},
                     ],
                     "features_extractor2": [
-                        {"t": "Linear", "in_features": 1484, "out_features": 512},
-                        {"t": "LeakyReLU"},
+                        {"t": "Dense", "input_shape": [1484], "units": 512},
+                        {"t": "ReLU", "negative_slope": 0.01},
                     ],
-                    "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},
-                    "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
+                    "actor": {"t": "Dense", "input_shape": [512], "units": 2312},
+                    "critic": {"t": "Dense", "input_shape": [512], "units": 1}
                 }
             }
         },
 
         # Fixed values to use in case a hyperparam is not mutable
         training={
-            "clip_param": 0.3,
-            "entropy_coeff": 0.0,
-            "gamma": 0.8,
-            "grad_clip": 5,
-            "grad_clip_by": "global_norm",  # global_norm = nn.utils.clip_grad_norm_(model.parameters)
-            "kl_coeff": 0.2,
-            "kl_target": 0.01,
-            "lambda_": 1.0,
-            "lr": 0.001,
-            "minibatch_size": 20,
-            "num_epochs": 1,
-            "train_batch_size_per_learner": 500,
-            "shuffle_batch_per_epoch": True,
-            "use_critic": True,
-            "use_gae": True,
-            "use_kl_loss": True,
-            "vf_clip_param": 10.0,
-            "vf_loss_coeff": 1.0,
+            "model_size": "XS",
+            "training_ratio": 32,
+            "gc_frequency_train_steps": 100,
+            "batch_size_B": 4,
+            "batch_length_T": 8,
+            "horizon_H": 15,
+            "gae_lambda": 0.95,
+            "entropy_scale": 3e-4,
+            "return_normalization_decay": 0.99,
+            "train_critic": True,
+            "train_actor": True,
+            "intrinsic_rewards_scale": 0.1,
+            "world_model_lr": 1e-4,
+            "actor_lr": 3e-5,
+            "critic_lr": 3e-5,
+            "world_model_grad_clip_by_global_norm": 1000.0,
+            "critic_grad_clip_by_global_norm": 100.0,
+            "actor_grad_clip_by_global_norm": 100.0,
+            "symlog_obs": True,
+            "use_float16": False,
         },
 
         user={

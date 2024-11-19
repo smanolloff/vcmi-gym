@@ -80,6 +80,10 @@ class Trainable(ray.tune.Trainable):
         self.cfg["wandb_project"] = initargs["_raytune"]["wandb_project"]  # needed by algo
         del self.cfg["_raytune"]  # rejected by algo
 
+        # Ray 2.38 seems to exclude empty dict args when calling setup?
+        if "logparams" not in self.cfg:
+            self.cfg["logparams"] = {}
+
         # Define param name mapping for algo's wandb logging
         for k in common.flattened_dict_keys(cfg, "."):
             assert "/" not in k

@@ -15,9 +15,7 @@
 # =============================================================================
 
 import torch
-import threading
 import glob
-import concurrent
 import gymnasium as gym
 import os
 import time
@@ -26,6 +24,7 @@ import importlib
 import pathlib
 import numpy as np
 import yaml
+from functools import partial
 
 import dataclasses
 from torch.distributions.categorical import Categorical
@@ -99,66 +98,62 @@ class SerializableCategoricalMasked:
         return torch.nn.functional.softmax(self.logits, dim=-1)
 
 
-def create_venv(env_cls, args, seed):
+def create_venv(env_cls, args, seeds):
     assert args.mapside in ["attacker", "defender"]
 
-    num_envs = len(args.envmaps)
-    all_maps = args.envmaps
-    version = args.env_version
+    # assert args.env.conntype == "proc" or args.num_envs == 1, (
+    #     f"conntype='thread' not possible with args.num_envs={args.num_envs}"
+    # )
 
-    state = {"n": 0}
-    lock = threading.RLock()
+    assert args.num_envs == len(seeds)
 
-    sbm = ["MMAI_SCRIPT_SUMMONER", "BattleAI", "MMAI_MODEL"]
-    sbm_probs = torch.tensor(args.opponent_sbm_probs, dtype=torch.float)
-
-    assert len(sbm_probs) == 3
-    if sbm_probs[2] > 0:
+    assert len(args.opponent_sbm_probs) == 3
+    if args.opponent_sbm_probs[2]:
         assert os.path.isfile(args.opponent_load_file)
 
-    dist = Categorical(sbm_probs)
+    def env_creator(i):
+        print("********ENV CREARTOR i=%d (PID=%d)" % (i, os.getpid()))
+        sbm = ["MMAI_SCRIPT_SUMMONER", "BattleAI", "MMAI_MODEL"]
+        sbm_probs = torch.tensor(args.opponent_sbm_probs, dtype=torch.float)
 
-    def env_creator():
+        dist = Categorical(sbm_probs)
         opponent = sbm[dist.sample()]
-        with lock:
-            assert state["n"] < len(all_maps)
-            mapname = all_maps[state["n"]]
+        mapname = args.envmaps[i % len(args.envmaps)]
 
-            if opponent == "MMAI_MODEL":
-                assert args.opponent_load_file, "opponent_load_file is required for MMAI_MODEL"
+        if opponent == "MMAI_MODEL":
+            assert args.opponent_load_file, "opponent_load_file is required for MMAI_MODEL"
 
+        env_kwargs = dict(
+            dataclasses.asdict(args.env),
+            seed=np.random.randint(2**31),
+            mapname=mapname,
+        )
+
+        if args.env_version == 4:
             env_kwargs = dict(
-                dataclasses.asdict(args.env),
-                seed=seed,
-                mapname=mapname,
+                env_kwargs,
+                role=args.mapside,
+                opponent=opponent,
+                opponent_model=args.opponent_load_file,
             )
+        elif args.env_version == 3:
+            env_kwargs = dict(
+                env_kwargs,
+                attacker=opponent,
+                defender=opponent,
+                attacker_model=args.opponent_load_file,
+                defender_model=args.opponent_load_file,
+            )
+            env_kwargs[args.mapside] = "MMAI_USER"
+            env_kwargs.pop("conntype", None)
+            env_kwargs.pop("reward_dynamic_scaling", None)
+        else:
+            raise Exception("Unexpected env version: %s" % args.env_version)
 
-            if version == 4:
-                env_kwargs = dict(
-                    env_kwargs,
-                    role=args.mapside,
-                    opponent=opponent,
-                    opponent_model=args.opponent_load_file,
-                )
-            elif version == 3:
-                env_kwargs = dict(
-                    env_kwargs,
-                    attacker=opponent,
-                    defender=opponent,
-                    attacker_model=args.opponent_load_file,
-                    defender_model=args.opponent_load_file,
-                )
-                env_kwargs[args.mapside] = "MMAI_USER"
-                env_kwargs.pop("conntype", None)
-                env_kwargs.pop("reward_dynamic_scaling", None)
-            else:
-                raise Exception("Unexpected env version: %s" % version)
+        for a in env_kwargs.pop("deprecated_args", ["encoding_type"]):
+            env_kwargs.pop(a, None)
 
-            for a in env_kwargs.pop("deprecated_args", ["encoding_type"]):
-                env_kwargs.pop(a, None)
-
-            print("Env kwargs (env.%d): %s" % (state["n"], env_kwargs))
-            state["n"] += 1
+        print("Env kwargs (env.%d): %s" % (i, env_kwargs))
 
         res = env_cls(**env_kwargs)
 
@@ -169,16 +164,12 @@ def create_venv(env_cls, args, seed):
 
         return res
 
-    if len(all_maps) > 1:
-        # I don't remember anymore, but there were issues if max_workers>8
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(num_envs, 8)) as executor:
-            futures = [executor.submit(env_creator) for _ in range(num_envs)]
-            results = [future.result() for future in futures]
+    funcs = [partial(env_creator, i) for i in range(args.num_envs)]
 
-        funcs = [lambda x=x: x for x in results]
-        vec_env = gym.vector.SyncVectorEnv(funcs)
+    if args.num_envs > 1:
+        vec_env = gym.vector.AsyncVectorEnv(funcs)
     else:
-        vec_env = gym.vector.SyncVectorEnv([env_creator])
+        vec_env = gym.vector.SyncVectorEnv(funcs)
 
     vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env, deque_size=args.stats_buffer_size)
 

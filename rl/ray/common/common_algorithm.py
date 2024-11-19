@@ -22,19 +22,27 @@ class EnvRunnerKeepalive:
         self.runner_group = runner_group
         self.interval = interval
         self.logger = logger
+        self.event = threading.Event()
+        self.thread = threading.Thread(target=self._loop, daemon=True)
 
-    def __enter__(self):
         if not self.runner_group:
             return
 
         self.logger.info("Starting env runner keepalive loop")
-        self.event = threading.Event()
-        self.thread = threading.Thread(target=self._loop, daemon=True)
         # self.thread = threading.Thread(target=self._debug_loop, daemon=True)
         self.thread.start()
 
+    def __del__(self):
+        self.stop()
+
+    def __enter__(self):
+        pass
+
     def __exit__(self, exc_type, exc_value, traceback):
-        if not self.runner_group:
+        self.stop()
+
+    def stop(self):
+        if not self.runner_group or not self.thread.is_alive():
             return
 
         self.logger.info("Stopping env runner keepalive loop...")
@@ -101,6 +109,7 @@ def wandb_init(algo):
         # For wandb.log, commit=True by default
         # for wandb_log, commit=False by default
         def wandb_log(*args, **kwargs):
+            algo.logger.debug("wandb log: %s %s" % (args, kwargs))
             wandb.log(*args, **dict({"commit": False}, **kwargs))
     else:
         def wandb_log(*args, **kwargs):
@@ -166,12 +175,14 @@ def wandb_log_git_diff(algo):
         # art.wait()
 
 
-def save_checkpoint(algo, checkpoint_dir):
+def save_checkpoint(algo, checkpoint_dir, jsave=True):
     learner = algo.learner_group.get_checkpointable_components()[0][1]
 
     rl_module = learner.module[DEFAULT_MODULE_ID]
-    model_file = os.path.join(checkpoint_dir, "jit-model.pt")
-    rl_module.jsave(model_file)
+
+    if jsave:
+        model_file = os.path.join(checkpoint_dir, "jit-model.pt")
+        rl_module.jsave(model_file)
 
     config_file = os.path.join(checkpoint_dir, "algo_config.json")
 

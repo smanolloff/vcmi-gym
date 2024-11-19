@@ -1,0 +1,78 @@
+{
+    "actual_training_ratio": "Stats(1.0; len=1; reduce=mean; win=1)",
+    "env_runners": {
+        "num_agent_steps_sampled": {
+            "default_agent": "Stats(32; len=1; reduce=sum)"
+        },
+        "num_agent_steps_sampled_lifetime": {
+            "default_agent": "Stats(993; len=1; reduce=sum)"
+        },
+        "num_env_steps_sampled": "Stats(32; len=1; reduce=sum)",
+        "num_env_steps_sampled_lifetime": "Stats(993; len=1; reduce=sum)",
+        "num_episodes": "Stats(0; len=1; reduce=sum)",
+        "num_module_steps_sampled": {
+            "default_policy": "Stats(32; len=1; reduce=sum)"
+        },
+        "num_module_steps_sampled_lifetime": {
+            "default_policy": "Stats(993; len=1; reduce=sum)"
+        }
+    },
+    "learners": {
+        "__all_modules__": {
+            "num_env_steps_trained": "Stats(4; len=1; reduce=sum)",
+            "num_module_steps_trained": "Stats(4; len=1; reduce=sum)"
+        },
+        "default_policy": {
+            "ACTOR_L_neg_entropy_term": "Stats(-0.0023136695381253958; len=1; reduce=mean; win=1)",
+            "ACTOR_L_neglogp_reinforce_term": "Stats(-2.8281774520874023; len=1; reduce=mean; win=1)",
+            "ACTOR_L_total": "Stats(-0.8813993334770203; len=1; reduce=mean; win=1)",
+            "ACTOR_action_entropy": "Stats(7.712231636047363; len=1; reduce=mean; win=1)",
+            "ACTOR_gradients_global_norm": "Stats(0.0; len=1; reduce=mean; win=1)",
+            "ACTOR_gradients_maxabs_after_clipping": "Stats(-inf; len=1; reduce=mean; win=1)",
+            "ACTOR_value_targets_pct5_ema": "Stats(-1.0614423899824033e-06; len=1; reduce=mean; win=1)",
+            "ACTOR_value_targets_pct95_ema": "Stats(-1.1920928955078125e-07; len=1; reduce=mean; win=1)",
+            "CRITIC_L_neg_logp_of_value_targets": "Stats(5.541261196136475; len=1; reduce=mean; win=1)",
+            "CRITIC_L_slow_critic_regularization": "Stats(5.541261196136475; len=1; reduce=mean; win=1)",
+            "CRITIC_L_total": "Stats(3.567382335662842; len=1; reduce=mean; win=1)",
+            "CRITIC_gradients_global_norm": "Stats(0.0; len=1; reduce=mean; win=1)",
+            "CRITIC_gradients_maxabs_after_clipping": "Stats(-inf; len=1; reduce=mean; win=1)",
+            "VALUE_TARGETS_H_BxT": "Stats(-4.6445072143797006e-07; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_L_continue": "Stats(0.560418963432312; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_L_decoder": "Stats(695.7745971679688; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_L_dynamics": "Stats(4.1130523681640625; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_L_prediction": "Stats(701.8762817382812; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_L_representation": "Stats(4.1130523681640625; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_L_reward": "Stats(5.541263580322266; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_L_total": "Stats(704.3441162109375; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_gradients_global_norm": "Stats(274.9804382324219; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_gradients_maxabs_after_clipping": "Stats(8.162605285644531; len=1; reduce=mean; win=1)",
+            "WORLD_MODEL_learned_initial_h": "Stats(1.4062386071600486e-05; len=1; reduce=mean; win=1)",
+            "actor_learning_rate": "Stats(2.9999999242136255e-05; len=1; reduce=mean; win=1)",
+            "critic_learning_rate": "Stats(2.9999999242136255e-05; len=1; reduce=mean; win=1)",
+            "module_train_batch_size_mean": "Stats(4; len=1; reduce=mean; ema=0.01)",
+            "num_module_steps_trained": "Stats(4; len=1; reduce=sum)",
+            "total_loss": "Stats(707.0300903320312; len=1; reduce=mean; win=1)",
+            "world_model_learning_rate": "Stats(9.999999747378752e-05; len=1; reduce=mean; win=1)"
+        }
+    },
+    "num_agent_steps_sampled_lifetime": {
+        "default_agent": "Stats(32; len=1; reduce=sum)"
+    },
+    "num_env_steps_sampled_lifetime": "Stats(32; len=1; reduce=sum)",
+    "num_env_steps_trained_lifetime": "Stats(32; len=1; reduce=sum)",
+    "num_episodes_lifetime": "Stats(0; len=1; reduce=sum)",
+    "num_grad_updates_lifetime": "Stats(1; len=1; reduce=sum)",
+    "replay_buffer": {
+        "added_steps": "Stats(32.0; len=1; reduce=mean; win=1)",
+        "capacity": "Stats(100000.0; len=1; reduce=mean; win=1)",
+        "replayed_steps": "Stats(0.0; len=1; reduce=mean; win=1)",
+        "size_num_episodes": "Stats(1.0; len=1; reduce=mean; win=1)",
+        "size_timesteps": "Stats(32.0; len=1; reduce=mean; win=1)"
+    },
+    "timers": {
+        "garbage_collection": "Stats(0.21048591658473015; len=1; reduce=mean; ema=0.01)",
+        "learn": "Stats(1.3563205003738403; len=1; reduce=mean; ema=0.01)",
+        "sample": "Stats(0.4806389566510916; len=1; reduce=mean; ema=0.01)",
+        "synch_weights": "Stats(1.7508864402770996e-06; len=1; reduce=mean; ema=0.01)"
+    }
+}
