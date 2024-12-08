@@ -521,7 +521,8 @@ class Agent(nn.Module):
         jagent.features_extractor2 = clean_agent.NN.features_extractor2
 
         # common
-        jagent.actor = clean_agent.NN.actor
+        jagent.actor_head1 = clean_agent.NN.actor_head1
+        jagent.actor_head2 = clean_agent.NN.actor_head2
         jagent.critic = clean_agent.NN.critic
         torch.jit.save(torch.jit.script(jagent), jagent_file)
 
@@ -555,33 +556,49 @@ class JitAgent(nn.Module):
         self.features_extractor1_stacks = nn.Identity()
         self.features_extractor1_hexes = nn.Identity()
         self.features_extractor2 = nn.Identity()
-        self.actor = nn.Identity()
-        self.critic = nn.Identity()
+        self.actor_head1 = nn.Identity()
+        self.actor_head2 = nn.Identity()
         self.env_version = 0
 
     # Inference (deterministic)
     # XXX: attention is not handled here
     @torch.jit.export
-    def predict(self, obs, mask) -> int:
+    def predict(self, obs, mask1, mask2, deterministic: bool = False) -> int:
         with torch.no_grad():
             b_obs = obs.unsqueeze(dim=0)
-            b_mask = mask.unsqueeze(dim=0)
+            b_mask1 = mask1.unsqueeze(dim=0)
+            b_mask2 = mask2.unsqueeze(dim=0)
+            b_misc, b_stacks, b_hexes = self.obs_splitter(b_obs)
+            b_fmisc = self.features_extractor1_misc(b_misc)
+            b_fstacks = self.features_extractor1_stacks(b_stacks)
+            b_fhexes = self.features_extractor1_hexes(b_hexes)
+            b_fcat = torch.cat((b_fmisc, b_fstacks, b_fhexes), dim=1)
+            b_features = self.features_extractor2(b_fcat)
 
-            # v2-
-            # features = self.features_extractor(b_obs)
+            b_head1_in = b_features
+            b_head1_out = self.actor_head1(b_head1_in)
+            b_head1_probs = self.categorical_masked(logits0=b_head1_out, mask=b_mask1)
 
-            # v3+
-            misc, stacks, hexes = self.obs_splitter(b_obs)
-            fmisc = self.features_extractor1_misc(misc)
-            fstacks = self.features_extractor1_stacks(stacks)
-            fhexes = self.features_extractor1_hexes(hexes)
-            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
-            features = self.features_extractor2(fcat)
+            if deterministic:
+                b_action1 = torch.argmax(b_head1_probs, dim=1)
+            else:
+                b_action1 = self.sample(b_head1_probs, b_head1_out)
 
-            action_logits = self.actor(features)
-            dist = common.SerializableCategoricalMasked(logits=action_logits, mask=b_mask)
-            action = torch.argmax(dist.probs, dim=1)
-            return action.int().item()
+            b_head2_in = torch.cat((b_features, b_action1.unsqueeze(-1)), dim=1)
+            b_head2_out = self.actor_head2(b_head2_in)
+            b_head2_mask = b_mask2[torch.arange(1), b_action1]
+            b_head2_probs = self.categorical_masked(logits0=b_head1_out, mask=b_mask1)
+
+            if deterministic:
+                b_action2 = torch.argmax(b_head2_probs, dim=2)
+            else:
+                b_action2 = self.sample(b_head2_probs, b_head2_out)
+
+            b_results_to_keep = b_head2_mask.any(dim=1)
+            b_action2 = b_action2.where(b_results_to_keep, 0)
+            action_int = (b_action2.int().item() << 8) | b_action1.int().item()
+
+            return action_int
 
     @torch.jit.export
     def get_value(self, obs) -> float:
@@ -595,6 +612,26 @@ class JitAgent(nn.Module):
             features = self.features_extractor2(fcat)
             value = self.critic(features)
             return value.float().item()
+
+    # Implement SerializableCategoricalMasked as a function
+    # (lite interpreted does not support instantiating the class)
+    @torch.jit.export
+    def categorical_masked(self, logits0: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits0.dtype)
+
+        # logits
+        logits1 = torch.where(mask, logits0, mask_value)
+        logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        return probs
+
+    @torch.jit.export
+    def sample(self, probs: torch.Tensor, action_logits: torch.Tensor) -> torch.Tensor:
+        num_events = action_logits.size()[-1]
+        probs_2d = probs.reshape(-1, num_events)
+        samples_2d = torch.multinomial(probs_2d, 1, True).T
+        batch_shape = action_logits.size()[:-1]
+        return samples_2d.reshape(batch_shape)
 
     @torch.jit.export
     def get_version(self) -> int:
