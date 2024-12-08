@@ -24,14 +24,11 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
 
-import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
 
-# import tyro
 import warnings
-import enum
 
 from .. import common
 
@@ -1129,8 +1126,8 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="simotest.pt",
-        agent_load_file=None,
+        # agent_load_file="/Users/simo/Projects/vcmi-gym/data/mppo-test/mppo-test/agent-1733620580.pt",
+        # agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
         rollouts_per_mapchange=0,
@@ -1140,7 +1137,7 @@ def debug_args():
         ep_rew_mean_target=None,
         quit_on_target=False,
         mapside="defender",
-        save_every=2000000000,  # greater than time.time()
+        save_every=10,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=1,
         out_dir_template="data/mppo-test/mppo-test",

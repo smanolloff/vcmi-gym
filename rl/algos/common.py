@@ -112,7 +112,6 @@ def create_venv(env_cls, args, seeds):
         assert os.path.isfile(args.opponent_load_file)
 
     def env_creator(i):
-        print("********ENV CREARTOR i=%d (PID=%d)" % (i, os.getpid()))
         sbm = ["MMAI_SCRIPT_SUMMONER", "BattleAI", "MMAI_MODEL"]
         sbm_probs = torch.tensor(args.opponent_sbm_probs, dtype=torch.float)
 

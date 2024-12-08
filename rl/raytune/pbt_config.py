@@ -26,7 +26,7 @@ config = {
         #       $ NO_WANDB=true NO_SAVE=true python -m rl.algos.mppo.mppo
         #
         # """
-        "population_size": 3,
+        "population_size": 5,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -70,7 +70,7 @@ config = {
             "num_minibatches": [2, 4, 8],
             "update_epochs": linlist(1, 10, n=5, dtype=int),
             "vf_coef": linlist(0.1, 2, n=9),
-            # "clip_vloss": [1, 0],  # not used in ppo-dna
+            "clip_vloss": [1, 0],  # not used in ppo-dna
             "clip_coef": linlist(0.1, 0.8, n=8),
             "norm_adv": [1, 0],
 
@@ -88,18 +88,19 @@ config = {
         #       the interruption, but the first trial to finish will get
         #       a set of "initial" values for its next iteration.
         #
-        "initial_hyperparams": {
-            "lr_schedule": {"mode": "const", "start": 0.00001},
-            "ent_coef": 0.005,
-            "gae_lambda": 0.99,
-            "gamma": 0.96575,
-            "max_grad_norm": 0.5,
-            "num_minibatches": 2,
-            "num_steps": 512,
-            "update_epochs": 2,
-            "vf_coef": 1.05,
-            "norm_adv": 0
-        },
+        "initial_hyperparams": {},
+        # "initial_hyperparams": {
+        #     "lr_schedule": {"mode": "const", "start": 0.00001},
+        #     "ent_coef": 0.005,
+        #     "gae_lambda": 0.99,
+        #     "gamma": 0.96575,
+        #     "max_grad_norm": 0.5,
+        #     "num_minibatches": 2,
+        #     "num_steps": 512,
+        #     "update_epochs": 2,
+        #     "vf_coef": 1.05,
+        #     "norm_adv": 0
+        # },
 
         "resumes": [],  # trial_id will be appended here when resuming (trial_id != run_id)
         "resumed_run_id": None,  # will be set to the *original* run_id to resume
@@ -117,9 +118,9 @@ config = {
     #   = 6K episodes (good for 1K avg metric)
     #   = ~30..60 min (Mac)
     # "vsteps_total": 150_000,
-    # "seconds_total": 1800,
+    "seconds_total": 1800,
     # "seconds_total": 3600,
-    "seconds_total": 10*3600,  # 8x30min = 4h... (BattleAI is 8x slower)
+    # "seconds_total": 10*3600,  # 8x30min = 4h... (BattleAI is 8x slower)
 
     # Initial checkpoint to start from
     "agent_load_file": None,
@@ -133,7 +134,7 @@ config = {
         "gym/generated/4096/4096-mixstack-100K-01.vmap",
         # "gym/generated/4096/4x1024.vmap"
     ],
-    "opponent_sbm_probs": [0, 1, 0],
+    "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
     # "opponent_load_file": "rl/models/Attacker model:v9/jit-agent.pt",
     # "opponent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
@@ -214,7 +215,8 @@ config = {
             {"t": "Linear", "in_features": 1484, "out_features": 512},
             {"t": "LeakyReLU"},
         ],
-        "actor": {"t": "Linear", "in_features": 512, "out_features": 2312},
+        "actor_head1": {"t": "Linear", "in_features": 512, "out_features": 13},
+        "actor_head2": {"t": "Linear", "in_features": 513, "out_features": 165},
         "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
     },
 
@@ -256,7 +258,7 @@ config = {
     #   TRAIN TIME: 2.16
 
 
-    "num_envs": 4,
+    "num_envs": 1,
     "env": {
         "reward_dmg_factor": 5,
         "step_reward_fixed": 0,
@@ -282,10 +284,8 @@ config = {
         "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 4,
-    "env_wrappers": [
-        dict(module="vcmi_gym", cls="LegacyObservationSpaceWrapper")
-    ],
+    "env_version": 5,
+    "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None
     # "group_id": None
