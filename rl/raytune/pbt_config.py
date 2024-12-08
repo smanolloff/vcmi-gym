@@ -119,7 +119,7 @@ config = {
     # "vsteps_total": 150_000,
     # "seconds_total": 1800,
     # "seconds_total": 3600,
-    "seconds_total": 3*3600,  # 8x30min = 4h... (BattleAI is 8x slower)
+    "seconds_total": 10*3600,  # 8x30min = 4h... (BattleAI is 8x slower)
 
     # Initial checkpoint to start from
     "agent_load_file": None,

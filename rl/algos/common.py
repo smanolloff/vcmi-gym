@@ -129,7 +129,7 @@ def create_venv(env_cls, args, seeds):
             mapname=mapname,
         )
 
-        if args.env_version == 4:
+        if args.env_version >= 4:
             env_kwargs = dict(
                 env_kwargs,
                 role=args.mapside,

@@ -15,32 +15,18 @@
 # =============================================================================
 
 import gymnasium
-from .envs.v1.vcmi_env import VcmiEnv as VcmiEnv_v1, InfoDict
-from .envs.v1.decoder.other import (
-    HexAction,
-    HexState,
-    MeleeDistance,
-    ShootDistance,
-    DmgMod,
-    Side,
-)
-
+from .envs.v1.vcmi_env import VcmiEnv as VcmiEnv_v1
 from .envs.v2.vcmi_env import VcmiEnv as VcmiEnv_v2
 from .envs.v3.vcmi_env import VcmiEnv as VcmiEnv_v3
 from .envs.v4.vcmi_env import VcmiEnv as VcmiEnv_v4
+from .envs.v5.vcmi_env import VcmiEnv as VcmiEnv_v5
 
 from .envs.util.dual_env import DualEnvController, DualEnvClient
-from .envs.util.wrappers import (
-    LegacyActionSpaceWrapper,
-    LegacyObservationSpaceWrapper,
-)
-
-from .tools.test_helper import TestHelper
 
 
 def register_envs():
     common_opts = dict(disable_env_checker=True, order_enforce=False)
-    for v in [1, 2, 3, 4]:
+    for v in [1, 2, 3, 4, 5]:
         env_id = f"VCMI-v{v}"
         entry_point = f"vcmi_gym:VcmiEnv_v{v}"
         if env_id not in gymnasium.envs.registration.registry:
@@ -53,16 +39,7 @@ all = [
     VcmiEnv_v2,
     VcmiEnv_v3,
     VcmiEnv_v4,
+    VcmiEnv_v5,
     DualEnvController,
     DualEnvClient,
-    HexAction,
-    HexState,
-    MeleeDistance,
-    ShootDistance,
-    DmgMod,
-    Side,
-    InfoDict,
-    TestHelper,
-    LegacyActionSpaceWrapper,
-    LegacyObservationSpaceWrapper,
 ]
