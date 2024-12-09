@@ -73,7 +73,7 @@ class VcmiEnv(gym.Env):
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
     ROLES = ["attacker", "defender"]
-    OPPONENTS = ["StupidAI", "BattleAI", "MMAI_SCRIPT_SUMMONER", "MMAI_MODEL", "OTHER_ENV"]
+    OPPONENTS = ["StupidAI", "BattleAI", "MMAI_SCRIPT_SUMMONER", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
 
     ACTION_SPACE = gym.spaces.Dict({
         "action_1": gym.spaces.Discrete(N_PRIMARY_ACTIONS),
@@ -242,7 +242,8 @@ class VcmiEnv(gym.Env):
         # print("Observation space: %s" % self.observation_space)
 
         # required to init vars
-        self._reset_vars(self.connector.reset())
+        # self._reset_vars(self.connector.reset())
+        self.reset()
 
     @tracelog
     def step(self, action_dict, fallback=False):
@@ -257,7 +258,7 @@ class VcmiEnv(gym.Env):
         if a1 == 0 and not self.allow_retreat:
             if self.allow_invalid_actions:
                 self.logger.warn("Attempted a retreat action %s, but retreat is not allowed" % action_dict)
-                fba = self._defend_action(self.result.state)
+                fba = self.defend_action()
                 self.logger.warn("Falling back to action %s" % fba)
                 return self.step(fba, fallback=True)
             else:
@@ -274,7 +275,7 @@ class VcmiEnv(gym.Env):
             if self.allow_invalid_actions:
                 self.logger.warn("Attempted an invalid action %s: errcode=%d" % (action_dict, res.errcode))
                 assert not fallback, "action %s is a fallback action, but is also invalid: errcode=%d" % (action_dict, res.errcode)
-                fba = self._defend_action(self.result.state)
+                fba = self.defend_action()
                 self.logger.warn("Falling back to action: %s" % fba)
                 return self.step(fba, fallback=True)
             else:
@@ -290,7 +291,7 @@ class VcmiEnv(gym.Env):
 
         trunc = self.actions_total >= self.max_steps
 
-        self._update_vars_after_step(res, rew, rew_unclipped, term, trunc)
+        self._update_vars_after_step(obs, res, rew, rew_unclipped, term, trunc)
         self._maybe_render()
 
         info = self.__class__.build_info(res, term, trunc, self.actions_total, self.net_value)
@@ -302,12 +303,12 @@ class VcmiEnv(gym.Env):
         super().reset(seed=seed)
 
         result = self.connector.reset()
-        self._reset_vars(result)
+        obs = self._build_dict_obs(result)
+        self._reset_vars(result, obs)
         if self.render_each_step:
             self.render()
 
         self.result.actmask[0] = False  # prevent retreats for now
-        obs = self._build_dict_obs(self.result)
 
         info = {"side": self.result.side}
         return obs, info
@@ -350,6 +351,31 @@ class VcmiEnv(gym.Env):
     def decode(self):
         return self.__class__.decode_obs(self.result.state)
 
+    def defend_action(self):
+        bf = self.decode()
+        astack = None
+        for stack in bf.stacks[self.result.side]:
+            if stack.exists() and stack.QUEUE_POS == 0:
+                astack = stack
+                break
+
+        if not astack:
+            raise Exception("Could not find active stack")
+
+        # Moving to self results in a defend action
+        self_hex = astack.Y_COORD*15 + astack.X_COORD
+        return {"action_1": PrimaryAction.MOVE, "action_2": self_hex}
+
+    def random_action(self):
+        if self.terminated or self.truncated:
+            return None
+        actions1 = np.where(self.obs["action_mask_1"])[0]
+        assert actions1.any(), "action mask allows no actions, but last result was not terminal"
+        a1 = np.random.choice(actions1)
+        actions2 = np.where(self.obs["action_mask_2"][a1])[0]
+        a2 = np.random.choice(actions2) if np.any(actions2) else 0
+        return {"action_1": a1, "action_2": a2}
+
     @staticmethod
     def decode_obs(obs):
         return Decoder.decode(obs)
@@ -358,13 +384,14 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def _update_vars_after_step(self, res, rew, rew_unclipped, term, trunc):
+    def _update_vars_after_step(self, obs, res, rew, rew_unclipped, term, trunc):
         reward_clip_abs = abs(rew - rew_unclipped)
         self.actions_total += 1
         self.net_dmg = res.dmg_dealt - res.dmg_received
         self.net_dmg_total += self.net_dmg
         self.net_value = res.value_killed - res.value_lost
         self.net_value_total += self.net_value
+        self.obs = obs
         self.result = res
         self.reward = rew
         self.reward_total += rew
@@ -373,12 +400,13 @@ class VcmiEnv(gym.Env):
         self.terminated = term
         self.truncated = trunc
 
-    def _reset_vars(self, res):
+    def _reset_vars(self, res, obs):
         self.actions_total = 0
         self.net_dmg = 0
         self.net_dmg_total = 0
         self.net_value = 0
         self.net_value_total = 0
+        self.obs = obs
         self.result = res
         self.reward = 0
         self.reward_total = 0
@@ -473,19 +501,3 @@ class VcmiEnv(gym.Env):
                 res.actmask[N_PRIMARY_ACTIONS:].reshape(165, N_AMOVE_ACTIONS).swapaxes(0, 1)
             ))
         }
-
-    def _defend_action(self, state):
-        bf = self.decode_obs(state)
-        astack = None
-        for stack in bf.stacks[self.result.side]:
-            if stack.exists() and stack.QUEUE_POS == 0:
-                astack = stack
-                break
-
-        if not astack:
-            raise Exception("Could not find active stack")
-
-        # Moving to self results in a defend action
-        self_hex = astack.Y_COORD*15 + astack.X_COORD
-
-        return {"action_1": PrimaryAction.MOVE, "action_2": self_hex}

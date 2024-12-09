@@ -20,26 +20,30 @@ import torch
 import vcmi_gym
 
 
-def get_action(model, obs, mask):
+def get_action(model, obs):
     if model is None:
-        return np.random.choice(np.where(mask)[0])
+        a1 = np.random.choice(np.where(obs["action_mask_1"])[0])
+        a2_choices = np.where(obs["action_mask_2"][a1])[0]
+        a2 = np.random.choice(a2_choices) if len(a2_choices) else 0
+        return {"action_1": a1, "action_2": a2}
 
-    return model.predict(
-        torch.as_tensor(obs).float(),
-        torch.as_tensor(np.array(mask))
-    )
+    raise NotImplementedError("model prediction on v5 env")
+    # return model.predict(
+    #     torch.as_tensor(obs).float(),
+    #     torch.as_tensor(np.array(mask))
+    # )
 
 
 def main():
     total_steps = 1000
-    env = vcmi_gym.VcmiEnv_v4(
+    env = vcmi_gym.x(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
-        random_heroes=1,
-        random_obstacles=1,
-        conntype="thread"
+        random_heroes=0,
+        random_obstacles=0,
+        conntype="thread",
+        opponent="StupidAI",
+        max_steps=1000,
         # swap_sides=1,
-        # defender="MMAI_USER",
-        # defender_model="/Users/simo/Projects/vcmi-gym/data/PBT-mppo-obstacle+sideswap-20240512_230506/ee609_00000/checkpoint_000020/agent.pt"
     )
     obs, info = env.reset()
     term = False
@@ -105,7 +109,7 @@ def main():
                     tmpresets += 1
                 obs, info = env.reset()
             else:
-                act = get_action(model, obs, env.action_mask())
+                act = get_action(model, obs)
                 obs, _, term, trunc, info = env.step(act)
 
             # reset is also a "step" (aka. a round-trip to VCMI)

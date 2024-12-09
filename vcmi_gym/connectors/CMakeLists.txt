@@ -38,7 +38,7 @@ set(CONNECTOR_V1_FILES v1/connector.h v1/connector.cpp v1/common.h)
 set(CONNECTOR_V2_FILES v2/connector.h v2/connector.cpp ${CONNECTOR_V1_FILES})
 set(CONNECTOR_V3_FILES v3/connector.h v3/connector.cpp v3/common.h)
 set(CONNECTOR_V4_FILES v4/common.h v4/connector.cpp v4/threadconnector.h v4/threadconnector.cpp v4/procconnector.h v4/procconnector.cpp)
-set(CONNECTOR_V5_FILES v5/common.h v5/connector.cpp v5/threadconnector.h v5/threadconnector.cpp v5/procconnector.h v5/procconnector.cpp)
+set(CONNECTOR_V5_FILES v5/common.h v5/common.cpp v5/connector.cpp v5/threadconnector.h v5/threadconnector.cpp v5/procconnector.h v5/procconnector.cpp)
 
 set(EXPORTER_V1_FILES v1/exporter.h v1/exporter.cpp)
 set(EXPORTER_V2_FILES v2/exporter.h v2/exporter.cpp ${EXPORTER_V1_FILES})

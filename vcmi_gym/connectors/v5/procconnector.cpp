@@ -15,12 +15,14 @@
 // =============================================================================
 
 #include "procconnector.h"
+#include "common.h"
 #include "schema/v5/constants.h"
 #include "schema/v5/types.h"
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"
 #include "ML/model_wrappers/torchpath.h"
+#include "ML/user_agents/agent-v5.h"
 #include <algorithm>
 
 #include <pybind11/pybind11.h>
@@ -381,7 +383,13 @@ namespace Connector::V5::Proc {
         std::function<double(const MMAI::Schema::IState* s)> getValueRed;
         std::function<double(const MMAI::Schema::IState* s)> getValueBlue;
 
-        if (red == "MMAI_USER") {
+        auto f_getRandomAction = [](const MMAI::Schema::IState* s) {
+            return RandomValidAction(s);
+        };
+
+        if (red == "MMAI_RANDOM") {
+            leftModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
+        } else if (red == "MMAI_USER") {
             leftModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
         } else if (red == "MMAI_MODEL") {
             // BAI will load the actual model based on leftModel->getName()
@@ -390,7 +398,9 @@ namespace Connector::V5::Proc {
             leftModel = new ML::ModelWrappers::Scripted(red);
         }
 
-        if (blue == "MMAI_USER") {
+        if (red == "MMAI_RANDOM") {
+            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
+        } else if (blue == "MMAI_USER") {
             rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
         } else if (blue == "MMAI_MODEL") {
             // BAI will load the actual model based on leftModel->getName()

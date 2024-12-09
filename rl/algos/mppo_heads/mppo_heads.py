@@ -408,7 +408,7 @@ class AgentNN(nn.Module):
         # in case of AMOVE, head2 is generally less important
 
         b_head2_in = torch.cat((b_features, b_action1.unsqueeze(-1)), dim=1)
-        b_head2_out = self.actor_head2(b_head2_in)
+        b_head2_out = self.actor_head2(b_head2_in.detach())
         b_head2_mask = b_mask2[torch.arange(b), b_action1]
         b_head2_dist = common.CategoricalMasked(logits=b_head2_out, mask=b_head2_mask)
 
@@ -449,9 +449,9 @@ class AgentNN(nn.Module):
         # XXX (heads):
         # DEBUG: compare two methods for calculating valid_mask_2
         # TODO: remove
-        if not torch.equal(b_results_to_keep, b_action1 >= 2):
-            import ipdb; ipdb.set_trace()  # noqa
-            print(1)
+        # if not torch.equal(b_results_to_keep, b_action1 >= 2):
+        #     import ipdb; ipdb.set_trace()  # noqa
+        #     print(1)
 
         b_logprob2 = b_logprob2.where(b_results_to_keep, 0)
         b_entropy2 = b_entropy2.where(b_results_to_keep, 0)

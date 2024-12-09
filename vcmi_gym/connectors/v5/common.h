@@ -21,9 +21,11 @@
 #include <iostream>
 #include <thread>
 #include <filesystem>
+#include <random>
 
 #include "schema/base.h"
 #include "schema/v5/types.h"
+#include "schema/v5/constants.h"
 
 #include <pybind11/numpy.h>
 
@@ -32,7 +34,6 @@
     #define LOGCOLLECT 0    // whether to record logs in memory
 #else
     #define VERBOSE 0
-    // #define LOGCOLLECT 1
     #define LOGCOLLECT 0
 #endif
 
@@ -50,6 +51,8 @@ namespace Connector::V5 {
     using P_BattlefieldState = py::array_t<float>;
     using P_ActionMask = py::array_t<bool>;
     using P_AttentionMask = py::array_t<float>;
+
+    MMAI::Schema::Action RandomValidAction(const MMAI::Schema::IState * s);
 
     class P_State {
     public:

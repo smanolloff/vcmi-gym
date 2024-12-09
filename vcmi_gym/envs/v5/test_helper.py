@@ -20,7 +20,6 @@
 #      in VcmiEnv's observation space
 #
 
-import numpy as np
 from .decoder.other import PrimaryAction
 
 
@@ -28,6 +27,7 @@ class TestHelper:
     def __init__(self, env, auto_render=True):
         self.env = env
         self.term = False
+        self.trunc = False
         self.auto_render = auto_render
         self.obs, self.info = self.env.reset()
         self.battlefield = self.env.decode()
@@ -56,7 +56,7 @@ class TestHelper:
             return
 
         action = {"action_1": a1, "action_2": a2 or 0}
-        self.obs, self.rew, self.term, trunc, self.info = self.env.step(action)
+        self.obs, self.rew, self.term, self.trunc, self.info = self.env.step(action)
         self.battlefield = self.env.decode()
         self.render()
 
@@ -85,16 +85,13 @@ class TestHelper:
         self._maybe_render(a["action_1"], a["action_2"])
 
     def random(self):
-        actions1 = np.where(self.obs["action_mask_1"])[0]
-        if actions1.any():
-            a1 = np.random.choice(actions1)
-            actions2 = np.where(self.obs["action_mask_2"][a1])[0]
-            a2 = np.random.choice(actions2) if np.any(actions2) else 0
-            return self._maybe_render(a1, a2)
-        else:
-            assert self.term, "action mask allows no actions, but last result was not terminal"
+        a = self.env.random_action()
+        if a is None:
+            assert self.term
             print("Battle ended, re-starting...")
             self.reset()
+        else:
+            self._maybe_render(a["action_1"], a["action_2"])
 
     def help(self):
         print((
