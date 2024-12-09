@@ -225,7 +225,8 @@ def main():
             progress_report_steps=5
         )
         assert buffer.full and not buffer.index
-        eval_autoencoder(
+
+        loss = eval_autoencoder(
             logger=logger,
             autoencoder=ae,
             buffer=buffer,
@@ -233,7 +234,9 @@ def main():
             batch_size=eval_batch_size
         )
 
-        loss = train_autoencoder(
+        logger.log(dict(iteration=iteration, eval_loss=round(loss, 6)))
+
+        train_autoencoder(
             logger=logger,
             autoencoder=ae,
             optimizer=optimizer,
@@ -243,7 +246,6 @@ def main():
             train_steps=train_steps
         )
 
-        logger.log(dict(iteration=iteration, eval_loss=round(loss, 6)))
 
 
 if __name__ == "__main__":
