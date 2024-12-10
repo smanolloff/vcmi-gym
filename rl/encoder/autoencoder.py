@@ -95,7 +95,7 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
     else:
         progress_report_step = float("inf")
 
-    next_progress_report_at = progress_report_step
+    next_progress_report_at = 0
     progress = 0
     terms = 0
     truncs = 0
@@ -103,6 +103,12 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
     trunc = env.truncated
 
     for i in range(n):
+        # Ensure logging on final obs
+        progress = round((i+1) / n, 3)
+        if progress >= next_progress_report_at:
+            next_progress_report_at += progress_report_step
+            logger.log(dict(observations_collected=i+1, progress=progress*100, terms=terms, truncs=truncs))
+
         action = env.random_action()
         if action is None:
             assert term or trunc
@@ -117,11 +123,7 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
         obs = to_tensor(dict_obs)
         buffer.add(obs)
 
-        # Ensure logging on final obs
-        progress = round((i+1) / n, 3)
-        if progress >= next_progress_report_at:
-            next_progress_report_at += progress_report_step
-            logger.log(dict(observations_collected=i/n, progress=progress*100, terms=terms, truncs=truncs))
+    logger.log(dict(observations_collected=n, progress=100, terms=terms, truncs=truncs))
 
 
 def train_autoencoder(
@@ -159,7 +161,7 @@ def eval_autoencoder(logger, autoencoder, buffer, eval_env_steps):
         reconstructed = autoencoder(batch)
         loss_sum += mse_loss(reconstructed, batch).item()
 
-    return loss_sum / eval_env_steps
+    return loss_sum / 10
 
 
 def main():
