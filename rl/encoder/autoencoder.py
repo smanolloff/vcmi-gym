@@ -205,11 +205,11 @@ def main():
             ),
             train=dict(
                 layer_sizes=[4096, 1024, 256, 32],
-                learning_rate=1e-4,
+                learning_rate=1e-5,
 
                 buffer_capacity=100_000,
                 train_epochs=10,
-                train_batch_size=100,
+                train_batch_size=1000,
                 eval_env_steps=10_000,
 
                 # Debug
@@ -220,12 +220,13 @@ def main():
             )
         )
 
+    os.makedirs(config["run"]["out_dir"], exist_ok=True)
+
     if not resuming:
         with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
             print(f"Saving new config to: {f.name}")
             json.dump(config, f)
 
-    os.makedirs(config["run"]["out_dir"], exist_ok=True)
     logger = StructuredLogger(filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
     logger.log(dict(config=config))
 
