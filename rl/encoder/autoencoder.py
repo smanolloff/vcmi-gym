@@ -295,6 +295,8 @@ def main():
         logger.log(f"Saving optimizer weights to {filename}")
         torch.save(optimizer.state_dict(), filename)
 
+        iteration += 1
+
 
 if __name__ == "__main__":
     main()
