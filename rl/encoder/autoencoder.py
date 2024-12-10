@@ -94,17 +94,17 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
     progress = 0
     terms = 0
     truncs = 0
-    term = False
-    trunc = False
+    term = env.terminated
+    trunc = env.truncated
 
     for i in range(n):
         action = env.random_action()
         if action is None:
             assert term or trunc
-            term = False
-            trunc = False
             terms += term
             truncs += trunc
+            term = False
+            trunc = False
             dict_obs, _info = env.reset()
         else:
             dict_obs, _rew, term, trunc, _info = env.step(action)
