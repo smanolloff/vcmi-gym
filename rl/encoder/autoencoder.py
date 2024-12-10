@@ -1,5 +1,6 @@
 import os
 import torch
+import sys
 import torch.nn as nn
 import random
 import string
@@ -40,7 +41,7 @@ class Buffer:
 
 
 class Autoencoder(nn.Module):
-    def __init__(self, input_dim, latent_dim):
+    def __init__(self, input_dim, layer_sizes):
         super().__init__()
 
         layer_sizes = [4096, 1024, 256, 32]
@@ -71,7 +72,7 @@ class StructuredLogger:
         self.log(dict(filename=filename))
 
     def log(self, obj):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%.3s")
+        timestamp = datetime.utcnow().isoformat(timespec='milliseconds')
         if isinstance(obj, dict):
             log_obj = dict(timestamp=timestamp, message=obj)
         else:
@@ -164,40 +165,63 @@ def eval_autoencoder(logger, autoencoder, buffer, eval_env_steps):
 def main():
     run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
 
-    config = dict(
-        run=dict(
-            id=run_id,
-            out_dir=os.path.abspath("data/autoencoder"),
-        ),
-        env=dict(
-            opponent="MMAI_RANDOM",
-            mapname="gym/generated/4096/4x1024.vmap",
-            max_steps=1000,
-            random_heroes=1,
-            random_obstacles=1,
-            town_chance=30,
-            warmachine_chance=40,
-            random_terrain_chance=100,
-            tight_formation_chance=20,
-            user_timeout=600,
-            vcmi_timeout=600,
-            boot_timeout=300,
-            conntype="thread",
-            # vcmi_loglevel_global="trace",
-            # vcmi_loglevel_ai="trace",
-        ),
-        train=dict(
-            learning_rate=1e-4,
-            buffer_capacity=100_000,
-            train_epochs=10,
-            train_batch_size=100,
-            eval_env_steps=10_000,
-            # buffer_capacity=100,
-            # train_epochs=2,
-            # train_batch_size=10,
-            # eval_env_steps=100,
+    # Usage:
+    # python -m rl.encoder.autoencoder [path/to/config.json]
+
+    resuming = False
+    if len(sys.argv) > 1:
+        resuming = True
+        with open(sys.argv[1], "r") as f:
+            print(f"Resuming from config: {f.name}")
+            config = json.load(f)
+    else:
+        config = dict(
+            resume_config=None,
+            # resume_config="/Users/simo/Projects/vcmi-gym/data/autoencoder/uwgxnffd.json",
+
+            # XXX: values below are irrelevant if `resume_config` is given
+            run=dict(
+                id=run_id,
+                out_dir=os.path.abspath("data/autoencoder"),
+            ),
+            env=dict(
+                opponent="MMAI_RANDOM",
+                mapname="gym/generated/4096/4x1024.vmap",
+                max_steps=1000,
+                random_heroes=1,
+                random_obstacles=1,
+                town_chance=30,
+                warmachine_chance=40,
+                random_terrain_chance=100,
+                tight_formation_chance=20,
+                user_timeout=1800,
+                vcmi_timeout=1800,
+                boot_timeout=300,
+                conntype="thread",
+                # vcmi_loglevel_global="trace",
+                # vcmi_loglevel_ai="trace",
+            ),
+            train=dict(
+                layer_sizes=[4096, 1024, 256, 32],
+                learning_rate=1e-4,
+
+                buffer_capacity=100_000,
+                train_epochs=10,
+                train_batch_size=100,
+                eval_env_steps=10_000,
+
+                # Debug
+                # buffer_capacity=100,
+                # train_epochs=2,
+                # train_batch_size=10,
+                # eval_env_steps=100,
+            )
         )
-    )
+
+    if not resuming:
+        with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
+            print(f"Saving new config to: {f.name}")
+            json.dump(config, f)
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
     logger = StructuredLogger(filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
@@ -217,9 +241,19 @@ def main():
 
     dict_obs, _ = env.reset()
     obs = to_tensor(dict_obs)
-    ae = Autoencoder(input_dim=obs.shape[0], latent_dim=32)
-    buffer = Buffer(capacity=buffer_capacity, obs_shape=obs.shape, device="cpu")
+    ae = Autoencoder(input_dim=obs.shape[0], layer_sizes=config["train"]["layer_sizes"])
     optimizer = torch.optim.Adam(ae.parameters(), lr=learning_rate)
+
+    if resuming:
+        filename = "%s/%s-model.pt" % (config["run"]["out_dir"], config["run"]["id"])
+        logger.log(f"Loading model weights from {filename}")
+        ae.load_state_dict(torch.load(filename, weights_only=True), strict=True)
+
+        filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], config["run"]["id"])
+        logger.log(f"Loading optimizer weights from {filename}")
+        optimizer.load_state_dict(torch.load(filename, weights_only=True))
+
+    buffer = Buffer(capacity=buffer_capacity, obs_shape=obs.shape, device="cpu")
 
     iteration = 0
     while True:
@@ -250,9 +284,13 @@ def main():
             train_batch_size=train_batch_size
         )
 
-        filename = os.path.join(config["run"]["out_dir"], f"{run_id}.pt")
-        logger.log(f"Saving model to {filename}")
-        torch.save(ae, filename)
+        filename = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
+        logger.log(f"Saving model weights to {filename}")
+        torch.save(ae.state_dict(), filename)
+
+        filename = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
+        logger.log(f"Saving optimizer weights to {filename}")
+        torch.save(optimizer.state_dict(), filename)
 
 
 if __name__ == "__main__":
