@@ -39,7 +39,7 @@ class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
                     case "SIDE":
                         value = self._side()
                     case "FLAGS":
-                        value = self._flags(value)
+                        value = ", ".join(self.flags())
 
             elif compact:
                 continue
@@ -55,10 +55,9 @@ class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
             return None
         return list(SIDE_MAP)[self.SIDE]
 
-    def _flags(self, value):
-        flags = []
-        for name, offset in STACK_FLAG_MAP.items():
-            if self.FLAGS[offset]:
-                flags.append(name)
+    def alias(self):
+        return chr(self.ID + (ord('0') if self.ID < 7 else ord('A') - 7))
 
-        return ",".join(flags) or None
+    def flags(self):
+        return [k for k, v in STACK_FLAG_MAP.items() if self.FLAGS[v]]
+
