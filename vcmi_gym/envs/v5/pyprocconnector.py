@@ -47,7 +47,7 @@ STATE_VALUE_NA = EXPORTER.get_state_value_na()
 MISC_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_misc_attribute_mapping()]))
 HEX_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
 STACK_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_stack_attribute_mapping()]))
-STACK_FLAG_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, *v in EXPORTER.get_stack_flag_mapping()]))
+STACK_FLAG_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag_mapping()]))
 
 PRIMARY_ACTION_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_primary_actions())]))
 AMOVE_ACTION_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_amove_actions())]))

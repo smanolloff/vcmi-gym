@@ -104,10 +104,10 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
 
     for i in range(n):
         # Ensure logging on final obs
-        progress = round((i+1) / n, 3)
+        progress = round(i / n, 3)
         if progress >= next_progress_report_at:
             next_progress_report_at += progress_report_step
-            logger.log(dict(observations_collected=i+1, progress=progress*100, terms=terms, truncs=truncs))
+            logger.log(dict(observations_collected=i, progress=progress*100, terms=terms, truncs=truncs))
 
         action = env.random_action()
         if action is None:
@@ -204,8 +204,8 @@ def main():
                 # vcmi_loglevel_ai="trace",
             ),
             train=dict(
-                layer_sizes=[4096, 1024, 256, 32],
-                learning_rate=1e-5,
+                layer_sizes=[2048, 512, 128],
+                learning_rate=1e-4,
 
                 buffer_capacity=100_000,
                 train_epochs=10,

@@ -349,7 +349,7 @@ class VcmiEnv(gym.Env):
         self.close()
 
     def decode(self):
-        return self.__class__.decode_obs(self.result.state)
+        return self.__class__.decode_obs(self.result)
 
     def defend_action(self):
         bf = self.decode()
@@ -377,8 +377,8 @@ class VcmiEnv(gym.Env):
         return {"action_1": a1, "action_2": a2}
 
     @staticmethod
-    def decode_obs(obs):
-        return Decoder.decode(obs)
+    def decode_obs(pyresult):
+        return Decoder.decode(pyresult)
 
     #
     # private

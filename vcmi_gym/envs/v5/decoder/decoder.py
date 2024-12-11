@@ -29,7 +29,8 @@ class Decoder:
     STATE_SIZE_ONE_HEX = pyconnector.STATE_SIZE_ONE_HEX
 
     @classmethod
-    def decode(cls, obs):
+    def decode(cls, pyresult):
+        obs = pyresult.state
         assert obs.shape == (pyconnector.STATE_SIZE,), f"{obs.shape} == ({pyconnector.STATE_SIZE},)"
 
         sizes = [
@@ -47,11 +48,11 @@ class Decoder:
         stacks = stacks.reshape(2, 10, pyconnector.STATE_SIZE_ONE_STACK)
         hexes = hexes.reshape(11, 15, pyconnector.STATE_SIZE_ONE_HEX)
 
-        res = Battlefield()
+        res = Battlefield(pyresult)
 
         for side in range(2):
             for i in range(10):
-                res.stacks[side].append(cls.decode_stack(stacks[0][i]))
+                res.stacks[side].append(cls.decode_stack(stacks[side][i]))
 
         for y in range(11):
             row = []
@@ -66,7 +67,12 @@ class Decoder:
         res = {}
         for attr, (enctype, offset, n, vmax) in pyconnector.STACK_ATTR_MAP.items():
             attrdata = stackdata[offset:][:n]
-            res[attr] = cls.decode_attribute(attrdata, enctype, vmax)
+            attrvalue = cls.decode_attribute(attrdata, enctype, vmax)
+            if attr == "FLAGS":
+                res[attr] = Stack.Flags(**{k: int(attrvalue[v]) for k, v in pyconnector.STACK_FLAG_MAP.items()})
+            else:
+                res[attr] = attrvalue
+
         return Stack(**dict(res, data=stackdata))
 
     @classmethod
