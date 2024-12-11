@@ -378,7 +378,7 @@ class VcmiEnv(gym.Env):
 
     @staticmethod
     def decode_obs(pyresult):
-        return Decoder.decode(pyresult)
+        return Decoder.decode(pyresult.state, pyresult.is_battle_over)
 
     #
     # private

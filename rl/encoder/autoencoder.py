@@ -10,7 +10,8 @@ import yaml
 from torch.nn.functional import mse_loss
 from datetime import datetime
 
-from vcmi_gym import VcmiEnv_v5
+from vcmi_gym.envs.v5.vcmi_env import VcmiEnv
+from vcmi_gym.envs.v5.decoder.decoder import Decoder
 
 
 def to_tensor(dict_obs):
@@ -178,10 +179,6 @@ def main():
             config = json.load(f)
     else:
         config = dict(
-            resume_config=None,
-            # resume_config="/Users/simo/Projects/vcmi-gym/data/autoencoder/uwgxnffd.json",
-
-            # XXX: values below are irrelevant if `resume_config` is given
             run=dict(
                 id=run_id,
                 out_dir=os.path.abspath("data/autoencoder"),
@@ -240,7 +237,7 @@ def main():
     assert eval_env_steps % 10 == 0  # needed for eval batch_size
 
     # Initialize environment, buffer, and model
-    env = VcmiEnv_v5(**config["env"])
+    env = VcmiEnv(**config["env"])
 
     dict_obs, _ = env.reset()
     obs = to_tensor(dict_obs)
@@ -298,5 +295,38 @@ def main():
         iteration += 1
 
 
+def test():
+    assert len(sys.argv) == 2
+    with open(sys.argv[1], "r") as f:
+        config = json.load(f)
+    env = VcmiEnv(**config["env"])
+    dict_obs, _ = env.reset()
+    obs = to_tensor(dict_obs)
+    ae = Autoencoder(input_dim=obs.shape[0], layer_sizes=config["train"]["layer_sizes"])
+
+    while True:
+        action = env.random_action()
+        if action is None:
+            dict_obs, _info = env.reset()
+            done = False
+        else:
+            dict_obs, _rew, term, trunc, _info = env.step(action)
+            done = term or trunc
+
+        obs_only_shape = dict_obs["observation"].shape
+
+        with torch.no_grad():
+            obs1 = to_tensor(dict_obs)
+            obs2 = ae(obs1)
+            loss = mse_loss(obs2, obs1)
+            print("Loss: %s" % loss)
+            d1 = Decoder.decode(obs1[:obs_only_shape[0]].numpy(), done)
+            d2 = Decoder.decode(obs2[:obs_only_shape[0]].numpy(), done)
+
+        print(d1.render())
+        print(d2.render())
+
+
 if __name__ == "__main__":
-    main()
+    # main()
+    test()

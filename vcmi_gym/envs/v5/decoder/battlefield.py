@@ -14,15 +14,16 @@
 # limitations under the License.
 # =============================================================================
 
-from ..pyprocconnector import HEX_STATE_MAP, HEX_ATTR_MAP
+from ..pyprocconnector import HEX_STATE_MAP
+from .stack import Stack, STACK_ATTR_MAP, STACK_FLAG_MAP
 
 
 class Battlefield():
     def __repr__(self):
         return "Battlefield(11x15)"
 
-    def __init__(self, pyresult):
-        self.pyresult = pyresult
+    def __init__(self, is_battle_over):
+        self.is_battle_over = is_battle_over
         self.hexes = []
         self.stacks = [[], []]  # left, right stacks
 
@@ -51,7 +52,7 @@ class Battlefield():
             print("Invalid stack (ID=%s)" % i)
 
     # XXX: this is C++ code translated in Python and it's quite ugly
-    def render(self):
+    def render(self, strict=False):
         astack = None
 
         arr = lambda x, n: [x for _ in range(n)]
@@ -63,7 +64,6 @@ class Battlefield():
                     idstacks[stack.SIDE][stack.ID] = stack
                     if stack.QUEUE_POS == 0:
                         astack = stack
-                        break
 
         if not astack:
             raise Exception("Could not find active stack")
@@ -111,6 +111,11 @@ class Battlefield():
         # y even "▏"
         # y odd "▕"
 
+        def uknstack(id, y, x, side):
+            attrs = {k: -1 for k in STACK_ATTR_MAP.keys()}
+            flags = Stack.Flags(**{k: 0 for k in STACK_FLAG_MAP.keys()})
+            return Stack(**dict(attrs, ID=id, Y_COORD=y, X_COORD=x, SIDE=side, FLAGS=flags, data=[]))
+
         for y in range(11):
             for x in range(15):
                 sym = "?"
@@ -119,7 +124,9 @@ class Battlefield():
 
                 if hex.STACK_ID:
                     stack = idstacks[hex.STACK_SIDE][hex.STACK_ID]
-                    assert stack, "stack with side=%d and ID=%d not found" % (hex.STACK_SIDE, hex.STACK_ID)
+                    if not stack:
+                        assert not strict, "stack with side=%d and ID=%d not found" % (hex.STACK_SIDE, hex.STACK_ID)
+                        stack = uknstack(hex.STACK_ID, hex.Y_COORD, hex.X_COORD, hex.STACK_SIDE)
 
                 if x == 0:
                     lines.append("%s┨%s" % (nummap[y % 10], " " if y % 2 == 0 else ""))
@@ -172,6 +179,8 @@ class Battlefield():
                     sym = stack.alias()
                     col = bluecol if stack.SIDE else redcol
 
+                    if stack.QUANTITY == -1:
+                        col += "\033[1;47"
                     if stack.QUEUE_POS == 0:
                         col += activemod
 
@@ -228,7 +237,7 @@ class Battlefield():
         # {Attribute, name, colwidth}
         rowdefs = [
             ("ID", "Stack #"),
-            ("X_COORD", ""),  # divider row
+            ("DIVROW", ""),  # divider row
             ("QUANTITY", "Qty"),
             ("ATTACK", "Attack"),
             ("DEFENSE", "Defense"),
@@ -240,13 +249,13 @@ class Battlefield():
             ("SPEED", "Speed"),
             ("QUEUE_POS", "Queue"),
             ("AI_VALUE", "Value"),
-            ("Y_COORD", "State"),  # "WAR" = CAN_WAIT, WILL_ACT, CAN_RETAL
-            ("Y_COORD", "Attack mods"),  # "DB" = Double, Blinding
-            ("Y_COORD", "Blocked/ing"),
-            ("Y_COORD", "Fly/Sleep"),
-            ("Y_COORD", "No Retal/Melee"),
-            ("Y_COORD", "Wide/Breath"),
-            ("X_COORD", ""),  # divider row
+            ("STATE", "State"),  # "WAR" = CAN_WAIT, WILL_ACT, CAN_RETAL
+            ("ATTACK MODS", "Attack mods"),  # "DB" = Double, Blinding
+            ("BLOCKED/ING", "Blocked/ing"),
+            ("FLY/SLEEP", "Fly/Sleep"),
+            ("NO RETAL/MELEE", "No Retal/Melee"),
+            ("WIDE/BREATH", "Wide/Breath"),
+            ("DIVROW", ""),  # divider row
         ]
 
         # Table with nrows and ncells, each cell a 3-element tuple
@@ -270,7 +279,7 @@ class Battlefield():
 
         # Attribute rows
         for a, aname in rowdefs:
-            if a == "X_COORD":
+            if a == "DIVROW":
                 table.append(divrow)
                 continue
 
@@ -302,40 +311,27 @@ class Battlefield():
                             value = value[:-2] + "k" + value[-1]
                             if value.endswith("k0"):
                                 value = value[:-1]
-                        elif a == "Y_COORD":
-                            fmt = "%d/%d"
-
-                            # Y_COORD, "State"},  // "WAR" = CAN_WAIT, WILL_ACT, CAN_RETAL
-                            # Y_COORD, "Attack type"}, // "DB" = Double strike, Blind-like
-                            # Y_COORD, "Blocked/ing"},
-                            # Y_COORD, "Fly/Sleep"},
-                            # Y_COORD, "No Retal/Melee"},
-                            # Y_COORD, "Wide/Breath"},
-
-                            if specialcounter == 0:
-                                value = ""
-                                value += "W" if flags.CAN_WAIT else " "
-                                value += "A" if flags.WILL_ACT else " "
-                                value += "R" if flags.CAN_RETALIATE else " "
-
-                            elif specialcounter == 1:
-                                value = ""
-                                value += "D" if flags.ADDITIONAL_ATTACK else " "
-                                value += "B" if flags.BLIND_LIKE_ATTACK else " "
-                            elif specialcounter == 2:
-                                value = fmt % (flags.BLOCKED, flags.BLOCKING)
-                            elif specialcounter == 3:
-                                value = fmt % (flags.FLYING, flags.SLEEPING)
-                            elif specialcounter == 4:
-                                value = fmt % (flags.BLOCKS_RETALIATION, flags.NO_MELEE_PENALTY)
-                            elif specialcounter == 5:
-                                value = fmt % (flags.IS_WIDE, flags.TWO_HEX_ATTACK_BREATH)
-                            else:
-                                raise Exception("Unexpected specialcounter: %d", specialcounter)
+                        elif a == "STATE":
+                            value = ""
+                            value += "W" if flags.CAN_WAIT else " "
+                            value += "A" if flags.WILL_ACT else " "
+                            value += "R" if flags.CAN_RETALIATE else " "
+                        elif a == "ATTACK MODS":
+                            value = ""
+                            value += "D" if flags.ADDITIONAL_ATTACK else " "
+                            value += "B" if flags.BLIND_LIKE_ATTACK else " "
+                        elif a == "BLOCKED/ING":
+                            value = "%s/%s" % (flags.BLOCKED, flags.BLOCKING)
+                        elif a == "FLY/SLEEP":
+                            value = "%s/%s" % (flags.FLYING, flags.SLEEPING)
+                        elif a == "NO RETAL/MELEE":
+                            value = "%s/%s" % (flags.BLOCKS_RETALIATION, flags.NO_MELEE_PENALTY)
+                        elif a == "WIDE/BREATH":
+                            value = "%s/%s" % (flags.IS_WIDE, flags.TWO_HEX_ATTACK_BREATH)
                         else:
                             value = str(getattr(stack, a))
 
-                        if stack.QUEUE_POS == 0 and not self.pyresult.is_battle_over:
+                        if stack.QUEUE_POS == 0 and not self.is_battle_over:
                             color += activemod
 
                     colid = 2 + i + side + (10*side)

@@ -29,8 +29,8 @@ class Decoder:
     STATE_SIZE_ONE_HEX = pyconnector.STATE_SIZE_ONE_HEX
 
     @classmethod
-    def decode(cls, pyresult):
-        obs = pyresult.state
+    def decode(cls, state, is_battle_over):
+        obs = state
         assert obs.shape == (pyconnector.STATE_SIZE,), f"{obs.shape} == ({pyconnector.STATE_SIZE},)"
 
         sizes = [
@@ -48,7 +48,7 @@ class Decoder:
         stacks = stacks.reshape(2, 10, pyconnector.STATE_SIZE_ONE_STACK)
         hexes = hexes.reshape(11, 15, pyconnector.STATE_SIZE_ONE_HEX)
 
-        res = Battlefield(pyresult)
+        res = Battlefield(is_battle_over)
 
         for side in range(2):
             for i in range(10):
