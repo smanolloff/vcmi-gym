@@ -14,18 +14,31 @@
 # limitations under the License.
 # =============================================================================
 
-from ..pyprocconnector import HEX_STATE_MAP
-from .stack import Stack, STACK_ATTR_MAP, STACK_FLAG_MAP
+from .stack import Stack, StackFlags
+from .value import Value
+
+from ..pyprocconnector import (
+    HEX_STATE_MAP,
+    HEX_ATTR_MAP,
+    STATE_SIZE_MISC,
+    STATE_SIZE_STACKS,
+    STATE_SIZE_HEXES,
+    STATE_SIZE_ONE_STACK,
+    STATE_SIZE_ONE_HEX,
+    STACK_ATTR_MAP,
+    STACK_FLAG_MAP
+)
 
 
 class Battlefield():
     def __repr__(self):
         return "Battlefield(11x15)"
 
-    def __init__(self, is_battle_over):
+    def __init__(self, is_battle_over, envstate=None):
         self.is_battle_over = is_battle_over
         self.hexes = []
         self.stacks = [[], []]  # left, right stacks
+        self.envstate = envstate
 
     def get_hex(self, y_or_n, x=None):
         if x is not None:
@@ -61,8 +74,8 @@ class Battlefield():
         for sidestacks in self.stacks:
             for stack in sidestacks:
                 if stack.exists():
-                    idstacks[stack.SIDE][stack.ID] = stack
-                    if stack.QUEUE_POS == 0:
+                    idstacks[stack.SIDE.v][stack.ID.v] = stack
+                    if stack.QUEUE_POS.v == 0:
                         astack = stack
 
         if not astack:
@@ -112,9 +125,9 @@ class Battlefield():
         # y odd "▕"
 
         def uknstack(id, y, x, side):
-            attrs = {k: -1 for k in STACK_ATTR_MAP.keys()}
-            flags = Stack.Flags(**{k: 0 for k in STACK_FLAG_MAP.keys()})
-            return Stack(**dict(attrs, ID=id, Y_COORD=y, X_COORD=x, SIDE=side, FLAGS=flags, data=[]))
+            attrs = {k: Value(k, "BINARY_EXPLICIT_NULL", 2, [1, 0]) for k in STACK_ATTR_MAP.keys()}
+            attrs["FLAGS"] = Value("FLAGS", "BINARY_EXPLICIT_NULL", len(STACK_FLAG_MAP), [0]*len(STACK_FLAG_MAP), struct_cls=StackFlags, struct_mapping=STACK_FLAG_MAP)
+            return Stack(**dict(attrs, data=[]))
 
         for y in range(11):
             for x in range(15):
@@ -175,24 +188,24 @@ class Battlefield():
                     sym = "◌" if sym == "○" else sym
 
                 if hex.STACK_ID:
-                    seen = seenstacks[stack.SIDE][stack.ID]
+                    seen = seenstacks[stack.SIDE.v][stack.ID.v]
                     sym = stack.alias()
                     col = bluecol if stack.SIDE else redcol
 
-                    if stack.QUANTITY == -1:
+                    if stack.QUANTITY.v == -1:
                         col += "\033[1;47"
-                    if stack.QUEUE_POS == 0:
+                    elif stack.QUEUE_POS.v == 0:
                         col += activemod
 
-                    if stack.FLAGS.IS_WIDE and not seen:
-                        if stack.SIDE == 0:
+                    if stack.FLAGS.v.IS_WIDE and not seen:
+                        if stack.SIDE.v == 0:
                             sym += "↠"
                             addspace = False
-                        elif stack.SIDE == 1 and hex.X_COORD < 14:
+                        elif stack.SIDE.v == 1 and hex.X_COORD < 14:
                             sym += "↞"
                             addspace = False
 
-                    seenstacks[stack.SIDE][stack.ID] = 1
+                    seenstacks[stack.SIDE.v][stack.ID.v] = 1
 
                 row += (col + sym + nocol)
 
@@ -255,6 +268,13 @@ class Battlefield():
             ("FLY/SLEEP", "Fly/Sleep"),
             ("NO RETAL/MELEE", "No Retal/Melee"),
             ("WIDE/BREATH", "Wide/Breath"),
+            ("Y_COORD", "Y"),
+            ("X_COORD", "X"),
+            ("STACK_ID_NULL", "STACK_ID_NULL"),
+            ("ID_NULL", "ID_NULL"),
+            ("STACK_SIDE_NULL", "STACK_SIDE_NULL"),
+            ("Y_COORD_NULL", "Y_COORD_NULL"),
+            ("X_COORD_NULL", "X_COORD_NULL"),
             ("DIVROW", ""),  # divider row
         ]
 
@@ -292,6 +312,23 @@ class Battlefield():
             for i in [1, 12, len(colwidths)-1]:
                 row[i] = (nocol, colwidths[i], "|")
 
+            def get_stack_null_value(i, attrname):
+                enctype, offset, *_ = STACK_ATTR_MAP[attrname]
+                assert enctype.endswith("EXPLICIT_NULL")
+                stacksdata = self.envstate[STATE_SIZE_MISC:][:STATE_SIZE_STACKS]
+                stackdata = stacksdata[i*STATE_SIZE_ONE_STACK:][:STATE_SIZE_ONE_STACK]
+                attrdata = stackdata[offset:]
+                return attrdata[0]
+
+            def get_hex_null_value(i, attrname):
+                enctype, offset, *_ = HEX_ATTR_MAP[attrname]
+                assert enctype.endswith("EXPLICIT_NULL")
+                hexesdata = self.envstate[STATE_SIZE_MISC+STATE_SIZE_STACKS:]
+                assert hexesdata.shape[0] == STATE_SIZE_HEXES
+                hexdata = hexesdata[i*STATE_SIZE_ONE_HEX:][:STATE_SIZE_ONE_HEX]
+                attrdata = hexdata[offset:]
+                return attrdata[0]
+
             # Stack cols
             for side in [0, 1]:
                 sidestacks = self.stacks[side]
@@ -301,8 +338,8 @@ class Battlefield():
                     value = ""
 
                     if stack.exists():
-                        flags = stack.FLAGS
-                        color = bluecol if stack.SIDE else redcol
+                        flags = stack.FLAGS.struct
+                        color = bluecol if stack.SIDE.v else redcol
 
                         if a == "ID":
                             value = stack.alias()
@@ -328,10 +365,20 @@ class Battlefield():
                             value = "%s/%s" % (flags.BLOCKS_RETALIATION, flags.NO_MELEE_PENALTY)
                         elif a == "WIDE/BREATH":
                             value = "%s/%s" % (flags.IS_WIDE, flags.TWO_HEX_ATTACK_BREATH)
+                        elif a == "STACK_ID_NULL":
+                            value = "%.1f" % get_hex_null_value(y, x, "STACK_ID")
+                        elif a == "ID_NULL":
+                            value = "%.1f" % get_stack_null_value(i, side, "ID")
+                        elif a == "STACK_SIDE_NULL":
+                            value = "%.1f" % get_stack_null_value(i, side, "SIDE")
+                        elif a == "Y_COORD_NULL":
+                            value = "%.1f" % get_stack_null_value(i, side, "Y_COORD")
+                        elif a == "X_COORD_NULL":
+                            value = "%.1f" % get_stack_null_value(i, side, "X_COORD")
                         else:
                             value = str(getattr(stack, a))
 
-                        if stack.QUEUE_POS == 0 and not self.is_battle_over:
+                        if stack.QUEUE_POS.v == 0 and not self.is_battle_over:
                             color += activemod
 
                     colid = 2 + i + side + (10*side)

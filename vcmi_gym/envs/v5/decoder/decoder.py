@@ -17,8 +17,9 @@
 import numpy as np
 
 from .battlefield import Battlefield
+from .value import Value
 from .hex import Hex
-from .stack import Stack
+from .stack import Stack, StackFlags
 from .. import pyprocconnector as pyconnector
 
 NA = pyconnector.STATE_VALUE_NA
@@ -48,7 +49,7 @@ class Decoder:
         stacks = stacks.reshape(2, 10, pyconnector.STATE_SIZE_ONE_STACK)
         hexes = hexes.reshape(11, 15, pyconnector.STATE_SIZE_ONE_HEX)
 
-        res = Battlefield(is_battle_over)
+        res = Battlefield(is_battle_over, envstate=state)
 
         for side in range(2):
             for i in range(10):
@@ -67,11 +68,11 @@ class Decoder:
         res = {}
         for attr, (enctype, offset, n, vmax) in pyconnector.STACK_ATTR_MAP.items():
             attrdata = stackdata[offset:][:n]
-            attrvalue = cls.decode_attribute(attrdata, enctype, vmax)
+
             if attr == "FLAGS":
-                res[attr] = Stack.Flags(**{k: int(attrvalue[v]) for k, v in pyconnector.STACK_FLAG_MAP.items()})
+                res[attr] = Value(attr, enctype, n, vmax, attrdata, struct_cls=StackFlags, struct_mapping=pyconnector.STACK_FLAG_MAP)
             else:
-                res[attr] = attrvalue
+                res[attr] = Value(attr, enctype, n, vmax, attrdata)
 
         return Stack(**dict(res, data=stackdata))
 
@@ -80,7 +81,7 @@ class Decoder:
         res = {}
         for attr, (enctype, offset, n, vmax) in pyconnector.HEX_ATTR_MAP.items():
             attrdata = hexdata[offset:][:n]
-            res[attr] = cls.decode_attribute(attrdata, enctype, vmax)
+            res[attr] = Value(attr, enctype, vmax, attrdata)
         return Hex(**dict(res, data=hexdata))
 
     @classmethod

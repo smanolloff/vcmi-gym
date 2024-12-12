@@ -45,7 +45,7 @@ class Autoencoder(nn.Module):
     def __init__(self, input_dim, layer_sizes):
         super().__init__()
 
-        layer_sizes = [4096, 1024, 256, 32]
+        layer_sizes = [4096, 1024, 256]
         encoder = nn.Sequential()
         decoder = nn.Sequential()
 
@@ -202,7 +202,7 @@ def main():
             ),
             train=dict(
                 layer_sizes=[2048, 512, 128],
-                learning_rate=1e-4,
+                learning_rate=1e-5,
 
                 buffer_capacity=100_000,
                 train_epochs=10,
@@ -304,6 +304,10 @@ def test():
     obs = to_tensor(dict_obs)
     ae = Autoencoder(input_dim=obs.shape[0], layer_sizes=config["train"]["layer_sizes"])
 
+    filename = "%s/%s-model.pt" % (config["run"]["out_dir"], config["run"]["id"])
+    print(f"Loading model weights from {filename}")
+    ae.load_state_dict(torch.load(filename, weights_only=True), strict=True)
+
     while True:
         action = env.random_action()
         if action is None:
@@ -328,5 +332,5 @@ def test():
 
 
 if __name__ == "__main__":
-    # main()
-    test()
+    main()
+    # test()

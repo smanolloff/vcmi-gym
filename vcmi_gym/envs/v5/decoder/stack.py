@@ -19,11 +19,12 @@ from collections import namedtuple
 from ..pyprocconnector import STACK_ATTR_MAP, STACK_FLAG_MAP, SIDE_MAP
 
 
-class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
-    class Flags(namedtuple("Flags", list(STACK_FLAG_MAP.keys()))):
-        def __repr__(self):
-            return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
+class StackFlags(namedtuple("StackFlags", list(STACK_FLAG_MAP.keys()))):
+    def __repr__(self):
+        return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
 
+
+class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
     def __repr__(self):
         return f'Stack(id={self.ID} side={self._side()} y={self.Y_COORD} x={self.X_COORD})'
 
@@ -59,7 +60,3 @@ class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
 
     def alias(self):
         return chr(self.ID + (ord('0') if self.ID < 7 else ord('A') - 7))
-
-    # def flags(self):
-    #     return [k for k, v in STACK_FLAG_MAP.items() if self.FLAGS[v]]
-
