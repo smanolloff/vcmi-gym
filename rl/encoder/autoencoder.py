@@ -15,10 +15,11 @@ from vcmi_gym.envs.v5.decoder.decoder import Decoder
 
 
 def to_tensor(dict_obs):
+    # return torch.as_tensor(dict_obs["observation"])
     return torch.concatenate((
         torch.as_tensor(dict_obs["observation"]),
-        torch.as_tensor(dict_obs["action_mask_1"]).float(),
-        torch.as_tensor(dict_obs["action_mask_2"]).float().flatten(),
+        # torch.as_tensor(dict_obs["action_mask_1"]).float(),
+        # torch.as_tensor(dict_obs["action_mask_2"]).float().flatten(),
     ))
 
 
@@ -42,10 +43,29 @@ class Buffer:
 
 
 class Autoencoder(nn.Module):
+    # class Split(nn.Module):
+    #     def __init__(self, split_size, dim):
+    #         super().__init__()
+    #         self.split_size = split_size
+    #         self.dim = dim
+
+    #     def forward(self, x):
+    #         return torch.split(x, self.split_size, self.dim)
+
+    #     def __repr__(self):
+    #         return f"{self.__class__.__name__}(dim={self.dim}, split_size={self.split_size})"
+
     def __init__(self, input_dim, layer_sizes):
         super().__init__()
 
-        layer_sizes = [4096, 1024, 256]
+        # obs_dims = [
+        #     VcmiEnv.STATE_SIZE_MISC,
+        #     VcmiEnv.STATE_SIZE_STACKS,
+        #     VcmiEnv.STATE_SIZE_HEXES,
+        # ]
+        # assert len(input_dim) == 0
+        # assert sum(obs_dims) == input_dim[0], f"{sum(obs_dims)} == {input_dim}"
+
         encoder = nn.Sequential()
         decoder = nn.Sequential()
 
@@ -57,9 +77,11 @@ class Autoencoder(nn.Module):
             decoder.insert(0, nn.Linear(layer_size, tmpdim))
             tmpdim = layer_size
 
-        # drop activations after last layer
-        self.encoder = encoder[:-1]
-        self.decoder = decoder[:-1]
+        encoder = encoder[:-1]
+        decoder = decoder[:-1]
+
+        self.encoder = encoder
+        self.decoder = decoder
 
     def forward(self, x):
         latent = self.encoder(x)
@@ -193,19 +215,19 @@ def main():
                 warmachine_chance=40,
                 random_terrain_chance=100,
                 tight_formation_chance=20,
-                user_timeout=1800,
-                vcmi_timeout=1800,
+                user_timeout=3600,
+                vcmi_timeout=3600,
                 boot_timeout=300,
                 conntype="thread",
                 # vcmi_loglevel_global="trace",
                 # vcmi_loglevel_ai="trace",
             ),
             train=dict(
-                layer_sizes=[2048, 512, 128],
-                learning_rate=1e-5,
+                layer_sizes=[4096, 1536, 384, 64],
+                learning_rate=1e-4,
 
                 buffer_capacity=100_000,
-                train_epochs=10,
+                train_epochs=3,
                 train_batch_size=1000,
                 eval_env_steps=10_000,
 
@@ -262,7 +284,7 @@ def main():
             env=env,
             buffer=buffer,
             n=buffer.capacity,
-            progress_report_steps=5
+            progress_report_steps=0
         )
         assert buffer.full and not buffer.index
 
@@ -325,7 +347,7 @@ def test():
             loss = mse_loss(obs2, obs1)
             print("Loss: %s" % loss)
             d1 = Decoder.decode(obs1[:obs_only_shape[0]].numpy(), done)
-            d2 = Decoder.decode(obs2[:obs_only_shape[0]].numpy(), done)
+            d2 = Decoder.decode(obs2[:obs_only_shape[0]].numpy(), done, state0=obs1[:obs_only_shape[0]])
 
         print(d1.render())
         print(d2.render())

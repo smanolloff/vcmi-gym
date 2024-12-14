@@ -29,9 +29,12 @@ class Decoder:
     # declare as class var to allow overwriting by subclasses
     STATE_SIZE_ONE_HEX = pyconnector.STATE_SIZE_ONE_HEX
 
+    # XXX: `state0` is used in autoencoder testing scenarios where it
+    #      represents the real state, while `state` is the reconstructed one
     @classmethod
-    def decode(cls, state, is_battle_over):
+    def decode(cls, state, is_battle_over, state0=None):
         obs = state
+        obs0 = state0
         assert obs.shape == (pyconnector.STATE_SIZE,), f"{obs.shape} == ({pyconnector.STATE_SIZE},)"
 
         sizes = [
@@ -49,39 +52,50 @@ class Decoder:
         stacks = stacks.reshape(2, 10, pyconnector.STATE_SIZE_ONE_STACK)
         hexes = hexes.reshape(11, 15, pyconnector.STATE_SIZE_ONE_HEX)
 
+        if obs0 is not None:
+            misc0, stacks0, hexes0 = np.split(obs0, delimiters)
+            stacks0 = stacks0.reshape(2, 10, pyconnector.STATE_SIZE_ONE_STACK)
+            hexes0 = hexes0.reshape(11, 15, pyconnector.STATE_SIZE_ONE_HEX)
+
         res = Battlefield(is_battle_over, envstate=state)
 
         for side in range(2):
             for i in range(10):
-                res.stacks[side].append(cls.decode_stack(stacks[side][i]))
+                stackdata = stacks[side][i]
+                stackdata0 = stacks0[side][i] if obs0 is not None else None
+                res.stacks[side].append(cls.decode_stack(stackdata, stackdata0))
 
         for y in range(11):
             row = []
             for x in range(15):
-                row.append(cls.decode_hex(hexes[y][x]))
+                hexdata = hexes[y][x]
+                hexdata0 = hexes0[y][x] if obs0 is not None else None
+                row.append(cls.decode_hex(hexdata, hexdata0))
             res.hexes.append(row)
 
         return res
 
     @classmethod
-    def decode_stack(cls, stackdata):
+    def decode_stack(cls, stackdata, stackdata0=None):
         res = {}
         for attr, (enctype, offset, n, vmax) in pyconnector.STACK_ATTR_MAP.items():
             attrdata = stackdata[offset:][:n]
+            attrdata0 = stackdata0[offset:][:n] if stackdata0 is not None else None
 
             if attr == "FLAGS":
-                res[attr] = Value(attr, enctype, n, vmax, attrdata, struct_cls=StackFlags, struct_mapping=pyconnector.STACK_FLAG_MAP)
+                res[attr] = Value(attr, enctype, n, vmax, attrdata, raw0=attrdata0, struct_cls=StackFlags, struct_mapping=pyconnector.STACK_FLAG_MAP)
             else:
-                res[attr] = Value(attr, enctype, n, vmax, attrdata)
+                res[attr] = Value(attr, enctype, n, vmax, attrdata, raw0=attrdata0)
 
         return Stack(**dict(res, data=stackdata))
 
     @classmethod
-    def decode_hex(cls, hexdata):
+    def decode_hex(cls, hexdata, hexdata0=None):
         res = {}
         for attr, (enctype, offset, n, vmax) in pyconnector.HEX_ATTR_MAP.items():
             attrdata = hexdata[offset:][:n]
-            res[attr] = Value(attr, enctype, vmax, attrdata)
+            attrdata0 = hexdata0[offset:][:n] if hexdata0 is not None else None
+            res[attr] = Value(attr, enctype, n, vmax, attrdata, raw0=attrdata0)
         return Hex(**dict(res, data=hexdata))
 
     @classmethod

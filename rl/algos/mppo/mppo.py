@@ -811,6 +811,7 @@ def main(args, agent_cls=Agent):
             clipfracs = []
 
             # XXX: train during optimization
+            import ipdb; ipdb.set_trace()  # noqa
             agent.train()
             for epoch in range(args.update_epochs):
                 np.random.shuffle(b_inds)
