@@ -137,7 +137,7 @@ namespace Connector::V5 {
             break; case MA::CURRENT_ARMY_VALUE_LEFT:  attrname = "CURRENT_ARMY_VALUE_LEFT";
             break; case MA::CURRENT_ARMY_VALUE_RIGHT: attrname = "CURRENT_ARMY_VALUE_RIGHT";
             break; default:
-                throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
+                throw std::runtime_error("Unexpected MiscAttribute: " + std::to_string(static_cast<int>(a)));
             }
 
             auto encname = getEncodingName(e);
@@ -168,7 +168,7 @@ namespace Connector::V5 {
             break; case HA::STACK_SIDE:     attrname = "STACK_SIDE";
             break; case HA::ACTION_MASK:    attrname = "ACTION_MASK";
             break; default:
-                throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
+                throw std::runtime_error("Unexpected HexAttribute: " + std::to_string(static_cast<int>(a)));
             }
 
             auto encname = getEncodingName(e);
@@ -197,6 +197,7 @@ namespace Connector::V5 {
             break; case SA::SIDE:      attrname = "SIDE";
             break; case SA::Y_COORD:   attrname = "Y_COORD";
             break; case SA::X_COORD:   attrname = "X_COORD";
+            break; case SA::CREATURE_ID: attrname = "CREATURE_ID";
             break; case SA::QUANTITY:  attrname = "QUANTITY";
             break; case SA::ATTACK:    attrname = "ATTACK";
             break; case SA::DEFENSE:   attrname = "DEFENSE";
@@ -210,7 +211,7 @@ namespace Connector::V5 {
             break; case SA::AI_VALUE:  attrname = "AI_VALUE";
             break; case SA::FLAGS:     attrname = "FLAGS";
             break; default:
-                throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
+                throw std::runtime_error("Unexpected StackAttribute: " + std::to_string(static_cast<int>(a)));
             }
 
             auto encname = getEncodingName(e);
@@ -271,10 +272,14 @@ namespace Connector::V5 {
         break; case E::CATEGORICAL_MASKING_NULL:    return "CATEGORICAL_MASKING_NULL";
         break; case E::CATEGORICAL_STRICT_NULL:     return "CATEGORICAL_STRICT_NULL";
         break; case E::CATEGORICAL_ZERO_NULL:       return "CATEGORICAL_ZERO_NULL";
-        break; case E::NORMALIZED_EXPLICIT_NULL:    return "NORMALIZED_EXPLICIT_NULL";
-        break; case E::NORMALIZED_MASKING_NULL:     return "NORMALIZED_MASKING_NULL";
-        break; case E::NORMALIZED_STRICT_NULL:      return "NORMALIZED_STRICT_NULL";
-        break; case E::NORMALIZED_ZERO_NULL:        return "NORMALIZED_ZERO_NULL";
+        break; case E::EXPNORM_EXPLICIT_NULL:       return "EXPNORM_EXPLICIT_NULL";
+        break; case E::EXPNORM_MASKING_NULL:        return "EXPNORM_MASKING_NULL";
+        break; case E::EXPNORM_STRICT_NULL:         return "EXPNORM_STRICT_NULL";
+        break; case E::EXPNORM_ZERO_NULL:           return "EXPNORM_ZERO_NULL";
+        break; case E::LINNORM_EXPLICIT_NULL:       return "LINNORM_EXPLICIT_NULL";
+        break; case E::LINNORM_MASKING_NULL:        return "LINNORM_MASKING_NULL";
+        break; case E::LINNORM_STRICT_NULL:         return "LINNORM_STRICT_NULL";
+        break; case E::LINNORM_ZERO_NULL:           return "LINNORM_ZERO_NULL";
         break; default:
             throw std::runtime_error("Unexpected encoding: " + std::to_string(static_cast<int>(e)));
         }

@@ -187,16 +187,14 @@ def eval_autoencoder(logger, autoencoder, buffer, eval_env_steps):
     return loss_sum / 10
 
 
-def main():
+def train(resume_config):
     run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
 
     # Usage:
     # python -m rl.encoder.autoencoder [path/to/config.json]
 
-    resuming = False
-    if len(sys.argv) > 1:
-        resuming = True
-        with open(sys.argv[1], "r") as f:
+    if resume_config:
+        with open(resume_config, "r") as f:
             print(f"Resuming from config: {f.name}")
             config = json.load(f)
     else:
@@ -241,10 +239,10 @@ def main():
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
-    if not resuming:
+    if not resume_config:
         with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
             print(f"Saving new config to: {f.name}")
-            json.dump(config, f)
+            json.dump(config, f, indent=4)
 
     logger = StructuredLogger(filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
     logger.log(dict(config=config))
@@ -266,7 +264,7 @@ def main():
     ae = Autoencoder(input_dim=obs.shape[0], layer_sizes=config["train"]["layer_sizes"])
     optimizer = torch.optim.Adam(ae.parameters(), lr=learning_rate)
 
-    if resuming:
+    if resume_config:
         filename = "%s/%s-model.pt" % (config["run"]["out_dir"], config["run"]["id"])
         logger.log(f"Loading model weights from {filename}")
         ae.load_state_dict(torch.load(filename, weights_only=True), strict=True)
@@ -317,9 +315,8 @@ def main():
         iteration += 1
 
 
-def test():
-    assert len(sys.argv) == 2
-    with open(sys.argv[1], "r") as f:
+def test(cfg_file):
+    with open(cfg_file, "r") as f:
         config = json.load(f)
     env = VcmiEnv(**config["env"])
     dict_obs, _ = env.reset()
@@ -347,12 +344,37 @@ def test():
             loss = mse_loss(obs2, obs1)
             print("Loss: %s" % loss)
             d1 = Decoder.decode(obs1[:obs_only_shape[0]].numpy(), done)
-            d2 = Decoder.decode(obs2[:obs_only_shape[0]].numpy(), done, state0=obs1[:obs_only_shape[0]])
+
+            d2 = Decoder.decode(
+                obs2[:obs_only_shape[0]].numpy(),
+                done,
+                state0=obs1[:obs_only_shape[0]].numpy(),
+                precision=0,  # number of digits after "."
+                roundfracs=None,   # 5 = round to nearest 0.2 (3.14 => 3.2)
+            )
 
         print(d1.render())
         print(d2.render())
 
 
 if __name__ == "__main__":
-    main()
-    # test()
+    usage = "Usage: python -m rl.encoder.autoencoder train|test [path/to/config.json]"
+
+    if len(sys.argv) not in [2, 3]:
+        print(usage)
+        sys.exit(1)
+
+    if sys.argv[1] == "train":
+        fn = train
+    elif sys.argv[1] == "test":
+        fn = test
+    else:
+        print(usage)
+        sys.exit(1)
+
+    if len(sys.argv) > 2:
+        cfg_file = sys.argv[2]
+    else:
+        cfg_file = None
+
+    fn(cfg_file)

@@ -57,10 +57,10 @@ namespace Connector::V5 {
         constexpr auto n1 = std::get<2>(MMAI::Schema::V5::MISC_ENCODING.at(EI(MA::SHOOTING)));
         static_assert(EI(MA::PRIMARY_ACTION_MASK) == 0);
         static_assert(EI(MA::SHOOTING) == 1);
-        static_assert(n1 == 1);
-        // either 0.0 or 1.0, but compare with 0.5
+        static_assert(n1 == 2);
+        // either [0.0, 1.0] or [1.0, 0.0], but compare with 0.5
         // (to avoid floating-point issues)
-        auto shooting = s->getBattlefieldState().at(n0) > 0.5;
+        auto shooting = s->getBattlefieldState().at(n0+1) > 0.5;
 
         if (primaryAction > EI(PA::MOVE) && shooting)
             // no hex needed

@@ -25,9 +25,19 @@ from ..pyprocconnector import (
 )
 
 
+class HexStateFlags(namedtuple("HexStateFlags", list(HEX_STATE_MAP.keys()))):
+    def __repr__(self):
+        return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
+
+
+class AmoveActionFlags(namedtuple("AmoveActionFlags", list(AMOVE_ACTION_MAP.keys()))):
+    def __repr__(self):
+        return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
+
+
 class Hex(namedtuple("Hex", ["data"] + list(HEX_ATTR_MAP.keys()))):
     def __repr__(self):
-        return f'Hex(y={self.Y_COORD} x={self.X_COORD})'
+        return f'Hex(y={self.Y_COORD.v} x={self.X_COORD.v})'
 
     def dump(self, compact=True):
         maxlen = 0
@@ -37,18 +47,11 @@ class Hex(namedtuple("Hex", ["data"] + list(HEX_ATTR_MAP.keys()))):
                 continue
 
             value = getattr(self, field)
+            value = value.struct if value.struct else value.v
             maxlen = max(maxlen, len(field))
 
             if value is not None:
-                match field:
-                    case "STATE_MASK":
-                        names = list(HEX_STATE_MAP.keys())
-                        indexes = np.where(value)[0]
-                        value = ", ".join([names[i] for i in indexes])
-                    case "ACTION_MASK":
-                        names = list(AMOVE_ACTION_MAP.keys())
-                        indexes = np.where(value)[0]
-                        value = ", ".join([names[i] for i in indexes])
+                pass
             elif compact:
                 continue
 
@@ -62,13 +65,13 @@ class Hex(namedtuple("Hex", ["data"] + list(HEX_ATTR_MAP.keys()))):
         if amoveaction not in AMOVE_ACTION_MAP.values():
             return None
 
-        if not self.ACTION_MASK[amoveaction]:
+        if not self.ACTION_MASK.v[amoveaction]:
             print("Action not possible for this hex")
             return None
 
-        hexid = 15*self.Y_COORD + self.X_COORD
+        hexid = 15*self.Y_COORD.v + self.X_COORD.v
         offset = len(PRIMARY_ACTION_MAP) - len(AMOVE_ACTION_MAP)
         return {"action_1": offset + amoveaction, "action_2": hexid}
 
     def actions(self):
-        return [k for k, v in AMOVE_ACTION_MAP.items() if self.ACTION_MASK[v]]
+        return [k for k, v in AMOVE_ACTION_MAP.items() if self.ACTION_MASK.v[v]]

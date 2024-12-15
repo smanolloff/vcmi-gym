@@ -26,7 +26,7 @@ class StackFlags(namedtuple("StackFlags", list(STACK_FLAG_MAP.keys()))):
 
 class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
     def __repr__(self):
-        return f'Stack(id={self.ID} side={self._side()} y={self.Y_COORD} x={self.X_COORD})'
+        return f'Stack(id={self.ID} side={self._side()} y={self.Y_COORD.v} x={self.X_COORD.v})'
 
     def dump(self, compact=True):
         maxlen = 0
@@ -36,7 +36,8 @@ class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
             if field == "data":
                 continue
 
-            value = getattr(self, field) if self.exists() else None
+            value = getattr(self, field)
+            value = value.struct if value.struct else value.v
             maxlen = max(maxlen, len(field))
 
             if value is not None:
@@ -51,12 +52,12 @@ class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
         print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))
 
     def exists(self):
-        return self.X_COORD is not None
+        return self.X_COORD.v is not None
 
     def _side(self):
-        if self.SIDE is None:
+        if self.SIDE.v is None:
             return None
-        return list(SIDE_MAP)[self.SIDE]
+        return list(SIDE_MAP)[self.SIDE.v]
 
     def alias(self):
-        return chr(self.ID + (ord('0') if self.ID < 7 else ord('A') - 7))
+        return chr(self.ID.v + (ord('0') if self.ID < 7 else ord('A') - 7))
