@@ -26,7 +26,7 @@ class StackFlags(namedtuple("StackFlags", list(STACK_FLAG_MAP.keys()))):
 
 class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
     def __repr__(self):
-        return f'Stack(id={self.ID} side={self._side()} y={self.Y_COORD.v} x={self.X_COORD.v})'
+        return f'Stack(id={self.ID.v} side={self._side()} y={self.Y_COORD.v} x={self.X_COORD.v})'
 
     def dump(self, compact=True):
         maxlen = 0
@@ -60,4 +60,4 @@ class Stack(namedtuple("Stack", ["data"] + list(STACK_ATTR_MAP.keys()))):
         return list(SIDE_MAP)[self.SIDE.v]
 
     def alias(self):
-        return chr(self.ID.v + (ord('0') if self.ID < 7 else ord('A') - 7))
+        return chr(self.ID.v + (ord('0') if self.ID.v < 7 else ord('A') - 7))

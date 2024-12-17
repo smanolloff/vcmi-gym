@@ -318,6 +318,7 @@ def train(resume_config):
 def test(cfg_file):
     with open(cfg_file, "r") as f:
         config = json.load(f)
+    print("Env config: %s" % config["env"])
     env = VcmiEnv(**config["env"])
     dict_obs, _ = env.reset()
     obs = to_tensor(dict_obs)
@@ -338,12 +339,21 @@ def test(cfg_file):
 
         obs_only_shape = dict_obs["observation"].shape
 
+        verbose = False
+
         with torch.no_grad():
-            obs1 = to_tensor(dict_obs)
+            print("Loading lastobs.tmp", os.getcwd())
+            obs1 = torch.load("lastobs.npy", weights_only=True)
+
+            # obs1 = to_tensor(dict_obs)
+            # print("Saving to lastobs.tmp", os.getcwd())
+            # torch.save(obs1, "lastobs.npy")
+            # print(env.render())
+
             obs2 = ae(obs1)
             loss = mse_loss(obs2, obs1)
             print("Loss: %s" % loss)
-            d1 = Decoder.decode(obs1[:obs_only_shape[0]].numpy(), done)
+            d1 = Decoder.decode(obs1[:obs_only_shape[0]].numpy(), done, verbose=verbose)
 
             d2 = Decoder.decode(
                 obs2[:obs_only_shape[0]].numpy(),
@@ -351,10 +361,13 @@ def test(cfg_file):
                 state0=obs1[:obs_only_shape[0]].numpy(),
                 precision=0,  # number of digits after "."
                 roundfracs=None,   # 5 = round to nearest 0.2 (3.14 => 3.2)
+                verbose=verbose
             )
 
         print(d1.render())
         print(d2.render())
+
+        sys.exit(1)
 
 
 if __name__ == "__main__":

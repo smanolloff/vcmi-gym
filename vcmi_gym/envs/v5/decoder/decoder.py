@@ -32,7 +32,7 @@ class Decoder:
     # XXX: `state0` is used in autoencoder testing scenarios where it
     #      represents the real state, while `state` is the reconstructed one
     @classmethod
-    def decode(cls, state, is_battle_over, state0=None, precision=None, roundfracs=None):
+    def decode(cls, state, is_battle_over, state0=None, precision=None, roundfracs=None, verbose=False):
         obs = state
         obs0 = state0
         assert obs.shape == (pyconnector.STATE_SIZE,), f"{obs.shape} == ({pyconnector.STATE_SIZE},)"
@@ -63,20 +63,20 @@ class Decoder:
             for i in range(10):
                 stackdata = stacks[side][i]
                 stackdata0 = stacks0[side][i] if obs0 is not None else None
-                res.stacks[side].append(cls.decode_stack(stackdata, stackdata0, precision, roundfracs))
+                res.stacks[side].append(cls.decode_stack(stackdata, stackdata0, precision, roundfracs, verbose))
 
         for y in range(11):
             row = []
             for x in range(15):
                 hexdata = hexes[y][x]
                 hexdata0 = hexes0[y][x] if obs0 is not None else None
-                row.append(cls.decode_hex(hexdata, hexdata0, precision, roundfracs))
+                row.append(cls.decode_hex(hexdata, hexdata0, precision, roundfracs, verbose))
             res.hexes.append(row)
 
         return res
 
     @classmethod
-    def decode_stack(cls, stackdata, stackdata0=None, precision=None, roundfracs=None):
+    def decode_stack(cls, stackdata, stackdata0=None, precision=None, roundfracs=None, verbose=False):
         res = {}
         for attr, (enctype, offset, n, vmax) in pyconnector.STACK_ATTR_MAP.items():
             attrdata = stackdata[offset:][:n]
@@ -88,8 +88,9 @@ class Decoder:
                 vmax=vmax,
                 raw=attrdata,
                 raw0=attrdata0,
-                precision=precision,   # number of digits after "."
-                roundfracs=roundfracs  # 5 = round to nearest 0.2 (3.14 => 3.2)
+                precision=precision,    # number of digits after "."
+                roundfracs=roundfracs,  # 5 = round to nearest 0.2 (3.14 => 3.2)
+                verbose=verbose
             )
 
             if attr == "FLAGS":
@@ -100,7 +101,7 @@ class Decoder:
         return Stack(**dict(res, data=stackdata))
 
     @classmethod
-    def decode_hex(cls, hexdata, hexdata0=None, precision=None, roundfracs=None):
+    def decode_hex(cls, hexdata, hexdata0=None, precision=None, roundfracs=None, verbose=False):
         res = {}
         for attr, (enctype, offset, n, vmax) in pyconnector.HEX_ATTR_MAP.items():
             attrdata = hexdata[offset:][:n]
@@ -112,8 +113,9 @@ class Decoder:
                 vmax=vmax,
                 raw=attrdata,
                 raw0=attrdata0,
-                precision=precision,   # number of digits after "."
-                roundfracs=roundfracs  # 5 = round to nearest 0.2 (3.14 => 3.2)
+                precision=precision,    # number of digits after "."
+                roundfracs=roundfracs,  # 5 = round to nearest 0.2 (3.14 => 3.2)
+                verbose=verbose,
             )
 
             if attr == "STATE_MASK":

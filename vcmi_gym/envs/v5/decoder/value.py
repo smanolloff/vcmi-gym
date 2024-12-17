@@ -1,5 +1,6 @@
 from .. import pyprocconnector as pyconnector
 import numpy as np
+import math
 
 NA = pyconnector.STATE_VALUE_NA
 
@@ -24,7 +25,8 @@ class Value:
         precision=None,    # number of digits after "."
         roundfracs=None,  # 5 = round to nearest 0.2 (3.14 => 3.2)
         struct_cls=None,
-        struct_mapping=None
+        struct_mapping=None,
+        verbose=False,
     ):
         self.name = name
         self.enctype = enctype
@@ -32,6 +34,7 @@ class Value:
         self.vmax = vmax
         self.struct_cls = struct_cls
         self.struct_mapping = struct_mapping
+        self.verbose = verbose
 
         self.raw = raw
         self.raw0 = raw0
@@ -47,7 +50,7 @@ class Value:
 
         if enctype.endswith("EXPLICIT_NULL"):
             # if self.raw_rounded[0] == 1:
-            if raw.argmax() == 0:
+            if raw.argmax() == 0 and self.raw[0] > 0.2:
                 self.v = None
                 self._compare()
                 return
@@ -86,6 +89,10 @@ class Value:
             # struct_mapping is a dict {"NAME": index}
             self.struct = struct_cls(**{k: int(self.v[v]) for k, v in struct_mapping.items()})
 
+    def log(self, msg):
+        if self.verbose:
+            print(msg)
+
     def _compare(self):
         if self.raw0 is None:
             return
@@ -111,10 +118,10 @@ class Value:
         equal = np.allclose(self.raw0, self.raw_re, atol=1e-3)
 
         if equal:
-            print(f"Match: v={self.v}, v0={self.v0}, name={self.name}, enctype={self.enctype}")
+            self.log(f"Match: v={self.v}, v0={self.v0}, name={self.name}, enctype={self.enctype}")
             return
 
-        print(f"Mismatch: {self.enctype}: {self.name}")
+        self.log(f"Mismatch: {self.enctype}: {self.name}")
 
         # for printing purposes
         display_rounding = 2
@@ -130,11 +137,16 @@ class Value:
         lines[1] = lines[1].ljust(linewidth) + ("  # %11s # %s" % ("raw_rounded", self.v_rounded))
         lines[2] = lines[2].ljust(linewidth) + ("  # %11s # %s" % ("raw_re", self.v_re))
         lines[3] = lines[3].ljust(linewidth) + ("  # %11s # %s" % ("raw0 (orig)", self.v0))
-        print("\n".join(lines))
+        self.log("\n".join(lines))
 
         # If just one of the values is None => problem (will mess up rendering)
         v0v = [self.v0, self.v]
         assert all(x is None for x in v0v) or not any(x is None for x in v0v), "critical mismatch"
+
+        if self.v is not None:
+            err_abs = np.sum((self.v0 - self.v))
+            err_rel = np.sum(np.abs(self.v0) / np.abs(self.v))
+            self.log("Error: abs=%.2f => %.2f%%" % (err_abs, err_rel * 100))
 
         # treat CATEGORICAL mismatches as critical (?):
         # assert not self.enctype.startswith("CATEGORICAL"), "critical mismatch"
@@ -162,8 +174,11 @@ class Encoder:
             else:
                 raise Exception(f"Unexpected enctype: {enctype}")
         else:
-            if enctype.startswith("NORMALIZED"):
-                raw[0] = v / vmax
+            eps = 1e-8
+            if enctype.startswith("EXPNORM"):
+                raw[0] = math.log((v + 1) or eps, vmax)
+            elif enctype.startswith("LINNORM"):
+                raw[0] = v / (vmax or eps)
             elif enctype.startswith("CATEGORICAL"):
                 raw[v] = 1
             elif enctype.startswith("BINARY"):

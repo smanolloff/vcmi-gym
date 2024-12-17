@@ -15,7 +15,6 @@
 # =============================================================================
 
 from collections import namedtuple
-import numpy as np
 
 from ..pyprocconnector import (
     HEX_ATTR_MAP,
