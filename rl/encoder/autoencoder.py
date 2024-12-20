@@ -203,7 +203,7 @@ def train(resume_config):
             print(f"Resuming from config: {f.name}")
             config = json.load(f)
 
-        config["run"]["run_id"] = run_id
+        config["run"]["id"] = run_id
         config["run"]["resumed_config"] = resume_config
     else:
         config = dict(
