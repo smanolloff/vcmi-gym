@@ -145,7 +145,7 @@ class Value:
 
         if self.v is not None:
             err_abs = np.sum((self.v0 - self.v))
-            err_rel = np.sum(np.abs(self.v0) / np.abs(self.v))
+            err_rel = np.sum(np.abs(self.v0) / (np.abs(self.v) + 1e-8))
             self.log("Error: abs=%.2f => %.2f%%" % (err_abs, err_rel * 100))
 
         # treat CATEGORICAL mismatches as critical (?):

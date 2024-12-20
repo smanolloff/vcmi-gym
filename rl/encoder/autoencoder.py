@@ -6,6 +6,7 @@ import random
 import string
 import json
 import yaml
+import argparse
 
 from torch.nn.functional import mse_loss
 from datetime import datetime
@@ -40,6 +41,12 @@ class Buffer:
         max_index = self.capacity if self.full else self.index
         indices = random.sample(range(max_index), batch_size)
         return self.buffer[indices]
+
+    def sample_iter(self, batch_size):
+        max_index = self.capacity if self.full else self.index
+        indices = torch.randperm(max_index)  # Shuffle indices
+        for i in range(0, max_index, batch_size):
+            yield self.buffer[indices[i:i + batch_size]]
 
 
 class Autoencoder(nn.Module):
@@ -158,33 +165,31 @@ def train_autoencoder(
     train_batch_size
 ):
     autoencoder.train()
-    train_steps = buffer.capacity // train_batch_size
 
     for epoch in range(train_epochs):
-        loss_sum = 0
-        for _ in range(train_steps):
-            batch = buffer.sample(train_batch_size)
+        losses = []
+        for batch in buffer.sample_iter(train_batch_size):
             reconstructed = autoencoder(batch)
             loss = mse_loss(reconstructed, batch)
-            loss_sum += loss.item()
+            losses.append(loss.item())
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-        loss = loss_sum / train_steps
+        loss = sum(losses) / len(losses)
         logger.log(dict(train_epoch=epoch, loss=round(loss, 6)))
 
 
 def eval_autoencoder(logger, autoencoder, buffer, eval_env_steps):
     autoencoder.eval()
-    loss_sum = 0
     batch_size = eval_env_steps // 10
-    for _ in range(10):
-        batch = buffer.sample(batch_size)
-        reconstructed = autoencoder(batch)
-        loss_sum += mse_loss(reconstructed, batch).item()
+    losses = []
 
-    return loss_sum / 10
+    for batch in buffer.sample_iter(batch_size):
+        reconstructed = autoencoder(batch)
+        losses.append(mse_loss(reconstructed, batch).item())
+
+    return sum(losses) / len(losses)
 
 
 def train(resume_config):
@@ -197,11 +202,15 @@ def train(resume_config):
         with open(resume_config, "r") as f:
             print(f"Resuming from config: {f.name}")
             config = json.load(f)
+
+        config["run"]["run_id"] = run_id
+        config["run"]["resumed_config"] = resume_config
     else:
         config = dict(
             run=dict(
                 id=run_id,
                 out_dir=os.path.abspath("data/autoencoder"),
+                resumed_config=None,
             ),
             env=dict(
                 opponent="MMAI_RANDOM",
@@ -239,10 +248,9 @@ def train(resume_config):
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
-    if not resume_config:
-        with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
-            print(f"Saving new config to: {f.name}")
-            json.dump(config, f, indent=4)
+    with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
+        print(f"Saving new config to: {f.name}")
+        json.dump(config, f, indent=4)
 
     logger = StructuredLogger(filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
     logger.log(dict(config=config))
@@ -315,7 +323,7 @@ def train(resume_config):
         iteration += 1
 
 
-def test(cfg_file):
+def test(cfg_file, lastobs=False, verbose=False):
     with open(cfg_file, "r") as f:
         config = json.load(f)
     print("Env config: %s" % config["env"])
@@ -339,16 +347,16 @@ def test(cfg_file):
 
         obs_only_shape = dict_obs["observation"].shape
 
-        verbose = False
-
         with torch.no_grad():
-            print("Loading lastobs.tmp", os.getcwd())
-            obs1 = torch.load("lastobs.npy", weights_only=True)
+            if lastobs:
+                print("Loading lastobs.tmp", os.getcwd())
+                obs1 = torch.load("lastobs.npy", weights_only=True)
+            else:
+                obs1 = to_tensor(dict_obs)
+                print("Saving to lastobs.tmp", os.getcwd())
+                torch.save(obs1, "lastobs.npy")
 
-            # obs1 = to_tensor(dict_obs)
-            # print("Saving to lastobs.tmp", os.getcwd())
-            # torch.save(obs1, "lastobs.npy")
-            # print(env.render())
+            print(env.render())
 
             obs2 = ae(obs1)
             loss = mse_loss(obs2, obs1)
@@ -371,23 +379,21 @@ def test(cfg_file):
 
 
 if __name__ == "__main__":
-    usage = "Usage: python -m rl.encoder.autoencoder train|test [path/to/config.json]"
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-v', help="be more verbose", action="store_true")
+    parser.add_argument('-f', metavar="FILE", help="config file to resume or test")
+    parser.add_argument('-l', help="test with lastobs.npy", action="store_true")
+    parser.add_argument('action', choices=["train", "test"])
+    args = parser.parse_args()
 
-    if len(sys.argv) not in [2, 3]:
-        print(usage)
-        sys.exit(1)
-
-    if sys.argv[1] == "train":
+    if args.action == "train":
         fn = train
-    elif sys.argv[1] == "test":
-        fn = test
     else:
-        print(usage)
+        assert args.action == "test"
+        fn = test
+
+    if args.l and not fn == test:
+        print("-l can only be given if action is 'test'")
         sys.exit(1)
 
-    if len(sys.argv) > 2:
-        cfg_file = sys.argv[2]
-    else:
-        cfg_file = None
-
-    fn(cfg_file)
+    fn(args.f, args.l, args.v)
