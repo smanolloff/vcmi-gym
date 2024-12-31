@@ -392,8 +392,8 @@ if __name__ == "__main__":
         assert args.action == "test"
         fn = test
 
-    if args.l and not fn == test:
-        print("-l can only be given if action is 'test'")
+    if (args.l or args.v) and not fn == test:
+        print("-l and -v can only be given if action is 'test'")
         sys.exit(1)
 
     fn(args.f, args.l, args.v)

@@ -177,47 +177,16 @@ config = {
 
     # NN arch
     "network": {
-        "attention": None,
-        "features_extractor1_misc": [
-            # => (B, M)
-            {"t": "LazyLinear", "out_features": 4},
+        "autoencoder_config_file": "/Users/simo/Projects/vcmi-gym/data/autoencoder/iyrwwthw-config.json",
+        "body": [
+            {"t": "LazyLinear", "out_features": 128},
             {"t": "LeakyReLU"},
-            # => (B, 4)
-        ],
-        "features_extractor1_stacks": [
-            # => (B, 20, S)
-            {"t": "LazyLinear", "out_features": 8},
-            {"t": "LayerNorm", "normalized_shape": [20, 8]},
-            {"t": "LeakyReLU"},
-            # => (B, 20, 8)
-
-            {"t": "Flatten"},
-            # => (B, 160)
-
-            # {"t": "LeakyReLU"},
-            # {"t": "Linear", "in_features": 640, "out_features": 256},
-        ],
-        "features_extractor1_hexes": [
-            # => (B, 165, H)
-            {"t": "LazyLinear", "out_features": 8},
-            {"t": "LayerNorm", "normalized_shape": [165, 8]},
-            {"t": "LeakyReLU"},
-            # => (B, 165, 8)
-
-            {"t": "Flatten"},
-            # => (B, 1320)
-
-            # {"t": "LeakyReLU"},
-            # {"t": "Linear", "in_features": 2640, "out_features": 256},
-        ],
-        "features_extractor2": [
-            # => (B, 1484)
-            {"t": "Linear", "in_features": 1484, "out_features": 512},
+            {"t": "LazyLinear", "out_features": 128},
             {"t": "LeakyReLU"},
         ],
-        "actor_head1": {"t": "Linear", "in_features": 512, "out_features": 13},
-        "actor_head2": {"t": "Linear", "in_features": 513, "out_features": 165},
-        "critic": {"t": "Linear", "in_features": 512, "out_features": 1}
+        "actor_head1": {"t": "LazyLinear", "out_features": 13},
+        "actor_head2": {"t": "LazyLinear", "out_features": 165},
+        "critic": {"t": "LazyLinear", "out_features": 1}
     },
 
     # Static

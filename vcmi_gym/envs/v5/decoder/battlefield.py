@@ -14,6 +14,8 @@
 # limitations under the License.
 # =============================================================================
 
+import numpy as np
+
 from .stack import Stack, StackFlags
 from .value import Value
 
@@ -126,9 +128,9 @@ class Battlefield():
         # y odd "▕"
 
         def uknstack(id, y, x, side):
-            attrs = {k: Value(k, "BINARY_EXPLICIT_NULL", 2, [1, 0]) for k in STACK_ATTR_MAP.keys()}
-            attrs["COORD_Y"] = Value("COORD_Y", "BINARY_EXPLICIT_NULL", len(STACK_FLAG_MAP), [0]*len(STACK_FLAG_MAP), struct_cls=StackFlags, struct_mapping=STACK_FLAG_MAP)
-            attrs["FLAGS"] = Value("FLAGS", "BINARY_EXPLICIT_NULL", len(STACK_FLAG_MAP), [0]*len(STACK_FLAG_MAP), struct_cls=StackFlags, struct_mapping=STACK_FLAG_MAP)
+            attrs = {k: Value(k, "BINARY_EXPLICIT_NULL", 2, 1, np.array([1, 0])) for k in STACK_ATTR_MAP.keys()}
+            attrs["COORD_Y"] = Value("COORD_Y", "BINARY_EXPLICIT_NULL", len(STACK_FLAG_MAP), 10, np.array([0]*len(STACK_FLAG_MAP)), struct_cls=StackFlags, struct_mapping=STACK_FLAG_MAP)
+            attrs["FLAGS"] = Value("FLAGS", "BINARY_EXPLICIT_NULL", len(STACK_FLAG_MAP), 1, np.array([0]*len(STACK_FLAG_MAP)), struct_cls=StackFlags, struct_mapping=STACK_FLAG_MAP)
             return Stack(**dict(attrs, data=[]))
 
         for y in range(11):
