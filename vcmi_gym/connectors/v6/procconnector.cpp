@@ -15,14 +15,12 @@
 // =============================================================================
 
 #include "procconnector.h"
-#include "common.h"
-#include "schema/v5/constants.h"
-#include "schema/v5/types.h"
+#include "schema/v6/constants.h"
+#include "schema/v6/types.h"
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"
 #include "ML/model_wrappers/torchpath.h"
-#include "ML/user_agents/agent-v5.h"
 #include <algorithm>
 
 #include <pybind11/pybind11.h>
@@ -37,7 +35,7 @@
     if(want != connstate) \
         throw std::runtime_error("Unexpected connector state: want: " + std::to_string(EI(want)) + ", have: " + std::to_string(EI(connstate)))
 
-namespace Connector::V5::Proc {
+namespace Connector::V6::Proc {
     namespace py = pybind11;
 
     Connector::Connector(
@@ -91,7 +89,7 @@ namespace Connector::V5::Proc {
 
 
     const int Connector::version() {
-        return 5;
+        return 6;
     }
 
     const std::vector<std::string> Connector::getLogs() {
@@ -129,24 +127,24 @@ namespace Connector::V5::Proc {
 #endif // VERBOSE || LOGCOLLECT
     }
 
-    const MMAI::Schema::V5::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
+    const MMAI::Schema::V6::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
         LOG("Extracting supplementary data...");
         auto &any = s->getSupplementaryData();
         if(!any.has_value()) throw std::runtime_error("extractSupplementaryData: supdata is empty");
-        auto &t = typeid(const MMAI::Schema::V5::ISupplementaryData*);
-        auto err = MMAI::Schema::AnyCastError(any, typeid(const MMAI::Schema::V5::ISupplementaryData*));
+        auto &t = typeid(const MMAI::Schema::V6::ISupplementaryData*);
+        auto err = MMAI::Schema::AnyCastError(any, typeid(const MMAI::Schema::V6::ISupplementaryData*));
 
         if(!err.empty()) {
             LOGFMT("anycast for getSumpplementaryData error: %s", err);
         }
 
-        return std::any_cast<const MMAI::Schema::V5::ISupplementaryData*>(s->getSupplementaryData());
+        return std::any_cast<const MMAI::Schema::V6::ISupplementaryData*>(s->getSupplementaryData());
     };
 
     const P_State Connector::convertState(const MMAI::Schema::IState* s) {
         LOG("Convert IState -> P_State");
         auto sup = extractSupplementaryData(s);
-        assert(sup->getType() == MMAI::Schema::V5::ISupplementaryData::Type::REGULAR);
+        assert(sup->getType() == MMAI::Schema::V6::ISupplementaryData::Type::REGULAR);
 
         // XXX: these do not improve performance, better avoid the const_cast
         // auto pbs = P_BattlefieldState(bs.size(), const_cast<float*>(bs.data()));
@@ -240,7 +238,7 @@ namespace Connector::V5::Proc {
         LOG("release lock (return)");
         LOG("return P_State");
         const auto pstate = convertState(state);
-        assert(pstate.type == MMAI::Schema::V5::ISupplementaryData::Type::REGULAR);
+        assert(pstate.type == MMAI::Schema::V6::ISupplementaryData::Type::REGULAR);
         return pstate;
     }
 
@@ -273,7 +271,7 @@ namespace Connector::V5::Proc {
 
         ASSERT_STATE(ConnectorState::AWAITING_ACTION);
         auto sup = extractSupplementaryData(state);
-        assert(sup->getType() == MMAI::Schema::V5::ISupplementaryData::Type::ANSI_RENDER);
+        assert(sup->getType() == MMAI::Schema::V6::ISupplementaryData::Type::ANSI_RENDER);
 
         LOG("release lock (return)");
         LOG("return state->ansiRender");
@@ -401,8 +399,6 @@ namespace Connector::V5::Proc {
         if (blue == "MMAI_RANDOM") {
             rightModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
         } else if (blue == "MMAI_USER") {
-            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction, f_getValueDummy);
-        } else if (blue == "MMAI_MODEL") {
             // BAI will load the actual model based on leftModel->getName()
             rightModel = new ML::ModelWrappers::TorchPath(blueModel);
         } else {

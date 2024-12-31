@@ -11,8 +11,8 @@ import argparse
 from torch.nn.functional import mse_loss
 from datetime import datetime
 
-from vcmi_gym.envs.v5.vcmi_env import VcmiEnv
-from vcmi_gym.envs.v5.decoder.decoder import Decoder
+from vcmi_gym.envs.v6.vcmi_env import VcmiEnv
+from vcmi_gym.envs.v6.decoder.decoder import Decoder
 
 
 def to_tensor(dict_obs):
@@ -139,16 +139,21 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
             next_progress_report_at += progress_report_step
             logger.log(dict(observations_collected=i, progress=progress*100, terms=terms, truncs=truncs))
 
+        print("rrand action...")
         action = env.random_action()
+        print("rrand action: " + str(action))
         if action is None:
             assert term or trunc
             terms += term
             truncs += trunc
             term = False
             trunc = False
+            print("resetting")
             dict_obs, _info = env.reset()
         else:
+            print("stepping")
             dict_obs, _rew, term, trunc, _info = env.step(action)
+        print("obs collected")
 
         obs = to_tensor(dict_obs)
         buffer.add(obs)
@@ -230,10 +235,10 @@ def train(resume_config):
                 # vcmi_loglevel_ai="trace",
             ),
             train=dict(
-                layer_sizes=[4096, 1536, 384, 64],
+                layer_sizes=[4096, 1536, 512, 256],
                 learning_rate=1e-4,
 
-                buffer_capacity=100_000,
+                buffer_capacity=1000,
                 train_epochs=3,
                 train_batch_size=1000,
                 eval_env_steps=10_000,
@@ -290,7 +295,7 @@ def train(resume_config):
             env=env,
             buffer=buffer,
             n=buffer.capacity,
-            progress_report_steps=0
+            progress_report_steps=10
         )
         assert buffer.full and not buffer.index
 
@@ -388,12 +393,10 @@ if __name__ == "__main__":
 
     if args.action == "train":
         fn = train
+        if args.l or args.v:
+            print("-l and -v can only be given if action is 'test'")
+            sys.exit(1)
+        train(args.f)
     else:
         assert args.action == "test"
-        fn = test
-
-    if (args.l or args.v) and not fn == test:
-        print("-l and -v can only be given if action is 'test'")
-        sys.exit(1)
-
-    fn(args.f, args.l, args.v)
+        test(args.f, args.l, args.v)
