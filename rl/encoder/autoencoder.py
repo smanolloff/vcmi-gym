@@ -79,8 +79,8 @@ class Autoencoder(nn.Module):
         tmpdim = input_dim
         for layer_size in layer_sizes:
             encoder.append(nn.Linear(tmpdim, layer_size))
-            encoder.append(nn.ReLU())
-            decoder.insert(0, nn.ReLU())
+            encoder.append(nn.GELU())
+            decoder.insert(0, nn.GELU())
             decoder.insert(0, nn.Linear(layer_size, tmpdim))
             tmpdim = layer_size
 
@@ -208,6 +208,7 @@ def train(resume_config):
             print(f"Resuming from config: {f.name}")
             config = json.load(f)
 
+        resumed_run_id = config["run"]["id"]
         config["run"]["id"] = run_id
         config["run"]["resumed_config"] = resume_config
     else:
@@ -235,7 +236,9 @@ def train(resume_config):
                 # vcmi_loglevel_ai="trace",
             ),
             train=dict(
-                layer_sizes=[4096, 1536, 512, 256],
+                layer_sizes=[4096, 1536, 512],
+
+                # TODO: consider torch.optim.lr_scheduler.StepLR
                 learning_rate=1e-4,
 
                 buffer_capacity=1000,
@@ -278,11 +281,11 @@ def train(resume_config):
     optimizer = torch.optim.Adam(ae.parameters(), lr=learning_rate)
 
     if resume_config:
-        filename = "%s/%s-model.pt" % (config["run"]["out_dir"], config["run"]["id"])
+        filename = "%s/%s-model.pt" % (config["run"]["out_dir"], resumed_run_id)
         logger.log(f"Loading model weights from {filename}")
         ae.load_state_dict(torch.load(filename, weights_only=True), strict=True)
 
-        filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], config["run"]["id"])
+        filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], resumed_run_id)
         logger.log(f"Loading optimizer weights from {filename}")
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
 
@@ -295,7 +298,7 @@ def train(resume_config):
             env=env,
             buffer=buffer,
             n=buffer.capacity,
-            progress_report_steps=10
+            progress_report_steps=0
         )
         assert buffer.full and not buffer.index
 
