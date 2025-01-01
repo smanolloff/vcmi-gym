@@ -266,11 +266,12 @@ class VcmiEnv(gym.Env):
                 self.logger.warn("Attempted an invalid action (action=%d, errcode=%d)" % (action, res.errcode))
                 assert not fallback, "action=%d is a fallback action, but is also invalid (errcode=%d)" % (action, res.errcode)
                 defend = self.defend_action()
+                print(self.render())
                 self.logger.warn("Falling back to defend action=%d" % defend)
                 return self.step(defend, fallback=True)
             else:
                 self.logger.error("Attempted an invalid action (action=%d, errcode=%d)" % (action, res.errcode))
-                # import ipdb, os; ipdb.set_trace() if os.getenv("DEBUG") else ...  # noqa
+                print(self.render())
                 raise Exception("Invalid action given: %s" % action)
 
         term = res.is_battle_over
@@ -296,7 +297,7 @@ class VcmiEnv(gym.Env):
         obs = {"observation": result.state, "action_mask": result.actmask}
         self._reset_vars(result, obs)
         if self.render_each_step:
-            self.render()
+            print(self.render())
 
         self.result.actmask[0] = False  # prevent retreats for now
 

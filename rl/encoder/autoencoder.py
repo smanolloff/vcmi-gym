@@ -223,6 +223,7 @@ def train(resume_config):
                 warmachine_chance=40,
                 random_terrain_chance=100,
                 tight_formation_chance=20,
+                allow_invalid_actions=True,
                 user_timeout=3600,
                 vcmi_timeout=3600,
                 boot_timeout=300,
