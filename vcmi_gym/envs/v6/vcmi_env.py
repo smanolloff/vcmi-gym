@@ -345,16 +345,17 @@ class VcmiEnv(gym.Env):
     def defend_action(self):
         bf = self.decode()
         astack = None
-        for stack in bf.stacks:
-            if stack.QUEUE_POS == 0:
-                astack = stack
-                break
+        for sidestacks in bf.stacks:
+            for stack in sidestacks:
+                if stack.QUEUE_POS.v == 0:
+                    astack = stack
+                    break
 
         if not astack:
             raise Exception("Could not find active stack")
 
         # Moving to self results in a defend action
-        h = bf.get_hex(astack.Y_COORD, astack.X_COORD)
+        h = bf.get_hex(astack.Y_COORD.v, astack.X_COORD.v)
         return h.action(HexAction.MOVE)
 
     def random_action(self):

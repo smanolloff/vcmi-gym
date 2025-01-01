@@ -358,7 +358,17 @@ class Agent(nn.Module):
     @staticmethod
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
-        return torch.load(agent_file, map_location=device, weights_only=False)
+        agent = torch.load(agent_file, map_location=device, weights_only=False)
+
+        # The encoder is static and is not saved
+        # => build a new agent and use its encoder instead
+        assert agent.NN.encoder is None
+        attrs = ["args", "observation_space", "action_space", "state"]
+        data = {k: agent.__dict__[k] for k in attrs}
+        clean_agent = agent.__class__(**data)
+        agent.NN.encoder = clean_agent.NN.encoder
+        agent.NN.encoder.to(device)
+        return agent
 
     def __init__(self, args, observation_space, action_space, state=None, device="cpu"):
         super().__init__()
@@ -883,7 +893,7 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="simotest.pt",
+        # agent_load_file="data/mppo-test/mppo-test/agent-1735766664.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -901,14 +911,14 @@ def debug_args():
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
-        lr_schedule=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule=ScheduleArgs(mode="const", start=0.0001),
         # envmaps=["gym/generated/4096/4x1024.vmap"],
         envmaps=["gym/A1.vmap"],
-        # num_steps=64,
-        num_steps=4,
+        num_steps=128,
+        # num_steps=4,
         gamma=0.8,
         gae_lambda=0.8,
-        num_minibatches=2,
+        num_minibatches=4,
         # num_minibatches=16,
         # update_epochs=2,
         update_epochs=2,
@@ -951,7 +961,7 @@ def debug_args():
         env_version=6,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         network=dict(
-            autoencoder_config_file="/Users/simo/Projects/vcmi-gym/data/autoencoder/xstogshq-config.json",
+            autoencoder_config_file="/Users/simo/Projects/vcmi-gym/data/autoencoder/cfzpdxub-config.json",
             action_embedding_dim=256,
             body=[
                 dict(t="LazyLinear", out_features=256),

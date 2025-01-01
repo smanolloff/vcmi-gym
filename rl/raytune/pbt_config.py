@@ -177,7 +177,7 @@ config = {
 
     # NN arch
     "network": {
-        "autoencoder_config_file": "/Users/simo/Projects/vcmi-gym/data/autoencoder/xstogshq-config.json",
+        "autoencoder_config_file": "/Users/simo/Projects/vcmi-gym/data/autoencoder/cfzpdxub-config.json",
         "action_embedding_dim": 256,
         "body": [
             {"t": "LazyLinear", "out_features": 256},
@@ -253,7 +253,7 @@ config = {
         "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 5,
+    "env_version": 6,
     "env_wrappers": [],
     # Wandb already initialized when algo is invoked
     # "run_id": None

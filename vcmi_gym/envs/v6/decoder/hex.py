@@ -65,7 +65,7 @@ class Hex(namedtuple("Hex", ["data"] + list(HEX_ATTR_MAP.keys()))):
         if hexaction not in HEX_ACT_MAP.values():
             return None
 
-        if not self.ACTION_MASK[hexaction]:
+        if not self.ACTION_MASK.v[hexaction]:
             print("Action not possible for this hex")
             return None
 
