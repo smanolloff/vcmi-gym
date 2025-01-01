@@ -177,16 +177,16 @@ config = {
 
     # NN arch
     "network": {
-        "autoencoder_config_file": "/Users/simo/Projects/vcmi-gym/data/autoencoder/iyrwwthw-config.json",
+        "autoencoder_config_file": "/Users/simo/Projects/vcmi-gym/data/autoencoder/xstogshq-config.json",
+        "action_embedding_dim": 256,
         "body": [
-            {"t": "LazyLinear", "out_features": 128},
-            {"t": "LeakyReLU"},
-            {"t": "LazyLinear", "out_features": 128},
-            {"t": "LeakyReLU"},
+            {"t": "LazyLinear", "out_features": 256},
+            {"t": "GELU"},
+            {"t": "LazyLinear", "out_features": 1024},
+            {"t": "GELU"},
+            {"t": "LazyLinear", "out_features": 256},
+            {"t": "GELU"},
         ],
-        "actor_head1": {"t": "LazyLinear", "out_features": 13},
-        "actor_head2": {"t": "LazyLinear", "out_features": 165},
-        "critic": {"t": "LazyLinear", "out_features": 1}
     },
 
     # Static

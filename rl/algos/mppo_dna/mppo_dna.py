@@ -1080,14 +1080,12 @@ def main(args):
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
-            # Agent.save(agent, "/Users/simo/Projects/vcmi-gym/simotest.pt")
-
             wandb_log({"params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"]})
             wandb_log({"params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"]})
+            wandb_log({"params/distill_learning_rate": agent.optimizer_distill.param_groups[0]["lr"]})
             wandb_log({"losses/value_loss": v_loss.item()})
             wandb_log({"losses/policy_loss": pg_loss.item()})
-            wandb_log({"losses/value_loss": v_loss.item()})
-            wandb_log({"losses/policy_loss": pg_loss.item()})
+            wandb_log({"losses/distill_loss": distill_loss.item()})
             wandb_log({"losses/entropy": entropy_loss.item()})
             wandb_log({"losses/old_approx_kl": old_approx_kl.item()})
             wandb_log({"losses/approx_kl": approx_kl.item()})
@@ -1095,22 +1093,6 @@ def main(args):
             wandb_log({"losses/explained_variance": explained_var})
             wandb_log({"rollout/ep_count": envs.episode_count})
             wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
-
-            if envs.episode_count > 0:
-                wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
-                wandb_log({"rollout/ep_value_mean": ep_value_mean})
-                wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
-
-            wandb_log({"rollout100/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_100)})
-            wandb_log({"rollout1000/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_1000)})
-            wandb_log({"rollout100/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_100)})
-            wandb_log({"rollout1000/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_1000)})
-            wandb_log({"rollout100/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_100)})
-            wandb_log({"rollout1000/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_1000)})
-            wandb_log({"global/num_rollouts": agent.state.current_rollout})
-            wandb_log({"global/num_timesteps": agent.state.current_timestep})
-            wandb_log({"global/num_seconds": agent.state.current_second})
-            wandb_log({"global/num_episode": agent.state.current_episode})
 
             if envs.episode_count > 0:
                 assert ep_rew_mean is not np.nan
@@ -1123,22 +1105,6 @@ def main(args):
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
-            wandb_log({"params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"]})
-            wandb_log({"params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"]})
-            wandb_log({"params/distill_learning_rate": agent.optimizer_distill.param_groups[0]["lr"]})
-
-            wandb_log({"losses/value_loss": v_loss.item()})
-            wandb_log({"losses/policy_loss": pg_loss.item()})
-            wandb_log({"losses/distill_loss": pg_loss.item()})
-            wandb_log({"losses/entropy": distill_loss.item()})
-            wandb_log({"losses/old_approx_kl": old_approx_kl.item()})
-            wandb_log({"losses/approx_kl": approx_kl.item()})
-            wandb_log({"losses/clipfrac": np.mean(clipfracs)})
-            wandb_log({"losses/explained_variance": explained_var})
-            wandb_log({"rollout/ep_count": envs.episode_count})
-            wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
-
-            if envs.episode_count > 0:
                 wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
                 wandb_log({"rollout/ep_value_mean": ep_value_mean})
                 wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
