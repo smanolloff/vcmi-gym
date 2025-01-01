@@ -620,7 +620,6 @@ def main(args, agent_cls=Agent):
 
         # TRY NOT TO MODIFY: start the game
         next_obs_dict, _ = envs.reset(seed=agent.state.seed)  # XXX: seed has no effect here
-        next_obs, _ = envs.reset(seed=agent.state.seed)  # XXX: seed has no effect here
         next_obs = torch.Tensor(next_obs_dict["observation"]).to(device)
         next_done = torch.zeros(num_envs).to(device)
         next_mask = torch.as_tensor(next_obs_dict["action_mask"]).to(device)
