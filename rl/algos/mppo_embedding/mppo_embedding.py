@@ -556,7 +556,7 @@ def main(args, agent_cls=Agent):
     wrappers = args.env_wrappers
 
     if args.env_version == 6:
-        from vcmi_gym import VcmiEnv_v4 as VcmiEnv
+        from vcmi_gym import VcmiEnv_v6 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 

@@ -16,12 +16,6 @@
 
 #pragma once
 
-#include <filesystem>
-#include <cstdio>
-#include <iostream>
-#include <thread>
-#include <filesystem>
-
 #include "schema/base.h"
 #include "schema/v6/types.h"
 

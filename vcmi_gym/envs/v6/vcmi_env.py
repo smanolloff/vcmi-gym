@@ -85,7 +85,7 @@ class VcmiEnv(gym.Env):
     STATE_SIZE_HEXES = STATE_SIZE_HEXES
     STATE_SIZE_STACKS = STATE_SIZE_STACKS
     STATE_SEQUENCE = STATE_SEQUENCE
-    ENV_VERSION = 4
+    ENV_VERSION = 6
 
     def __init__(
         self,
@@ -162,7 +162,7 @@ class VcmiEnv(gym.Env):
         self.other_env = other_env
         # </params>
 
-        self.logger = log.get_logger("VcmiEnv-v4", vcmienv_loglevel)
+        self.logger = log.get_logger("VcmiEnv-v6", vcmienv_loglevel)
 
         connector_class = PyProcConnector
 

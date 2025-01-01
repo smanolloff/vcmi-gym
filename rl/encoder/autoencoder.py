@@ -232,7 +232,7 @@ def train(resume_config):
                 # vcmi_loglevel_ai="trace",
             ),
             train=dict(
-                layer_sizes=[4096, 1536, 512],
+                layer_sizes=[2048, 512],
 
                 # TODO: consider torch.optim.lr_scheduler.StepLR
                 learning_rate=1e-4,

@@ -553,7 +553,9 @@ namespace Connector::V6::Thread {
         if (blue == "MMAI_RANDOM") {
             rightModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
         } else if (blue == "MMAI_USER") {
-            // BAI will load the actual model based on leftModel->getName()
+            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction0, f_getValueDummy);
+        } else if (blue == "MMAI_MODEL") {
+            // BAI will load the actual model based on rightModel->getName()
             rightModel = new ML::ModelWrappers::TorchPath(blueModel);
         } else {
             rightModel = new ML::ModelWrappers::Scripted(blue);
