@@ -139,21 +139,16 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
             next_progress_report_at += progress_report_step
             logger.log(dict(observations_collected=i, progress=progress*100, terms=terms, truncs=truncs))
 
-        print("rrand action...")
         action = env.random_action()
-        print("rrand action: " + str(action))
         if action is None:
             assert term or trunc
             terms += term
             truncs += trunc
             term = False
             trunc = False
-            print("resetting")
             dict_obs, _info = env.reset()
         else:
-            print("stepping")
             dict_obs, _rew, term, trunc, _info = env.step(action)
-        print("obs collected")
 
         obs = to_tensor(dict_obs)
         buffer.add(obs)
