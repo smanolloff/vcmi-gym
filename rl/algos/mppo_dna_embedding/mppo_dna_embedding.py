@@ -29,11 +29,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.mobile_optimizer import optimize_for_mobile
+from collections import OrderedDict
 
 import warnings
-import json
 
-from ...encoder.autoencoder import Autoencoder
 from .. import common
 
 ENVS = []  # debug
@@ -96,11 +95,21 @@ class EnvArgs:
 
 
 @dataclass
+class EncoderArgs:
+    type: str  # split / fc
+    # encoder_load_file: str  # load weigts + freeze?
+    kwargs: dict = field(default_factory=dict)
+
+
+@dataclass
 class NetworkArgs:
-    autoencoder_config_file: str
     action_embedding_dim: int
-    encoder: list[dict] = field(default_factory=list)
+    encoder: EncoderArgs
     body: list[dict] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not isinstance(self.encoder, EncoderArgs):
+            self.encoder = EncoderArgs(**self.encoder)
 
 
 @dataclass
@@ -242,28 +251,95 @@ class Args:
         common.coerce_dataclass_ints(self)
 
 
-class AgentNN(nn.Module):
-    @staticmethod
-    def build_layer(spec):
-        kwargs = dict(spec)  # copy
-        t = kwargs.pop("t")
-        layer_cls = getattr(torch.nn, t, None) or globals()[t]
-        return layer_cls(**kwargs)
+@staticmethod
+def build_layer(spec):
+    kwargs = dict(spec)  # copy
+    t = kwargs.pop("t")
+    layer_cls = getattr(torch.nn, t, None) or globals()[t]
+    return layer_cls(**kwargs)
 
+
+class FCEncoder(nn.Module):
+    def __init__(self, body):
+        self.layers = nn.Sequential()
+        for spec in body:
+            self.layers.append(build_layer(spec))
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class SplitEncoder(nn.Module):
+    def __init__(self, obs_dims, z_dims):
+        super().__init__()
+
+        obs_dims = OrderedDict({k: obs_dims[k] for k in ["misc", "stacks", "hexes"]})
+        z_dims = OrderedDict({k: z_dims[k] for k in ["misc", "1stack", "1hex", "merged", "out"]})
+
+        self.dmisc = obs_dims["misc"]
+        self.dstacks = obs_dims["stacks"]
+        self.dhexes = obs_dims["hexes"]
+        self.dz = z_dims["out"]
+        self.dzmisc = z_dims["misc"]
+        self.dz1stack = z_dims["1stack"]
+        self.dz1hex = z_dims["1hex"]
+        self.dzmerged = z_dims["merged"]
+        self.dzstacks = 20 * self.dz1stack
+        self.dzhexes = 165 * self.dz1hex
+        self.d1stack = self.dstacks // 20
+        self.d1hex = self.dhexes // 165
+        self.dzpremerge = self.dzmisc + self.dzstacks + self.dzhexes
+
+        # Networks:
+        self.enc_misc = nn.Sequential(
+            # => (B, dmisc)
+            nn.LazyLinear(self.dzmisc),
+            nn.LeakyReLU()
+            # => (B, dzmisc)
+        )
+        self.enc_stacks = nn.Sequential(
+            # => (B, 20*S)
+            nn.Unflatten(1, [20, self.d1stack]),  # => (B, 20, d1stack)
+            nn.LazyLinear(self.dz1stack),         # => (B, 20, dz1stack)
+            nn.LeakyReLU(),
+            nn.Flatten()
+            # => (B, dzstacks)
+        )
+        self.enc_hexes = nn.Sequential(
+            # => (B, 165*H)
+            nn.Unflatten(1, [165, self.d1hex]),  # => (B, 165, d1hex)
+            nn.LazyLinear(self.dz1hex),          # => (B, 165, dz1hex)
+            nn.LeakyReLU(),
+            nn.Flatten()
+            # => (B, dzhexes)
+        )
+        self.enc_merged = nn.Sequential(
+            # => (B, dzpremerge)
+            nn.LazyLinear(self.dzmerged),
+            nn.LeakyReLU(),
+            nn.LazyLinear(self.dz)
+            # => (B, dz)
+        )
+
+    def forward(self, x):
+        misc, stacks, hexes = x.split((self.dmisc, self.dstacks, self.dhexes), dim=1)
+        return self.enc_merged(torch.cat(dim=1, tensors=(
+            self.enc_misc(misc),
+            self.enc_stacks(stacks),
+            self.enc_hexes(hexes),
+        )))
+
+
+class AgentNN(nn.Module):
     def __init__(self, network, input_dim, num_actions):
         super().__init__()
 
-        if network.autoencoder_config_file:
-            with open(network.autoencoder_config_file, "r") as f:
-                autoencoder_config = json.load(f)
-                autoencoder = Autoencoder(input_dim=input_dim, layer_sizes=autoencoder_config["train"]["layer_sizes"])
-            self.encoder = autoencoder.encoder
-            # for param in self.encoder.parameters():
-            #     param.requires_grad = False  # Freeze encoder
+        if network.encoder.type == "fc":
+            self.encoder = FCEncoder(**network.encoder.kwargs)
+        elif network.encoder.type == "split":
+            self.encoder = SplitEncoder(**network.encoder.kwargs)
         else:
-            self.encoder = nn.Sequential()
-            for spec in network.encoder:
-                self.encoder.append(AgentNN.build_layer(spec))
+            raise Exception("Unknown encoder type: %s" % network.encoder.type)
 
         self.action_embedding = nn.Embedding(num_actions, network.action_embedding_dim)
 
@@ -272,8 +348,8 @@ class AgentNN(nn.Module):
         self.value_net = torch.nn.Sequential()
 
         for spec in network.body:
-            self.actor_net.append(AgentNN.build_layer(spec))
-            self.value_net.append(AgentNN.build_layer(spec))
+            self.actor_net.append(build_layer(spec))
+            self.value_net.append(build_layer(spec))
 
         self.actor_head = nn.LazyLinear(1)
         self.value_head = nn.LazyLinear(1)
@@ -420,12 +496,6 @@ class Agent(nn.Module):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
 
         agent = torch.load(agent_file, map_location=device, weights_only=False)
-
-        if agent.args.network.autoencoder_config_file:
-            # The encoder is static and is not saved
-            # => build a new agent and use its encoder instead
-            assert agent.NN_actor.encoder is None
-            assert agent.NN_value.encoder is None
 
         attrs = ["args", "observation_space", "action_space", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
@@ -754,7 +824,7 @@ def main(args):
             # XXX: eval during experience collection
             agent.eval()
 
-            # tstart = time.time()
+            t0 = time.time()
             # print("Collecting experiences...")
             for step in range(0, args.num_steps):
                 obs[step] = next_obs
@@ -797,8 +867,7 @@ def main(args):
                 agent.state.current_second = int(time.time() - start_time)
                 agent.state.global_second = global_start_second + agent.state.current_second
 
-            # print("SAMPLE TIME: %.2f" % (time.time() - tstart))
-            # tstart = time.time()
+            t1_sample = time.time()
 
             # bootstrap value if not done
             with torch.no_grad():
@@ -914,6 +983,8 @@ def main(args):
             ep_value_mean = common.safe_mean(agent.state.ep_net_value_queue)
             ep_is_success_mean = common.safe_mean(agent.state.ep_is_success_queue)
 
+            t2_train = time.time()
+
             if envs.episode_count > 0:
                 assert ep_rew_mean is not np.nan
                 assert ep_value_mean is not np.nan
@@ -997,7 +1068,7 @@ def main(args):
                 "global/global_num_episodes": agent.state.global_episode,
             }, commit=agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0)
 
-            LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f losses=%.1f|%.1f|%.1f" % (
+            LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f losses=%.1f|%.1f|%.1f dur=%.1fs|%.1fs|%.1fs" % (
                 agent.state.current_rollout,
                 agent.state.current_vstep,
                 ep_rew_mean,
@@ -1005,7 +1076,10 @@ def main(args):
                 ep_is_success_mean,
                 value_loss.item(),
                 policy_loss.item(),
-                distill_loss.item()
+                distill_loss.item(),
+                t1_sample - t0,
+                t2_train - t1_sample,
+                t2_train - t0
             ))
 
             agent.state.current_rollout += 1
@@ -1044,7 +1118,7 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        agent_load_file="/Users/simo/Projects/vcmi-gym/vcmi/rel/bin/data/mppo_dna-test/mppo_dna-test/agent-1736031988.pt",
+        agent_load_file="data/PBT-DNA-split-emb-20250106_033328/3bef1_00000/checkpoint_000004/agent.pt",
         # agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -1054,7 +1128,7 @@ def debug_args():
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
-        mapside="defender",
+        mapside="attacker",
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=1,
@@ -1067,19 +1141,19 @@ def debug_args():
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
         num_envs=1,
-        num_steps=128,
+        num_steps=512,
         gamma=0.8,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,
         gae_lambda_value=0.95,
-        num_minibatches=1,
-        num_minibatches_value=1,
-        num_minibatches_policy=1,
-        num_minibatches_distill=1,
-        update_epochs=2,
-        update_epochs_value=2,
-        update_epochs_policy=2,
-        update_epochs_distill=2,
+        num_minibatches=4,
+        num_minibatches_value=4,
+        num_minibatches_policy=4,
+        num_minibatches_distill=4,
+        update_epochs=4,
+        update_epochs_value=4,
+        update_epochs_policy=4,
+        update_epochs_distill=4,
         norm_adv=True,
         clip_coef=0.3,
         clip_vloss=True,
@@ -1092,6 +1166,7 @@ def debug_args():
         seed=42,
         skip_wandb_init=False,
         skip_wandb_log_code=False,
+        envmaps=["gym/generated/4096/4096-mixstack-100K-01.vmap"],
         env=EnvArgs(
             max_steps=500,
             reward_dmg_factor=5,
@@ -1123,20 +1198,39 @@ def debug_args():
         env_version=6,
         network={
             "action_embedding_dim": 128,
-            "autoencoder_config_file": None,  # for loading encoder from an autoencoder
-            "encoder": [
-                {"t": "LazyLinear", "out_features": 2048},
-                {"t": "GELU"},
-                {"t": "LazyLinear", "out_features": 1024},
-                {"t": "GELU"},
-                {"t": "LazyLinear", "out_features": 512},
-                {"t": "GELU"},
-            ],
+            "encoder": {
+                "type": "split",  # split / fc
+                "kwargs": {
+                    # kwargs for "split" encoder:
+                    "z_dims": {
+                        "misc": 4,
+                        "1stack": 8,
+                        "1hex": 8,
+                        "merged": 512,
+                        "out": 256,
+                    },
+                    "obs_dims": {
+                        "misc": 4,       # BATTLEFIELD_STATE_SIZE_MISC
+                        "stacks": 4580,  # BATTLEFIELD_STATE_SIZE_ALL_STACKS
+                        "hexes": 9570,   # BATTLEFIELD_STATE_SIZE_ALL_HEXES
+                    },
+
+                    # kwargs for "fc" encoder:
+                    # "body": [
+                    #     {"t": "LazyLinear", "out_features": 2048},
+                    #     {"t": "LeakyReLU"},
+                    #     {"t": "LazyLinear", "out_features": 1024},
+                    #     {"t": "LeakyReLU"},
+                    #     {"t": "LazyLinear", "out_features": 512},
+                    #     {"t": "LeakyReLU"},
+                    # ],
+                },
+            },
             "body": [
-                {"t": "LazyLinear", "out_features": 512},
-                {"t": "GELU"},
-                {"t": "LazyLinear", "out_features": 512},
-                {"t": "GELU"},
+                {"t": "LazyLinear", "out_features": 256},
+                {"t": "LeakyReLU"},
+                {"t": "LazyLinear", "out_features": 256},
+                {"t": "LeakyReLU"},
             ],
         }
     )
@@ -1146,3 +1240,6 @@ if __name__ == "__main__":
     # To run from vcmi-gym root:
     # $ python -m rl.algos.mppo
     main(debug_args())
+
+    # test_args = Args(**{'run_id': '3bef1_00003', 'group_id': 'PBT-DNA-split-emb-20250106_033328', 'run_name': None, 'trial_id': '3bef1_00003', 'wandb_project': 'vcmi-gym', 'resume': False, 'overwrite': [], 'notes': '', 'tags': ['BattleAI', 'obstacles-random', 'v4'], 'loglevel': logging.DEBUG, 'agent_load_file': '/Users/simo/Projects/vcmi-gym/rl/raytune/../../data/PBT-DNA-split-emb-20250106_033328/3bef1_00003/checkpoint_000006/agent.pt', 'vsteps_total': 0, 'seconds_total': 3600, 'rollouts_per_mapchange': 0, 'rollouts_per_log': 50, 'rollouts_per_table_log': 0, 'success_rate_target': None, 'ep_rew_mean_target': None, 'quit_on_target': False, 'mapside': 'attacker', 'mapmask': '', 'randomize_maps': False, 'permasave_every': 0, 'save_every': 0, 'max_saves': 3, 'out_dir_template': 'data/{group_id}/{run_id}', 'opponent_load_file': None, 'opponent_sbm_probs': [1, 0, 0], 'lr_schedule': {'mode': 'const', 'start': 0.0001064459013883141, 'end': 0, 'rate': 10}, 'lr_schedule_value': {'mode': 'const', 'start': 0.0001064459013883141, 'end': 0, 'rate': 10}, 'lr_schedule_policy': {'mode': 'const', 'start': 0.0001064459013883141, 'end': 0, 'rate': 10}, 'lr_schedule_distill': {'mode': 'const', 'start': 0.0001064459013883141, 'end': 0, 'rate': 10}, 'clip_coef': 0.6, 'clip_vloss': False, 'distill_beta': 1.0, 'ent_coef': 0.04, 'vf_coef': 1.2875, 'gae_lambda': 0.6805263157894736, 'gae_lambda_policy': 0.6805263157894736, 'gae_lambda_value': 0.6805263157894736, 'gamma': 0.69975, 'max_grad_norm': 4.3, 'norm_adv': 0, 'num_envs': 1, 'envmaps': ['gym/generated/4096/4096-mixstack-100K-01.vmap'], 'num_minibatches': 4, 'num_minibatches_distill': 4, 'num_minibatches_policy': 4, 'num_minibatches_value': 4, 'num_steps': 256, 'stats_buffer_size': 100, 'update_epochs': 4, 'update_epochs_distill': 4, 'update_epochs_policy': 4, 'update_epochs_value': 4, 'weight_decay': 0, 'target_kl': None, 'logparams': {'params/ent_coef': 'ent_coef', 'params/gamma': 'gamma', 'params/max_grad_norm': 'max_grad_norm', 'params/num_steps': 'num_steps', 'params/lr_schedule.start': 'lr_schedule.start', 'params/gae_lambda': 'gae_lambda', 'params/num_minibatches': 'num_minibatches', 'params/update_epochs': 'update_epochs', 'params/vf_coef': 'vf_coef', 'params/clip_vloss': 'clip_vloss', 'params/clip_coef': 'clip_coef', 'params/norm_adv': 'norm_adv'}, 'cfg_file': None, 'seed': 0, 'skip_wandb_init': True, 'skip_wandb_log_code': True, 'env': {'encoding_type': '', 'max_steps': 500, 'reward_dmg_factor': 5, 'vcmi_loglevel_global': 'error', 'vcmi_loglevel_ai': 'error', 'vcmienv_loglevel': 'WARN', 'sparse_info': True, 'step_reward_fixed': 0, 'step_reward_frac': -0.001, 'step_reward_mult': 1, 'term_reward_mult': 0, 'consecutive_error_reward_factor': None, 'user_timeout': 600, 'vcmi_timeout': 600, 'boot_timeout': 300, 'conntype': 'thread', 'random_heroes': 1, 'random_obstacles': 1, 'town_chance': 10, 'warmachine_chance': 40, 'random_terrain_chance': 100, 'tight_formation_chance': 0, 'battlefield_pattern': '', 'mana_min': 0, 'mana_max': 0, 'swap_sides': 0, 'reward_clip_tanh_army_frac': 1, 'reward_army_value_ref': 500, 'reward_dynamic_scaling': False, 'true_rng': True, 'deprecated_args': ['encoding_type', 'consecutive_error_reward_factor', 'sparse_info', 'true_rng']}, 'env_version': 6, 'env_wrappers': [{'module': 'vcmi_gym.envs.util.wrappers', 'cls': 'LegacyObservationSpaceWrapper'}], 'network': {'action_embedding_dim': 128, 'encoder': {'type': 'split', 'kwargs': {'z_dims': {'misc': 4, '1stack': 8, '1hex': 8, 'merged': 512, 'out': 256}, 'obs_dims': {'misc': 4, 'stacks': 4580, 'hexes': 9570}}}, 'body': [{'t': 'LazyLinear', 'out_features': 256}, {'t': 'LeakyReLU'}, {'t': 'LazyLinear', 'out_features': 256}, {'t': 'LeakyReLU'}]}})
+    # main(test_args)

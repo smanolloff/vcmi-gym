@@ -26,7 +26,7 @@ config = {
         #       $ NO_WANDB=true NO_SAVE=true python -m rl.algos.mppo.mppo
         #
         # """
-        "population_size": 3,
+        "population_size": 4,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -177,20 +177,39 @@ config = {
     # NN arch
     "network": {
         "action_embedding_dim": 128,
-        "autoencoder_config_file": None,  # for loading encoder from an autoencoder
-        "encoder": [
-            {"t": "LazyLinear", "out_features": 2048},
-            {"t": "GELU"},
-            {"t": "LazyLinear", "out_features": 1024},
-            {"t": "GELU"},
-            {"t": "LazyLinear", "out_features": 512},
-            {"t": "GELU"},
-        ],
+        "encoder": {
+            "type": "split",  # split / fc
+            "kwargs": {
+                # kwargs for "split" encoder:
+                "z_dims": {
+                    "misc": 4,
+                    "1stack": 8,
+                    "1hex": 8,
+                    "merged": 512,
+                    "out": 256,
+                },
+                "obs_dims": {
+                    "misc": 4,       # BATTLEFIELD_STATE_SIZE_MISC
+                    "stacks": 4580,  # BATTLEFIELD_STATE_SIZE_ALL_STACKS
+                    "hexes": 9570,   # BATTLEFIELD_STATE_SIZE_ALL_HEXES
+                },
+
+                # kwargs for "fc" encoder:
+                # "body": [
+                #     {"t": "LazyLinear", "out_features": 2048},
+                #     {"t": "LeakyReLU"},
+                #     {"t": "LazyLinear", "out_features": 1024},
+                #     {"t": "LeakyReLU"},
+                #     {"t": "LazyLinear", "out_features": 512},
+                #     {"t": "LeakyReLU"},
+                # ],
+            },
+        },
         "body": [
-            {"t": "LazyLinear", "out_features": 512},
-            {"t": "GELU"},
-            {"t": "LazyLinear", "out_features": 512},
-            {"t": "GELU"},
+            {"t": "LazyLinear", "out_features": 256},
+            {"t": "LeakyReLU"},
+            {"t": "LazyLinear", "out_features": 256},
+            {"t": "LeakyReLU"},
         ],
     },
 

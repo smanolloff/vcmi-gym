@@ -117,7 +117,7 @@ def new_tuner(algo, experiment_name, config, scheduler, searcher=None, param_spa
     trainable_cls = getattr(trainable_mod, "Trainable")
 
     checkpoint_config = ray.train.CheckpointConfig(
-        num_to_keep=10,
+        num_to_keep=3,
         # XXX: can't use score as it may delete the *latest* checkpoint
         #      and then fail when attempting to load it after perturb...
         # checkpoint_score_order="max",
