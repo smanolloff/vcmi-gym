@@ -530,11 +530,6 @@ namespace Connector::V6::Thread {
             return 0.0;
         };
 
-        std::function<int(const MMAI::Schema::IState* s)> getActionRed;
-        std::function<int(const MMAI::Schema::IState* s)> getActionBlue;
-        std::function<double(const MMAI::Schema::IState* s)> getValueRed;
-        std::function<double(const MMAI::Schema::IState* s)> getValueBlue;
-
         auto f_getRandomAction = [](const MMAI::Schema::IState* s) {
             return RandomValidAction(s);
         };
@@ -553,7 +548,7 @@ namespace Connector::V6::Thread {
         if (blue == "MMAI_RANDOM") {
             rightModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
         } else if (blue == "MMAI_USER") {
-            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction0, f_getValueDummy);
+            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction1, f_getValueDummy);
         } else if (blue == "MMAI_MODEL") {
             // BAI will load the actual model based on rightModel->getName()
             rightModel = new ML::ModelWrappers::TorchPath(blueModel);

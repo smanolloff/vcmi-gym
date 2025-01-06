@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =============================================================================
-# This file contains a modified version of CleanRL's PPO implementation:
-# https://github.com/vwxyzjn/cleanrl/blob/e421c2e50b81febf639fced51a69e2602593d50d/cleanrl/ppo.py
+# This file contains a modified version of CleanRL's PPO-DNA implementation:
+# https://github.com/vwxyzjn/cleanrl/blob/caabea4c5b856f429baa2af8bc973d4994d4c330/cleanrl/ppo_dna_atari_envpool.py
 import os
 import sys
 import random
 import logging
 import time
-# import json
+import copy
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -31,10 +31,10 @@ import torch.nn as nn
 from torch.utils.mobile_optimizer import optimize_for_mobile
 
 import warnings
+import json
 
-# from ...encoder.autoencoder import Autoencoder
+from ...encoder.autoencoder import Autoencoder
 from .. import common
-
 
 ENVS = []  # debug
 
@@ -54,15 +54,18 @@ class ScheduleArgs:
 
 @dataclass
 class EnvArgs:
+    encoding_type: str = ""  # DEPRECATED
     max_steps: int = 500
     reward_dmg_factor: int = 5
     vcmi_loglevel_global: str = "error"
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
+    sparse_info: bool = True
     step_reward_fixed: int = 0
     step_reward_frac: float = 0
     step_reward_mult: int = 1
     term_reward_mult: int = 0
+    consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
     user_timeout: int = 30
     vcmi_timeout: int = 30
     boot_timeout: int = 30
@@ -82,6 +85,9 @@ class EnvArgs:
     reward_dynamic_scaling: bool = False
     true_rng: bool = True  # DEPRECATED
     deprecated_args: list[dict] = field(default_factory=lambda: [
+        "encoding_type",
+        "consecutive_error_reward_factor",
+        "sparse_info",
         "true_rng"
     ])
 
@@ -93,6 +99,7 @@ class EnvArgs:
 class NetworkArgs:
     autoencoder_config_file: str
     action_embedding_dim: int
+    encoder: list[dict] = field(default_factory=list)
     body: list[dict] = field(default_factory=list)
 
 
@@ -100,9 +107,11 @@ class NetworkArgs:
 class State:
     seed: int = -1
     resumes: int = 0
+    map_swaps: int = 0  # DEPRECATED
     global_timestep: int = 0
     current_timestep: int = 0
     current_vstep: int = 0
+    global_rollout: int = 0
     current_rollout: int = 0
     global_second: int = 0
     current_second: int = 0
@@ -149,7 +158,9 @@ class Args:
     success_rate_target: Optional[float] = None
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
-    mapside: str = "attacker"
+    mapside: str = "both"
+    mapmask: str = ""  # DEPRECATED
+    randomize_maps: bool = False
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
     max_saves: int = 3
@@ -157,23 +168,38 @@ class Args:
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
-    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
-    weight_decay: float = 0.0
+
+    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())  # used if nn-specific lr_schedule["start"] is 0
+    lr_schedule_value: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
+    lr_schedule_policy: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
+    lr_schedule_distill: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
     clip_coef: float = 0.2
     clip_vloss: bool = False
+    distill_beta: float = 1.0
     ent_coef: float = 0.01
-    vf_coef: float = 0.5
-    gae_lambda: float = 0.95
+    vf_coef: float = 1.2   # not used
+    gae_lambda: float = 0.95  # used if nn-specific gae_lambda is 0
+    gae_lambda_policy: float = 0
+    gae_lambda_value: float = 0
     gamma: float = 0.99
     max_grad_norm: float = 0.5
     norm_adv: bool = True
-    target_kl: float = None
-    num_minibatches: int = 4
-    num_steps: int = 128
-    stats_buffer_size: int = 100
-    update_epochs: int = 4
     num_envs: int = 1
     envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4x1024.vmap"])
+
+    num_minibatches: int = 4  # used if nn-specific num_minibatches is 0
+    num_minibatches_distill: int = 0
+    num_minibatches_policy: int = 0
+    num_minibatches_value: int = 0
+    num_steps: int = 128
+    stats_buffer_size: int = 100
+
+    update_epochs: int = 4   # used if nn-specific update_epochs is 0
+    update_epochs_distill: int = 0
+    update_epochs_policy: int = 0
+    update_epochs_value: int = 0
+    weight_decay: float = 0.0
+    target_kl: float = None
 
     logparams: dict = field(default_factory=dict)
     cfg_file: Optional[str] = None
@@ -191,8 +217,27 @@ class Args:
             self.env = EnvArgs(**self.env)
         if not isinstance(self.lr_schedule, ScheduleArgs):
             self.lr_schedule = ScheduleArgs(**self.lr_schedule)
+        if not isinstance(self.lr_schedule_value, ScheduleArgs):
+            self.lr_schedule_value = ScheduleArgs(**self.lr_schedule_value)
+        if not isinstance(self.lr_schedule_policy, ScheduleArgs):
+            self.lr_schedule_policy = ScheduleArgs(**self.lr_schedule_policy)
+        if not isinstance(self.lr_schedule_distill, ScheduleArgs):
+            self.lr_schedule_distill = ScheduleArgs(**self.lr_schedule_distill)
         if not isinstance(self.network, NetworkArgs):
             self.network = NetworkArgs(**self.network)
+
+        for a in ["distill", "policy", "value"]:
+            if getattr(self, f"update_epochs_{a}") == 0:
+                setattr(self, f"update_epochs_{a}", self.update_epochs)
+
+            if getattr(self, f"num_minibatches_{a}") == 0:
+                setattr(self, f"num_minibatches_{a}", self.num_minibatches)
+
+            if a != "distill" and getattr(self, f"gae_lambda_{a}") == 0:
+                setattr(self, f"gae_lambda_{a}", self.gae_lambda)
+
+            if getattr(self, f"lr_schedule_{a}").start == 0:
+                setattr(self, f"lr_schedule_{a}", self.lr_schedule)
 
         common.coerce_dataclass_ints(self)
 
@@ -208,21 +253,21 @@ class AgentNN(nn.Module):
     def __init__(self, network, input_dim, num_actions):
         super().__init__()
 
-        # with open(network.autoencoder_config_file, "r") as f:
-        #     autoencoder_config = json.load(f)
-        #     autoencoder = Autoencoder(input_dim=input_dim, layer_sizes=autoencoder_config["train"]["layer_sizes"])
-
-        # self.encoder = autoencoder.encoder
-
-        # # Freeze encoder
-        # for param in self.encoder.parameters():
-        #     param.requires_grad = False
-        self.encoder = nn.Identity()
+        if network.autoencoder_config_file:
+            with open(network.autoencoder_config_file, "r") as f:
+                autoencoder_config = json.load(f)
+                autoencoder = Autoencoder(input_dim=input_dim, layer_sizes=autoencoder_config["train"]["layer_sizes"])
+            self.encoder = autoencoder.encoder
+            # for param in self.encoder.parameters():
+            #     param.requires_grad = False  # Freeze encoder
+        else:
+            self.encoder = nn.Sequential()
+            for spec in network.encoder:
+                self.encoder.append(AgentNN.build_layer(spec))
 
         self.action_embedding = nn.Embedding(num_actions, network.action_embedding_dim)
 
-        # Must use separate networks, as the actor net has different
-        # input dimensions
+        # Must use separate networks -- actor net has different input dims
         self.actor_net = torch.nn.Sequential()
         self.value_net = torch.nn.Sequential()
 
@@ -262,10 +307,10 @@ class AgentNN(nn.Module):
 
         # Compute logits for all actions
         b, num_actions = b_mask.shape
-        b_features = self.actor_net(b_combined.view(b * num_actions, -1))
+        b_actor_features = self.actor_net(b_combined.view(b * num_actions, -1))
         # => (B*N, OE+AE)
 
-        b_logits = self.actor_head(b_features).view(b, num_actions)
+        b_logits = self.actor_head(b_actor_features).view(b, num_actions)
         # => (B, N)
 
         # Apply action mask
@@ -274,6 +319,18 @@ class AgentNN(nn.Module):
 
         # (B, N)
         return b_logits
+
+    def get_action(self, b_obs, b_mask, b_action=None, deterministic=False):
+        b_encobs = self.encoder(b_obs)
+        b_action_logits = self.get_action_logits(b_encobs, b_mask)
+        dist = torch.distributions.Categorical(logits=b_action_logits)
+        if b_action is None:
+            if deterministic:
+                b_action = torch.argmax(dist.probs, dim=1)
+            else:
+                b_action = dist.sample()
+
+        return b_action, dist.log_prob(b_action), dist.entropy(), dist
 
     def get_value(self, b_obs):
         return self.value_head(self.value_net(self.encoder(b_obs)))
@@ -289,8 +346,7 @@ class AgentNN(nn.Module):
                 b_action = dist.sample()
 
         b_value = self.value_head(self.value_net(b_encobs))
-
-        return b_action, dist.log_prob(b_action), dist.entropy(), b_value
+        return b_action, dist.log_prob(b_action), dist.entropy(), dist, b_value
 
     # Inference (deterministic)
     def predict(self, b_obs, b_mask):
@@ -328,12 +384,11 @@ class Agent(nn.Module):
         attrs = ["args", "observation_space", "action_space", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
-        clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
-        clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
-
-        # no need to save the encoder
-        clean_agent.NN.encoder = None
-
+        clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
+        clean_agent.NN_actor.load_state_dict(agent.NN_actor.state_dict(), strict=True)
+        clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
+        clean_agent.optimizer_actor.load_state_dict(agent.optimizer_actor.state_dict())
+        clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
         torch.save(clean_agent, agent_file)
 
     @staticmethod
@@ -342,15 +397,19 @@ class Agent(nn.Module):
         attrs = ["args", "observation_space", "action_space", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
-        clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
-        clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
+        clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
+        clean_agent.NN_actor.load_state_dict(agent.NN_actor.state_dict(), strict=True)
+        clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
+        clean_agent.optimizer_actor.load_state_dict(agent.optimizer_actor.state_dict())
+        clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
         jagent = JitAgent()
         jagent.env_version = clean_agent.env_version
-        jagent.encoder = clean_agent.NN.encoder
-        jagent.action_embedding = clean_agent.NN.action_embedding
-        jagent.actor_net = clean_agent.NN.actor_net
-        jagent.value_net = clean_agent.NN.value_net
-        jagent.actor_head = clean_agent.NN.actor_head
+        jagent.obs_dims = clean_agent.obs_dims
+        jagent.encoder = clean_agent.NN_actor.encoder
+        jagent.action_embedding = clean_agent.NN_actor.action_embedding
+        jagent.actor_net = clean_agent.NN_actor.actor_net
+        jagent.value_net = clean_agent.NN_value.value_net
+        jagent.actor_head = clean_agent.NN_actor.actor_head
         jagent.value_head = clean_agent.NN.value_head
 
         jagent_optimized = optimize_for_mobile(torch.jit.script(jagent), preserved_methods=["get_version", "predict", "get_value"])
@@ -359,16 +418,22 @@ class Agent(nn.Module):
     @staticmethod
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
+
         agent = torch.load(agent_file, map_location=device, weights_only=False)
 
-        # The encoder is static and is not saved
-        # => build a new agent and use its encoder instead
-        assert agent.NN.encoder is None
+        if agent.args.network.autoencoder_config_file:
+            # The encoder is static and is not saved
+            # => build a new agent and use its encoder instead
+            assert agent.NN_actor.encoder is None
+            assert agent.NN_value.encoder is None
+
         attrs = ["args", "observation_space", "action_space", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
-        agent.NN.encoder = clean_agent.NN.encoder
-        agent.NN.encoder.to(device)
+        agent.NN_actor.encoder = clean_agent.NN_actor.encoder
+        agent.NN_value.encoder = clean_agent.NN_value.encoder
+        agent.NN_actor.encoder.to(device)
+        agent.NN_value.encoder.to(device)
         return agent
 
     def __init__(self, args, observation_space, action_space, state=None, device="cpu"):
@@ -377,14 +442,17 @@ class Agent(nn.Module):
         self.env_version = args.env_version
         self.observation_space = observation_space  # needed for save/load
         self.action_space = action_space  # needed for save/load
-        self.NN = AgentNN(args.network, observation_space["observation"].shape[0], action_space.n)
-        self.NN.to(device)
+        self._optimizer_state = None  # needed for save/load
+        self.NN_actor = AgentNN(args.network, observation_space["observation"].shape[0], action_space.n)
+        self.NN_value = AgentNN(args.network, observation_space["observation"].shape[0], action_space.n)
 
-        # Exclude encoder params (which don't require grad) from optimizer
-        trainable_params = (p for p in self.NN.parameters() if p.requires_grad)
-        self.optimizer = torch.optim.AdamW(trainable_params, eps=1e-5)
+        self.NN_value.to(device)
+        self.NN_actor.to(device)
 
-        self.predict = self.NN.predict
+        self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
+        self.optimizer_actor = torch.optim.AdamW(self.NN_actor.parameters(), eps=1e-5)
+        self.optimizer_distill = torch.optim.AdamW(self.NN_actor.parameters(), eps=1e-5)
+        self.predict = self.NN_actor.predict
         self.state = state or State()
 
 
@@ -394,65 +462,72 @@ class JitAgent(nn.Module):
     def __init__(self):
         super().__init__()
         # XXX: these are overwritten after object is initialized
-        self.env_version = 0
         self.encoder = nn.Identity()
         self.action_embedding = nn.Identity()
         self.actor_net = nn.Identity()
         self.value_net = nn.Identity()
         self.actor_head = nn.Identity()
         self.value_head = nn.Identity()
+        self.env_version = 0
+
+    # Inference
+    @torch.jit.export
+    def predict(self, obs, mask, deterministic: bool = False) -> int:
+        b_obs = obs.unsqueeze(dim=0)
+        b_mask = mask.unsqueeze(dim=0)
+
+        # v1, v2
+        # features = self.features_extractor(b_obs)
+
+        # v3+
+        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
+        features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
+            self.features_extractor1_policy_misc(split[0]),
+            self.features_extractor1_policy_stacks(split[1]),
+            self.features_extractor1_policy_hexes(split[2])
+        )))
+
+        action_logits = self.actor(features)
+        probs = self.categorical_masked(logits0=action_logits, mask=b_mask)
+
+        if deterministic:
+            action = torch.argmax(probs, dim=1)
+        else:
+            action = self.sample(probs, action_logits)
+
+        return action.int().item()
 
     @torch.jit.export
     def forward(self, obs) -> torch.Tensor:
         b_obs = obs.unsqueeze(dim=0)
+        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
+        features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
+            self.features_extractor1_policy_misc(split[0]),
+            self.features_extractor1_policy_stacks(split[1]),
+            self.features_extractor1_policy_hexes(split[2])
+        )))
 
-        # Code copied from AgentNN's get_action_and_value
-        # (comments stripped)
-        all_action_embs = self.action_embedding.weight
-        num_actions = all_action_embs.shape[0]
-        b_encobs = self.encoder(b_obs)
-        b_encobs_expanded = b_encobs.unsqueeze(1).expand(-1, all_action_embs.shape[0], -1)
-        b_combined = torch.cat([b_encobs_expanded, all_action_embs.unsqueeze(0)], dim=2)
-        b_features = self.actor_net(b_combined.view(num_actions, -1))
-        b_logits = self.actor_head(b_features).view(1, num_actions)
-
-        return torch.cat(dim=1, tensors=(b_logits, self.critic_head(self.critic_net(b_encobs))))
-
-    # Inference (deterministic)
-    @torch.jit.export
-    def predict(self, obs, mask, deterministic: bool = False) -> int:
-        with torch.no_grad():
-            b_obs = obs.unsqueeze(dim=0)
-            b_mask = mask.unsqueeze(dim=0)
-
-            # Code copied from AgentNN's get_action_and_value
-            # (comments stripped)
-            all_action_embs = self.action_embedding.weight
-            b_encobs = self.encoder(b_obs)
-            b_encobs_expanded = b_encobs.unsqueeze(1).expand(-1, all_action_embs.shape[0], -1)
-            b_combined = torch.cat([b_encobs_expanded, all_action_embs.unsqueeze(0)], dim=2)
-            b, num_actions = b_mask.shape
-            b_actor_out = self.actor_net(b_combined.view(b * num_actions, -1))
-            b_logits = self.actor_head(b_actor_out).view(b, num_actions)
-            probs = self.categorical_masked(logits0=b_logits, mask=b_mask)
-
-            if deterministic:
-                action = torch.argmax(probs, dim=1)
-            else:
-                action = self.sample(probs, b_logits)
-
-            return action.int().item()
+        return torch.cat(dim=1, tensors=(self.actor(features), self.critic(features)))
 
     @torch.jit.export
     def get_value(self, obs) -> float:
         b_obs = obs.unsqueeze(dim=0)
-        b_value = self.critic_head(self.critic_net(self.encoder(b_obs)))
-        return b_value.float().item()
+        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
+        features = self.features_extractor2_value(torch.cat(dim=1, tensors=(
+            self.features_extractor1_value_misc(split[0]),
+            self.features_extractor1_value_stacks(split[1]),
+            self.features_extractor1_value_hexes(split[2])
+        )))
+
+        value = self.critic(features)
+        return value.float().item()
 
     @torch.jit.export
     def get_version(self) -> int:
         return self.env_version
 
+    # Implement SerializableCategoricalMasked as a function
+    # (lite interpreted does not support instantiating the class)
     @torch.jit.export
     def categorical_masked(self, logits0: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits0.dtype)
@@ -472,8 +547,25 @@ class JitAgent(nn.Module):
         return samples_2d.reshape(batch_shape)
 
 
-def main(args, agent_cls=Agent):
-    LOG = logging.getLogger("mppo")
+def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda):
+    total_steps = len(rewards)
+    advantages = torch.zeros_like(rewards)
+    lastgaelam = 0
+    for t in reversed(range(total_steps)):
+        if t == total_steps - 1:
+            nextnonterminal = 1.0 - next_done
+            nextvalues = next_value
+        else:
+            nextnonterminal = 1.0 - dones[t + 1]
+            nextvalues = values[t + 1]
+        delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
+        advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+    returns = advantages + values
+    return advantages, returns
+
+
+def main(args):
+    LOG = logging.getLogger("mppo_dna")
     LOG.setLevel(args.loglevel)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -511,11 +603,18 @@ def main(args, agent_cls=Agent):
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     LOG.info("Out dir: %s" % out_dir)
 
-    lr_schedule_fn = common.schedule_fn(args.lr_schedule)
+    num_envs = args.num_envs
 
-    num_envs = len(args.envmaps)
-    batch_size = int(num_envs * args.num_steps)
-    minibatch_size = int(batch_size // args.num_minibatches)
+    lr_schedule_fn_value = common.schedule_fn(args.lr_schedule_value)
+    lr_schedule_fn_policy = common.schedule_fn(args.lr_schedule_policy)
+    lr_schedule_fn_distill = common.schedule_fn(args.lr_schedule_distill)
+
+    batch_size_policy = int(num_envs * args.num_steps)
+    batch_size_value = int(num_envs * args.num_steps)
+    batch_size_distill = int(num_envs * args.num_steps)
+    minibatch_size_policy = int(batch_size_policy // args.num_minibatches_policy)
+    minibatch_size_value = int(batch_size_value // args.num_minibatches_value)
+    minibatch_size_distill = int(batch_size_distill // args.num_minibatches_distill)
 
     save_ts = None
     permasave_ts = None
@@ -556,7 +655,11 @@ def main(args, agent_cls=Agent):
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 6:
+    if args.env_version == 3:
+        from vcmi_gym import VcmiEnv_v3 as VcmiEnv
+    elif args.env_version == 4:
+        from vcmi_gym import VcmiEnv_v4 as VcmiEnv
+    elif args.env_version == 6:
         from vcmi_gym import VcmiEnv_v6 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
@@ -567,6 +670,13 @@ def main(args, agent_cls=Agent):
     assert act_space.n == obs_space["action_mask"].shape[0]
 
     if agent is None:
+        # TODO: robust mechanism ensuring these don't get mixed up
+        assert VcmiEnv.STATE_SEQUENCE == ["misc", "stacks", "hexes"]
+        obs_dims = dict(
+            misc=VcmiEnv.STATE_SIZE_MISC,
+            stacks=VcmiEnv.STATE_SIZE_STACKS,
+            hexes=VcmiEnv.STATE_SIZE_HEXES,
+        )
         agent = Agent(args, obs_space, act_space, device=device)
 
     # TRY NOT TO MODIFY: seeding
@@ -586,10 +696,9 @@ def main(args, agent_cls=Agent):
         # these are used by gym's RecordEpisodeStatistics wrapper
         envs.return_queue = agent.state.ep_rew_queue
         envs.length_queue = agent.state.ep_length_queue
-
         if args.wandb_project:
             import wandb
-            common.setup_wandb(args, agent, __file__)
+            common.setup_wandb(args, agent, __file__, watch=False)
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
@@ -611,7 +720,7 @@ def main(args, agent_cls=Agent):
 
         # ALGO Logic: Storage setup
         obs = torch.zeros((args.num_steps, num_envs) + obs_space["observation"].shape).to(device)
-        actions = torch.zeros((args.num_steps, num_envs)).to(device)
+        actions = torch.zeros((args.num_steps, num_envs) + act_space.shape).to(device)
         logprobs = torch.zeros((args.num_steps, num_envs)).to(device)
         rewards = torch.zeros((args.num_steps, num_envs)).to(device)
         dones = torch.zeros((args.num_steps, num_envs)).to(device)
@@ -620,10 +729,10 @@ def main(args, agent_cls=Agent):
         masks = torch.zeros((args.num_steps, num_envs, act_space.n), dtype=torch.bool).to(device)
 
         # TRY NOT TO MODIFY: start the game
-        next_obs_dict, _ = envs.reset(seed=agent.state.seed)  # XXX: seed has no effect here
-        next_obs = torch.Tensor(next_obs_dict["observation"]).to(device)
-        next_done = torch.zeros(num_envs).to(device)
-        next_mask = torch.as_tensor(next_obs_dict["action_mask"]).to(device)
+        next_obs, _ = envs.reset(seed=args.seed)
+        next_obs = torch.as_tensor(next_obs, device=device)
+        next_done = torch.zeros(num_envs, device=device)
+        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
 
         progress = 0
         map_rollouts = 0
@@ -638,10 +747,15 @@ def main(args, agent_cls=Agent):
             else:
                 progress = 0
 
-            agent.optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
+            agent.optimizer_value.param_groups[0]["lr"] = lr_schedule_fn_value(progress)
+            agent.optimizer_actor.param_groups[0]["lr"] = lr_schedule_fn_policy(progress)
+            agent.optimizer_distill.param_groups[0]["lr"] = lr_schedule_fn_distill(progress)
 
             # XXX: eval during experience collection
             agent.eval()
+
+            # tstart = time.time()
+            # print("Collecting experiences...")
             for step in range(0, args.num_steps):
                 obs[step] = next_obs
                 dones[step] = next_done
@@ -649,18 +763,23 @@ def main(args, agent_cls=Agent):
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    action, logprob, _, value = agent.NN.get_action_and_value(next_obs, next_mask)
+                    action, logprob, _, _ = agent.NN_actor.get_action(next_obs, next_mask)
+
+                    value = agent.NN_value.get_value(next_obs)
                     values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
 
                 # TRY NOT TO MODIFY: execute the game and log data.
-                next_obs_dict, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
+                next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
                 next_done = np.logical_or(terminations, truncations)
                 rewards[step] = torch.tensor(reward, device=device).view(-1)
-                next_obs = torch.as_tensor(next_obs_dict["observation"], device=device)
+                next_obs = torch.as_tensor(next_obs, device=device)
                 next_done = torch.as_tensor(next_done, device=device, dtype=torch.float32)
-                next_mask = torch.as_tensor(next_obs_dict["action_mask"], device=device)
+                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
+
+                # XXX SIMO: SB3 does bootstrapping for truncated episodes here
+                # https://github.com/DLR-RM/stable-baselines3/pull/658
 
                 # See notes/gym_vector.txt
                 for final_info, has_final_info in zip(infos.get("final_info", []), infos.get("_final_info", [])):
@@ -678,21 +797,17 @@ def main(args, agent_cls=Agent):
                 agent.state.current_second = int(time.time() - start_time)
                 agent.state.global_second = global_start_second + agent.state.current_second
 
+            # print("SAMPLE TIME: %.2f" % (time.time() - tstart))
+            # tstart = time.time()
+
             # bootstrap value if not done
             with torch.no_grad():
-                next_value = agent.NN.get_value(next_obs).reshape(1, -1)
-                advantages = torch.zeros_like(rewards, device=device)
-                lastgaelam = 0
-                for t in reversed(range(args.num_steps)):
-                    if t == args.num_steps - 1:
-                        nextnonterminal = 1.0 - next_done
-                        nextvalues = next_value
-                    else:
-                        nextnonterminal = 1.0 - dones[t + 1]
-                        nextvalues = values[t + 1]
-                    delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
-                returns = advantages + values
+                next_value = agent.NN_value.get_value(next_obs).reshape(1, -1)
+
+                advantages, _ = compute_advantages(
+                    rewards, dones, values, next_done, next_value, args.gamma, args.gae_lambda_policy
+                )
+                _, returns = compute_advantages(rewards, dones, values, next_done, next_value, args.gamma, args.gae_lambda_value)
 
             # flatten the batch
             b_obs = obs.flatten(end_dim=1)
@@ -703,18 +818,19 @@ def main(args, agent_cls=Agent):
             b_returns = returns.flatten(end_dim=1)
             b_values = values.flatten(end_dim=1)
 
-            # Optimizing the policy and value network
-            b_inds = np.arange(batch_size)
+            # Policy network optimization
+            b_inds = np.arange(batch_size_policy)
             clipfracs = []
 
+            # print("Training (1)...")
             agent.train()
-            for epoch in range(args.update_epochs):
+            for epoch in range(args.update_epochs_policy):
                 np.random.shuffle(b_inds)
-                for start in range(0, batch_size, minibatch_size):
-                    end = start + minibatch_size
+                for start in range(0, batch_size_policy, minibatch_size_policy):
+                    end = start + minibatch_size_policy
                     mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, newvalue = agent.NN.get_action_and_value(b_obs[mb_inds], b_masks[mb_inds], b_action=b_actions.long()[mb_inds])
+                    _, newlogprob, entropy, _ = agent.NN_actor.get_action(b_obs[mb_inds], b_masks[mb_inds], b_action=b_actions.long()[mb_inds])
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 
@@ -733,33 +849,62 @@ def main(args, agent_cls=Agent):
                     pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
                     pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                    # Value loss
-                    newvalue = newvalue.view(-1)
-                    if args.clip_vloss:
-                        v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
-                        v_clipped = b_values[mb_inds] + torch.clamp(
-                            newvalue - b_values[mb_inds],
-                            -args.clip_coef,
-                            args.clip_coef,
-                        )
-                        v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
-                        v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                        v_loss = 0.5 * v_loss_max.mean()
-                    else:
-                        # XXX: SIMO: SB3 does not multiply by 0.5 here
-                        #            (ie. SB3's vf_coef is essentially x2)
-                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
-
                     entropy_loss = entropy.mean()
-                    loss = pg_loss - args.ent_coef * entropy_loss + v_loss * args.vf_coef
+                    policy_loss = pg_loss - args.ent_coef * entropy_loss
 
-                    agent.optimizer.zero_grad()
-                    loss.backward()
-                    nn.utils.clip_grad_norm_(agent.NN.parameters(), args.max_grad_norm)
-                    agent.optimizer.step()
+                    agent.optimizer_actor.zero_grad()
+                    policy_loss.backward()
+                    nn.utils.clip_grad_norm_(agent.NN_actor.parameters(), args.max_grad_norm)
+                    agent.optimizer_actor.step()
 
                 if args.target_kl is not None and approx_kl > args.target_kl:
                     break
+
+            # print("Training (2)...")
+            # Value network optimization
+            for epoch in range(args.update_epochs_value):
+                np.random.shuffle(b_inds)
+                for start in range(0, batch_size_value, minibatch_size_value):
+                    end = start + minibatch_size_value
+                    mb_inds = b_inds[start:end]
+
+                    newvalue = agent.NN_value.get_value(b_obs[mb_inds])
+                    newvalue = newvalue.view(-1)
+
+                    # Value loss
+                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+
+                    agent.optimizer_value.zero_grad()
+                    v_loss.backward()
+                    nn.utils.clip_grad_norm_(agent.NN_value.parameters(), args.max_grad_norm)
+                    agent.optimizer_value.step()
+
+            # Value network to policy network distillation
+            # print("Training (3)...")
+            agent.NN_actor.zero_grad(True)  # don't clone gradients
+            old_NN_actor = copy.deepcopy(agent.NN_actor).to(device)
+            old_NN_actor.eval()
+            for epoch in range(args.update_epochs_distill):
+                np.random.shuffle(b_inds)
+                for start in range(0, batch_size_distill, minibatch_size_distill):
+                    end = start + minibatch_size_distill
+                    mb_inds = b_inds[start:end]
+                    # Compute policy and value targets
+                    with torch.no_grad():
+                        _, _, _, old_action_dist = old_NN_actor.get_action(b_obs[mb_inds], b_masks[mb_inds])
+                        value_target = agent.NN_value.get_value(b_obs[mb_inds])
+
+                    _, _, _, new_action_dist, new_value = agent.NN_actor.get_action_and_value(b_obs[mb_inds], b_masks[mb_inds])
+
+                    # Distillation loss
+                    policy_kl_loss = torch.distributions.kl_divergence(old_action_dist, new_action_dist).mean()
+                    value_loss = 0.5 * (new_value.view(-1) - value_target).square().mean()
+                    distill_loss = value_loss + args.distill_beta * policy_kl_loss
+
+                    agent.optimizer_distill.zero_grad()
+                    distill_loss.backward()
+                    nn.utils.clip_grad_norm_(agent.NN_actor.parameters(), args.max_grad_norm)
+                    agent.optimizer_distill.step()
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
@@ -780,10 +925,12 @@ def main(args, agent_cls=Agent):
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
-            wandb_log({"params/learning_rate": agent.optimizer.param_groups[0]["lr"]})
-            wandb_log({"losses/total_loss": loss.item()})
+            wandb_log({"params/policy_learning_rate": agent.optimizer_actor.param_groups[0]["lr"]})
+            wandb_log({"params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"]})
+            wandb_log({"params/distill_learning_rate": agent.optimizer_distill.param_groups[0]["lr"]})
             wandb_log({"losses/value_loss": v_loss.item()})
             wandb_log({"losses/policy_loss": pg_loss.item()})
+            wandb_log({"losses/distill_loss": distill_loss.item()})
             wandb_log({"losses/entropy": entropy_loss.item()})
             wandb_log({"losses/old_approx_kl": old_approx_kl.item()})
             wandb_log({"losses/approx_kl": approx_kl.item()})
@@ -843,24 +990,28 @@ def main(args, agent_cls=Agent):
                 else:
                     raise Exception("Not implemented: map change on target")
 
-            if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
-                wandb_log({
-                    "global/global_num_timesteps": agent.state.global_timestep,
-                    "global/global_num_seconds": agent.state.global_second,
-                    "global/global_num_episodes": agent.state.global_episode,
-                }, commit=True)  # commit on final log line
+            wandb_log({
+                "global/global_num_timesteps": agent.state.global_timestep,
+                "global/global_num_seconds": agent.state.global_second,
+                "global/global_num_rollouts": agent.state.global_rollout,
+                "global/global_num_episodes": agent.state.global_episode,
+            }, commit=agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0)
 
-                LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f loss=%.2f" % (
-                    agent.state.current_rollout,
-                    agent.state.current_vstep,
-                    ep_rew_mean,
-                    ep_value_mean,
-                    ep_is_success_mean,
-                    loss.item()
-                ))
+            LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f losses=%.1f|%.1f|%.1f" % (
+                agent.state.current_rollout,
+                agent.state.current_vstep,
+                ep_rew_mean,
+                ep_value_mean,
+                ep_is_success_mean,
+                value_loss.item(),
+                policy_loss.item(),
+                distill_loss.item()
+            ))
 
             agent.state.current_rollout += 1
+            agent.state.global_rollout += 1
             save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
+            # print("TRAIN TIME: %.2f" % (time.time() - tstart))
 
     finally:
         common.maybe_save(0, 10e9, args, agent, out_dir)
@@ -884,8 +1035,8 @@ def main(args, agent_cls=Agent):
 
 def debug_args():
     return Args(
-        "mppo-embedding-test",
-        "mppo-embedding-test",
+        "mppo_dna-test",
+        "mppo_dna-test",
         loglevel=logging.DEBUG,
         run_name=None,
         trial_id=None,
@@ -893,8 +1044,8 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="data/mppo-test/mppo-test/agent-1735766664.pt",
-        agent_load_file=None,
+        agent_load_file="/Users/simo/Projects/vcmi-gym/vcmi/rel/bin/data/mppo_dna-test/mppo_dna-test/agent-1736031988.pt",
+        # agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
         rollouts_per_mapchange=0,
@@ -904,30 +1055,37 @@ def debug_args():
         ep_rew_mean_target=None,
         quit_on_target=False,
         mapside="defender",
-        save_every=10,  # greater than time.time()
+        save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=1,
-        out_dir_template="data/mppo-test/mppo-test",
+        out_dir_template="data/mppo_dna-test/mppo_dna-test",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
-        lr_schedule=ScheduleArgs(mode="const", start=0.0001),
-        # envmaps=["gym/generated/4096/4x1024.vmap"],
-        envmaps=["gym/A1.vmap"],
+        lr_schedule=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
+        num_envs=1,
         num_steps=128,
-        # num_steps=4,
         gamma=0.8,
-        gae_lambda=0.8,
-        num_minibatches=4,
-        # num_minibatches=16,
-        # update_epochs=2,
+        gae_lambda=0.9,
+        gae_lambda_policy=0.95,
+        gae_lambda_value=0.95,
+        num_minibatches=1,
+        num_minibatches_value=1,
+        num_minibatches_policy=1,
+        num_minibatches_distill=1,
         update_epochs=2,
+        update_epochs_value=2,
+        update_epochs_policy=2,
+        update_epochs_distill=2,
         norm_adv=True,
         clip_coef=0.3,
         clip_vloss=True,
         ent_coef=0.01,
-        vf_coef=1.2,
         max_grad_norm=0.5,
+        distill_beta=1.0,
         target_kl=None,
         logparams={},
         cfg_file=None,
@@ -940,6 +1098,8 @@ def debug_args():
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
             vcmienv_loglevel="WARN",
+            consecutive_error_reward_factor=-1,
+            sparse_info=True,
             step_reward_fixed=-100,
             step_reward_mult=1,
             term_reward_mult=0,
@@ -952,26 +1112,33 @@ def debug_args():
             swap_sides=0,
             reward_clip_tanh_army_frac=1,
             reward_army_value_ref=0,
+            reward_dynamic_scaling=False,
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
-            conntype="proc"
+            conntype="thread"
         ),
-        env_wrappers=[],
-        env_version=6,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
-        network=dict(
-            autoencoder_config_file="/Users/simo/Projects/vcmi-gym/data/autoencoder/cfzpdxub-config.json",
-            action_embedding_dim=256,
-            body=[
-                dict(t="LazyLinear", out_features=256),
-                dict(t="GELU"),
-                dict(t="LazyLinear", out_features=1024),
-                dict(t="GELU"),
-                dict(t="LazyLinear", out_features=256),
-                dict(t="GELU"),
-            ]
-        )
+        env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
+        env_version=6,
+        network={
+            "action_embedding_dim": 128,
+            "autoencoder_config_file": None,  # for loading encoder from an autoencoder
+            "encoder": [
+                {"t": "LazyLinear", "out_features": 2048},
+                {"t": "GELU"},
+                {"t": "LazyLinear", "out_features": 1024},
+                {"t": "GELU"},
+                {"t": "LazyLinear", "out_features": 512},
+                {"t": "GELU"},
+            ],
+            "body": [
+                {"t": "LazyLinear", "out_features": 512},
+                {"t": "GELU"},
+                {"t": "LazyLinear", "out_features": 512},
+                {"t": "GELU"},
+            ],
+        }
     )
 
 
@@ -979,6 +1146,3 @@ if __name__ == "__main__":
     # To run from vcmi-gym root:
     # $ python -m rl.algos.mppo
     main(debug_args())
-
-    # args = {'run_id': '478b9_00002', 'group_id': 'PBT-emb-20250102_002516', 'run_name': None, 'trial_id': '478b9_00002', 'wandb_project': 'vcmi-gym', 'resume': False, 'overwrite': [], 'notes': '', 'tags': ['BattleAI', 'obstacles-random', 'v4'], 'loglevel': 20, 'agent_load_file': None, 'vsteps_total': 0, 'seconds_total': 1800, 'rollouts_per_mapchange': 0, 'rollouts_per_log': 50, 'rollouts_per_table_log': 0, 'success_rate_target': None, 'ep_rew_mean_target': None, 'quit_on_target': False, 'mapside': 'attacker', 'permasave_every': 0, 'save_every': 0, 'max_saves': 3, 'out_dir_template': 'data/{group_id}/{run_id}', 'opponent_load_file': None, 'opponent_sbm_probs': [1, 0, 0], 'lr_schedule': {'mode': 'const', 'start': 2.575440836141387e-05, 'end': 0, 'rate': 10}, 'weight_decay': 0, 'clip_coef': 0.8, 'clip_vloss': False, 'ent_coef': 0.05, 'vf_coef': 0.8124999999999999, 'gae_lambda': 0.8094736842105263, 'gamma': 0.69975, 'max_grad_norm': 5.25, 'norm_adv': 0, 'target_kl': None, 'num_minibatches': 2, 'num_steps': 512, 'stats_buffer_size': 100, 'update_epochs': 7, 'num_envs': 1, 'envmaps': ['gym/generated/4096/4096-mixstack-100K-01.vmap'], 'logparams': {'params/ent_coef': 'ent_coef', 'params/gamma': 'gamma', 'params/max_grad_norm': 'max_grad_norm', 'params/num_steps': 'num_steps', 'params/lr_schedule.start': 'lr_schedule.start', 'params/gae_lambda': 'gae_lambda', 'params/num_minibatches': 'num_minibatches', 'params/update_epochs': 'update_epochs', 'params/vf_coef': 'vf_coef', 'params/clip_vloss': 'clip_vloss', 'params/clip_coef': 'clip_coef', 'params/norm_adv': 'norm_adv'}, 'cfg_file': None, 'seed': 0, 'skip_wandb_init': True, 'skip_wandb_log_code': False, 'env': {'max_steps': 500, 'reward_dmg_factor': 5, 'vcmi_loglevel_global': 'error', 'vcmi_loglevel_ai': 'error', 'vcmienv_loglevel': 'WARN', 'step_reward_fixed': 0, 'step_reward_frac': -0.001, 'step_reward_mult': 1, 'term_reward_mult': 0, 'user_timeout': 600, 'vcmi_timeout': 600, 'boot_timeout': 300, 'conntype': 'thread', 'random_heroes': 1, 'random_obstacles': 1, 'town_chance': 10, 'warmachine_chance': 40, 'random_terrain_chance': 100, 'tight_formation_chance': 0, 'battlefield_pattern': '', 'mana_min': 0, 'mana_max': 0, 'swap_sides': 0, 'reward_clip_tanh_army_frac': 1, 'reward_army_value_ref': 500, 'reward_dynamic_scaling': False, 'true_rng': True, 'deprecated_args': ['true_rng']}, 'env_version': 6, 'env_wrappers': [], 'network': {'autoencoder_config_file': '/Users/simo/Projects/vcmi-gym/data/autoencoder/cfzpdxub-config.json', 'action_embedding_dim': 256, 'body': [{'t': 'LazyLinear', 'out_features': 256}, {'t': 'GELU'}, {'t': 'LazyLinear', 'out_features': 1024}, {'t': 'GELU'}, {'t': 'LazyLinear', 'out_features': 256}, {'t': 'GELU'}]}}
-    # main(Args(**args))

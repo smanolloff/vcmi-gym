@@ -26,7 +26,7 @@ config = {
         #       $ NO_WANDB=true NO_SAVE=true python -m rl.algos.mppo.mppo
         #
         # """
-        "population_size": 5,
+        "population_size": 3,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -59,16 +59,16 @@ config = {
             "max_grad_norm": linlist(0.5, 10, n=11),
 
             # 1 env:
-            # "num_steps": [256, 512, 1024, 2048],
+            "num_steps": [256, 512],
 
             # 4 envs:
-            "num_steps": [64, 128, 256, 512],
+            # "num_steps": [64, 128, 256],
 
             # PPO-vanilla specific
             "lr_schedule": {"start": explist(1e-5, 2e-4, n=20)},
             "gae_lambda": linlist(0.5, 0.99, n=20),
-            "num_minibatches": [2, 4, 8],
-            "update_epochs": linlist(1, 10, n=5, dtype=int),
+            "num_minibatches": [4, 8, 16],
+            "update_epochs": linlist(1, 5, n=5, dtype=int),
             "vf_coef": linlist(0.1, 2, n=9),
             "clip_vloss": [1, 0],  # not used in ppo-dna
             "clip_coef": linlist(0.1, 0.8, n=8),
@@ -118,9 +118,8 @@ config = {
     #   = 6K episodes (good for 1K avg metric)
     #   = ~30..60 min (Mac)
     # "vsteps_total": 150_000,
-    "seconds_total": 1800,
-    # "seconds_total": 3600,
-    # "seconds_total": 10*3600,  # 8x30min = 4h... (BattleAI is 8x slower)
+    # "seconds_total": 1800,
+    "seconds_total": 3600,
 
     # Initial checkpoint to start from
     "agent_load_file": None,
@@ -177,14 +176,20 @@ config = {
 
     # NN arch
     "network": {
-        "autoencoder_config_file": "/Users/simo/Projects/vcmi-gym/data/autoencoder/cfzpdxub-config.json",
-        "action_embedding_dim": 256,
-        "body": [
-            {"t": "LazyLinear", "out_features": 256},
+        "action_embedding_dim": 128,
+        "autoencoder_config_file": None,  # for loading encoder from an autoencoder
+        "encoder": [
+            {"t": "LazyLinear", "out_features": 2048},
             {"t": "GELU"},
             {"t": "LazyLinear", "out_features": 1024},
             {"t": "GELU"},
-            {"t": "LazyLinear", "out_features": 256},
+            {"t": "LazyLinear", "out_features": 512},
+            {"t": "GELU"},
+        ],
+        "body": [
+            {"t": "LazyLinear", "out_features": 512},
+            {"t": "GELU"},
+            {"t": "LazyLinear", "out_features": 512},
             {"t": "GELU"},
         ],
     },
@@ -247,14 +252,14 @@ config = {
         "mana_min": 0,
         "mana_max": 0,
         "swap_sides": 0,
-        "user_timeout": 60,
-        "vcmi_timeout": 60,
+        "user_timeout": 600,
+        "vcmi_timeout": 600,
         "boot_timeout": 300,
         "conntype": "thread"
     },
     "seed": 0,
     "env_version": 6,
-    "env_wrappers": [],
+    "env_wrappers": [{"module": "vcmi_gym.envs.util.wrappers", "cls": "LegacyObservationSpaceWrapper"}],
     # Wandb already initialized when algo is invoked
     # "run_id": None
     # "group_id": None

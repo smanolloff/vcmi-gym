@@ -101,18 +101,17 @@ class Trainable(ray.tune.Trainable):
         assert self.agent, "save_checkpoint called but self.agent is None"
         f = os.path.join(checkpoint_dir, "agent.pt")
         self.algo.Agent.save(self.agent, f)
-        if int(self.trial_id.split("_")[1]) == 0:
-            art = wandb.Artifact(name="agent.pt", type="model")
-            art.description = f"Snapshot of agent.pt from {time.ctime(time.time())}"
-            art.ttl = datetime.timedelta(days=7)
-            art.metadata["step"] = wandb.run.step
-            art.add_file(f, name="agent.pt")
-
-            jf = os.path.join(checkpoint_dir, "jit-agent.pt")
-            self.algo.Agent.jsave(self.agent, jf)
-            art.add_file(jf, name="jit-agent.pt")
-
-            wandb.run.log_artifact(art, name="agent.pt")
+        # XXX: tmp disable wandb artifact saving (experimental models)
+        # if int(self.trial_id.split("_")[1]) == 0:
+        #     art = wandb.Artifact(name="agent.pt", type="model")
+        #     art.description = f"Snapshot of agent.pt from {time.ctime(time.time())}"
+        #     art.ttl = datetime.timedelta(days=7)
+        #     art.metadata["step"] = wandb.run.step
+        #     art.add_file(f, name="agent.pt")
+        #     jf = os.path.join(checkpoint_dir, "jit-agent.pt")
+        #     self.algo.Agent.jsave(self.agent, jf)
+        #     art.add_file(jf, name="jit-agent.pt")
+        #     wandb.run.log_artifact(art, name="agent.pt")
         return checkpoint_dir
 
     @debuglog

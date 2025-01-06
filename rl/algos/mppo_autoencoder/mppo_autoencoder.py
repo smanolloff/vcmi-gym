@@ -239,8 +239,8 @@ class AgentNN(nn.Module):
         common.layer_init(self.critic, gain=1.0)
 
         # Freeze encoder
-        for param in self.encoder.parameters():
-            param.requires_grad = False
+        # for param in self.encoder.parameters():
+        #     param.requires_grad = False
 
     def get_value(self, x, attn_mask=None):
         return self.critic(self.body(self.encoder(x)))
@@ -374,7 +374,7 @@ class Agent(nn.Module):
         clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
 
         # no need to save the encoder
-        clean_agent.NN.encoder = None
+        # clean_agent.NN.encoder = None
         torch.save(clean_agent, agent_file)
 
     @staticmethod
@@ -407,7 +407,7 @@ class Agent(nn.Module):
 
         # The encoder is static and is not saved
         # => build a new agent and use its encoder instead
-        assert agent.NN.encoder is None
+        # assert agent.NN.encoder is None
         attrs = ["args", "observation_space", "action_space", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)

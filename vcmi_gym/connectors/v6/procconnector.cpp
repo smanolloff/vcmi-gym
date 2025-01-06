@@ -376,11 +376,6 @@ namespace Connector::V6::Proc {
             return 0.0;
         };
 
-        std::function<int(const MMAI::Schema::IState* s)> getActionRed;
-        std::function<int(const MMAI::Schema::IState* s)> getActionBlue;
-        std::function<double(const MMAI::Schema::IState* s)> getValueRed;
-        std::function<double(const MMAI::Schema::IState* s)> getValueBlue;
-
         auto f_getRandomAction = [](const MMAI::Schema::IState* s) {
             return RandomValidAction(s);
         };
