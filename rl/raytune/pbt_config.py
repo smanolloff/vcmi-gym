@@ -26,7 +26,7 @@ config = {
         #       $ NO_WANDB=true NO_SAVE=true python -m rl.algos.mppo.mppo
         #
         # """
-        "population_size": 4,
+        "population_size": 5,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -118,8 +118,8 @@ config = {
     #   = 6K episodes (good for 1K avg metric)
     #   = ~30..60 min (Mac)
     # "vsteps_total": 150_000,
-    # "seconds_total": 1800,
-    "seconds_total": 3600,
+    "seconds_total": 1800,
+    # "seconds_total": 3600,
 
     # Initial checkpoint to start from
     "agent_load_file": None,
@@ -130,8 +130,8 @@ config = {
     "tags": ["BattleAI", "obstacles-random", "v4"],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
-        "gym/generated/4096/4096-mixstack-100K-01.vmap",
-        # "gym/generated/4096/4x1024.vmap"
+        # "gym/generated/4096/4096-mixstack-100K-01.vmap",
+        "gym/generated/4096/4x1024.vmap"
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
@@ -176,45 +176,47 @@ config = {
 
     # NN arch
     "network": {
-        "action_embedding_dim": 128,
-        "encoder": {
-            "type": "split",  # split / fc
-            "kwargs": {
-                # kwargs for "split" encoder:
-                "z_dims": {
-                    "misc": 4,
-                    "1stack": 8,
-                    "1hex": 8,
-                    "merged": 512,
-                    "out": 256,
-                },
-                "obs_dims": {
-                    "misc": 4,       # BATTLEFIELD_STATE_SIZE_MISC
-                    "stacks": 4580,  # BATTLEFIELD_STATE_SIZE_ALL_STACKS
-                    "hexes": 9570,   # BATTLEFIELD_STATE_SIZE_ALL_HEXES
-                },
+        "encoder": [
+            # => (B, 165*E)
 
-                # kwargs for "fc" encoder:
-                # "body": [
-                #     {"t": "LazyLinear", "out_features": 2048},
-                #     {"t": "LeakyReLU"},
-                #     {"t": "LazyLinear", "out_features": 1024},
-                #     {"t": "LeakyReLU"},
-                #     {"t": "LazyLinear", "out_features": 512},
-                #     {"t": "LeakyReLU"},
-                # ],
-            },
-        },
-        "body": [
-            {"t": "LazyLinear", "out_features": 256},
+            #
+            # HexConv (variant A: classic conv)
+            #
+            {"t": "HexConv", "out_channels": 64},
             {"t": "LeakyReLU"},
-            {"t": "LazyLinear", "out_features": 256},
+            # => (B, 165, 64)
+            {"t": "HexConv", "out_channels": 64},
             {"t": "LeakyReLU"},
+            # => (B, 165, 16)
+
+            # #
+            # # HexConv (variant B: residual conv)
+            # #
+            # {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
+            # {"t": "LeakyReLU"},
+            # # => (B, 165, E)
+            # {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
+            # {"t": "LeakyReLU"},
+            # # => (B, 165, E)
+
+            #
+            # COMMON
+            #
+            {"t": "LazyLinear", "out_features": 32},
+            {"t": "LeakyReLU"},
+            # => (B, 165, 32)
+            {"t": "Flatten"},
+            # => (B, 5280)
+            {"t": "LazyLinear", "out_features": 1024},
+            {"t": "LeakyReLU"},
+            # => (B, 1024)
         ],
+        "actor": {"t": "LazyLinear", "out_features": 1322},
+        "critic": {"t": "LazyLinear", "out_features": 1}
     },
 
     # Static
-    "loglevel": logging.INFO,
+    "loglevel": logging.DEBUG,
     "logparams": {},  # overwritten based on "hyperparam_mutations"
     "skip_wandb_init": True,
     "skip_wandb_log_code": False,  # overwritten to True after 1st iteration
@@ -223,7 +225,7 @@ config = {
     "overwrite": [],
     "notes": "",
     "rollouts_per_mapchange": 0,
-    "rollouts_per_log": 50,
+    "rollouts_per_log": 10,
     "rollouts_per_table_log": 0,
     "success_rate_target": None,
     "ep_rew_mean_target": None,
@@ -277,7 +279,7 @@ config = {
         "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 6,
+    "env_version": 7,
     "env_wrappers": [{"module": "vcmi_gym.envs.util.wrappers", "cls": "LegacyObservationSpaceWrapper"}],
     # Wandb already initialized when algo is invoked
     # "run_id": None

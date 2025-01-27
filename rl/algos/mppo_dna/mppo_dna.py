@@ -87,6 +87,7 @@ class EnvArgs:
     deprecated_args: list[dict] = field(default_factory=lambda: [
         "encoding_type",
         "consecutive_error_reward_factor",
+        "sparse_info",
         "true_rng"
     ])
 
@@ -97,10 +98,7 @@ class EnvArgs:
 @dataclass
 class NetworkArgs:
     attention: dict = field(default_factory=dict)
-    features_extractor1_misc: list[dict] = field(default_factory=list)
-    features_extractor1_stacks: list[dict] = field(default_factory=list)
-    features_extractor1_hexes: list[dict] = field(default_factory=list)
-    features_extractor2: list[dict] = field(default_factory=list)
+    encoder: list[dict] = field(default_factory=list)
     actor: dict = field(default_factory=dict)
     critic: dict = field(default_factory=dict)
 
@@ -243,36 +241,69 @@ class Args:
         common.coerce_dataclass_ints(self)
 
 
-class ChanFirst(nn.Module):
-    def forward(self, x):
-        return x.permute(0, 3, 1, 2)
-
-
-class Split(nn.Module):
-    def __init__(self, split_size, dim):
+# 1. Adds 1 hex of padding to the input
+#
+#               0 0 0 0
+#    1 2 3     0 1 2 3 0
+#     4 5 6 =>  0 4 5 6 0
+#    7 8 9     0 7 8 9 0
+#               0 0 0 0
+#
+# 2. Simulates a Conv2d with kernel_size=2, padding=1
+#
+#  For the above example (grid of 9 total hexes), this would result in:
+#
+#  1 => [0, 0, 0, 1, 2, 0, 4]
+#  2 => [0, 0, 1, 2, 3, 4, 5]
+#  3 => [0, 0, 2, 3, 0, 5, 6]
+#  4 => [1, 2, 0, 4, 5, 7, 8]
+#  ...
+#  9 => [5, 6, 8, 9, 0, 0, 0]
+#
+# Input: (B, ...) reshapeable to (B, Y, X, E)
+# Output: (B, 165, out_channels)
+#
+class HexConv(nn.Module):
+    def __init__(self, out_channels):
         super().__init__()
 
-        self.split_size = split_size
-        self.dim = dim
+        padded_offsets0 = [-17, -16, -1, 0, 1, 17, 18]
+        padded_offsets1 = [-18, -17, -1, 0, 1, 16, 17]
+        self.padded_convinds = torch.zeros(11, 15, 7, dtype=int)
+        for y in range(1, 12):
+            for x in range(1, 16):
+                padded_hexind = y * 17 + x
+                if y % 2 == 0:
+                    padded_offsets = torch.tensor(padded_offsets0)
+                else:
+                    padded_offsets = torch.tensor(padded_offsets1)
+                self.padded_convinds[y-1, x-1] = padded_offsets + padded_hexind
+
+        self.fc = nn.LazyLinear(out_features=out_channels)
 
     def forward(self, x):
-        return torch.split(x, self.split_size, self.dim)
+        x = x.reshape(x.shape[0], 11, 15, -1)
+        padded_shape = torch.tensor(x.shape) + torch.tensor([0, 2, 2, 0])
+        padded_x = torch.zeros(*padded_shape)
+        padded_x[:, 1:12, 1:16, :] = x
+        padded_x = padded_x.flatten(start_dim=1, end_dim=2)
+        fc_input = padded_x[:, self.padded_convinds.flatten(), :].reshape(x.shape[0], 165, -1)
+        return self.fc(fc_input)
 
-    def __repr__(self):
-        return f"{self.__class__.__name__}(dim={self.dim}, split_size={self.split_size})"
 
-
-class ResBlock(nn.Module):
-    def __init__(self, channels, activation="LeakyReLU"):
+class HexConvResBlock(nn.Module):
+    def __init__(self, channels, act={"t": "LeakyReLU"}):
         super().__init__()
-        self.block = nn.Sequential(
-            common.layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1)),
-            getattr(nn, activation)(),
-            common.layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
-        )
+
+        self.conv1 = HexConv(channels)
+        self.conv2 = HexConv(channels)
+        self.act = AgentNN.build_layer(act)
 
     def forward(self, x):
-        return x + self.block(x)
+        x = x.reshape(x.shape[0], 165, -1)
+        identity = x
+        out = self.conv2(self.act(self.conv1(x)))
+        return out + identity
 
 
 class SelfAttention(nn.Module):
@@ -302,120 +333,45 @@ class SelfAttention(nn.Module):
 
 class AgentNN(nn.Module):
     @staticmethod
-    def build_layer(spec, obs_dims):
+    def build_layer(spec):
         kwargs = dict(spec)  # copy
         t = kwargs.pop("t")
-
-        assert len(obs_dims) == 3  # [M, S, H]
-
-        for k, v in kwargs.items():
-            if v == "_M_":
-                kwargs[k] = obs_dims["misc"]
-            if v == "_H_":
-                assert obs_dims["hexes"] % 165 == 0
-                kwargs[k] = obs_dims["hexes"] // 165
-            if v == "_S_":
-                assert obs_dims["stacks"] % 20 == 0
-                kwargs[k] = obs_dims["stacks"] // 20
-
         layer_cls = getattr(torch.nn, t, None) or globals()[t]
         return layer_cls(**kwargs)
 
-    def __init__(self, network, obs_dims):
+    def __init__(self, network, obs_dim):
         super().__init__()
 
-        self.obs_dims = obs_dims
+        self.attention = None
+        self.obs_dim = obs_dim
+        self.encoder = torch.nn.Sequential()
+        for spec in network.encoder:
+            layer = AgentNN.build_layer(spec)
+            self.encoder.append(layer)
 
-        assert isinstance(obs_dims, dict)
-        assert list(obs_dims.keys()) == ["misc", "stacks", "hexes"]  # order is important
+        self.actor = AgentNN.build_layer(network.actor)
+        self.critic = AgentNN.build_layer(network.critic)
 
-        if network.attention:
-            layer = AgentNN.build_layer(network.attention, obs_dims)
-            self.attention = common.layer_init(layer)
-        else:
-            self.attention = None
-
-        # XXX: no lazy option for SelfAttention
+        # Init lazy layers
         with torch.no_grad():
-            dummy_outputs = []
+            self.get_action_and_value(torch.randn([1, obs_dim]), torch.ones([1, 1322], dtype=torch.bool))
 
-        self.obs_splitter = Split(list(obs_dims.values()), dim=1)
+        common.layer_init(self.actor, gain=0.01)
+        common.layer_init(self.critic, gain=1.0)
 
-        self.features_extractor1_misc = torch.nn.Sequential()
-        for spec in network.features_extractor1_misc:
-            layer = AgentNN.build_layer(spec, obs_dims)
-            self.features_extractor1_misc.append(layer)
-
-        # dummy input to initialize lazy modules
-        with torch.no_grad():
-            dummy_outputs.append(self.features_extractor1_misc(torch.randn([1, obs_dims["misc"]])))
-
-        for layer in self.features_extractor1_misc:
-            common.layer_init(layer)
-
-        self.features_extractor1_stacks = torch.nn.Sequential(
-            torch.nn.Unflatten(dim=1, unflattened_size=[20, obs_dims["stacks"] // 20])
-        )
-
-        for spec in network.features_extractor1_stacks:
-            layer = AgentNN.build_layer(spec, obs_dims)
-            self.features_extractor1_stacks.append(layer)
-
-        # dummy input to initialize lazy modules
-        with torch.no_grad():
-            dummy_outputs.append(self.features_extractor1_stacks(torch.randn([1, obs_dims["stacks"]])))
-
-        for layer in self.features_extractor1_stacks:
-            common.layer_init(layer)
-
-        self.features_extractor1_hexes = torch.nn.Sequential(
-            torch.nn.Unflatten(dim=1, unflattened_size=[165, obs_dims["hexes"] // 165])
-        )
-
-        for spec in network.features_extractor1_hexes:
-            layer = AgentNN.build_layer(spec, obs_dims)
-            self.features_extractor1_hexes.append(layer)
-
-        # dummy input to initialize lazy modules
-        with torch.no_grad():
-            dummy_outputs.append(self.features_extractor1_hexes(torch.randn([1, obs_dims["hexes"]])))
-
-        for layer in self.features_extractor1_hexes:
-            common.layer_init(layer)
-
-        self.features_extractor2 = torch.nn.Sequential()
-        for spec in network.features_extractor2:
-            layer = AgentNN.build_layer(spec, obs_dims)
-            self.features_extractor2.append(layer)
-
-        # dummy input to initialize lazy modules
-        with torch.no_grad():
-            self.features_extractor2(torch.cat(tuple(dummy_outputs), dim=1))
-
-        for layer in self.features_extractor2:
-            common.layer_init(layer)
-
-        self.actor = common.layer_init(AgentNN.build_layer(network.actor, obs_dims), gain=0.01)
-        self.critic = common.layer_init(AgentNN.build_layer(network.critic, obs_dims), gain=1.0)
-
-    def extract_features(self, x):
-        misc, stacks, hexes = self.obs_splitter(x)
-        fmisc = self.features_extractor1_misc(misc)
-        fstacks = self.features_extractor1_stacks(stacks)
-        fhexes = self.features_extractor1_hexes(hexes)
-        fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
-        return self.features_extractor2(fcat)
+    def encode(self, x):
+        return self.encoder(x)
 
     def get_value(self, x, attn_mask=None):
         if self.attention:
             x = self.attention(x, attn_mask)
-        return self.critic(self.extract_features(x))
+        return self.critic(self.encode(x))
 
     def get_action(self, x, mask, attn_mask=None, action=None, deterministic=False):
         if self.attention:
             x = self.attention(x, attn_mask)
-        features = self.extract_features(x)
-        action_logits = self.actor(features)
+        encoded = self.encode(x)
+        action_logits = self.actor(encoded)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
@@ -427,9 +383,9 @@ class AgentNN(nn.Module):
     def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
         if self.attention:
             x = self.attention(x, attn_mask)
-        features = self.extract_features(x)
-        value = self.critic(features)
-        action_logits = self.actor(features)
+        encoded = self.encode(x)
+        value = self.critic(encoded)
+        action_logits = self.actor(encoded)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
@@ -472,7 +428,7 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "obs_dims", "state"]
+        attrs = ["args", "obs_dim", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -485,7 +441,7 @@ class Agent(nn.Module):
     @staticmethod
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
-        attrs = ["args", "obs_dims", "state"]
+        attrs = ["args", "obs_dim", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -495,22 +451,11 @@ class Agent(nn.Module):
         clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
         jagent = JitAgent()
         jagent.env_version = clean_agent.env_version
-        jagent.obs_dims = clean_agent.obs_dims
-
-        # v1, v2
-        # jagent.features_extractor = clean_agent.NN.features_extractor
+        jagent.obs_dim = clean_agent.obs_dim
 
         # v3+
-        jagent.obs_splitter = clean_agent.NN_policy.obs_splitter
-        jagent.features_extractor1_policy_misc = clean_agent.NN_policy.features_extractor1_misc
-        jagent.features_extractor1_policy_stacks = clean_agent.NN_policy.features_extractor1_stacks
-        jagent.features_extractor1_policy_hexes = clean_agent.NN_policy.features_extractor1_hexes
-        jagent.features_extractor2_policy = clean_agent.NN_policy.features_extractor2
-
-        jagent.features_extractor1_value_misc = clean_agent.NN_value.features_extractor1_misc
-        jagent.features_extractor1_value_stacks = clean_agent.NN_value.features_extractor1_stacks
-        jagent.features_extractor1_value_hexes = clean_agent.NN_value.features_extractor1_hexes
-        jagent.features_extractor2_value = clean_agent.NN_value.features_extractor2
+        jagent.encoder_policy = clean_agent.NN_policy.encoder
+        jagent.encoder_value = clean_agent.NN_value.encoder
 
         # common
         jagent.actor = clean_agent.NN_policy.actor
@@ -524,14 +469,14 @@ class Agent(nn.Module):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
         return torch.load(agent_file, map_location=device, weights_only=False)
 
-    def __init__(self, args, obs_dims, state=None, device="cpu"):
+    def __init__(self, args, obs_dim, state=None, device="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
         self._optimizer_state = None  # needed for save/load
-        self.obs_dims = obs_dims  # needed for save/load
-        self.NN_value = AgentNN(args.network, obs_dims)
-        self.NN_policy = AgentNN(args.network, obs_dims)
+        self.obs_dim = obs_dim  # needed for save/load
+        self.NN_value = AgentNN(args.network, obs_dim)
+        self.NN_policy = AgentNN(args.network, obs_dim)
         self.NN_value.to(device)
         self.NN_policy.to(device)
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
@@ -548,14 +493,8 @@ class JitAgent(nn.Module):
         super().__init__()
         # XXX: these are overwritten after object is initialized
         self.obs_splitter = nn.Identity()
-        self.features_extractor1_policy_misc = nn.Identity()
-        self.features_extractor1_policy_stacks = nn.Identity()
-        self.features_extractor1_policy_hexes = nn.Identity()
-        self.features_extractor2_policy = nn.Identity()
-        self.features_extractor1_value_misc = nn.Identity()
-        self.features_extractor1_value_stacks = nn.Identity()
-        self.features_extractor1_value_hexes = nn.Identity()
-        self.features_extractor2_value = nn.Identity()
+        self.encoder_policy = nn.Identity()
+        self.encoder_value = nn.Identity()
         self.actor = nn.Identity()
         self.critic = nn.Identity()
         self.env_version = 0
@@ -566,19 +505,8 @@ class JitAgent(nn.Module):
     def predict(self, obs, mask, deterministic: bool = False) -> int:
         b_obs = obs.unsqueeze(dim=0)
         b_mask = mask.unsqueeze(dim=0)
-
-        # v1, v2
-        # features = self.features_extractor(b_obs)
-
-        # v3+
-        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
-        features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
-            self.features_extractor1_policy_misc(split[0]),
-            self.features_extractor1_policy_stacks(split[1]),
-            self.features_extractor1_policy_hexes(split[2])
-        )))
-
-        action_logits = self.actor(features)
+        encoded = self.encoder(b_obs)
+        action_logits = self.actor(encoded)
         probs = self.categorical_masked(logits0=action_logits, mask=b_mask)
 
         if deterministic:
@@ -591,26 +519,15 @@ class JitAgent(nn.Module):
     @torch.jit.export
     def forward(self, obs) -> torch.Tensor:
         b_obs = obs.unsqueeze(dim=0)
-        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
-        features = self.features_extractor2_policy(torch.cat(dim=1, tensors=(
-            self.features_extractor1_policy_misc(split[0]),
-            self.features_extractor1_policy_stacks(split[1]),
-            self.features_extractor1_policy_hexes(split[2])
-        )))
+        encoded = self.encoder(b_obs)
 
-        return torch.cat(dim=1, tensors=(self.actor(features), self.critic(features)))
+        return torch.cat(dim=1, tensors=(self.actor(encoded), self.critic(encoded)))
 
     @torch.jit.export
     def get_value(self, obs) -> float:
         b_obs = obs.unsqueeze(dim=0)
-        split = self.obs_splitter(b_obs)  # cannot use destructuring assignment
-        features = self.features_extractor2_value(torch.cat(dim=1, tensors=(
-            self.features_extractor1_value_misc(split[0]),
-            self.features_extractor1_value_stacks(split[1]),
-            self.features_extractor1_value_hexes(split[2])
-        )))
-
-        value = self.critic(features)
+        encoded = self.encoder(b_obs)
+        value = self.critic(encoded)
         return value.float().item()
 
     @torch.jit.export
@@ -746,35 +663,20 @@ def main(args):
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 1:
-        from vcmi_gym import VcmiEnv_v1 as VcmiEnv
-    elif args.env_version == 2:
-        from vcmi_gym import VcmiEnv_v2 as VcmiEnv
-    elif args.env_version == 3:
-        from vcmi_gym import VcmiEnv_v3 as VcmiEnv
-    elif args.env_version == 4:
-        from vcmi_gym import VcmiEnv_v4 as VcmiEnv
+    if args.env_version == 7:
+        from vcmi_gym import VcmiEnv_v7 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
+    obs_space = VcmiEnv.OBSERVATION_SPACE
+    act_space = VcmiEnv.ACTION_SPACE
+
     if agent is None:
         # TODO: robust mechanism ensuring these don't get mixed up
-        assert VcmiEnv.STATE_SEQUENCE == ["misc", "stacks", "hexes"]
-        obs_dims = dict(
-            misc=VcmiEnv.STATE_SIZE_MISC,
-            stacks=VcmiEnv.STATE_SIZE_STACKS,
-            hexes=VcmiEnv.STATE_SIZE_HEXES,
-        )
-        agent = Agent(args, obs_dims, device=device)
+        obs_dim = VcmiEnv.STATE_SIZE
+        agent = Agent(args, obs_dim, device=device)
 
-    # Legacy models with offset actions
-    if agent.NN_policy.actor.out_features == 2311:
-        print("Using legacy model with 2311 actions")
-        wrappers.append(dict(module="vcmi_gym", cls="LegacyActionSpaceWrapper"))
-        n_actions = 2311
-    else:
-        print("Using new model with 2312 actions")
-        n_actions = 2312
+    n_actions = 1322
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -784,40 +686,18 @@ def main(args):
     torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
     try:
-        # A dummy env needs to be created to infer the action and obs space
-        # (use `create_venv` to enure the same wrappers are in place)
-        dummy_args = copy.deepcopy(args)
-        dummy_args.num_envs = 1
-        dummy_args.env.mapname = "gym/A1.vmap"
-        dummy_args.env.conntype = "proc"
-        dummy_venv = common.create_venv(VcmiEnv, dummy_args, [1])
-
         seeds = [np.random.randint(2**31) for i in range(args.num_envs)]
         envs = common.create_venv(VcmiEnv, args, seeds)
-
-        # Do not use env_cls.OBSERVATION_SPACE
-        # (obs space is changed by a wrapper)
-        act_space = dummy_venv.envs[0].action_space
-        obs_space = dummy_venv.envs[0].observation_space
-        dummy_venv.close()
-        del dummy_venv
-
-        # [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
-
-        assert isinstance(act_space, gym.spaces.Discrete), "only discrete action space is supported"
+        [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         agent.state.seed = seed
 
         # these are used by gym's RecordEpisodeStatistics wrapper
         envs.return_queue = agent.state.ep_rew_queue
         envs.length_queue = agent.state.ep_length_queue
-
-        assert act_space.shape == ()
-
         if args.wandb_project:
             import wandb
             common.setup_wandb(args, agent, __file__, watch=False)
-            wandb.watch(agent.NN_policy, log="all", log_graph=True, log_freq=1000)
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
@@ -841,14 +721,14 @@ def main(args):
         attn = False
 
         # ALGO Logic: Storage setup
-        obs = torch.zeros((args.num_steps, num_envs) + obs_space.shape).to(device)
+        obs = torch.zeros((args.num_steps, num_envs) + obs_space["observation"].shape).to(device)
         actions = torch.zeros((args.num_steps, num_envs) + act_space.shape).to(device)
         logprobs = torch.zeros((args.num_steps, num_envs)).to(device)
         rewards = torch.zeros((args.num_steps, num_envs)).to(device)
         dones = torch.zeros((args.num_steps, num_envs)).to(device)
         values = torch.zeros((args.num_steps, num_envs)).to(device)
 
-        masks = torch.zeros((args.num_steps, num_envs, n_actions), dtype=torch.bool).to(device)
+        masks = torch.zeros((args.num_steps, num_envs, act_space.n), dtype=torch.bool).to(device)
         attnmasks = torch.zeros((args.num_steps, num_envs, 165, 165)).to(device)
 
         # TRY NOT TO MODIFY: start the game
@@ -949,13 +829,13 @@ def main(args):
                 _, returns = compute_advantages(rewards, dones, values, next_done, next_value, args.gamma, args.gae_lambda_value)
 
             # flatten the batch
-            b_obs = obs.reshape((-1,) + obs_space.shape)
-            b_logprobs = logprobs.reshape(-1)
-            b_actions = actions.reshape((-1,) + act_space.shape)
-            b_masks = masks.reshape((-1,) + (n_actions,))
-            b_advantages = advantages.reshape(-1)
-            b_returns = returns.reshape(-1)
-            b_values = values.reshape(-1)
+            b_obs = obs.flatten(end_dim=1)
+            b_logprobs = logprobs.flatten(end_dim=1)
+            b_actions = actions.flatten(end_dim=1)
+            b_masks = masks.flatten(end_dim=1)
+            b_advantages = advantages.flatten(end_dim=1)
+            b_returns = returns.flatten(end_dim=1)
+            b_values = values.flatten(end_dim=1)
 
             if attn:
                 b_attn_masks = attnmasks.reshape((-1,) + (165, 165))
@@ -1273,42 +1153,44 @@ def debug_args():
         ),
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
-        env_version=4,
+        env_version=7,
         network=dict(
             attention=None,
-            features_extractor1_misc=[
-                # => (B, M)
-                dict(t="LazyLinear", out_features=4),
+            encoder=[
+                # => (B, 165*E)
+                dict(t="HexConv", out_channels=64),
                 dict(t="LeakyReLU"),
-                # => (B, 4)
-            ],
-            features_extractor1_stacks=[
-                # => (B, 20, S)
-                dict(t="LazyLinear", out_features=8),
-                dict(t="LayerNorm", normalized_shape=[20, 8]),
+                # => (B, 165, 64)
+                dict(t="HexConv", out_channels=64),
                 dict(t="LeakyReLU"),
-                # => (B, 20, 8)
-
+                # => (B, 165, 16)
+                dict(t="LazyLinear", out_features=32),
+                dict(t="LeakyReLU"),
+                # => (B, 165, 32)
                 dict(t="Flatten"),
-                # => (B, 320)
-            ],
-            features_extractor1_hexes=[
-                # => (B, 165, H)
-                dict(t="LazyLinear", out_features=8),
-                dict(t="LayerNorm", normalized_shape=[165, 8]),
+                # => (B, 5280)
+                dict(t="LazyLinear", out_features=1024),
                 dict(t="LeakyReLU"),
-                # => (B, 165, 8)
+                # => (B, 1024)
 
-                dict(t="Flatten"),
-                # => (B, 2640)
+                # # => (B, 165*E)
+                # dict(t="HexConvResBlock", channels=81, act=dict(t="LeakyReLU")),
+                # dict(t="LeakyReLU"),
+                # # => (B, 165, E)
+                # dict(t="HexConvResBlock", channels=81, act=dict(t="LeakyReLU")),
+                # dict(t="LeakyReLU"),
+                # # => (B, 165, E)
+                # dict(t="LazyLinear", out_features=32),
+                # dict(t="LeakyReLU"),
+                # # => (B, 165, 32)
+                # dict(t="Flatten"),
+                # # => (B, 5280)
+                # dict(t="LazyLinear", out_features=1024),
+                # dict(t="LeakyReLU"),
+                # # => (B, 1024)
             ],
-            features_extractor2=[
-                # => (B, 2964)
-                dict(t="LazyLinear", out_features=512),
-                dict(t="LeakyReLU"),
-            ],
-            actor=dict(t="Linear", in_features=512, out_features=2312),
-            critic=dict(t="Linear", in_features=512, out_features=1)
+            actor=dict(t="LazyLinear", out_features=1322),
+            critic=dict(t="LazyLinear", out_features=1)
         )
     )
 

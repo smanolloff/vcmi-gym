@@ -1094,8 +1094,8 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        agent_load_file="data/PBT-DNA-split-emb-20250106_033328/3bef1_00000/checkpoint_000004/agent.pt",
-        # agent_load_file=None,
+        # agent_load_file="data/PBT-DNA-split-emb-20250106_033328/3bef1_00000/checkpoint_000004/agent.pt",
+        agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
         rollouts_per_mapchange=0,
@@ -1173,7 +1173,7 @@ def debug_args():
         env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
         env_version=6,
         network={
-            "action_embedding_dim": 128,
+            "action_embedding_dim": 64,
             "encoder": {
                 "type": "split",  # split / fc
                 "kwargs": {
@@ -1183,7 +1183,7 @@ def debug_args():
                         "1stack": 8,
                         "1hex": 8,
                         "merged": 512,
-                        "out": 256,
+                        "out": 128,
                     },
                     "obs_dims": {
                         "misc": 4,       # BATTLEFIELD_STATE_SIZE_MISC
@@ -1203,9 +1203,9 @@ def debug_args():
                 },
             },
             "body": [
-                {"t": "LazyLinear", "out_features": 256},
+                {"t": "LazyLinear", "out_features": 128},
                 {"t": "LeakyReLU"},
-                {"t": "LazyLinear", "out_features": 256},
+                {"t": "LazyLinear", "out_features": 128},
                 {"t": "LeakyReLU"},
             ],
         }
