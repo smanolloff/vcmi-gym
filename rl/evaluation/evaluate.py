@@ -239,6 +239,11 @@ def create_venv(LOG, env_cls, agent, mapname, role, opponent, wrappers, env_kwar
                 kwargs["opponent"] = opponent
                 kwargs["opponent_model"] = agent.args.opponent_load_file
                 kwargs["conntype"] = "proc"
+            case vcmi_gym.VcmiEnv_v7:
+                kwargs["role"] = agent.args.mapside
+                kwargs["opponent"] = opponent
+                kwargs["opponent_model"] = agent.args.opponent_load_file
+                kwargs["conntype"] = "proc"
             case _:
                 raise Exception("env cls not supported: %s" % env_cls)
 
@@ -567,6 +572,14 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
                     case 4:
                         env_cls = vcmi_gym.VcmiEnv_v4
                         wrappers += [vcmi_gym.LegacyObservationSpaceWrapper]
+                    # case 5:
+                    #     env_cls = vcmi_gym.VcmiEnv_v5
+                    # case 6:
+                    #     env_cls = vcmi_gym.VcmiEnv_v6
+                    case 7:
+                        env_cls = vcmi_gym.VcmiEnv_v7
+                        from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
+                        wrappers += [LegacyObservationSpaceWrapper]
                     case _:
                         raise Exception("unsupported env version: %d" % env_version)
 
