@@ -25,7 +25,6 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
 
-import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
@@ -267,27 +266,26 @@ class HexConv(nn.Module):
     def __init__(self, out_channels):
         super().__init__()
 
-        padded_offsets0 = [-17, -16, -1, 0, 1, 17, 18]
-        padded_offsets1 = [-18, -17, -1, 0, 1, 16, 17]
-        self.padded_convinds = torch.zeros(11, 15, 7, dtype=int)
+        padded_offsets0 = torch.tensor([-17, -16, -1, 0, 1, 17, 18])
+        padded_offsets1 = torch.tensor([-18, -17, -1, 0, 1, 16, 17])
+        padded_convinds = torch.zeros(11, 15, 7, dtype=int)
+
         for y in range(1, 12):
             for x in range(1, 16):
                 padded_hexind = y * 17 + x
-                if y % 2 == 0:
-                    padded_offsets = torch.tensor(padded_offsets0)
-                else:
-                    padded_offsets = torch.tensor(padded_offsets1)
-                self.padded_convinds[y-1, x-1] = padded_offsets + padded_hexind
+                padded_offsets = padded_offsets0 if y % 2 == 0 else padded_offsets1
+                padded_convinds[y-1, x-1] = padded_offsets + padded_hexind
 
+        self.register_buffer("padded_convinds", padded_convinds.flatten())
         self.fc = nn.LazyLinear(out_features=out_channels)
 
     def forward(self, x):
-        x = x.reshape(x.shape[0], 11, 15, -1)
-        padded_shape = torch.tensor(x.shape) + torch.tensor([0, 2, 2, 0])
-        padded_x = torch.zeros(*padded_shape)
+        b, _, hexdim = x.shape
+        x = x.view(b, 11, 15, -1)
+        padded_x = x.new_zeros((b, 13, 17, hexdim))  # +2 hexes in X and Y coords
         padded_x[:, 1:12, 1:16, :] = x
-        padded_x = padded_x.flatten(start_dim=1, end_dim=2)
-        fc_input = padded_x[:, self.padded_convinds.flatten(), :].reshape(x.shape[0], 165, -1)
+        padded_x = padded_x.view(b, -1, hexdim)
+        fc_input = padded_x[:, self.padded_convinds, :].view(b, 165, -1)
         return self.fc(fc_input)
 
 
@@ -300,10 +298,10 @@ class HexConvResBlock(nn.Module):
         self.act = AgentNN.build_layer(act)
 
     def forward(self, x):
-        x = x.reshape(x.shape[0], 165, -1)
-        identity = x
+        assert x.is_contiguous
+        # identity = x.contiguous()
         out = self.conv2(self.act(self.conv1(x)))
-        return out + identity
+        return out.add_(x)
 
 
 class SelfAttention(nn.Module):
@@ -675,8 +673,6 @@ def main(args):
         # TODO: robust mechanism ensuring these don't get mixed up
         obs_dim = VcmiEnv.STATE_SIZE
         agent = Agent(args, obs_dim, device=device)
-
-    n_actions = 1322
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -1077,7 +1073,7 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="/Users/simo/Projects/vcmi-gym/rl/models/Defender model:v5/agent-migrated.pt",
+        # agent_load_file="/var/folders/m3/8p3yhh9171sbnhc7j_2xpk880000gn/T/x.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -1100,15 +1096,15 @@ def debug_args():
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
         num_envs=1,
-        num_steps=128,
+        num_steps=256,
         gamma=0.8,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,
         gae_lambda_value=0.95,
-        num_minibatches=1,
-        num_minibatches_value=1,
-        num_minibatches_policy=1,
-        num_minibatches_distill=1,
+        num_minibatches=4,
+        num_minibatches_value=4,
+        num_minibatches_policy=4,
+        num_minibatches_distill=4,
         update_epochs=2,
         update_epochs_value=2,
         update_epochs_policy=2,
@@ -1134,8 +1130,8 @@ def debug_args():
             consecutive_error_reward_factor=-1,
             sparse_info=True,
             step_reward_fixed=-100,
-            step_reward_mult=1,
-            term_reward_mult=0,
+            step_reward_mult=0,
+            term_reward_mult=1,
             random_heroes=0,
             random_obstacles=0,
             town_chance=0,
@@ -1158,6 +1154,9 @@ def debug_args():
             attention=None,
             encoder=[
                 # => (B, 165*E)
+                dict(t="Unflatten", dim=1, unflattened_size=[165, 81]),
+
+                # => (B, 165, E)
                 dict(t="HexConv", out_channels=64),
                 dict(t="LeakyReLU"),
                 # => (B, 165, 64)
@@ -1169,11 +1168,8 @@ def debug_args():
                 # => (B, 165, 32)
                 dict(t="Flatten"),
                 # => (B, 5280)
-                dict(t="LazyLinear", out_features=1024),
-                dict(t="LeakyReLU"),
-                # => (B, 1024)
 
-                # # => (B, 165*E)
+                # # => (B, 165, E)
                 # dict(t="HexConvResBlock", channels=81, act=dict(t="LeakyReLU")),
                 # dict(t="LeakyReLU"),
                 # # => (B, 165, E)
@@ -1185,9 +1181,10 @@ def debug_args():
                 # # => (B, 165, 32)
                 # dict(t="Flatten"),
                 # # => (B, 5280)
-                # dict(t="LazyLinear", out_features=1024),
-                # dict(t="LeakyReLU"),
-                # # => (B, 1024)
+
+                dict(t="LazyLinear", out_features=1024),
+                dict(t="LeakyReLU"),
+                # => (B, 1024)
             ],
             actor=dict(t="LazyLinear", out_features=1322),
             critic=dict(t="LazyLinear", out_features=1)

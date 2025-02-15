@@ -8,8 +8,12 @@ class LegacyActionSpaceWrapper(gym.Wrapper):
     2 became 1, etc
     """
 
+    @property
+    def action_space(self):
+        return gym.spaces.Discrete(n=self.env.action_space.n - 1)
+
     def action_mask(self):
-        return self.env.result.actmask[1:]
+        return self.env.action_mask()[1:]
 
     def step(self, action):
         return self.env.step(action + 1)

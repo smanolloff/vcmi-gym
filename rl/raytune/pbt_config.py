@@ -178,20 +178,25 @@ config = {
     "network": {
         "encoder": [
             # => (B, 165*E)
-
-            #
-            # HexConv (variant A: classic conv)
-            #
-            {"t": "HexConv", "out_channels": 64},
-            {"t": "LeakyReLU"},
-            # => (B, 165, 64)
-            {"t": "HexConv", "out_channels": 64},
-            {"t": "LeakyReLU"},
-            # => (B, 165, 16)
+            dict(t="Unflatten", dim=1, unflattened_size=[165, 81]),
+            # => (B, 165, E)
 
             # #
-            # # HexConv (variant B: residual conv)
+            # # HexConv (variant A: classic conv)
             # #
+            # {"t": "HexConv", "out_channels": 64},
+            # {"t": "LeakyReLU"},
+            # # => (B, 165, 64)
+            # {"t": "HexConv", "out_channels": 64},
+            # {"t": "LeakyReLU"},
+            # # => (B, 165, 16)
+
+            #
+            # HexConv (variant B: residual conv)
+            #
+            {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
+            {"t": "LeakyReLU"},
+            # => (B, 165, E)
             # {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
             # {"t": "LeakyReLU"},
             # # => (B, 165, E)

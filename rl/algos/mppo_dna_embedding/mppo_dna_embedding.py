@@ -29,7 +29,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.mobile_optimizer import optimize_for_mobile
-from collections import OrderedDict
 
 import warnings
 
@@ -95,21 +94,11 @@ class EnvArgs:
 
 
 @dataclass
-class EncoderArgs:
-    type: str  # split / fc
-    # encoder_load_file: str  # load weigts + freeze?
-    kwargs: dict = field(default_factory=dict)
-
-
-@dataclass
 class NetworkArgs:
-    action_embedding_dim: int
-    encoder: EncoderArgs
-    body: list[dict] = field(default_factory=list)
-
-    def __post_init__(self):
-        if not isinstance(self.encoder, EncoderArgs):
-            self.encoder = EncoderArgs(**self.encoder)
+    attention: dict = field(default_factory=dict)
+    encoder: list[dict] = field(default_factory=list)
+    actor: list[dict] = field(default_factory=list)
+    critic: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -251,80 +240,152 @@ class Args:
         common.coerce_dataclass_ints(self)
 
 
-class AgentNN(nn.Module):
-    def __init__(self, network, input_dim, n_actions):
+# 1. Adds 1 hex of padding to the input
+#
+#               0 0 0 0
+#    1 2 3     0 1 2 3 0
+#     4 5 6 =>  0 4 5 6 0
+#    7 8 9     0 7 8 9 0
+#               0 0 0 0
+#
+# 2. Simulates a Conv2d with kernel_size=2, padding=1
+#
+#  For the above example (grid of 9 total hexes), this would result in:
+#
+#  1 => [0, 0, 0, 1, 2, 0, 4]
+#  2 => [0, 0, 1, 2, 3, 4, 5]
+#  3 => [0, 0, 2, 3, 0, 5, 6]
+#  4 => [1, 2, 0, 4, 5, 7, 8]
+#  ...
+#  9 => [5, 6, 8, 9, 0, 0, 0]
+#
+# Input: (B, ...) reshapeable to (B, Y, X, E)
+# Output: (B, 165, out_channels)
+#
+class HexConv(nn.Module):
+    def __init__(self, out_channels):
         super().__init__()
 
-        assert input_dim % 165 == 0
-        assert n_actions % 165 == 1  # 1 nonhex action
+        padded_offsets0 = [-17, -16, -1, 0, 1, 17, 18]
+        padded_offsets1 = [-18, -17, -1, 0, 1, 16, 17]
+        self.padded_convinds = torch.zeros(11, 15, 7, dtype=int)
+        for y in range(1, 12):
+            for x in range(1, 16):
+                padded_hexind = y * 17 + x
+                if y % 2 == 0:
+                    padded_offsets = torch.tensor(padded_offsets0)
+                else:
+                    padded_offsets = torch.tensor(padded_offsets1)
+                self.padded_convinds[y-1, x-1] = padded_offsets + padded_hexind
 
-        n_hex_actions = n_actions // 165
-        n_nonhex_actions = 1
+        self.fc = nn.LazyLinear(out_features=out_channels)
 
-        hex_dim = input_dim // 165
-        hex_hidden = network.encoder.hex_hidden
-        hex_emb = network.encoder.hex_embedding_dim
-        act_emb = network.encoder.action_embedding_dim
+    def forward(self, x):
+        x = x.reshape(x.shape[0], 11, 15, -1)
+        padded_shape = torch.tensor(x.shape) + torch.tensor([0, 2, 2, 0])
+        padded_x = torch.zeros(*padded_shape)
+        padded_x[:, 1:12, 1:16, :] = x
+        padded_x = padded_x.flatten(start_dim=1, end_dim=2)
+        fc_input = padded_x[:, self.padded_convinds.flatten(), :].reshape(x.shape[0], 165, -1)
+        return self.fc(fc_input)
 
-        self.n_hex_actions = n_hex_actions
-        self.nonhex_action_embedding = nn.Embedding(n_nonhex_actions, act_emb)
-        self.hex_action_embedding = nn.Embedding(n_hex_actions, act_emb)
 
-        self.encoder = nn.Sequential(
-            # => (B, 165*H)
-            nn.Unflatten(1, [165, hex_dim]),
-            nn.Linear(hex_dim, hex_hidden),
-            nn.LeakyReLU(),
-            nn.Linear(hex_hidden, hex_emb),
-            nn.LeakyReLU(),
-            # => (B, 165, HZ)
-        )
+class HexConvResBlock(nn.Module):
+    def __init__(self, channels, act={"t": "LeakyReLU"}):
+        super().__init__()
 
-        self.actor_net = torch.nn.Sequential(
-            # => (B, 1+165*N, HE+AE)
-            nn.Linear(hex_emb+act_emb, 64),
-            nn.LeakyReLU(),
-            # => (B, 1+165*N, 64)
-            nn.Linear(64, 32),
-            nn.LeakyReLU(),
-            # => (B, 1+165*N, 32)
-            nn.Linear(32, 1)
-            # => (B, 1+165*N, 1)
-        )
+        self.conv1 = HexConv(channels)
+        self.conv2 = HexConv(channels)
+        self.act = AgentNN.build_layer(act)
 
-        self.value_net = torch.nn.Sequential(
-            # => (B, 165, HZ)
-            nn.Linear(hex_emb, 8),
-            nn.LeakyReLU(),
-            # => (B, 165, 8)
-            nn.Flatten(),
-            # => (B, 1320)
-            nn.Linear(1320, 256),
-            nn.LeakyReLU(),
-            # => (B, 256)
-            nn.Linear(256, 1)
-        )
+    def forward(self, x):
+        x = x.reshape(x.shape[0], 165, -1)
+        identity = x
+        out = self.conv2(self.act(self.conv1(x)))
+        return out + identity
 
-        common.layer_init(self.encoder)
-        common.layer_init(self.actor_net)
-        common.layer_init(self.value_net)
+
+class SelfAttention(nn.Module):
+    def __init__(self, edim, num_heads=1):
+        assert edim % num_heads == 0, f"{edim} % {num_heads} == 0"
+        super().__init__()
+        self.edim = edim
+        self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=num_heads, batch_first=True)
+
+    def forward(self, b_obs, b_masks=None):
+        assert len(b_obs.shape) == 3
+        assert b_obs.shape[2] == self.edim
+
+        if b_masks is None:
+            res, _ = self.mha(b_obs, b_obs, b_obs, need_weights=False)
+            return res
+        else:
+            assert len(b_masks.shape) == 3
+            assert b_masks.shape[0] == b_obs.shape[0], f"{b_masks.shape[0]} == {b_obs.shape[0]}"
+            assert b_masks.shape[1] == b_obs.shape[1], f"{b_masks.shape[1]} == {b_obs.shape[1]}"
+            assert b_masks.shape[1] == b_masks.shape[2], f"{b_masks.shape[1]} == {b_masks.shape[2]}"
+            b_obs = b_obs.flatten(start_dim=1, end_dim=2)
+            # => (B, 165, e)
+            res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
+            return res
+
+
+class AgentNN(nn.Module):
+    @staticmethod
+    def build_layer(spec):
+        kwargs = dict(spec)  # copy
+        t = kwargs.pop("t")
+        layer_cls = getattr(torch.nn, t, None) or globals()[t]
+        return layer_cls(**kwargs)
+
+    def __init__(self, network, obs_dim, n_actions):
+        super().__init__()
+
+        assert n_actions == 1 + 165*8
+
+        self.n_nonhex_actions = 1  # WAIT
+        self.n_hex_actions = 8  # MOVE, SHOOT, 6xAMOVE
+        self.embedded_actions = torch.nn.functional.one_hot(torch.arange(1 + self.n_hex_actions))
+
+        self.attention = None
+        self.obs_dim = obs_dim
+        self.encoder = torch.nn.Sequential()
+        for spec in network.encoder:
+            layer = AgentNN.build_layer(spec)
+            self.encoder.append(layer)
+
+        self.actor = torch.nn.Sequential()
+        for spec in network.actor:
+            layer = AgentNN.build_layer(spec)
+            self.actor.append(layer)
+
+        self.critic = torch.nn.Sequential()
+        for spec in network.critic:
+            layer = AgentNN.build_layer(spec)
+            self.critic.append(layer)
+
+        # Init lazy layers
+        with torch.no_grad():
+            self.get_action_and_value(torch.randn([3, obs_dim]), torch.ones([1, n_actions], dtype=torch.bool))
+
+        # common.layer_init(self.encoder)
+        common.layer_init(self.actor, gain=0.01)
+        common.layer_init(self.critic, gain=1.0)
 
         self.temperature = nn.Parameter(torch.ones(1))
 
     # Notation used:
     #   B = batch
-    #   HE = embedded hex dim (1 hex)
-    #   AE = embedded hexaction dim (1 hexaction)
+    #   HE = hex embedding dim (1 hex)
+    #   AE = hexaction embedding dim (1 hexaction)
     #   N = n_hex_actions
 
     def get_action_logits(self, b_hex_embs, b_mask):
         b = b_hex_embs.shape[0]
-
         #
         # Non-hex action
         #
-
-        nonhex_action_embs = self.nonhex_action_embedding.weight
+        nonhex_action_embs = self.embedded_actions[0:1]
         # => (1, AE)
 
         b_nonhex_action_emb_expanded = nonhex_action_embs.unsqueeze(0).expand(b, *nonhex_action_embs.shape)
@@ -333,14 +394,14 @@ class AgentNN(nn.Module):
         b_hex_embs_mean = b_hex_embs.mean(dim=1, keepdim=True)
         # => (B, 1, HE)
 
-        b_nonhex_action_emb_combined = torch.cat([b_nonhex_action_emb_expanded, b_hex_embs], dim=-1)
+        b_nonhex_action_emb_combined = torch.cat([b_nonhex_action_emb_expanded, b_hex_embs_mean], dim=-1)
         # => (B, 1, HE+AE)
 
         #
         # Hex actions
         #
 
-        hex_action_embs = self.hex_action_embedding.weight
+        hex_action_embs = self.embedded_actions[1:]
         # => (N, AE)
 
         b_hex_action_embs_expanded = hex_action_embs.unsqueeze(0).unsqueeze(0).expand(b, 165, *hex_action_embs.shape)
@@ -362,8 +423,8 @@ class AgentNN(nn.Module):
         # => (B, 1+165*N, HE+AE)
 
         # Get logits for all hex-action pairs
-        b_logits = self.actor_net(b_combined).flatten(end_dim=1)
-        # => (B, 165*N)
+        b_logits = self.actor(b_combined)
+        # => (B, 1+165*N)
 
         # Apply temperature and mask
         # b_logits = b_logits / self.temperature
@@ -385,7 +446,7 @@ class AgentNN(nn.Module):
         return b_action, dist.log_prob(b_action), dist.entropy(), dist
 
     def get_value(self, b_obs):
-        return self.value_net(self.encoder(b_obs))
+        return self.critic(self.encoder(b_obs))
 
     def get_action_and_value(self, b_obs, b_mask, b_action=None, deterministic=False):
         b_encobs = self.encoder(b_obs)
@@ -397,7 +458,7 @@ class AgentNN(nn.Module):
             else:
                 b_action = dist.sample()
 
-        b_value = self.value_net(b_encobs)
+        b_value = self.critic(b_encobs)
         return b_action, dist.log_prob(b_action), dist.entropy(), dist, b_value
 
     # Inference (deterministic)
@@ -433,71 +494,56 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "observation_space", "action_space", "state"]
+        attrs = ["args", "obs_dim", "n_actions", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
-        clean_agent.NN_actor.load_state_dict(agent.NN_actor.state_dict(), strict=True)
+        clean_agent.NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
         clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
-        clean_agent.optimizer_actor.load_state_dict(agent.optimizer_actor.state_dict())
+        clean_agent.optimizer_policy.load_state_dict(agent.optimizer_policy.state_dict())
         clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
         torch.save(clean_agent, agent_file)
 
     @staticmethod
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
-        attrs = ["args", "observation_space", "action_space", "state"]
+        attrs = ["args", "obs_dim", "n_actions", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
-        clean_agent.NN_actor.load_state_dict(agent.NN_actor.state_dict(), strict=True)
+        clean_agent.NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
         clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
-        clean_agent.optimizer_actor.load_state_dict(agent.optimizer_actor.state_dict())
+        clean_agent.optimizer_policy.load_state_dict(agent.optimizer_policy.state_dict())
         clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
         jagent = JitAgent()
         jagent.env_version = clean_agent.env_version
-        jagent.obs_dims = clean_agent.obs_dims
-        jagent.encoder = clean_agent.NN_actor.encoder
-        jagent.hex_action_embedding = clean_agent.NN_actor.hex_action_embedding
-        jagent.nonhex_action_embedding = clean_agent.NN_actor.nonhex_action_embedding
-        jagent.actor_net = clean_agent.NN_actor.actor_net
-        jagent.value_net = clean_agent.NN_value.value_net
-
+        jagent.obs_dim = clean_agent.obs_dim
+        jagent.n_actions = clean_agent.n_actions
+        jagent.actor = clean_agent.NN_policy.actor
+        jagent.critic = clean_agent.NN_value.critic
         jagent_optimized = optimize_for_mobile(torch.jit.script(jagent), preserved_methods=["get_version", "predict", "get_value"])
         jagent_optimized._save_for_lite_interpreter(jagent_file)
 
     @staticmethod
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
+        return torch.load(agent_file, map_location=device, weights_only=False)
 
-        agent = torch.load(agent_file, map_location=device, weights_only=False)
-
-        attrs = ["args", "observation_space", "action_space", "state"]
-        data = {k: agent.__dict__[k] for k in attrs}
-        clean_agent = agent.__class__(**data)
-        agent.NN_actor.encoder = clean_agent.NN_actor.encoder
-        agent.NN_value.encoder = clean_agent.NN_value.encoder
-        agent.NN_actor.encoder.to(device)
-        agent.NN_value.encoder.to(device)
-        return agent
-
-    def __init__(self, args, observation_space, action_space, state=None, device="cpu"):
+    def __init__(self, args, obs_dim, n_actions, state=None, device="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
-        self.observation_space = observation_space  # needed for save/load
-        self.action_space = action_space  # needed for save/load
         self._optimizer_state = None  # needed for save/load
-        self.NN_actor = AgentNN(args.network, observation_space["observation"].shape[0], action_space.n)
-        self.NN_value = AgentNN(args.network, observation_space["observation"].shape[0], action_space.n)
-
+        self.obs_dim = obs_dim  # needed for save/load
+        self.n_actions = n_actions  # needed for save/load
+        self.NN_value = AgentNN(args.network, obs_dim, n_actions)
+        self.NN_policy = AgentNN(args.network, obs_dim, n_actions)
         self.NN_value.to(device)
-        self.NN_actor.to(device)
-
+        self.NN_policy.to(device)
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
-        self.optimizer_actor = torch.optim.AdamW(self.NN_actor.parameters(), eps=1e-5)
-        self.optimizer_distill = torch.optim.AdamW(self.NN_actor.parameters(), eps=1e-5)
-        self.predict = self.NN_actor.predict
+        self.optimizer_policy = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
+        self.optimizer_distill = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
+        self.predict = self.NN_policy.predict
         self.state = state or State()
 
 
@@ -510,8 +556,6 @@ class JitAgent(nn.Module):
         super().__init__()
         # XXX: these are overwritten after object is initialized
         self.encoder = nn.Identity()
-        self.hex_action_embedding = nn.Identity()
-        self.nonhex_action_embedding = nn.Identity()
         self.actor_net = nn.Identity()
         self.value_net = nn.Identity()
         self.env_version = 0
@@ -701,29 +745,17 @@ def main(args):
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 3:
-        from vcmi_gym import VcmiEnv_v3 as VcmiEnv
-    elif args.env_version == 4:
-        from vcmi_gym import VcmiEnv_v4 as VcmiEnv
-    elif args.env_version == 6:
-        from vcmi_gym import VcmiEnv_v6 as VcmiEnv
+    if args.env_version == 7:
+        from vcmi_gym import VcmiEnv_v7 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
     obs_space = VcmiEnv.OBSERVATION_SPACE
     act_space = VcmiEnv.ACTION_SPACE
 
-    assert act_space.n == obs_space["action_mask"].shape[0]
-
     if agent is None:
-        # TODO: robust mechanism ensuring these don't get mixed up
-        assert VcmiEnv.STATE_SEQUENCE == ["misc", "stacks", "hexes"]
-        obs_dims = dict(
-            misc=VcmiEnv.STATE_SIZE_MISC,
-            stacks=VcmiEnv.STATE_SIZE_STACKS,
-            hexes=VcmiEnv.STATE_SIZE_HEXES,
-        )
-        agent = Agent(args, obs_space, act_space, device=device)
+        obs_dim = VcmiEnv.STATE_SIZE
+        agent = Agent(args, obs_dim, act_space.n - 1, device=device)
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -772,7 +804,7 @@ def main(args):
         dones = torch.zeros((args.num_steps, num_envs)).to(device)
         values = torch.zeros((args.num_steps, num_envs)).to(device)
 
-        masks = torch.zeros((args.num_steps, num_envs, act_space.n), dtype=torch.bool).to(device)
+        masks = torch.zeros((args.num_steps, num_envs, act_space.n - 1), dtype=torch.bool).to(device)
 
         # TRY NOT TO MODIFY: start the game
         next_obs, _ = envs.reset(seed=args.seed)
@@ -794,7 +826,7 @@ def main(args):
                 progress = 0
 
             agent.optimizer_value.param_groups[0]["lr"] = lr_schedule_fn_value(progress)
-            agent.optimizer_actor.param_groups[0]["lr"] = lr_schedule_fn_policy(progress)
+            agent.optimizer_policy.param_groups[0]["lr"] = lr_schedule_fn_policy(progress)
             agent.optimizer_distill.param_groups[0]["lr"] = lr_schedule_fn_distill(progress)
 
             # XXX: eval during experience collection
@@ -809,10 +841,11 @@ def main(args):
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    action, logprob, _, _ = agent.NN_actor.get_action(next_obs, next_mask)
+                    action, logprob, _, _ = agent.NN_policy.get_action(next_obs, next_mask)
 
                     value = agent.NN_value.get_value(next_obs)
                     values[step] = value.flatten()
+
                 actions[step] = action
                 logprobs[step] = logprob
 
@@ -875,7 +908,7 @@ def main(args):
                     end = start + minibatch_size_policy
                     mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, _ = agent.NN_actor.get_action(b_obs[mb_inds], b_masks[mb_inds], b_action=b_actions.long()[mb_inds])
+                    _, newlogprob, entropy, _ = agent.NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds], b_action=b_actions.long()[mb_inds])
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 
@@ -897,10 +930,10 @@ def main(args):
                     entropy_loss = entropy.mean()
                     policy_loss = pg_loss - args.ent_coef * entropy_loss
 
-                    agent.optimizer_actor.zero_grad()
+                    agent.optimizer_policy.zero_grad()
                     policy_loss.backward()
-                    nn.utils.clip_grad_norm_(agent.NN_actor.parameters(), args.max_grad_norm)
-                    agent.optimizer_actor.step()
+                    nn.utils.clip_grad_norm_(agent.NN_policy.parameters(), args.max_grad_norm)
+                    agent.optimizer_policy.step()
 
                 if args.target_kl is not None and approx_kl > args.target_kl:
                     break
@@ -926,9 +959,9 @@ def main(args):
 
             # Value network to policy network distillation
             # print("Training (3)...")
-            agent.NN_actor.zero_grad(True)  # don't clone gradients
-            old_NN_actor = copy.deepcopy(agent.NN_actor).to(device)
-            old_NN_actor.eval()
+            agent.NN_policy.zero_grad(True)  # don't clone gradients
+            old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
+            old_NN_policy.eval()
             for epoch in range(args.update_epochs_distill):
                 np.random.shuffle(b_inds)
                 for start in range(0, batch_size_distill, minibatch_size_distill):
@@ -936,10 +969,10 @@ def main(args):
                     mb_inds = b_inds[start:end]
                     # Compute policy and value targets
                     with torch.no_grad():
-                        _, _, _, old_action_dist = old_NN_actor.get_action(b_obs[mb_inds], b_masks[mb_inds])
+                        _, _, _, old_action_dist = old_NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds])
                         value_target = agent.NN_value.get_value(b_obs[mb_inds])
 
-                    _, _, _, new_action_dist, new_value = agent.NN_actor.get_action_and_value(b_obs[mb_inds], b_masks[mb_inds])
+                    _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(b_obs[mb_inds], b_masks[mb_inds])
 
                     # Distillation loss
                     policy_kl_loss = torch.distributions.kl_divergence(old_action_dist, new_action_dist).mean()
@@ -948,7 +981,7 @@ def main(args):
 
                     agent.optimizer_distill.zero_grad()
                     distill_loss.backward()
-                    nn.utils.clip_grad_norm_(agent.NN_actor.parameters(), args.max_grad_norm)
+                    nn.utils.clip_grad_norm_(agent.NN_policy.parameters(), args.max_grad_norm)
                     agent.optimizer_distill.step()
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
@@ -972,7 +1005,7 @@ def main(args):
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
-            wandb_log({"params/policy_learning_rate": agent.optimizer_actor.param_groups[0]["lr"]})
+            wandb_log({"params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"]})
             wandb_log({"params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"]})
             wandb_log({"params/distill_learning_rate": agent.optimizer_distill.param_groups[0]["lr"]})
             wandb_log({"losses/value_loss": v_loss.item()})
@@ -1170,45 +1203,51 @@ def debug_args():
             conntype="thread"
         ),
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
-        env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
-        env_version=6,
-        network={
-            "action_embedding_dim": 64,
-            "encoder": {
-                "type": "split",  # split / fc
-                "kwargs": {
-                    # kwargs for "split" encoder:
-                    "z_dims": {
-                        "misc": 4,
-                        "1stack": 8,
-                        "1hex": 8,
-                        "merged": 512,
-                        "out": 128,
-                    },
-                    "obs_dims": {
-                        "misc": 4,       # BATTLEFIELD_STATE_SIZE_MISC
-                        "stacks": 4580,  # BATTLEFIELD_STATE_SIZE_ALL_STACKS
-                        "hexes": 9570,   # BATTLEFIELD_STATE_SIZE_ALL_HEXES
-                    },
-
-                    # kwargs for "fc" encoder:
-                    # "body": [
-                    #     {"t": "LazyLinear", "out_features": 2048},
-                    #     {"t": "LeakyReLU"},
-                    #     {"t": "LazyLinear", "out_features": 1024},
-                    #     {"t": "LeakyReLU"},
-                    #     {"t": "LazyLinear", "out_features": 512},
-                    #     {"t": "LeakyReLU"},
-                    # ],
-                },
-            },
-            "body": [
-                {"t": "LazyLinear", "out_features": 128},
-                {"t": "LeakyReLU"},
-                {"t": "LazyLinear", "out_features": 128},
-                {"t": "LeakyReLU"},
+        env_wrappers=[
+            dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper"),
+            dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyActionSpaceWrapper")
+        ],
+        env_version=7,
+        network=dict(
+            attention=None,
+            encoder=[
+                # => (B, 165*E)
+                dict(t="HexConv", out_channels=64),
+                dict(t="LeakyReLU"),
+                # => (B, 165, 64)
+                dict(t="HexConv", out_channels=64),
+                dict(t="LeakyReLU"),
+                # => (B, 165, 64)
             ],
-        }
+            actor=[
+                # HE=64 (encoder out)
+                # AE=9 (onehot for 1 nonhex + 8 hex actions)
+                # => (B, 1+165*N, HE+AE)
+                dict(t="LazyLinear", out_features=64+9),
+                dict(t="LeakyReLU"),
+                # => (B, 1+165*N, 64)
+                dict(t="LazyLinear", out_features=32),
+                dict(t="LeakyReLU"),
+                # => (B, 1+165*N, 32)
+                dict(t="LazyLinear", out_features=1),
+                # => (B, 1+165*N, 1)
+                dict(t="Flatten")
+                # => (B, 1+165*N)
+            ],
+            critic=[
+                # HE=64 (encoder out)
+                # => (B, 165, HE)
+                dict(t="LazyLinear", out_features=32),
+                dict(t="LeakyReLU"),
+                # => (B, 165, 32)
+                dict(t="Flatten"),
+                # => (B, 5280)
+                dict(t="LazyLinear", out_features=1024),
+                dict(t="LeakyReLU"),
+                # => (B, 1024)
+                dict(t="LazyLinear", out_features=1)
+            ]
+        )
     )
 
 
