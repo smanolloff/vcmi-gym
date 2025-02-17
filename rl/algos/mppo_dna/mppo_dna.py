@@ -55,15 +55,10 @@ class ScheduleArgs:
 class EnvArgs:
     encoding_type: str = ""  # DEPRECATED
     max_steps: int = 500
-    reward_dmg_factor: int = 5
     vcmi_loglevel_global: str = "error"
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
     sparse_info: bool = True
-    step_reward_fixed: int = 0
-    step_reward_frac: float = 0
-    step_reward_mult: int = 1
-    term_reward_mult: int = 0
     consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
     user_timeout: int = 30
     vcmi_timeout: int = 30
@@ -78,10 +73,10 @@ class EnvArgs:
     battlefield_pattern: str = ""
     mana_min: int = 0
     mana_max: int = 0
+    reward_step_fixed: int = -1
+    reward_dmg_mult: int = 1
+    reward_term_mult: int = 1
     swap_sides: int = 0
-    reward_clip_tanh_army_frac: int = 1
-    reward_army_value_ref: int = 0
-    reward_dynamic_scaling: bool = False
     true_rng: bool = True  # DEPRECATED
     deprecated_args: list[dict] = field(default_factory=lambda: [
         "encoding_type",
@@ -97,7 +92,9 @@ class EnvArgs:
 @dataclass
 class NetworkArgs:
     attention: dict = field(default_factory=dict)
-    encoder: list[dict] = field(default_factory=list)
+    encoder_other: list[dict] = field(default_factory=list)
+    encoder_hexes: list[dict] = field(default_factory=list)
+    encoder_merged: list[dict] = field(default_factory=list)
     actor: dict = field(default_factory=dict)
     critic: dict = field(default_factory=dict)
 
@@ -337,37 +334,49 @@ class AgentNN(nn.Module):
         layer_cls = getattr(torch.nn, t, None) or globals()[t]
         return layer_cls(**kwargs)
 
-    def __init__(self, network, obs_dim):
+    def __init__(self, network, dim_other, dim_hexes):
         super().__init__()
 
-        self.attention = None
-        self.obs_dim = obs_dim
-        self.encoder = torch.nn.Sequential()
-        for spec in network.encoder:
+        self.dim_other = dim_other
+        self.dim_hexes = dim_hexes
+
+        self.encoder_other = torch.nn.Sequential()
+        self.encoder_hexes = torch.nn.Sequential()
+        self.encoder_merged = torch.nn.Sequential()
+
+        for spec in network.encoder_other:
             layer = AgentNN.build_layer(spec)
-            self.encoder.append(layer)
+            self.encoder_other.append(layer)
+
+        for spec in network.encoder_hexes:
+            layer = AgentNN.build_layer(spec)
+            self.encoder_hexes.append(layer)
+
+        for spec in network.encoder_merged:
+            layer = AgentNN.build_layer(spec)
+            self.encoder_merged.append(layer)
 
         self.actor = AgentNN.build_layer(network.actor)
         self.critic = AgentNN.build_layer(network.critic)
 
         # Init lazy layers
         with torch.no_grad():
-            self.get_action_and_value(torch.randn([1, obs_dim]), torch.ones([1, 1322], dtype=torch.bool))
+            self.get_action_and_value(torch.randn([1, dim_other + dim_hexes]), torch.ones([1, 1322], dtype=torch.bool))
 
         common.layer_init(self.actor, gain=0.01)
         common.layer_init(self.critic, gain=1.0)
 
     def encode(self, x):
-        return self.encoder(x)
+        other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=1)
+        z_other = self.encoder_other(other)
+        z_hexes = self.encoder_hexes(hexes)
+        merged = torch.cat((z_other, z_hexes), dim=1)
+        return self.encoder_merged(merged)
 
     def get_value(self, x, attn_mask=None):
-        if self.attention:
-            x = self.attention(x, attn_mask)
         return self.critic(self.encode(x))
 
     def get_action(self, x, mask, attn_mask=None, action=None, deterministic=False):
-        if self.attention:
-            x = self.attention(x, attn_mask)
         encoded = self.encode(x)
         action_logits = self.actor(encoded)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
@@ -379,8 +388,6 @@ class AgentNN(nn.Module):
         return action, dist.log_prob(action), dist.entropy(), dist
 
     def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
-        if self.attention:
-            x = self.attention(x, attn_mask)
         encoded = self.encode(x)
         value = self.critic(encoded)
         action_logits = self.actor(encoded)
@@ -393,7 +400,6 @@ class AgentNN(nn.Module):
         return action, dist.log_prob(action), dist.entropy(), dist, value
 
     # Inference (deterministic)
-    # XXX: attention is not handled here
     def predict(self, b_obs, b_mask):
         with torch.no_grad():
             b_obs = torch.as_tensor(b_obs)
@@ -426,7 +432,7 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "obs_dim", "state"]
+        attrs = ["args", "dim_other", "dim_hexes", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -439,7 +445,7 @@ class Agent(nn.Module):
     @staticmethod
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
-        attrs = ["args", "obs_dim", "state"]
+        attrs = ["args", "dim_other", "dim_hexes", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -449,7 +455,8 @@ class Agent(nn.Module):
         clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
         jagent = JitAgent()
         jagent.env_version = clean_agent.env_version
-        jagent.obs_dim = clean_agent.obs_dim
+        jagent.dim_other = clean_agent.dim_other
+        jagent.dim_hexes = clean_agent.dim_hexes
 
         # v3+
         jagent.encoder_policy = clean_agent.NN_policy.encoder
@@ -467,14 +474,15 @@ class Agent(nn.Module):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
         return torch.load(agent_file, map_location=device, weights_only=False)
 
-    def __init__(self, args, obs_dim, state=None, device="cpu"):
+    def __init__(self, args, dim_other, dim_hexes, state=None, device="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
         self._optimizer_state = None  # needed for save/load
-        self.obs_dim = obs_dim  # needed for save/load
-        self.NN_value = AgentNN(args.network, obs_dim)
-        self.NN_policy = AgentNN(args.network, obs_dim)
+        self.dim_other = dim_other  # needed for save/load
+        self.dim_hexes = dim_hexes  # needed for save/load
+        self.NN_value = AgentNN(args.network, dim_other, dim_hexes)
+        self.NN_policy = AgentNN(args.network, dim_other, dim_hexes)
         self.NN_value.to(device)
         self.NN_policy.to(device)
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
@@ -661,8 +669,8 @@ def main(args):
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 7:
-        from vcmi_gym import VcmiEnv_v7 as VcmiEnv
+    if args.env_version == 8:
+        from vcmi_gym import VcmiEnv_v8 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
@@ -671,8 +679,10 @@ def main(args):
 
     if agent is None:
         # TODO: robust mechanism ensuring these don't get mixed up
-        obs_dim = VcmiEnv.STATE_SIZE
-        agent = Agent(args, obs_dim, device=device)
+        dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
+        dim_hexes = VcmiEnv.STATE_SIZE_HEXES
+        assert VcmiEnv.STATE_SIZE == dim_other + dim_hexes
+        agent = Agent(args, dim_other, dim_hexes, device=device)
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -1123,25 +1133,20 @@ def debug_args():
         skip_wandb_log_code=False,
         env=EnvArgs(
             max_steps=500,
-            reward_dmg_factor=5,
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
             vcmienv_loglevel="WARN",
-            consecutive_error_reward_factor=-1,
             sparse_info=True,
-            step_reward_fixed=-100,
-            step_reward_mult=0,
-            term_reward_mult=1,
             random_heroes=0,
             random_obstacles=0,
             town_chance=0,
             warmachine_chance=0,
             mana_min=0,
             mana_max=0,
+            reward_step_fixed=-1,
+            reward_dmg_mult=1,
+            reward_term_mult=1,
             swap_sides=0,
-            reward_clip_tanh_army_frac=1,
-            reward_army_value_ref=0,
-            reward_dynamic_scaling=False,
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
@@ -1149,46 +1154,60 @@ def debug_args():
         ),
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
-        env_version=7,
-        network=dict(
-            attention=None,
-            encoder=[
-                # => (B, 165*E)
-                dict(t="Unflatten", dim=1, unflattened_size=[165, 81]),
+        env_version=8,
+        network={
+            "encoder_other": [
+                # => (B, 26)
+                {"t": "LazyLinear", "out_features": 64},
+                {"t": "LeakyReLU"},
+                # => (B, 64)
+            ],
+            "encoder_hexes": [
+                # => (B, 165*H)
+                dict(t="Unflatten", dim=1, unflattened_size=[165, 101]),
+                # => (B, 165, H)
 
-                # => (B, 165, E)
-                dict(t="HexConv", out_channels=64),
-                dict(t="LeakyReLU"),
-                # => (B, 165, 64)
-                dict(t="HexConv", out_channels=64),
-                dict(t="LeakyReLU"),
-                # => (B, 165, 16)
-                dict(t="LazyLinear", out_features=32),
-                dict(t="LeakyReLU"),
+                # #
+                # # HexConv (variant A: classic conv)
+                # #
+                # {"t": "HexConv", "out_channels": 64},
+                # {"t": "LeakyReLU"},
+                # # => (B, 165, 64)
+                # {"t": "HexConv", "out_channels": 64},
+                # {"t": "LeakyReLU"},
+                # # => (B, 165, 16)
+
+                #
+                # HexConv (variant B: residual conv)
+                #
+                {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
+                {"t": "LeakyReLU"},
+                # => (B, 165, H)
+                # {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
+                # {"t": "LeakyReLU"},
+                # # => (B, 165, H)
+                # {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
+                # {"t": "LeakyReLU"},
+                # # => (B, 165, H)
+
+                #
+                # HexConv COMMON
+                #
+                {"t": "LazyLinear", "out_features": 32},
+                {"t": "LeakyReLU"},
                 # => (B, 165, 32)
-                dict(t="Flatten"),
+
+                {"t": "Flatten"},
                 # => (B, 5280)
-
-                # # => (B, 165, E)
-                # dict(t="HexConvResBlock", channels=81, act=dict(t="LeakyReLU")),
-                # dict(t="LeakyReLU"),
-                # # => (B, 165, E)
-                # dict(t="HexConvResBlock", channels=81, act=dict(t="LeakyReLU")),
-                # dict(t="LeakyReLU"),
-                # # => (B, 165, E)
-                # dict(t="LazyLinear", out_features=32),
-                # dict(t="LeakyReLU"),
-                # # => (B, 165, 32)
-                # dict(t="Flatten"),
-                # # => (B, 5280)
-
-                dict(t="LazyLinear", out_features=1024),
-                dict(t="LeakyReLU"),
+            ],
+            "encoder_merged": [
+                {"t": "LazyLinear", "out_features": 1024},
+                {"t": "LeakyReLU"},
                 # => (B, 1024)
             ],
-            actor=dict(t="LazyLinear", out_features=1322),
-            critic=dict(t="LazyLinear", out_features=1)
-        )
+            "actor": {"t": "LazyLinear", "out_features": 1322},
+            "critic": {"t": "LazyLinear", "out_features": 1}
+        }
     )
 
 

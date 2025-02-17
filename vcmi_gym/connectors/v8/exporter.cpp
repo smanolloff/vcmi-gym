@@ -29,6 +29,8 @@ namespace Connector::V8 {
     const int Exporter::getStateSize() const { return BATTLEFIELD_STATE_SIZE; }
     const int Exporter::getStateSizeOneHex() const { return BATTLEFIELD_STATE_SIZE_ONE_HEX; }
     const int Exporter::getStateSizeAllHexes() const { return BATTLEFIELD_STATE_SIZE_ALL_HEXES; }
+    const int Exporter::getStateSizeOnePlayer() const { return BATTLEFIELD_STATE_SIZE_ONE_PLAYER; }
+    const int Exporter::getStateSizeGlobal() const { return BATTLEFIELD_STATE_SIZE_GLOBAL; }
     const int Exporter::getStateValueNa() const { return NULL_VALUE_ENCODED; }
     const int Exporter::getSideLeft() const { return static_cast<int>(MMAI::Schema::V8::Side::LEFT); }
     const int Exporter::getSideRight() const { return static_cast<int>(MMAI::Schema::V8::Side::RIGHT); }
@@ -165,42 +167,57 @@ namespace Connector::V8 {
         return res;
     }
 
-    const std::vector<AttributeMapping> Exporter::getMiscAttributeMapping() const {
+    const std::vector<AttributeMapping> Exporter::getGlobalAttributeMapping() const {
         // attrname => (encname, offset, n, vmax)
         auto res = std::vector<AttributeMapping> {};
         int offset = 0;
 
-        for (const auto &[a, e_, n_, vmax] : MISC_ENCODING) {
+        for (const auto &[a, e_, n_, vmax] : GLOBAL_ENCODING) {
             auto e = e_;
             auto n = n_;
 
             std::string attrname;
 
-            using MA = MiscAttribute;
+            using GA = GlobalAttribute;
             switch (a) {
-            break; case MA::BATTLE_SIDE:                 attrname = "BATTLE_SIDE";
-            break; case MA::BATTLE_WINNER:               attrname = "BATTLE_WINNER";
-            break; case MA::BFIELD_VALUE_NOW_REL0:       attrname = "BFIELD_VALUE_NOW_REL0";
-            break; case MA::ARMY_VALUE_L_NOW_REL:        attrname = "ARMY_VALUE_L_NOW_REL";
-            break; case MA::ARMY_VALUE_R_NOW_REL:        attrname = "ARMY_VALUE_R_NOW_REL";
-            break; case MA::ARMY_VALUE_L_NOW_REL0:       attrname = "ARMY_VALUE_L_NOW_REL0";
-            break; case MA::ARMY_VALUE_R_NOW_REL0:       attrname = "ARMY_VALUE_R_NOW_REL0";
-            break; case MA::VALUE_KILLED_LEFT_REL:       attrname = "VALUE_KILLED_LEFT_REL";
-            break; case MA::VALUE_KILLED_RIGHT_REL:      attrname = "VALUE_KILLED_RIGHT_REL";
-            break; case MA::VALUE_KILLED_LEFT_ACC_REL0:  attrname = "VALUE_KILLED_LEFT_ACC_REL0";
-            break; case MA::VALUE_KILLED_RIGHT_ACC_REL0: attrname = "VALUE_KILLED_RIGHT_ACC_REL0";
-            break; case MA::VALUE_LOST_LEFT_REL:         attrname = "VALUE_LOST_LEFT_REL";
-            break; case MA::VALUE_LOST_RIGHT_REL:        attrname = "VALUE_LOST_RIGHT_REL";
-            break; case MA::VALUE_LOST_LEFT_ACC_REL0:    attrname = "VALUE_LOST_LEFT_ACC_REL0";
-            break; case MA::VALUE_LOST_RIGHT_ACC_REL0:   attrname = "VALUE_LOST_RIGHT_ACC_REL0";
-            break; case MA::DMG_DEALT_LEFT_REL:          attrname = "DMG_DEALT_LEFT_REL";
-            break; case MA::DMG_DEALT_RIGHT_REL:         attrname = "DMG_DEALT_RIGHT_REL";
-            break; case MA::DMG_DEALT_LEFT_ACC_REL0:     attrname = "DMG_DEALT_LEFT_ACC_REL0";
-            break; case MA::DMG_DEALT_RIGHT_ACC_REL0:    attrname = "DMG_DEALT_RIGHT_ACC_REL0";
-            break; case MA::DMG_TAKEN_LEFT_REL:          attrname = "DMG_TAKEN_LEFT_REL";
-            break; case MA::DMG_TAKEN_RIGHT_REL:         attrname = "DMG_TAKEN_RIGHT_REL";
-            break; case MA::DMG_TAKEN_LEFT_ACC_REL0:     attrname = "DMG_TAKEN_LEFT_ACC_REL0";
-            break; case MA::DMG_TAKEN_RIGHT_ACC_REL0:    attrname = "DMG_TAKEN_RIGHT_ACC_REL0";
+            break; case GA::BATTLE_SIDE:                 attrname = "BATTLE_SIDE";
+            break; case GA::BATTLE_WINNER:               attrname = "BATTLE_WINNER";
+            break; case GA::BFIELD_VALUE_NOW_REL0:       attrname = "BFIELD_VALUE_NOW_REL0";
+            break; default:
+                throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
+            }
+
+            auto encname = getEncodingName(e);
+            res.emplace_back(attrname, encname, offset, n, vmax);
+            offset += n;
+        }
+
+        return res;
+    }
+
+    const std::vector<AttributeMapping> Exporter::getPlayerAttributeMapping() const {
+        // attrname => (encname, offset, n, vmax)
+        auto res = std::vector<AttributeMapping> {};
+        int offset = 0;
+
+        for (const auto &[a, e_, n_, vmax] : PLAYER_ENCODING) {
+            auto e = e_;
+            auto n = n_;
+
+            std::string attrname;
+
+            using PA = PlayerAttribute;
+            switch (a) {
+            break; case PA::ARMY_VALUE_NOW_REL:     attrname = "ARMY_VALUE_NOW_REL";
+            break; case PA::ARMY_VALUE_NOW_REL0:    attrname = "ARMY_VALUE_NOW_REL0";
+            break; case PA::VALUE_KILLED_REL:       attrname = "VALUE_KILLED_REL";
+            break; case PA::VALUE_KILLED_ACC_REL0:  attrname = "VALUE_KILLED_ACC_REL0";
+            break; case PA::VALUE_LOST_REL:         attrname = "VALUE_LOST_REL";
+            break; case PA::VALUE_LOST_ACC_REL0:    attrname = "VALUE_LOST_ACC_REL0";
+            break; case PA::DMG_DEALT_REL:          attrname = "DMG_DEALT_REL";
+            break; case PA::DMG_DEALT_ACC_REL0:     attrname = "DMG_DEALT_ACC_REL0";
+            break; case PA::DMG_RECEIVED_REL:       attrname = "DMG_RECEIVED_REL";
+            break; case PA::DMG_RECEIVED_ACC_REL0:  attrname = "DMG_RECEIVED_ACC_REL0";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
             }
@@ -253,13 +270,16 @@ namespace Connector::V8 {
             .def("get_state_size", &Exporter::getStateSize)
             .def("get_state_size_hexes", &Exporter::getStateSizeAllHexes)
             .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)
+            .def("get_state_size_one_player", &Exporter::getStateSizeOnePlayer)
+            .def("get_state_size_global", &Exporter::getStateSizeGlobal)
             .def("get_state_value_na", &Exporter::getStateValueNa)
             .def("get_side_left", &Exporter::getSideLeft)
             .def("get_side_right", &Exporter::getSideRight)
             .def("get_hex_actions", &Exporter::getHexActions, "Get a list of the HexAction enum value names")
             .def("get_hex_states", &Exporter::getHexStates, "Get a list of the HexState enum value names")
-            .def("get_misc_attribute_mapping", &Exporter::getMiscAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
             .def("get_hex_attribute_mapping", &Exporter::getHexAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
+            .def("get_player_attribute_mapping", &Exporter::getPlayerAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
+            .def("get_global_attribute_mapping", &Exporter::getGlobalAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
             .def("get_stack_flag_mapping", &Exporter::getStackFlagMapping, "Get flagname => offset");
     }
 }

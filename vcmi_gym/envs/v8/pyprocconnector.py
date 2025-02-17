@@ -38,12 +38,15 @@ N_HEX_ACTIONS = EXPORTER.get_n_hex_actions()
 N_ACTIONS = EXPORTER.get_n_actions()
 
 STATE_SIZE = EXPORTER.get_state_size()
+STATE_SIZE_GLOBAL = EXPORTER.get_state_size_global()
+STATE_SIZE_ONE_PLAYER = EXPORTER.get_state_size_one_player()
 STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
 STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
-STATE_SEQUENCE = ["misc", "stacks", "hexes"]
+STATE_SEQUENCE = ["global", "player", "player", "hexes"]
 STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
-MISC_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_misc_attribute_mapping()]))
+GLOBAL_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_global_attribute_mapping()]))
+PLAYER_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_player_attribute_mapping()]))
 HEX_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
 STACK_FLAG_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag_mapping()]))
 

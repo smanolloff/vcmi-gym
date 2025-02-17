@@ -35,11 +35,15 @@ N_HEX_ACTIONS = EXPORTER.get_n_hex_actions()
 N_ACTIONS = EXPORTER.get_n_actions()
 
 STATE_SIZE = EXPORTER.get_state_size()
+STATE_SIZE_GLOBAL = EXPORTER.get_state_size_global()
+STATE_SIZE_ONE_PLAYER = EXPORTER.get_state_size_one_player()
 STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
 STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
-STATE_SEQUENCE = ["misc", "stacks", "hexes"]
+STATE_SEQUENCE = ["global", "player", "player", "hexes"]
 STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
+GLOBAL_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_global_attribute_mapping()]))
+PLAYER_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_player_attribute_mapping()]))
 HEX_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
 STACK_FLAG_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag_mapping()]))
 
@@ -71,21 +75,7 @@ class PyResult():
     def __init__(self, result):
         self.state = result.get_state()
         self.actmask = result.get_actmask()
-        # self.attnmask = np.array(result.get_attnmask(), dtype=np.float32).reshape(165, 165)
         self.errcode = result.get_errcode()
-        self.side = result.get_side()
-        self.dmg_dealt = result.get_dmg_dealt()
-        self.dmg_received = result.get_dmg_received()
-        self.units_lost = result.get_units_lost()
-        self.units_killed = result.get_units_killed()
-        self.value_lost = result.get_value_lost()
-        self.value_killed = result.get_value_killed()
-        self.initial_side0_army_value = result.get_initial_side0_army_value()
-        self.initial_side1_army_value = result.get_initial_side1_army_value()
-        self.current_side0_army_value = result.get_current_side0_army_value()
-        self.current_side1_army_value = result.get_current_side1_army_value()
-        self.is_battle_over = result.get_is_battle_over()
-        self.is_victorious = result.get_is_victorious()
 
 
 class PyThreadConnector():

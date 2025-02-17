@@ -176,10 +176,16 @@ config = {
 
     # NN arch
     "network": {
-        "encoder": [
-            # => (B, 165*E)
+        "encoder_other": [
+            # => (B, 26)
+            {"t": "LazyLinear", "out_features": 64},
+            {"t": "LeakyReLU"},
+            # => (B, 64)
+        ],
+        "encoder_hexes": [
+            # => (B, 165*H)
             dict(t="Unflatten", dim=1, unflattened_size=[165, 81]),
-            # => (B, 165, E)
+            # => (B, 165, H)
 
             # #
             # # HexConv (variant A: classic conv)
@@ -196,22 +202,25 @@ config = {
             #
             {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
             {"t": "LeakyReLU"},
-            # => (B, 165, E)
+            # => (B, 165, H)
             # {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
             # {"t": "LeakyReLU"},
-            # # => (B, 165, E)
+            # # => (B, 165, H)
             # {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
             # {"t": "LeakyReLU"},
-            # # => (B, 165, E)
+            # # => (B, 165, H)
 
             #
-            # COMMON
+            # HexConv COMMON
             #
             {"t": "LazyLinear", "out_features": 32},
             {"t": "LeakyReLU"},
             # => (B, 165, 32)
+
             {"t": "Flatten"},
             # => (B, 5280)
+        ],
+        "encoder_merged": [
             {"t": "LazyLinear", "out_features": 1024},
             {"t": "LeakyReLU"},
             # => (B, 1024)
@@ -265,9 +274,9 @@ config = {
         "step_reward_frac": -0.001,
         "step_reward_mult": 1,
         "term_reward_mult": 0,
-        "reward_clip_tanh_army_frac": 1,
-        "reward_army_value_ref": 500,
-        "reward_dynamic_scaling": False,
+        "reward_step_fixed": -1,
+        "reward_dmg_mult": 1,
+        "reward_term_mult": 1,
         "random_heroes": 1,
         "random_obstacles": 1,
         "town_chance": 10,
