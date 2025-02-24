@@ -421,7 +421,7 @@ class VcmiEnv(gym.Env):
         info = InfoDict()
         info["side"] = bf.global_stats.BATTLE_SIDE.v
         info["net_value"] = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
-        info["is_success"] = bf.is_battle_won
+        info["is_success"] = bf.is_battle_won or False  # can be None if truncated
 
         # Return regular dict (wrappers insert arbitary keys)
         return dict(info)

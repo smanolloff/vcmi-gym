@@ -184,7 +184,7 @@ config = {
         ],
         "encoder_hexes": [
             # => (B, 165*H)
-            dict(t="Unflatten", dim=1, unflattened_size=[165, 81]),
+            dict(t="Unflatten", dim=1, unflattened_size=[165, 101]),
             # => (B, 165, H)
 
             # #
@@ -200,13 +200,13 @@ config = {
             #
             # HexConv (variant B: residual conv)
             #
-            {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
+            {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
             {"t": "LeakyReLU"},
             # => (B, 165, H)
-            # {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
+            # {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
             # {"t": "LeakyReLU"},
             # # => (B, 165, H)
-            # {"t": "HexConvResBlock", "channels": 81, "act": {"t": "LeakyReLU"}},
+            # {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
             # {"t": "LeakyReLU"},
             # # => (B, 165, H)
 
@@ -269,11 +269,6 @@ config = {
 
     "num_envs": 1,
     "env": {
-        "reward_dmg_factor": 5,
-        "step_reward_fixed": 0,
-        "step_reward_frac": -0.001,
-        "step_reward_mult": 1,
-        "term_reward_mult": 0,
         "reward_step_fixed": -1,
         "reward_dmg_mult": 1,
         "reward_term_mult": 1,
@@ -293,7 +288,7 @@ config = {
         "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 7,
+    "env_version": 8,
     "env_wrappers": [{"module": "vcmi_gym.envs.util.wrappers", "cls": "LegacyObservationSpaceWrapper"}],
     # Wandb already initialized when algo is invoked
     # "run_id": None

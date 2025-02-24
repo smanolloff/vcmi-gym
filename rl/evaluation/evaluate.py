@@ -216,30 +216,18 @@ def create_venv(LOG, env_cls, agent, mapname, role, opponent, wrappers, env_kwar
         kwargs = dict(kwargs, **env_kwargs)
 
         match env_cls:
-            case vcmi_gym.VcmiEnv_v2:
-                kwargs.pop("conntype", None)
-                kwargs.pop("reward_dynamic_scaling", None)
-                kwargs.pop("step_reward_frac", None)
-                kwargs.pop("town_chance", None)
-                kwargs.pop("warmachine_chance", None)
-                kwargs.pop("mana_min", None)
-                kwargs.pop("mana_max", None)
-                kwargs["attacker"] = opponent
-                kwargs["defender"] = opponent
-                breakpoint()
-                kwargs[role] = "MMAI_USER"
             case vcmi_gym.VcmiEnv_v3:
                 kwargs.pop("conntype", None)
                 kwargs.pop("reward_dynamic_scaling", None)
                 kwargs["attacker"] = opponent
                 kwargs["defender"] = opponent
                 kwargs[role] = "MMAI_USER"
-            case vcmi_gym.VcmiEnv_v4:
+            case vcmi_gym.VcmiEnv_v7:
                 kwargs["role"] = agent.args.mapside
                 kwargs["opponent"] = opponent
                 kwargs["opponent_model"] = agent.args.opponent_load_file
                 kwargs["conntype"] = "proc"
-            case vcmi_gym.VcmiEnv_v7:
+            case vcmi_gym.VcmiEnv_v8:
                 kwargs["role"] = agent.args.mapside
                 kwargs["opponent"] = opponent
                 kwargs["opponent_model"] = agent.args.opponent_load_file
@@ -563,21 +551,14 @@ def main(worker_id=0, n_workers=1, database=None, watchdog_file=None, model=None
 
                 print("USING ENV VERSION: %d" % env_version)
                 match env_version:
-                    case 1:
-                        env_cls = vcmi_gym.VcmiEnv_v1
-                    case 2:
-                        env_cls = vcmi_gym.VcmiEnv_v2
                     case 3:
                         env_cls = vcmi_gym.VcmiEnv_v3
-                    case 4:
-                        env_cls = vcmi_gym.VcmiEnv_v4
-                        wrappers += [vcmi_gym.LegacyObservationSpaceWrapper]
-                    # case 5:
-                    #     env_cls = vcmi_gym.VcmiEnv_v5
-                    # case 6:
-                    #     env_cls = vcmi_gym.VcmiEnv_v6
                     case 7:
                         env_cls = vcmi_gym.VcmiEnv_v7
+                        from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
+                        wrappers += [LegacyObservationSpaceWrapper]
+                    case 8:
+                        env_cls = vcmi_gym.VcmiEnv_v8
                         from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
                         wrappers += [LegacyObservationSpaceWrapper]
                     case _:
