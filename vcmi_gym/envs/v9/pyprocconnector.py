@@ -15,6 +15,7 @@
 # =============================================================================
 
 import multiprocessing
+import multiprocessing.shared_memory
 import ctypes
 import types
 import numpy as np
@@ -27,22 +28,26 @@ from collections import OrderedDict
 from ..util import log
 
 if (os.getenv("VCMIGYM_DEBUG", None) == "1"):
-    from ...connectors.build import exporter_v7
+    from ...connectors.build import exporter_v9
 else:
-    from ...connectors.rel import exporter_v7
+    from ...connectors.rel import exporter_v9
 
-EXPORTER = exporter_v7.Exporter()
+EXPORTER = exporter_v9.Exporter()
 
 N_NONHEX_ACTIONS = EXPORTER.get_n_nonhex_actions()
 N_HEX_ACTIONS = EXPORTER.get_n_hex_actions()
 N_ACTIONS = EXPORTER.get_n_actions()
 
 STATE_SIZE = EXPORTER.get_state_size()
+STATE_SIZE_GLOBAL = EXPORTER.get_state_size_global()
+STATE_SIZE_ONE_PLAYER = EXPORTER.get_state_size_one_player()
 STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
 STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
-STATE_SEQUENCE = ["misc", "stacks", "hexes"]
+STATE_SEQUENCE = ["global", "player", "player", "hexes"]
 STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
+GLOBAL_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_global_attribute_mapping()]))
+PLAYER_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_player_attribute_mapping()]))
 HEX_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
 STACK_FLAG_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag_mapping()]))
 
@@ -87,24 +92,12 @@ def tracelog(func, maxlen=MAXLEN):
 
 # Same as connector's P_Result, but with values converted to ctypes
 class PyResult():
-    def __init__(self, cres):
-        self.state = np.ctypeslib.as_array(cres.state)
+    def __init__(self, cres, shm):
+        # self.state = np.ctypeslib.as_array(cres.state)
+        self.statesize = np.ctypeslib.as_array(cres.statesize)
+        self.state = np.ndarray((cres.statesize,), dtype=np.float32, buffer=shm.buf)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
-        self.attnmask = np.ctypeslib.as_array(cres.attnmask).reshape(165, 165)
         self.errcode = cres.errcode
-        self.side = cres.side
-        self.dmg_dealt = cres.dmg_dealt
-        self.dmg_received = cres.dmg_received
-        self.units_lost = cres.units_lost
-        self.units_killed = cres.units_killed
-        self.value_lost = cres.value_lost
-        self.value_killed = cres.value_killed
-        self.initial_side0_army_value = cres.initial_side0_army_value
-        self.initial_side1_army_value = cres.initial_side1_army_value
-        self.current_side0_army_value = cres.current_side0_army_value
-        self.current_side1_army_value = cres.current_side1_army_value
-        self.is_battle_over = cres.is_battle_over
-        self.is_victorious = cres.is_victorious
 
 
 class PyProcConnector():
@@ -116,23 +109,10 @@ class PyProcConnector():
     # Needs to be overwritten by subclasses => define in PyProcConnector body
     class PyRawState(ctypes.Structure):
         _fields_ = [
+            ("statesize", ctypes.c_int),
             ("state", PyState),
             ("actmask", PyActmask),
-            ("attnmask", PyAttnmask),
             ("errcode", ctypes.c_int),
-            ("side", ctypes.c_int),
-            ("dmg_dealt", ctypes.c_int),
-            ("dmg_received", ctypes.c_int),
-            ("units_lost", ctypes.c_int),
-            ("units_killed", ctypes.c_int),
-            ("value_lost", ctypes.c_int),
-            ("value_killed", ctypes.c_int),
-            ("initial_side0_army_value", ctypes.c_int),
-            ("initial_side1_army_value", ctypes.c_int),
-            ("current_side0_army_value", ctypes.c_int),
-            ("current_side1_army_value", ctypes.c_int),
-            ("is_battle_over", ctypes.c_bool),
-            ("is_victorious", ctypes.c_bool),
         ]
 
     #
@@ -188,6 +168,20 @@ class PyProcConnector():
         self.v_command_type.value = PyProcConnector.COMMAND_TYPE_UNSET
         self.v_result_act = multiprocessing.Value(self.__class__.PyRawState)
 
+        max_links = sum([
+            165*6,           # ADJACENT
+            sum(range(15)),  # ACTS_BEFORE: 14 for the current, 13 for the next, ..etc
+            6*30,            # BLOCKED_BY: 1 unit can block 6 shooters; 30 max shooters...
+            30*30,           # MELEE_DMG_REL: 30 max units
+            30*30,           # RANGED_DMG_REL: 30 max units
+            165*30,          # RANGED_DMG_MOD: 30 max shooters
+            165*30,          # REACH
+            30,              # SECONDARY
+        ])
+
+        safe_size = STATE_SIZE + max_links
+        self.shm = multiprocessing.shared_memory.SharedMemory(create=True, size=safe_size * np.float32().itemsize)
+
         # Process synchronization:
         # cond.notify() will wake up the other proc (which immediately tries to acquire the lock)
         # cond.wait() will release the lock and wait (other proc now successfully acquires the lock)
@@ -207,7 +201,8 @@ class PyProcConnector():
             if not self._try_start(1, 0):
                 raise Exception("Failed to acquire semaphore")
 
-        return PyResult(self.v_result_act)
+        # return PyResult(self.v_result_act, np.copy(self.array))
+        return PyResult(self.v_result_act, self.shm)
 
     def shutdown(self):
         if self.shutting_down.is_set():
@@ -239,6 +234,8 @@ class PyProcConnector():
 
         try:
             self.cond.release()
+            self.shm.close()
+            self.shm.unlink()
         except Exception:
             pass
 
@@ -266,7 +263,8 @@ class PyProcConnector():
             self.v_command_type.value = PyProcConnector.COMMAND_TYPE_RESET
             self.cond.notify()
             self._wait_vcmi()
-        return PyResult(self.v_result_act)
+        # return PyResult(self.v_result_act, np.copy(self.array))
+        return PyResult(self.v_result_act, self.shm)
 
     @tracelog
     def step(self, action):
@@ -275,7 +273,8 @@ class PyProcConnector():
             self.v_action.value = action
             self.cond.notify()
             self._wait_vcmi()
-        return PyResult(self.v_result_act)
+        # return PyResult(self.v_result_act, np.copy(self.array))
+        return PyResult(self.v_result_act, self.shm)
 
     @tracelog
     def render(self):
@@ -359,30 +358,25 @@ class PyProcConnector():
     def _get_connector(self):
         if (os.getenv("VCMIGYM_DEBUG", None) == "1"):
             print("Using debug connector...")
-            from ...connectors.build import connector_v7
+            from ...connectors.build import connector_v9
         else:
-            from ...connectors.rel import connector_v7
+            from ...connectors.rel import connector_v9
 
-        return connector_v7
+        return connector_v9
 
     def set_v_result_act(self, result):
-        self.v_result_act.state = np.ctypeslib.as_ctypes(result.get_state())
+        self.v_result_act.statesize = result.get_state().size
+
+        # XXX: the numpy object itself is temporary
+        # It is used only as a write interface to the shm block
+
+        # XXX: same as:
+        #   ary = np.ndarray((self.v_result_act.statesize,), dtype=np.float32, buffer=self.shm.buf)
+        #   np.copyto(ary, result.get_state())
+        self.shm.buf[: result.get_state().nbytes] = result.get_state().tobytes()
+
         self.v_result_act.actmask = np.ctypeslib.as_ctypes(result.get_actmask())
-        # self.v_result_act.attnmask = np.ctypeslib.as_ctypes(np.array(result.get_attnmask(), dtype=np.float32))
         self.v_result_act.errcode = ctypes.c_int(result.get_errcode())
-        self.v_result_act.side = ctypes.c_int(result.get_side())
-        self.v_result_act.dmg_dealt = ctypes.c_int(result.get_dmg_dealt())
-        self.v_result_act.dmg_received = ctypes.c_int(result.get_dmg_received())
-        self.v_result_act.units_lost = ctypes.c_int(result.get_units_lost())
-        self.v_result_act.units_killed = ctypes.c_int(result.get_units_killed())
-        self.v_result_act.value_lost = ctypes.c_int(result.get_value_lost())
-        self.v_result_act.value_killed = ctypes.c_int(result.get_value_killed())
-        self.v_result_act.initial_side0_army_value = ctypes.c_int(result.get_initial_side0_army_value())
-        self.v_result_act.initial_side1_army_value = ctypes.c_int(result.get_initial_side1_army_value())
-        self.v_result_act.current_side0_army_value = ctypes.c_int(result.get_current_side0_army_value())
-        self.v_result_act.current_side1_army_value = ctypes.c_int(result.get_current_side1_army_value())
-        self.v_result_act.is_battle_over = ctypes.c_bool(result.get_is_battle_over())
-        self.v_result_act.is_victorious = ctypes.c_bool(result.get_is_victorious())
 
         if not self.allow_retreat:
             self.v_result_act.actmask[0] = False

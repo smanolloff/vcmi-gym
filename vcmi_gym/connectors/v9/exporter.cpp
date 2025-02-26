@@ -17,21 +17,23 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "schema/v7/constants.h"
-#include "schema/v7/types.h"
+#include "schema/v9/constants.h"
+#include "schema/v9/types.h"
 #include "exporter.h"
 
-namespace Connector::V7 {
-    const int Exporter::getVersion() const { return 7; }
+namespace Connector::V9 {
+    const int Exporter::getVersion() const { return 9; }
     const int Exporter::getNActions() const { return N_ACTIONS; }
     const int Exporter::getNNonhexActions() const { return N_NONHEX_ACTIONS; }
     const int Exporter::getNHexActions() const { return N_HEX_ACTIONS; }
     const int Exporter::getStateSize() const { return BATTLEFIELD_STATE_SIZE; }
     const int Exporter::getStateSizeOneHex() const { return BATTLEFIELD_STATE_SIZE_ONE_HEX; }
     const int Exporter::getStateSizeAllHexes() const { return BATTLEFIELD_STATE_SIZE_ALL_HEXES; }
+    const int Exporter::getStateSizeOnePlayer() const { return BATTLEFIELD_STATE_SIZE_ONE_PLAYER; }
+    const int Exporter::getStateSizeGlobal() const { return BATTLEFIELD_STATE_SIZE_GLOBAL; }
     const int Exporter::getStateValueNa() const { return NULL_VALUE_ENCODED; }
-    const int Exporter::getSideLeft() const { return static_cast<int>(MMAI::Schema::V7::Side::LEFT); }
-    const int Exporter::getSideRight() const { return static_cast<int>(MMAI::Schema::V7::Side::RIGHT); }
+    const int Exporter::getSideLeft() const { return static_cast<int>(MMAI::Schema::V9::Side::LEFT); }
+    const int Exporter::getSideRight() const { return static_cast<int>(MMAI::Schema::V9::Side::RIGHT); }
 
     const std::vector<std::string> Exporter::getHexActions() const {
         auto actions = std::vector<std::string> {};
@@ -91,24 +93,34 @@ namespace Connector::V7 {
 
             using HA = HexAttribute;
             switch (a) {
-            break; case HA::Y_COORD:         attrname = "Y_COORD";
-            break; case HA::X_COORD:         attrname = "X_COORD";
-            break; case HA::STATE_MASK:      attrname = "STATE_MASK";
-            break; case HA::ACTION_MASK:     attrname = "ACTION_MASK";
-            break; case HA::IS_REAR:         attrname = "IS_REAR";
-            break; case HA::STACK_SIDE:      attrname = "STACK_SIDE";
-            break; case HA::STACK_QUANTITY:  attrname="STACK_QUANTITY";
-            break; case HA::STACK_ATTACK:    attrname="STACK_ATTACK";
-            break; case HA::STACK_DEFENSE:   attrname="STACK_DEFENSE";
-            break; case HA::STACK_SHOTS:     attrname="STACK_SHOTS";
-            break; case HA::STACK_DMG_MIN:   attrname="STACK_DMG_MIN";
-            break; case HA::STACK_DMG_MAX:   attrname="STACK_DMG_MAX";
-            break; case HA::STACK_HP:        attrname="STACK_HP";
-            break; case HA::STACK_HP_LEFT:   attrname="STACK_HP_LEFT";
-            break; case HA::STACK_SPEED:     attrname="STACK_SPEED";
-            break; case HA::STACK_QUEUE_POS: attrname="STACK_QUEUE_POS";
-            break; case HA::STACK_AI_VALUE:  attrname="STACK_AI_VALUE";
-            break; case HA::STACK_FLAGS:     attrname="STACK_FLAGS";
+            break; case HA::Y_COORD:                     attrname = "Y_COORD";
+            break; case HA::X_COORD:                     attrname = "X_COORD";
+            break; case HA::STATE_MASK:                  attrname = "STATE_MASK";
+            break; case HA::ACTION_MASK:                 attrname = "ACTION_MASK";
+            break; case HA::IS_REAR:                     attrname = "IS_REAR";
+            break; case HA::STACK_SIDE:                  attrname = "STACK_SIDE";
+            break; case HA::STACK_QUANTITY:              attrname = "STACK_QUANTITY";
+            break; case HA::STACK_ATTACK:                attrname = "STACK_ATTACK";
+            break; case HA::STACK_DEFENSE:               attrname = "STACK_DEFENSE";
+            break; case HA::STACK_SHOTS:                 attrname = "STACK_SHOTS";
+            break; case HA::STACK_DMG_MIN:               attrname = "STACK_DMG_MIN";
+            break; case HA::STACK_DMG_MAX:               attrname = "STACK_DMG_MAX";
+            break; case HA::STACK_HP:                    attrname = "STACK_HP";
+            break; case HA::STACK_HP_LEFT:               attrname = "STACK_HP_LEFT";
+            break; case HA::STACK_SPEED:                 attrname = "STACK_SPEED";
+            break; case HA::STACK_QUEUE_POS:             attrname = "STACK_QUEUE_POS";
+            break; case HA::STACK_VALUE_ONE:             attrname = "STACK_VALUE_ONE";
+            break; case HA::STACK_FLAGS:                 attrname = "STACK_FLAGS";
+            break; case HA::STACK_VALUE_REL:             attrname = "STACK_VALUE_REL";
+            break; case HA::STACK_VALUE_REL0:            attrname = "STACK_VALUE_REL0";
+            break; case HA::STACK_VALUE_KILLED_REL:      attrname = "STACK_VALUE_KILLED_REL";
+            break; case HA::STACK_VALUE_KILLED_ACC_REL0: attrname = "STACK_VALUE_KILLED_ACC_REL0";
+            break; case HA::STACK_VALUE_LOST_REL:        attrname = "STACK_VALUE_LOST_REL";
+            break; case HA::STACK_VALUE_LOST_ACC_REL0:   attrname = "STACK_VALUE_LOST_ACC_REL0";
+            break; case HA::STACK_DMG_DEALT_REL:         attrname = "STACK_DMG_DEALT_REL";
+            break; case HA::STACK_DMG_DEALT_ACC_REL0:    attrname = "STACK_DMG_DEALT_ACC_REL0";
+            break; case HA::STACK_DMG_RECEIVED_REL:      attrname = "STACK_DMG_RECEIVED_REL";
+            break; case HA::STACK_DMG_RECEIVED_ACC_REL0: attrname = "STACK_DMG_RECEIVED_ACC_REL0";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
             }
@@ -155,6 +167,69 @@ namespace Connector::V7 {
         return res;
     }
 
+    const std::vector<AttributeMapping> Exporter::getGlobalAttributeMapping() const {
+        // attrname => (encname, offset, n, vmax)
+        auto res = std::vector<AttributeMapping> {};
+        int offset = 0;
+
+        for (const auto &[a, e_, n_, vmax] : GLOBAL_ENCODING) {
+            auto e = e_;
+            auto n = n_;
+
+            std::string attrname;
+
+            using GA = GlobalAttribute;
+            switch (a) {
+            break; case GA::BATTLE_SIDE:                 attrname = "BATTLE_SIDE";
+            break; case GA::BATTLE_WINNER:               attrname = "BATTLE_WINNER";
+            break; case GA::BFIELD_VALUE_NOW_REL0:       attrname = "BFIELD_VALUE_NOW_REL0";
+            break; default:
+                throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
+            }
+
+            auto encname = getEncodingName(e);
+            res.emplace_back(attrname, encname, offset, n, vmax);
+            offset += n;
+        }
+
+        return res;
+    }
+
+    const std::vector<AttributeMapping> Exporter::getPlayerAttributeMapping() const {
+        // attrname => (encname, offset, n, vmax)
+        auto res = std::vector<AttributeMapping> {};
+        int offset = 0;
+
+        for (const auto &[a, e_, n_, vmax] : PLAYER_ENCODING) {
+            auto e = e_;
+            auto n = n_;
+
+            std::string attrname;
+
+            using PA = PlayerAttribute;
+            switch (a) {
+            break; case PA::ARMY_VALUE_NOW_REL:     attrname = "ARMY_VALUE_NOW_REL";
+            break; case PA::ARMY_VALUE_NOW_REL0:    attrname = "ARMY_VALUE_NOW_REL0";
+            break; case PA::VALUE_KILLED_REL:       attrname = "VALUE_KILLED_REL";
+            break; case PA::VALUE_KILLED_ACC_REL0:  attrname = "VALUE_KILLED_ACC_REL0";
+            break; case PA::VALUE_LOST_REL:         attrname = "VALUE_LOST_REL";
+            break; case PA::VALUE_LOST_ACC_REL0:    attrname = "VALUE_LOST_ACC_REL0";
+            break; case PA::DMG_DEALT_REL:          attrname = "DMG_DEALT_REL";
+            break; case PA::DMG_DEALT_ACC_REL0:     attrname = "DMG_DEALT_ACC_REL0";
+            break; case PA::DMG_RECEIVED_REL:       attrname = "DMG_RECEIVED_REL";
+            break; case PA::DMG_RECEIVED_ACC_REL0:  attrname = "DMG_RECEIVED_ACC_REL0";
+            break; default:
+                throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
+            }
+
+            auto encname = getEncodingName(e);
+            res.emplace_back(attrname, encname, offset, n, vmax);
+            offset += n;
+        }
+
+        return res;
+    }
+
     const std::string Exporter::getEncodingName(Encoding e) const {
         using E = Encoding;
         switch(e) {
@@ -185,7 +260,7 @@ namespace Connector::V7 {
         }
     }
 
-    PYBIND11_MODULE(exporter_v7, m) {
+    PYBIND11_MODULE(exporter_v9, m) {
         pybind11::class_<Exporter>(m, "Exporter")
             .def(pybind11::init<>())
             .def("get_version", &Exporter::getVersion)
@@ -195,12 +270,16 @@ namespace Connector::V7 {
             .def("get_state_size", &Exporter::getStateSize)
             .def("get_state_size_hexes", &Exporter::getStateSizeAllHexes)
             .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)
+            .def("get_state_size_one_player", &Exporter::getStateSizeOnePlayer)
+            .def("get_state_size_global", &Exporter::getStateSizeGlobal)
             .def("get_state_value_na", &Exporter::getStateValueNa)
             .def("get_side_left", &Exporter::getSideLeft)
             .def("get_side_right", &Exporter::getSideRight)
             .def("get_hex_actions", &Exporter::getHexActions, "Get a list of the HexAction enum value names")
             .def("get_hex_states", &Exporter::getHexStates, "Get a list of the HexState enum value names")
             .def("get_hex_attribute_mapping", &Exporter::getHexAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
+            .def("get_player_attribute_mapping", &Exporter::getPlayerAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
+            .def("get_global_attribute_mapping", &Exporter::getGlobalAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
             .def("get_stack_flag_mapping", &Exporter::getStackFlagMapping, "Get flagname => offset");
     }
 }

@@ -24,10 +24,10 @@
 #include <deque>
 
 #include "schema/base.h"
-#include "schema/v7/types.h"
+#include "schema/v9/types.h"
 #include "common.h"
 
-namespace Connector::V7::Proc {
+namespace Connector::V9::Proc {
     enum ConnectorState {
         NEW,
         AWAITING_ACTION,
@@ -76,7 +76,7 @@ namespace Connector::V7::Proc {
         const P_State convertState(const MMAI::Schema::IState * r);
         MMAI::Schema::Action getAction(const MMAI::Schema::IState * r);
         const MMAI::Schema::Action getActionDummy(MMAI::Schema::IState);
-        const MMAI::Schema::V7::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
+        const MMAI::Schema::V9::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
         void log(std::string funcname, std::string msg);
     public:
         Connector(
@@ -111,7 +111,7 @@ namespace Connector::V7::Proc {
         const std::string render();
         const std::vector<std::string> getLogs();
 
-        virtual const int version();
+        virtual const int version() { return 9; };
         virtual ~Connector() = default;
     };
 }

@@ -18,7 +18,7 @@
 
 #include "common.h"
 
-namespace Connector::V7 {
+namespace Connector::V9 {
     MMAI::Schema::Action RandomValidAction(const MMAI::Schema::IState * s) {
         auto validActions = std::vector<MMAI::Schema::Action>{};
         auto mask = s->getActionMask();

@@ -15,13 +15,11 @@
 // =============================================================================
 
 #include "procconnector.h"
-#include "schema/v7/constants.h"
-#include "schema/v7/types.h"
+#include "schema/v9/types.h"
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"
 #include "ML/model_wrappers/torchpath.h"
-#include <algorithm>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/detail/common.h>
@@ -35,7 +33,7 @@
     if(want != connstate) \
         throw std::runtime_error("Unexpected connector state: want: " + std::to_string(EI(want)) + ", have: " + std::to_string(EI(connstate)))
 
-namespace Connector::V7::Proc {
+namespace Connector::V9::Proc {
     namespace py = pybind11;
 
     Connector::Connector(
@@ -87,11 +85,6 @@ namespace Connector::V7::Proc {
         statsPersistFreq(statsPersistFreq_)
         {};
 
-
-    const int Connector::version() {
-        return 7;
-    }
-
     const std::vector<std::string> Connector::getLogs() {
         return std::vector<std::string>(logs.begin(), logs.end());
     }
@@ -127,24 +120,24 @@ namespace Connector::V7::Proc {
 #endif // VERBOSE || LOGCOLLECT
     }
 
-    const MMAI::Schema::V7::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
+    const MMAI::Schema::V9::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
         LOG("Extracting supplementary data...");
         auto &any = s->getSupplementaryData();
         if(!any.has_value()) throw std::runtime_error("extractSupplementaryData: supdata is empty");
-        auto &t = typeid(const MMAI::Schema::V7::ISupplementaryData*);
-        auto err = MMAI::Schema::AnyCastError(any, typeid(const MMAI::Schema::V7::ISupplementaryData*));
+        auto &t = typeid(const MMAI::Schema::V9::ISupplementaryData*);
+        auto err = MMAI::Schema::AnyCastError(any, typeid(const MMAI::Schema::V9::ISupplementaryData*));
 
         if(!err.empty()) {
             LOGFMT("anycast for getSumpplementaryData error: %s", err);
         }
 
-        return std::any_cast<const MMAI::Schema::V7::ISupplementaryData*>(s->getSupplementaryData());
+        return std::any_cast<const MMAI::Schema::V9::ISupplementaryData*>(s->getSupplementaryData());
     };
 
     const P_State Connector::convertState(const MMAI::Schema::IState* s) {
         LOG("Convert IState -> P_State");
         auto sup = extractSupplementaryData(s);
-        assert(sup->getType() == MMAI::Schema::V7::ISupplementaryData::Type::REGULAR);
+        assert(sup->getType() == MMAI::Schema::V9::ISupplementaryData::Type::REGULAR);
 
         // XXX: these do not improve performance, better avoid the const_cast
         // auto pbs = P_BattlefieldState(bs.size(), const_cast<float*>(bs.data()));
@@ -159,6 +152,7 @@ namespace Connector::V7::Proc {
 
         auto &bs = s->getBattlefieldState();
         P_BattlefieldState pbs(bs.size());
+        LOG("bs.isze(): " + std::to_string(bs.size()));
         auto pbsmd = pbs.mutable_data();
         for (int i=0; i<bs.size(); i++)
             pbsmd[i] = bs[i];
@@ -170,32 +164,11 @@ namespace Connector::V7::Proc {
         for (int i=0; i < actmask.size(); i++)
             pammd[i] = actmask[i];
 
-        auto &attnmask = s->getAttentionMask();
-        auto patm = P_AttentionMask(attnmask.size());
-        auto patmmd = patm.mutable_data();
-        for (int i=0; i < attnmask.size(); i++)
-            patmmd[i] = attnmask[i];
-
-        auto misc = sup->getMisc();
         auto res = P_State(
              sup->getType(),
              pbs,
              pam,
-             patm,
              sup->getErrorCode(),
-             sup->getSide(),
-             sup->getDmgDealt(),
-             sup->getDmgReceived(),
-             sup->getUnitsLost(),
-             sup->getUnitsKilled(),
-             sup->getValueLost(),
-             sup->getValueKilled(),
-             misc->getInitialArmyValueLeft(),
-             misc->getInitialArmyValueRight(),
-             misc->getCurrentArmyValueLeft(),
-             misc->getCurrentArmyValueRight(),
-             sup->getIsBattleEnded(),
-             sup->getIsVictorious(),
              sup->getAnsiRender()
         );
 
@@ -238,7 +211,7 @@ namespace Connector::V7::Proc {
         LOG("release lock (return)");
         LOG("return P_State");
         const auto pstate = convertState(state);
-        assert(pstate.type == MMAI::Schema::V7::ISupplementaryData::Type::REGULAR);
+        assert(pstate.type == MMAI::Schema::V9::ISupplementaryData::Type::REGULAR);
         return pstate;
     }
 
@@ -271,7 +244,7 @@ namespace Connector::V7::Proc {
 
         ASSERT_STATE(ConnectorState::AWAITING_ACTION);
         auto sup = extractSupplementaryData(state);
-        assert(sup->getType() == MMAI::Schema::V7::ISupplementaryData::Type::ANSI_RENDER);
+        assert(sup->getType() == MMAI::Schema::V9::ISupplementaryData::Type::ANSI_RENDER);
 
         LOG("release lock (return)");
         LOG("return state->ansiRender");

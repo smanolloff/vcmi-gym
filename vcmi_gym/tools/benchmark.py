@@ -22,10 +22,7 @@ import vcmi_gym
 
 def get_action(model, obs):
     if model is None:
-        a1 = np.random.choice(np.where(obs["action_mask_1"])[0])
-        a2_choices = np.where(obs["action_mask_2"][a1])[0]
-        a2 = np.random.choice(a2_choices) if len(a2_choices) else 0
-        return {"action_1": a1, "action_2": a2}
+        return np.random.choice(np.where(obs["action_mask"])[0])
 
     raise NotImplementedError("model prediction on v5 env")
     # return model.predict(
@@ -36,11 +33,11 @@ def get_action(model, obs):
 
 def main():
     total_steps = 1000
-    env = vcmi_gym.x(
+    env = vcmi_gym.VcmiEnv_v8(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
         random_heroes=0,
         random_obstacles=0,
-        conntype="thread",
+        conntype="proc",
         opponent="StupidAI",
         max_steps=1000,
         # swap_sides=1,

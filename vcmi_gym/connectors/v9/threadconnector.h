@@ -25,11 +25,11 @@
 #include <deque>
 
 #include "schema/base.h"
-#include "schema/v7/types.h"
+#include "schema/v9/types.h"
 #include "common.h"
 #include "exporter.h"
 
-namespace Connector::V7::Thread {
+namespace Connector::V9::Thread {
     enum ConnectorState {
         NEW,
         AWAITING_ACTION_0,
@@ -101,7 +101,7 @@ namespace Connector::V7::Thread {
         const P_State convertState(const MMAI::Schema::IState * r);
         MMAI::Schema::Action getAction(const MMAI::Schema::IState * r, int side);
         const MMAI::Schema::Action getActionDummy(MMAI::Schema::IState);
-        const MMAI::Schema::V7::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
+        const MMAI::Schema::V9::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
 
         // essentially, all of .reset(), .render() and .step() are a form of getState
         ReturnCode getState(const char* funcname, int side, int action);
@@ -176,7 +176,7 @@ namespace Connector::V7::Thread {
         void shutdown();
         const std::vector<std::string> getLogs();
 
-        virtual const int version();
+        virtual const int version() { return 9; };
         virtual ~Connector() = default;
     };
 }

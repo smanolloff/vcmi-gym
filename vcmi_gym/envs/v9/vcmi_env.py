@@ -16,16 +16,19 @@
 
 import numpy as np
 import gymnasium as gym
-from typing import Optional
+from typing import Optional, NamedTuple
 
 from ..util import log
-# from .decoder.decoder import Decoder
+from .decoder.decoder import Decoder
 from .decoder.other import HexAction
 
 from .pyprocconnector import (
     PyProcConnector,
     STATE_VALUE_NA,
     STATE_SIZE,
+    STATE_SIZE_HEXES,
+    STATE_SIZE_GLOBAL,
+    STATE_SIZE_ONE_PLAYER,
     N_ACTIONS,
 )
 
@@ -63,6 +66,18 @@ class InfoDict(dict):
         super().__setitem__(k, v)
 
 
+# NOTE:
+# Typical episode returns for step_fixed=0, dmg_mult=0, term_mult=0 (no errors):
+# (-60, 60)
+# * -/+ 60 if dmg_mult=1
+# * -/+ 50 if term_mult=1
+class RewardConfig(NamedTuple):
+    err_exclusive: float
+    step_fixed: float
+    dmg_mult: float
+    term_mult: float
+
+
 class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
@@ -78,7 +93,11 @@ class VcmiEnv(gym.Env):
     })
 
     STATE_SIZE = STATE_SIZE
-    ENV_VERSION = 7
+    STATE_SIZE_HEXES = STATE_SIZE_HEXES
+    STATE_SIZE_GLOBAL = STATE_SIZE_GLOBAL
+    STATE_SIZE_ONE_PLAYER = STATE_SIZE_ONE_PLAYER
+
+    ENV_VERSION = 9
 
     def __init__(
         self,
@@ -113,14 +132,10 @@ class VcmiEnv(gym.Env):
         mana_max: int = 0,
         swap_sides: int = 0,
         allow_retreat: bool = False,
-        step_reward_mult: int = 1,
-        step_reward_fixed: int = 0,
-        step_reward_frac: int = 0,
-        reward_dmg_factor: int = 5,
-        term_reward_mult: int = 1,
-        reward_clip_tanh_army_frac: float = 1.0,
-        reward_army_value_ref: int = 1000,
-        reward_dynamic_scaling: bool = False,
+        reward_err_exclusive: int = -10,
+        reward_step_fixed: int = -1,
+        reward_dmg_mult: int = 1,
+        reward_term_mult: int = 1,
         conntype: str = "proc",
         other_env: Optional["VcmiEnv"] = None,
         nostart: bool = False
@@ -143,19 +158,21 @@ class VcmiEnv(gym.Env):
         self.role = role
         self.opponent = opponent
         self.opponent_model = opponent_model
-        self.reward_clip_tanh_army_frac = reward_clip_tanh_army_frac
-        self.reward_army_value_ref = reward_army_value_ref
-        self.reward_dynamic_scaling = reward_dynamic_scaling
-        self.reward_dmg_factor = reward_dmg_factor
-        self.step_reward_fixed = step_reward_fixed
-        self.step_reward_frac = step_reward_frac
-        self.step_reward_mult = step_reward_mult
-        self.term_reward_mult = term_reward_mult
+        self.reward_step_fixed = reward_step_fixed
+        self.reward_dmg_mult = reward_dmg_mult
+        self.reward_term_mult = reward_term_mult
         self.allow_retreat = allow_retreat
         self.other_env = other_env
         # </params>
 
-        self.logger = log.get_logger("VcmiEnv-v7", vcmienv_loglevel)
+        self.reward_cfg = RewardConfig(
+            err_exclusive=reward_err_exclusive,
+            step_fixed=reward_step_fixed,
+            dmg_mult=reward_dmg_mult,
+            term_mult=reward_term_mult,
+        )
+
+        self.logger = log.get_logger("VcmiEnv-v9", vcmienv_loglevel)
 
         connector_class = PyProcConnector
 
@@ -267,18 +284,19 @@ class VcmiEnv(gym.Env):
                 print(self.render())
                 raise Exception("Invalid action given: %s" % action)
 
-        term = res.is_battle_over
-        rew, rew_unclipped = self.calc_reward(res, fallback)
+        bf = Decoder.decode(res.state)
+        term = bf.global_stats.BATTLE_WINNER.v is not None
+        rew = self.__class__.calc_reward(res, bf, self.reward_cfg)
 
         res.actmask[0] = False  # prevent retreats for now
         obs = {"observation": res.state, "action_mask": res.actmask}
 
         trunc = self.actions_total >= self.max_steps
 
-        self._update_vars_after_step(obs, res, rew, rew_unclipped, term, trunc)
+        self._update_vars_after_step(obs, res, rew, term, trunc)
         self._maybe_render()
 
-        info = self.__class__.build_info(res, term, trunc, self.actions_total, self.net_value)
+        info = self.__class__.build_info(res, term, trunc, bf, self.actions_total)
 
         return obs, rew, term, trunc, info
 
@@ -288,13 +306,14 @@ class VcmiEnv(gym.Env):
 
         result = self.connector.reset()
         obs = {"observation": result.state, "action_mask": result.actmask}
+
         self._reset_vars(result, obs)
         if self.render_each_step:
             print(self.render())
 
         self.result.actmask[0] = False  # prevent retreats for now
 
-        info = {"side": self.result.side}
+        info = {"side": self.bf.global_stats.BATTLE_SIDE.v}
         return obs, info
 
     @tracelog
@@ -302,18 +321,17 @@ class VcmiEnv(gym.Env):
         if self.render_mode == "ansi":
             return (
                 "%s\n"
-                "Step:      %-5s\n"
-                "Reward:    %-5s (total: %s)\n"
-                "Net value: %-5s (total: %s)"
+                "Step:          %-5s\n"
+                "Reward:        %-5s (total: %s)\n"
+                "Net value (%%): %-5s (total: %s)"
             ) % (
                 self.connector.render(),
                 self.actions_total,
                 round(self.reward, 2),
                 round(self.reward_total, 2),
-                self.net_value,
-                self.net_value_total
+                self.bf.enemy_stats.VALUE_LOST_REL.v - self.bf.my_stats.VALUE_LOST_REL.v,
+                self.bf.enemy_stats.VALUE_LOST_ACC_REL0.v - self.bf.my_stats.VALUE_LOST_ACC_REL0.v
             )
-
         elif self.render_mode == "rgb_array":
             gym.logger.warn("Rendering RGB arrays is not implemented")
         elif self.render_mode is None:
@@ -337,19 +355,16 @@ class VcmiEnv(gym.Env):
 
     def defend_action(self):
         bf = self.decode()
-        astack = None
-        for sidestacks in bf.stacks:
-            for stack in sidestacks:
-                if stack.QUEUE_POS.v == 0:
-                    astack = stack
-                    break
+        ahex = None
+        for hex in [h for row in bf.hexes for h in row]:
+            if hex.STACK_QUEUE_POS.v == 0 and not hex.IS_REAR.v:
+                ahex = hex
+                break
 
-        if not astack:
-            raise Exception("Could not find active stack")
+        if not ahex:
+            raise Exception("Could not find active hex")
 
-        # Moving to self results in a defend action
-        h = bf.get_hex(astack.Y_COORD.v, astack.X_COORD.v)
-        return h.action(HexAction.MOVE)
+        return hex.action(HexAction.MOVE)
 
     def random_action(self):
         if self.terminated or self.truncated:
@@ -360,35 +375,23 @@ class VcmiEnv(gym.Env):
 
     @staticmethod
     def decode_obs(pyresult):
-        raise NotImplementedError("asdsa")
-        # return Decoder.decode(pyresult.state, pyresult.is_battle_over)
+        return Decoder.decode(pyresult.state)
 
     #
     # private
     #
 
-    def _update_vars_after_step(self, obs, res, rew, rew_unclipped, term, trunc):
-        reward_clip_abs = abs(rew - rew_unclipped)
+    def _update_vars_after_step(self, obs, res, rew, term, trunc):
         self.actions_total += 1
-        self.net_dmg = res.dmg_dealt - res.dmg_received
-        self.net_dmg_total += self.net_dmg
-        self.net_value = res.value_killed - res.value_lost
-        self.net_value_total += self.net_value
         self.obs = obs
         self.result = res
         self.reward = rew
         self.reward_total += rew
-        self.reward_clip_abs_total += reward_clip_abs
-        self.reward_clip_abs_max = max(reward_clip_abs, self.reward_clip_abs_max)
         self.terminated = term
         self.truncated = trunc
 
     def _reset_vars(self, res, obs):
         self.actions_total = 0
-        self.net_dmg = 0
-        self.net_dmg_total = 0
-        self.net_value = 0
-        self.net_value_total = 0
         self.obs = obs
         self.result = res
         self.reward = 0
@@ -397,26 +400,7 @@ class VcmiEnv(gym.Env):
         self.reward_clip_abs_max = 0
         self.terminated = False
         self.truncated = False
-
-        # TODO: handle unequal starting army values
-        #       e.g. smaller starting army = larger rew for that side?
-
-        # Tanh clipping:
-        # Used to clip max reward for a single action
-        # The clip value is relative to the avg starting army value
-        avg_army_value = (res.initial_side0_army_value + res.initial_side1_army_value) / 2
-        self.reward_clip_tanh_value = avg_army_value * self.reward_clip_tanh_army_frac
-
-        # Reward scaling factor:
-        # Used to equalize avg rewards for different starting army values
-        # E.g. 1K starting armies will have similar avg rewards as 100K armies
-        # This scaling is applied last, after all other reward modifiers
-        if self.reward_army_value_ref:
-            self.reward_scaling_factor = self.reward_army_value_ref / avg_army_value
-        else:
-            self.reward_scaling_factor = 1
-
-        self._step_reward_calc = self.step_reward_fixed + self.step_reward_frac * avg_army_value
+        self.bf = Decoder.decode(res.state)
 
     def _maybe_render(self):
         if self.render_each_step:
@@ -428,49 +412,36 @@ class VcmiEnv(gym.Env):
     # One-time values will be lost, put only only cumulatives/totals/etc.
     #
     @staticmethod
-    def build_info(res, term, trunc, actions_total, net_value):
+    def build_info(res, term, trunc, bf, actions_total):
         # Performance optimization
         if not (term or trunc):
-            return {"side": res.side, "step": actions_total}
+            return {"side": bf.global_stats.BATTLE_SIDE.v, "step": actions_total}
 
         # XXX: do not use constructor args (bypasses validations)
         info = InfoDict()
-        info["side"] = res.side
-        info["net_value"] = net_value
-        info["is_success"] = res.is_victorious
+        info["side"] = bf.global_stats.BATTLE_SIDE.v
+        info["net_value"] = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
+        info["is_success"] = bf.is_battle_won or False  # can be None if truncated
 
         # Return regular dict (wrappers insert arbitary keys)
         return dict(info)
 
-    def calc_reward(self, res, fallback=False):
+    @staticmethod
+    def calc_reward(res, bf, cfg: RewardConfig):
         if res.errcode > 0:
-            return -100, -100
+            return cfg.err_exclusive
 
-        if self.reward_dynamic_scaling:
-            avg_army_value = (res.current_side0_army_value + res.current_side1_army_value) / 2
-            self.reward_scaling_factor = self.reward_army_value_ref / avg_army_value
-            self._step_reward_calc = self.step_reward_fixed + self.step_reward_frac * avg_army_value
+        net_value = bf.enemy_stats.VALUE_LOST_REL.v - bf.my_stats.VALUE_LOST_REL.v
+        net_dmg = bf.enemy_stats.DMG_RECEIVED_REL.v - bf.my_stats.DMG_RECEIVED_REL.v
+        net_value_acc = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
+        ended = bf.global_stats.BATTLE_WINNER.v is not None
+        term_rew = net_value_acc if ended else 0
 
-        rew = self.net_value + self.reward_dmg_factor * self.net_dmg
-        rew *= self.step_reward_mult
+        # print("REWARD: net_value=%d (%d - %d)" % (net_value, bf.enemy_stats.VALUE_LOST_REL.v, bf.my_stats.VALUE_LOST_REL.v))
 
-        if res.is_battle_over:
-            vdiff = res.current_side0_army_value - res.current_side1_army_value
-            vdiff = -vdiff if res.side == 1 else vdiff
-            rew += (self.term_reward_mult * vdiff)
-
-        rew += (self._step_reward_calc * (3 + int(fallback)))
-
-        # Visualize on https://www.desmos.com/calculator
-        # In expression 1 type: s = 5000
-        # In expression 2 type: s * tanh(x/s)
-        # NOTE: this seems useless
-        if self.reward_clip_tanh_value:
-            clipped = self.reward_clip_tanh_value * np.tanh(rew / self.reward_clip_tanh_value)
-        else:
-            clipped = rew
-
-        rew *= self.reward_scaling_factor
-        clipped *= self.reward_scaling_factor
-
-        return clipped, rew
+        return (
+            cfg.step_fixed
+            + net_value
+            + net_dmg * cfg.dmg_mult
+            + term_rew * cfg.term_mult
+        )

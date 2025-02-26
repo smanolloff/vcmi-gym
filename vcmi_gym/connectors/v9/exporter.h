@@ -17,12 +17,12 @@
 #pragma once
 
 #include "schema/base.h"
-#include "schema/v7/types.h"
-#include "schema/v7/constants.h"
+#include "schema/v9/types.h"
+#include "schema/v9/constants.h"
 
-namespace Connector::V7 {
+namespace Connector::V9 {
     using namespace MMAI::Schema;
-    using namespace MMAI::Schema::V7;
+    using namespace MMAI::Schema::V9;
 
     using AttributeMapping = std::tuple<std::string, std::string, int, int, int>;
 
@@ -46,12 +46,16 @@ namespace Connector::V7 {
         virtual const int getStateSize() const;
         virtual const int getStateSizeOneHex() const;
         virtual const int getStateSizeAllHexes() const;
+        virtual const int getStateSizeOnePlayer() const;
+        virtual const int getStateSizeGlobal() const;
         virtual const int getStateValueNa() const;
         virtual const int getSideLeft() const;
         virtual const int getSideRight() const;
         virtual const std::vector<std::string> getHexActions() const;
         virtual const std::vector<std::string> getHexStates() const;
         virtual const std::vector<AttributeMapping> getHexAttributeMapping() const;
+        virtual const std::vector<AttributeMapping> getPlayerAttributeMapping() const;
+        virtual const std::vector<AttributeMapping> getGlobalAttributeMapping() const;
         virtual const std::vector<FlagMapping> getStackFlagMapping() const;
 
     protected:
