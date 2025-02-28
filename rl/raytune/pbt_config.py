@@ -35,7 +35,7 @@ config = {
         # Needs to be between 0 and 0.5.
         # Setting it to 0 essentially implies doing no exploitation at all.
         # """
-        "quantile_fraction": 0.5,
+        "quantile_fraction": 0.25,
 
         # """
         # Perturbations will then be made based on the values here
@@ -182,44 +182,6 @@ config = {
             {"t": "LeakyReLU"},
             # => (B, 64)
         ],
-        "encoder_hexes": [
-            # => (B, 165*H)
-            dict(t="Unflatten", dim=1, unflattened_size=[165, 101]),
-            # => (B, 165, H)
-
-            # #
-            # # HexConv (variant A: classic conv)
-            # #
-            # {"t": "HexConv", "out_channels": 64},
-            # {"t": "LeakyReLU"},
-            # # => (B, 165, 64)
-            # {"t": "HexConv", "out_channels": 64},
-            # {"t": "LeakyReLU"},
-            # # => (B, 165, 16)
-
-            #
-            # HexConv (variant B: residual conv)
-            #
-            {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-            {"t": "LeakyReLU"},
-            # => (B, 165, H)
-            # {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-            # {"t": "LeakyReLU"},
-            # # => (B, 165, H)
-            # {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-            # {"t": "LeakyReLU"},
-            # # => (B, 165, H)
-
-            #
-            # HexConv COMMON
-            #
-            {"t": "LazyLinear", "out_features": 32},
-            {"t": "LeakyReLU"},
-            # => (B, 165, 32)
-
-            {"t": "Flatten"},
-            # => (B, 5280)
-        ],
         "encoder_merged": [
             {"t": "LazyLinear", "out_features": 1024},
             {"t": "LeakyReLU"},
@@ -288,7 +250,7 @@ config = {
         "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 8,
+    "env_version": 9,
     "env_wrappers": [{"module": "vcmi_gym.envs.util.wrappers", "cls": "LegacyObservationSpaceWrapper"}],
     # Wandb already initialized when algo is invoked
     # "run_id": None

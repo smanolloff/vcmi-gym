@@ -240,7 +240,7 @@ namespace Connector::V9::Thread {
         //      ~10% faster than storing the BattlefieldState& reference in
         //      P_State as pybind's STL automatically converts it to a python
         //      list of python floats, which needs to be converted to a numpy
-        //      array of float42 floats in pyconnector.set_v_result_act()
+        //      array of float32 floats in pyconnector.set_v_result_act()
         //      (which copies the data anyway and is ultimately slower).
 
         auto &bs = s->getBattlefieldState();
@@ -256,10 +256,36 @@ namespace Connector::V9::Thread {
         for (int i=0; i < actmask.size(); i++)
             pammd[i] = actmask[i];
 
+        //
+        // LINKS
+        //
+        auto &links = sup->getLinks();
+        auto nlinks = links.size();
+        auto pei = P_EdgeIndex(2*nlinks);
+        auto pea = P_EdgeAttrs(nlinks + nlinks * EI(MMAI::Schema::V9::LinkType::_count));
+
+        auto peimd = pei.mutable_data();
+        auto peamd = pea.mutable_data();
+
+        // pre-fill with zeros
+        std::memset(peamd, 0, pea.size() * sizeof(int));
+        int i0 = 0;
+
+        for (int i=0; i<nlinks; i++) {
+            peimd[i] = links[i]->getSrc()->getID();
+            peimd[i+nlinks] = links[i]->getDst()->getID();
+            peamd[i0] = links[i]->getValue();
+            ++i0;
+            peamd[i0 + EI(links[i]->getType())] = 1;
+            i0 += EI(MMAI::Schema::V9::LinkType::_count);
+        }
+
         auto res = P_State(
              sup->getType(),
              pbs,
              pam,
+             pei,
+             pea,
              sup->getErrorCode(),
              sup->getAnsiRender()
         );

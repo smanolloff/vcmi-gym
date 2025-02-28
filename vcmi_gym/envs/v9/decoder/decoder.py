@@ -21,6 +21,7 @@ from .battlefield import Battlefield
 from .value import Value
 from .stats import GlobalStats, PlayerStats
 from .hex import Hex, HexStateFlags, HexActionFlags
+from .link import Link
 # from .stack import Stack, StackFlags
 from .. import pyprocconnector as pyconnector
 
@@ -39,17 +40,16 @@ class Decoder:
     # XXX: `state0` is used in autoencoder testing scenarios where it
     #      represents the real state, while `state` is the reconstructed one
     @classmethod
-    def decode(cls, state, verbose=False):
-        obs = state
-        assert obs.shape == (pyconnector.STATE_SIZE,), f"{obs.shape} == ({pyconnector.STATE_SIZE},)"
+    def decode(cls, pyresult, only_global=False, verbose=False):
+        obs = pyresult.state
 
+        assert obs.shape == (pyconnector.STATE_SIZE,), f"{obs.shape} == ({pyconnector.STATE_SIZE},)"
         sizes = [
             pyconnector.STATE_SIZE_GLOBAL,
             pyconnector.STATE_SIZE_ONE_PLAYER,
             pyconnector.STATE_SIZE_ONE_PLAYER,
             pyconnector.STATE_SIZE_ONE_HEX * 11 * 15
         ]
-
         assert sum(sizes) == pyconnector.STATE_SIZE, f"{sum(sizes)} == {pyconnector.STATE_SIZE}"
 
         # calculate the indexes of the delimiters from the sizes
@@ -57,10 +57,13 @@ class Decoder:
 
         gstats, lstats, rstats, hexes = np.split(obs, delimiters)
 
-        res = Battlefield(state)
+        res = Battlefield(pyresult)
         res.global_stats = cls.decode_global(gstats, verbose)
         res.left_stats = cls.decode_player(lstats, verbose)
         res.right_stats = cls.decode_player(rstats, verbose)
+
+        if only_global:
+            return res
 
         hexes = hexes.reshape(11, 15, pyconnector.STATE_SIZE_ONE_HEX)
         for y in range(11):
@@ -69,6 +72,11 @@ class Decoder:
                 hexdata = hexes[y][x]
                 row.append(cls.decode_hex(hexdata, verbose))
             res.hexes.append(row)
+
+        linktypes = pyresult.edge_types.reshape(pyresult.num_edges, -1)
+        flathexes = [h for row in res.hexes for h in row]
+        for (src, dst, v, type) in zip(pyresult.edge_sources, pyresult.edge_targets, pyresult.edge_values, linktypes):
+            res.links.append(cls.decode_link(flathexes[src], flathexes[dst], v, type))
 
         return res
 
@@ -155,5 +163,19 @@ class Decoder:
                 res[attr] = Value(**dict(kwargs, struct_cls=StackFlags, struct_mapping=pyconnector.STACK_FLAG_MAP))
             else:
                 res[attr] = Value(**kwargs)
+        hex = Hex(**dict(res, data=hexdata, links=dict(inbound=[], outbound=[])))
+        return hex
 
-        return Hex(**dict(res, data=hexdata))
+    @classmethod
+    def decode_link(cls, src, dst, v, type, verbose=False):
+        link = Link(
+            src=src,
+            dst=dst,
+            value=v,
+            type=list(pyconnector.LINK_TYPE_MAP.keys())[type.argmax()]
+        )
+
+        link.src.links["outbound"].append(link)
+        link.dst.links["inbound"].append(link)
+
+        return link

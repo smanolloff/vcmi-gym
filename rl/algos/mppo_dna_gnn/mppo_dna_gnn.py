@@ -28,6 +28,8 @@ from collections import deque
 import numpy as np
 import torch
 import torch.nn as nn
+import torch_geometric
+import torch_geometric.nn as gnn
 from torch.utils.mobile_optimizer import optimize_for_mobile
 
 # import tyro
@@ -93,7 +95,7 @@ class EnvArgs:
 class NetworkArgs:
     attention: dict = field(default_factory=dict)
     encoder_other: list[dict] = field(default_factory=list)
-    encoder_hexes: list[dict] = field(default_factory=list)
+    # encoder_graph: list[dict] = field(default_factory=list)
     encoder_merged: list[dict] = field(default_factory=list)
     actor: dict = field(default_factory=dict)
     critic: dict = field(default_factory=dict)
@@ -331,27 +333,43 @@ class AgentNN(nn.Module):
     def build_layer(spec):
         kwargs = dict(spec)  # copy
         t = kwargs.pop("t")
-        layer_cls = getattr(torch.nn, t, None) or globals()[t]
+        layer_cls = getattr(torch.nn, t, getattr(torch_geometric.nn, t, None)) or globals()[t]
         return layer_cls(**kwargs)
 
-    def __init__(self, network, dim_other, dim_hexes):
+    def __init__(self, network, dim_other, dim_hexes, dim_attr):
         super().__init__()
 
         self.dim_other = dim_other
         self.dim_hexes = dim_hexes
+        self.dim_attr = dim_attr
+
+        assert dim_hexes % 165 == 0
+        self.dim_1hex = dim_hexes // 165
 
         self.encoder_other = torch.nn.Sequential()
-        self.encoder_hexes = torch.nn.Sequential()
-        self.encoder_merged = torch.nn.Sequential()
-
         for spec in network.encoder_other:
             layer = AgentNN.build_layer(spec)
             self.encoder_other.append(layer)
 
-        for spec in network.encoder_hexes:
-            layer = AgentNN.build_layer(spec)
-            self.encoder_hexes.append(layer)
+        signature0 = "x, edge_index, edge_attr"
+        signature1 = "x, edge_index, edge_attr -> x"
+        self.encoder_graph = torch_geometric.nn.Sequential(signature0, [
+            (torch.nn.Unflatten(dim=0, unflattened_size=[165, self.dim_1hex]), "x -> x"),
+            # => (165, E)
+            (gnn.GATConv(in_channels=self.dim_1hex, out_channels=64, heads=1, edge_dim=dim_attr), signature1),
+            torch.nn.LeakyReLU(),
+            # => (165, 64*2)
+            (gnn.GATConv(in_channels=64, out_channels=32, heads=1, edge_dim=dim_attr), signature1),
+            torch.nn.LeakyReLU(),
+            # => (165, 32*2)
+            (gnn.GATConv(in_channels=32, out_channels=16, heads=1, edge_dim=dim_attr), signature1),
+            torch.nn.LeakyReLU(),
+            # => (165, 32)
+            torch.nn.Flatten(start_dim=0)
+            # => (5280)
+        ])
 
+        self.encoder_merged = torch.nn.Sequential()
         for spec in network.encoder_merged:
             layer = AgentNN.build_layer(spec)
             self.encoder_merged.append(layer)
@@ -361,40 +379,47 @@ class AgentNN(nn.Module):
 
         # Init lazy layers
         with torch.no_grad():
-            self.get_action_and_value(torch.randn([1, dim_other + dim_hexes]), torch.ones([1, 1322], dtype=torch.bool))
+            self.get_action_and_value(
+                torch.randn(dim_other + dim_hexes),
+                torch.tensor([[1], [0]], dtype=torch.int64),        # edge_index
+                torch.randn([1, dim_attr], dtype=torch.float32),    # edge_attrs
+                torch.ones(1322, dtype=torch.bool)                  # action_mask
+            )
 
         common.layer_init(self.actor, gain=0.01)
         common.layer_init(self.critic, gain=1.0)
 
-    def encode(self, x):
-        other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=1)
+    def encode(self, x, edge_index, edge_attrs):
+        # edge_index: (2, ε)
+        # edge_attrs: (ε, D)
+        other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=0)
         z_other = self.encoder_other(other)
-        z_hexes = self.encoder_hexes(hexes)
-        merged = torch.cat((z_other, z_hexes), dim=1)
+        z_hexes = self.encoder_graph(hexes, edge_index, edge_attrs)
+        merged = torch.cat((z_other, z_hexes), dim=0)
         return self.encoder_merged(merged)
 
-    def get_value(self, x, attn_mask=None):
-        return self.critic(self.encode(x))
+    def get_value(self, x, edge_index, edge_attrs):
+        return self.critic(self.encode(x, edge_index, edge_attrs))
 
-    def get_action(self, x, mask, attn_mask=None, action=None, deterministic=False):
-        encoded = self.encode(x)
+    def get_action(self, x, edge_index, edge_attrs, mask, action=None, deterministic=False):
+        encoded = self.encode(x, edge_index, edge_attrs)
         action_logits = self.actor(encoded)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
-                action = torch.argmax(dist.probs, dim=1)
+                action = torch.argmax(dist.probs, dim=0)
             else:
                 action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), dist
 
-    def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
-        encoded = self.encode(x)
+    def get_action_and_value(self, x, edge_index, edge_attrs, mask, action=None, deterministic=False):
+        encoded = self.encode(x, edge_index, edge_attrs)
         value = self.critic(encoded)
         action_logits = self.actor(encoded)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
-                action = torch.argmax(dist.probs, dim=1)
+                action = torch.argmax(dist.probs, dim=0)
             else:
                 action = dist.sample()
         return action, dist.log_prob(action), dist.entropy(), dist, value
@@ -432,20 +457,27 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "dim_other", "dim_hexes", "state"]
+        attrs = ["args", "dim_other", "dim_hexes", "dim_attr", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
-        clean_agent = agent.__class__(**data)
-        clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
-        clean_agent.NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
-        clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
-        clean_agent.optimizer_policy.load_state_dict(agent.optimizer_policy.state_dict())
-        clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
-        torch.save(clean_agent, agent_file)
+        data["_NN_value"] = agent.NN_value.state_dict()
+        data["_NN_policy"] = agent.NN_policy.state_dict()
+        data["_optimizer_value"] = agent.optimizer_value.state_dict()
+        data["_optimizer_policy"] = agent.optimizer_policy.state_dict()
+        data["_optimizer_distill"] = agent.optimizer_distill.state_dict()
+        torch.save(data, agent_file)
+
+        # clean_agent = agent.__class__(**data)
+        # clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
+        # clean_agent.NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
+        # clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
+        # clean_agent.optimizer_policy.load_state_dict(agent.optimizer_policy.state_dict())
+        # clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
+        # torch.save(clean_agent, agent_file)
 
     @staticmethod
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
-        attrs = ["args", "dim_other", "dim_hexes", "state"]
+        attrs = ["args", "dim_other", "dim_hexes", "dim_attr", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -457,6 +489,7 @@ class Agent(nn.Module):
         jagent.env_version = clean_agent.env_version
         jagent.dim_other = clean_agent.dim_other
         jagent.dim_hexes = clean_agent.dim_hexes
+        jagent.dim_attr = clean_agent.dim_attr
 
         # v3+
         jagent.encoder_policy = clean_agent.NN_policy.encoder
@@ -472,17 +505,36 @@ class Agent(nn.Module):
     @staticmethod
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
-        return torch.load(agent_file, map_location=device, weights_only=False)
+        data = torch.load(agent_file, weights_only=False)
 
-    def __init__(self, args, dim_other, dim_hexes, state=None, device="cpu"):
+        state_NN_value = data.pop("_NN_value")
+        state_NN_policy = data.pop("_NN_policy")
+        state_optimizer_value = data.pop("_optimizer_value")
+        state_optimizer_policy = data.pop("_optimizer_policy")
+        state_optimizer_distill = data.pop("_optimizer_distill")
+
+        expected_keys = ["args", "dim_other", "dim_hexes", "dim_attr", "state"]
+        assert all(k in data.keys() for k in expected_keys)
+        assert len(data) == len(expected_keys)
+        agent = Agent(**data)
+        agent.NN_value.load_state_dict(state_NN_value, strict=True)
+        agent.NN_policy.load_state_dict(state_NN_policy, strict=True)
+        agent.optimizer_value.load_state_dict(state_optimizer_value)
+        agent.optimizer_policy.load_state_dict(state_optimizer_policy)
+        agent.optimizer_distill.load_state_dict(state_optimizer_distill)
+
+        return agent
+
+    def __init__(self, args, dim_other, dim_hexes, dim_attr, state=None, device="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
         self._optimizer_state = None  # needed for save/load
         self.dim_other = dim_other  # needed for save/load
         self.dim_hexes = dim_hexes  # needed for save/load
-        self.NN_value = AgentNN(args.network, dim_other, dim_hexes)
-        self.NN_policy = AgentNN(args.network, dim_other, dim_hexes)
+        self.dim_attr = dim_attr    # needed for save/load
+        self.NN_value = AgentNN(args.network, dim_other, dim_hexes, dim_attr)
+        self.NN_policy = AgentNN(args.network, dim_other, dim_hexes, dim_attr)
         self.NN_value.to(device)
         self.NN_policy.to(device)
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
@@ -669,8 +721,8 @@ def main(args):
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 8:
-        from vcmi_gym import VcmiEnv_v8 as VcmiEnv
+    if args.env_version == 9:
+        from vcmi_gym import VcmiEnv_v9 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
@@ -681,8 +733,9 @@ def main(args):
         # TODO: robust mechanism ensuring these don't get mixed up
         dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
         dim_hexes = VcmiEnv.STATE_SIZE_HEXES
+        dim_attr = VcmiEnv.LINK_ATTR_SIZE
         assert VcmiEnv.STATE_SIZE == dim_other + dim_hexes
-        agent = Agent(args, dim_other, dim_hexes, device=device)
+        agent = Agent(args, dim_other, dim_hexes, dim_attr, device=device)
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -723,28 +776,29 @@ def main(args):
 
         assert act_space.shape == ()
 
-        # attn = agent.NN.attention is not None
-        attn = False
+        # XXX: the graph can't be batched as it has different shape each step...
+        edge_index = []
+        edge_attrs = []
 
         # ALGO Logic: Storage setup
-        obs = torch.zeros((args.num_steps, num_envs) + obs_space["observation"].shape).to(device)
-        actions = torch.zeros((args.num_steps, num_envs) + act_space.shape).to(device)
-        logprobs = torch.zeros((args.num_steps, num_envs)).to(device)
-        rewards = torch.zeros((args.num_steps, num_envs)).to(device)
-        dones = torch.zeros((args.num_steps, num_envs)).to(device)
-        values = torch.zeros((args.num_steps, num_envs)).to(device)
+        obs = torch.zeros((args.num_steps,) + obs_space["observation"].shape).to(device)
+        actions = torch.zeros((args.num_steps,) + act_space.shape).to(device)
+        logprobs = torch.zeros(args.num_steps).to(device)
+        rewards = torch.zeros(args.num_steps).to(device)
+        dones = torch.zeros(args.num_steps).to(device)
+        values = torch.zeros(args.num_steps).to(device)
 
-        masks = torch.zeros((args.num_steps, num_envs, act_space.n), dtype=torch.bool).to(device)
-        attnmasks = torch.zeros((args.num_steps, num_envs, 165, 165)).to(device)
+        masks = torch.zeros((args.num_steps, act_space.n), dtype=torch.bool).to(device)
 
         # TRY NOT TO MODIFY: start the game
         next_obs, _ = envs.reset(seed=args.seed)
-        next_obs = torch.as_tensor(next_obs, device=device)
-        next_done = torch.zeros(num_envs, device=device)
-        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
+        next_obs = torch.as_tensor(next_obs[0], device=device)
+        next_done = False
+        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")[0]), device=device)
 
-        if attn:
-            next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask"))).to(device)
+        assert num_envs == 1, "num_envs > 1 not supported with GNNs"
+        next_edge_index = torch.as_tensor(envs.unwrapped.call("edge_index")[0], device=device)
+        next_edge_attrs = torch.as_tensor(envs.unwrapped.call("edge_attrs")[0], device=device)
 
         progress = 0
         map_rollouts = 0
@@ -771,34 +825,33 @@ def main(args):
                 obs[step] = next_obs
                 dones[step] = next_done
                 masks[step] = next_mask
-
-                if attn:
-                    attnmasks[step] = next_attnmask
+                edge_index.append(next_edge_index)
+                edge_attrs.append(next_edge_attrs)
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    attn_mask = next_attnmask if attn else None
                     action, logprob, _, _ = agent.NN_policy.get_action(
                         next_obs,
+                        next_edge_index,
+                        next_edge_attrs,
                         next_mask,
-                        attn_mask=attn_mask
                     )
 
-                    value = agent.NN_value.get_value(next_obs, attn_mask=attn_mask)
+                    value = agent.NN_value.get_value(next_obs, next_edge_index, next_edge_attrs)
                     values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
 
                 # TRY NOT TO MODIFY: execute the game and log data.
-                next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
-                next_done = np.logical_or(terminations, truncations)
-                rewards[step] = torch.tensor(reward, device=device).view(-1)
-                next_obs = torch.as_tensor(next_obs, device=device)
-                next_done = torch.as_tensor(next_done, device=device, dtype=torch.float32)
-                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
+                next_obs, reward, terminations, truncations, infos = envs.step([action.cpu().numpy()])
 
-                if attn:
-                    next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask")), device=device)
+                next_done = terminations[0] or truncations[0]
+                rewards[step] = torch.tensor(reward[0], device=device).view(-1)
+                next_obs = torch.as_tensor(next_obs[0], device=device)
+                next_edge_index = torch.as_tensor(envs.unwrapped.call("edge_index")[0], device=device)
+                next_edge_attrs = torch.as_tensor(envs.unwrapped.call("edge_attrs")[0], device=device)
+                next_done = torch.as_tensor(next_done, device=device, dtype=torch.float32)
+                next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")[0]), device=device)
 
                 # XXX SIMO: SB3 does bootstrapping for truncated episodes here
                 # https://github.com/DLR-RM/stable-baselines3/pull/658
@@ -826,7 +879,8 @@ def main(args):
             with torch.no_grad():
                 next_value = agent.NN_value.get_value(
                     next_obs,
-                    attn_mask=next_attnmask if attn else None
+                    next_edge_index,
+                    next_edge_attrs,
                 ).reshape(1, -1)
 
                 advantages, _ = compute_advantages(
@@ -834,17 +888,15 @@ def main(args):
                 )
                 _, returns = compute_advantages(rewards, dones, values, next_done, next_value, args.gamma, args.gae_lambda_value)
 
-            # flatten the batch
-            b_obs = obs.flatten(end_dim=1)
-            b_logprobs = logprobs.flatten(end_dim=1)
-            b_actions = actions.flatten(end_dim=1)
-            b_masks = masks.flatten(end_dim=1)
-            b_advantages = advantages.flatten(end_dim=1)
-            b_returns = returns.flatten(end_dim=1)
-            b_values = values.flatten(end_dim=1)
-
-            if attn:
-                b_attn_masks = attnmasks.reshape((-1,) + (165, 165))
+            b_obs = obs
+            b_edge_index = edge_index  # not a numpy array; no need to flatten
+            b_edge_attrs = edge_attrs  # not a numpy array; no need to flatten
+            b_logprobs = logprobs
+            b_actions = actions
+            b_masks = masks
+            b_advantages = advantages
+            b_returns = returns
+            b_values = values
 
             # Policy network optimization
             b_inds = np.arange(batch_size_policy)
@@ -857,12 +909,28 @@ def main(args):
                     end = start + minibatch_size_policy
                     mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, _ = agent.NN_policy.get_action(
-                        b_obs[mb_inds],
-                        b_masks[mb_inds],
-                        action=b_actions.long()[mb_inds],
-                        attn_mask=b_attn_masks[mb_inds] if attn else None,
-                    )
+                    # _, newlogprob, entropy, _ = agent.NN_policy.get_action(
+                    #     b_obs[mb_inds],
+                    #     b_masks[mb_inds],
+                    #     action=b_actions.long()[mb_inds],
+                    #     attn_mask=b_attn_masks[mb_inds] if attn else None,
+                    # )
+
+                    # Batching not possible with GNNs => manually iterate
+                    newlogprob = torch.zeros(minibatch_size_policy)
+                    entropy = torch.zeros(minibatch_size_policy)
+                    for i in range(minibatch_size_policy):
+                        mb_ind = mb_inds[i]
+                        _, newlogprob0, entropy0, _ = agent.NN_policy.get_action(
+                            b_obs[mb_ind],
+                            b_edge_index[mb_ind],
+                            b_edge_attrs[mb_ind],
+                            b_masks[mb_ind],
+                            action=b_actions.long()[mb_ind],
+                        )
+                        newlogprob[i] = newlogprob0
+                        entropy[i] = entropy0
+
                     logratio = newlogprob - b_logprobs[mb_inds]
                     ratio = logratio.exp()
 
@@ -899,10 +967,21 @@ def main(args):
                     end = start + minibatch_size_value
                     mb_inds = b_inds[start:end]
 
-                    newvalue = agent.NN_value.get_value(
-                        b_obs[mb_inds],
-                        attn_mask=b_attn_masks[mb_inds] if attn else None,
-                    )
+                    # newvalue = agent.NN_value.get_value(
+                    #     b_obs[mb_inds],
+                    #     attn_mask=b_attn_masks[mb_inds] if attn else None,
+                    # )
+
+                    # Batching not possible with GNNs => manually iterate
+                    newvalue = torch.zeros(minibatch_size_value)
+                    for i in range(minibatch_size_value):
+                        mb_ind = mb_inds[i]
+                        newvalue[i] = agent.NN_value.get_value(
+                            b_obs[mb_ind],
+                            b_edge_index[mb_ind],
+                            b_edge_attrs[mb_ind],
+                        )
+
                     newvalue = newvalue.view(-1)
 
                     # Value loss
@@ -922,20 +1001,46 @@ def main(args):
                 for start in range(0, batch_size_distill, minibatch_size_distill):
                     end = start + minibatch_size_distill
                     mb_inds = b_inds[start:end]
-                    mb_attn_masks = b_attn_masks[mb_inds] if attn else None
                     # Compute policy and value targets
                     with torch.no_grad():
-                        _, _, _, old_action_dist = old_NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds])
-                        value_target = agent.NN_value.get_value(
-                            b_obs[mb_inds],
-                            attn_mask=mb_attn_masks
-                        )
+                        # _, _, _, old_action_dist = old_NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds])
+                        # value_target = agent.NN_value.get_value(
+                        #     b_obs[mb_inds],
+                        #     attn_mask=mb_attn_masks
+                        # )
 
-                    _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(
-                        b_obs[mb_inds],
-                        b_masks[mb_inds],
-                        attn_mask=mb_attn_masks
-                    )
+                        # Batching not possible with GNNs => manually iterate
+                        value_target = torch.zeros(minibatch_size_distill)
+                        for i in range(minibatch_size_distill):
+                            mb_ind = mb_inds[i]
+                            _, _, _, old_action_dist = old_NN_policy.get_action(
+                                b_obs[mb_ind],
+                                b_edge_index[mb_ind],
+                                b_edge_attrs[mb_ind],
+                                b_masks[mb_ind],
+                            )
+                            value_target[i] = agent.NN_value.get_value(
+                                b_obs[mb_ind],
+                                b_edge_index[mb_ind],
+                                b_edge_attrs[mb_ind],
+                            )
+
+                    # _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(
+                    #     b_obs[mb_inds],
+                    #     b_masks[mb_inds],
+                    #     attn_mask=mb_attn_masks
+                    # )
+
+                    new_value = torch.zeros(minibatch_size_distill)
+                    for i in range(minibatch_size_distill):
+                        mb_ind = mb_inds[i]
+                        _, _, _, new_action_dist, new_value0 = agent.NN_policy.get_action_and_value(
+                            b_obs[mb_ind],
+                            b_edge_index[mb_ind],
+                            b_edge_attrs[mb_ind],
+                            b_masks[mb_ind],
+                        )
+                        new_value[i] = new_value0
 
                     # Distillation loss
                     policy_kl_loss = torch.distributions.kl_divergence(old_action_dist, new_action_dist).mean()
@@ -1083,7 +1188,7 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="/var/folders/m3/8p3yhh9171sbnhc7j_2xpk880000gn/T/x.pt",
+        # agent_load_file="/Users/simo/Projects/vcmi-gym/vcmi/rel/bin/test.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -1099,14 +1204,15 @@ def debug_args():
         max_saves=0,
         out_dir_template="data/mppo_dna-test/mppo_dna-test",
         opponent_load_file=None,
-        opponent_sbm_probs=[0, 1, 0],
+        opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
         num_envs=1,
-        num_steps=256,
+        # envmaps=["gym/A1.vmap"],
+        num_steps=8,
         gamma=0.8,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,
@@ -1154,56 +1260,18 @@ def debug_args():
         ),
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
-        env_version=8,
+        env_version=9,
         network={
             "encoder_other": [
-                # => (B, 26)
+                # => 26
                 {"t": "LazyLinear", "out_features": 64},
                 {"t": "LeakyReLU"},
-                # => (B, 64)
-            ],
-            "encoder_hexes": [
-                # => (B, 165*H)
-                dict(t="Unflatten", dim=1, unflattened_size=[165, 101]),
-                # => (B, 165, H)
-
-                # #
-                # # HexConv (variant A: classic conv)
-                # #
-                # {"t": "HexConv", "out_channels": 64},
-                # {"t": "LeakyReLU"},
-                # # => (B, 165, 64)
-                # {"t": "HexConv", "out_channels": 64},
-                # {"t": "LeakyReLU"},
-                # # => (B, 165, 16)
-
-                #
-                # HexConv (variant B: residual conv)
-                #
-                {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-                {"t": "LeakyReLU"},
-                # => (B, 165, H)
-                {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-                {"t": "LeakyReLU"},
-                # => (B, 165, H)
-                {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-                {"t": "LeakyReLU"},
-                # => (B, 165, H)
-
-                #
-                # HexConv COMMON
-                #
-                {"t": "LazyLinear", "out_features": 32},
-                {"t": "LeakyReLU"},
-                # => (B, 165, 32)
-
-                {"t": "Flatten"},
-                # => (B, 5280)
+                # => 64
             ],
             "encoder_merged": [
                 {"t": "LazyLinear", "out_features": 1024},
                 {"t": "LeakyReLU"},
-                # => (B, 1024)
+                # => 1024
             ],
             "actor": {"t": "LazyLinear", "out_features": 1322},
             "critic": {"t": "LazyLinear", "out_features": 1}

@@ -28,6 +28,7 @@ namespace Connector::V9 {
     const int Exporter::getNHexActions() const { return N_HEX_ACTIONS; }
     const int Exporter::getStateSize() const { return BATTLEFIELD_STATE_SIZE; }
     const int Exporter::getStateSizeOneHex() const { return BATTLEFIELD_STATE_SIZE_ONE_HEX; }
+    const int Exporter::getStateSizeOneLink() const { return BATTLEFIELD_STATE_SIZE_ONE_LINK; }
     const int Exporter::getStateSizeAllHexes() const { return BATTLEFIELD_STATE_SIZE_ALL_HEXES; }
     const int Exporter::getStateSizeOnePlayer() const { return BATTLEFIELD_STATE_SIZE_ONE_PLAYER; }
     const int Exporter::getStateSizeGlobal() const { return BATTLEFIELD_STATE_SIZE_GLOBAL; }
@@ -80,6 +81,32 @@ namespace Connector::V9 {
         return states;
     }
 
+    const std::vector<std::string> Exporter::getLinkTypes() const {
+        auto types = std::vector<std::string> {};
+        std::string name;
+
+        for (int i=0; i < static_cast<int>(LinkType::_count); i++) {
+            switch (LinkType(i)) {
+            break; case LinkType::ACTS_BEFORE: name = "ACTS_BEFORE";
+            break; case LinkType::ADJACENT: name = "ADJACENT";
+            break; case LinkType::BLOCKED_BY: name = "BLOCKED_BY";
+            break; case LinkType::MELEE_DMG_REL: name = "MELEE_DMG_REL";
+            break; case LinkType::RETAL_DMG_REL: name = "RETAL_DMG_REL";
+            break; case LinkType::RANGED_DMG_REL: name = "RANGED_DMG_REL";
+            break; case LinkType::RANGED_MOD: name = "RANGED_MOD";
+            break; case LinkType::REACH: name = "REACH";
+            break; case LinkType::REAR_HEX: name = "REAR_HEX";
+            break; case LinkType::_count:
+            break; default:
+                throw std::runtime_error("Unexpected HexState: " + std::to_string(i));
+            }
+
+            types.push_back(name);
+        }
+
+        return types;
+    }
+
     const std::vector<AttributeMapping> Exporter::getHexAttributeMapping() const {
         // attrname => (encname, offset, n, vmax)
         auto res = std::vector<AttributeMapping> {};
@@ -121,6 +148,35 @@ namespace Connector::V9 {
             break; case HA::STACK_DMG_DEALT_ACC_REL0:    attrname = "STACK_DMG_DEALT_ACC_REL0";
             break; case HA::STACK_DMG_RECEIVED_REL:      attrname = "STACK_DMG_RECEIVED_REL";
             break; case HA::STACK_DMG_RECEIVED_ACC_REL0: attrname = "STACK_DMG_RECEIVED_ACC_REL0";
+            break; default:
+                throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
+            }
+
+            auto encname = getEncodingName(e);
+            res.emplace_back(attrname, encname, offset, n, vmax);
+            offset += n;
+        }
+
+        return res;
+    }
+
+    const std::vector<AttributeMapping> Exporter::getLinkAttributeMapping() const {
+        // attrname => (encname, offset, n, vmax)
+        auto res = std::vector<AttributeMapping> {};
+        int offset = 0;
+
+        for (const auto &[a, e_, n_, vmax] : LINK_ENCODING) {
+            auto e = e_;
+            auto n = n_;
+
+            std::string attrname;
+
+            using LA = LinkAttribute;
+            switch (a) {
+            break; case LA::TYPE:       attrname = "TYPE";
+            break; case LA::SRC_HEX_ID: attrname = "SRC_HEX_ID";
+            break; case LA::DST_HEX_ID: attrname = "DST_HEX_ID";
+            break; case LA::VALUE:      attrname = "VALUE";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
             }
@@ -255,6 +311,7 @@ namespace Connector::V9 {
         break; case E::LINNORM_MASKING_NULL:        return "LINNORM_MASKING_NULL";
         break; case E::LINNORM_STRICT_NULL:         return "LINNORM_STRICT_NULL";
         break; case E::LINNORM_ZERO_NULL:           return "LINNORM_ZERO_NULL";
+        break; case E::RAW:                         return "RAW";
         break; default:
             throw std::runtime_error("Unexpected encoding: " + std::to_string(static_cast<int>(e)));
         }
@@ -270,6 +327,7 @@ namespace Connector::V9 {
             .def("get_state_size", &Exporter::getStateSize)
             .def("get_state_size_hexes", &Exporter::getStateSizeAllHexes)
             .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)
+            .def("get_state_size_one_link", &Exporter::getStateSizeOneLink)
             .def("get_state_size_one_player", &Exporter::getStateSizeOnePlayer)
             .def("get_state_size_global", &Exporter::getStateSizeGlobal)
             .def("get_state_value_na", &Exporter::getStateValueNa)
@@ -277,7 +335,9 @@ namespace Connector::V9 {
             .def("get_side_right", &Exporter::getSideRight)
             .def("get_hex_actions", &Exporter::getHexActions, "Get a list of the HexAction enum value names")
             .def("get_hex_states", &Exporter::getHexStates, "Get a list of the HexState enum value names")
+            .def("get_link_types", &Exporter::getLinkTypes, "Get a list of the LinkType enum value names")
             .def("get_hex_attribute_mapping", &Exporter::getHexAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
+            .def("get_link_attribute_mapping", &Exporter::getLinkAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
             .def("get_player_attribute_mapping", &Exporter::getPlayerAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
             .def("get_global_attribute_mapping", &Exporter::getGlobalAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
             .def("get_stack_flag_mapping", &Exporter::getStackFlagMapping, "Get flagname => offset");

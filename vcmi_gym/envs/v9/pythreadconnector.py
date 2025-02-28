@@ -39,17 +39,22 @@ STATE_SIZE_GLOBAL = EXPORTER.get_state_size_global()
 STATE_SIZE_ONE_PLAYER = EXPORTER.get_state_size_one_player()
 STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
 STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
+STATE_SIZE_ONE_LINK = EXPORTER.get_state_size_one_link()
 STATE_SEQUENCE = ["global", "player", "player", "hexes"]
 STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
 GLOBAL_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_global_attribute_mapping()]))
 PLAYER_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_player_attribute_mapping()]))
 HEX_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
+LINK_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_link_attribute_mapping()]))
 STACK_FLAG_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag_mapping()]))
 
 HEX_ACT_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_hex_actions())]))
 HEX_STATE_MAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_hex_states())]))
+LINK_TYPE_MAP = types.MappingProxyType(OrderedDict([(type, i) for i, type in enumerate(EXPORTER.get_link_types())]))
 SIDE_MAP = types.MappingProxyType(OrderedDict([("LEFT", EXPORTER.get_side_left()), ("RIGHT", EXPORTER.get_side_right())]))
+
+NUM_LINK_TYPES = len(LINK_TYPE_MAP)
 
 TRACE = False
 MAXLEN = 80
@@ -74,6 +79,16 @@ def tracelog(func, maxlen=MAXLEN):
 class PyResult():
     def __init__(self, result):
         self.state = result.get_state()
+
+        edge_index = result.get_edge_index()
+        num_edges = len(edge_index) // 2
+        assert edge_index.flags['C_CONTIGUOUS']
+        self.edge_index = edge_index.reshape((2, num_edges))
+
+        edge_attrs = result.get_edge_attrs()
+        assert edge_attrs.flags['C_CONTIGUOUS']
+        self.edge_attrs = edge_attrs.reshape((num_edges, 1 + NUM_LINK_TYPES))
+
         self.actmask = result.get_actmask()
         self.errcode = result.get_errcode()
 

@@ -43,6 +43,12 @@ namespace Connector::V9 {
 
     using P_BattlefieldState = py::array_t<float>;
     using P_ActionMask = py::array_t<bool>;
+    // using P_EdgeSources = py::array_t<int>;         // index src (int)
+    // using P_EdgeTargets = py::array_t<int>;         // index dst (int)
+    // using P_EdgeValues = py::array_t<float>;        // value (float)
+    // using P_EdgeTypesOH = py::array_t<int>;         // edge type (one-hot)
+    using P_EdgeIndex = py::array_t<long>;      // contatenated index_src and index_dst (int)
+    using P_EdgeAttrs = py::array_t<float>;     // value + edge type
 
     MMAI::Schema::Action RandomValidAction(const MMAI::Schema::IState * s);
 
@@ -52,22 +58,47 @@ namespace Connector::V9 {
             MMAI::Schema::V9::ISupplementaryData::Type type_,
             P_BattlefieldState state_,
             P_ActionMask actmask_,
+            // P_EdgeSources edgesources_,
+            // P_EdgeTargets edgetargets_,
+            // P_EdgeValues edgevalues_,
+            // P_EdgeTypesOH edgetypes_,
+            P_EdgeIndex edgeindex_,
+            P_EdgeAttrs edgeattrs_,
             const MMAI::Schema::V9::ErrorCode errcode_,
             const std::string ansiRender_
         ) : type(type_)
           , state(state_)
           , actmask(actmask_)
+          // , edgesources(edgesources_)
+          // , edgetargets(edgetargets_)
+          // , edgevalues(edgevalues_)
+          // , edgetypes(edgetypes_)
+          , edgeindex(edgeindex_)
+          , edgeattrs(edgeattrs_)
           , errcode(static_cast<int>(errcode_))
           , ansiRender(ansiRender_) {}
 
         const MMAI::Schema::V9::ISupplementaryData::Type type;
         const P_BattlefieldState state;
         const P_ActionMask actmask;
+        // const P_EdgeSources edgesources;
+        // const P_EdgeTargets edgetargets;
+        // const P_EdgeValues edgevalues;
+        // const P_EdgeTypesOH edgetypes;
+        const P_EdgeIndex edgeindex;
+        const P_EdgeAttrs edgeattrs;
         const int errcode;
         const std::string ansiRender;
 
         const P_BattlefieldState get_state() const { return state; }
         const P_ActionMask get_actmask() const { return actmask; }
+        // const P_EdgeSources get_edge_sources() const { return edgesources; }
+        // const P_EdgeTargets get_edge_targets() const { return edgetargets; }
+        // const P_EdgeValues get_edge_values() const { return edgevalues; }
+        // const P_EdgeTypesOH get_edge_types() const { return edgetypes; }
+        const P_EdgeIndex get_edge_index() const { return edgeindex; }
+        const P_EdgeAttrs get_edge_attrs() const { return edgeattrs; }
+
         const int get_errcode() const { return errcode; }
     };
 }

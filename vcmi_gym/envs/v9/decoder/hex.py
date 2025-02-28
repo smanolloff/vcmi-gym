@@ -35,7 +35,7 @@ class HexActionFlags(namedtuple("HexActionFlags", list(HEX_ACT_MAP.keys()))):
         return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
 
 
-class Hex(namedtuple("Hex", ["data"] + list(HEX_ATTR_MAP.keys()))):
+class Hex(namedtuple("Hex", ["data", "links"] + list(HEX_ATTR_MAP.keys()))):
     def __repr__(self):
         return f'Hex(y={self.Y_COORD.v} x={self.X_COORD.v})'
 
@@ -43,7 +43,7 @@ class Hex(namedtuple("Hex", ["data"] + list(HEX_ATTR_MAP.keys()))):
         maxlen = 0
         lines = []
         for field in self._fields:
-            if field == "data":
+            if field in ["data", "links"]:
                 continue
 
             value = getattr(self, field)

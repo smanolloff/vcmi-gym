@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include "procconnector.h"
+#include "common.h"
 #include "schema/v9/types.h"
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
@@ -152,7 +153,6 @@ namespace Connector::V9::Proc {
 
         auto &bs = s->getBattlefieldState();
         P_BattlefieldState pbs(bs.size());
-        LOG("bs.isze(): " + std::to_string(bs.size()));
         auto pbsmd = pbs.mutable_data();
         for (int i=0; i<bs.size(); i++)
             pbsmd[i] = bs[i];
@@ -164,10 +164,36 @@ namespace Connector::V9::Proc {
         for (int i=0; i < actmask.size(); i++)
             pammd[i] = actmask[i];
 
+        //
+        // LINKS
+        //
+        auto &links = sup->getLinks();
+        auto nlinks = links.size();
+        auto pei = P_EdgeIndex(2*nlinks);
+        auto pea = P_EdgeAttrs(nlinks + nlinks * EI(MMAI::Schema::V9::LinkType::_count));
+
+        auto peimd = pei.mutable_data();
+        auto peamd = pea.mutable_data();
+
+        // pre-fill with zeros
+        std::memset(peamd, 0, pea.size() * sizeof(int));
+        int i0 = 0;
+
+        for (int i=0; i<nlinks; i++) {
+            peimd[i] = links[i]->getSrc()->getID();
+            peimd[i+nlinks] = links[i]->getDst()->getID();
+            peamd[i0] = links[i]->getValue();
+            ++i0;
+            peamd[i0 + EI(links[i]->getType())] = 1;
+            i0 += EI(MMAI::Schema::V9::LinkType::_count);
+        }
+
         auto res = P_State(
              sup->getType(),
              pbs,
              pam,
+             pei,
+             pea,
              sup->getErrorCode(),
              sup->getAnsiRender()
         );

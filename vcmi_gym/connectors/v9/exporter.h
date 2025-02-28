@@ -46,6 +46,7 @@ namespace Connector::V9 {
         virtual const int getStateSize() const;
         virtual const int getStateSizeOneHex() const;
         virtual const int getStateSizeAllHexes() const;
+        virtual const int getStateSizeOneLink() const;
         virtual const int getStateSizeOnePlayer() const;
         virtual const int getStateSizeGlobal() const;
         virtual const int getStateValueNa() const;
@@ -53,7 +54,9 @@ namespace Connector::V9 {
         virtual const int getSideRight() const;
         virtual const std::vector<std::string> getHexActions() const;
         virtual const std::vector<std::string> getHexStates() const;
+        virtual const std::vector<std::string> getLinkTypes() const;
         virtual const std::vector<AttributeMapping> getHexAttributeMapping() const;
+        virtual const std::vector<AttributeMapping> getLinkAttributeMapping() const;
         virtual const std::vector<AttributeMapping> getPlayerAttributeMapping() const;
         virtual const std::vector<AttributeMapping> getGlobalAttributeMapping() const;
         virtual const std::vector<FlagMapping> getStackFlagMapping() const;

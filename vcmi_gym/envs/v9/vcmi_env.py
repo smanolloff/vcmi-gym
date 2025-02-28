@@ -29,6 +29,7 @@ from .pyprocconnector import (
     STATE_SIZE_HEXES,
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
+    LINK_TYPE_MAP,
     N_ACTIONS,
 )
 
@@ -79,23 +80,43 @@ class RewardConfig(NamedTuple):
 
 
 class VcmiEnv(gym.Env):
+    class EdgeIndexSpace(gym.spaces.Space):
+        def __init__(self, num_nodes):
+            super().__init__(shape=None, dtype=np.int64)
+            assert num_nodes > 0
+            self.max_index = num_nodes - 1
+
+        def sample(self, num_edges=10):
+            return np.random.uniform(low=0, high=self.max_index, size=(2, num_edges)).astype(np.int64)
+
+    class EdgeAttrsSpace(gym.spaces.Space):
+        def __init__(self, attrs_space):
+            super().__init__(shape=None, dtype=attrs_space.dtype)
+            self.attrs_space = attrs_space
+
+        def sample(self, num_edges=10):
+            return np.stack([self.attrs_space.sample() for _ in range(num_edges)])
+
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
     ROLES = ["attacker", "defender"]
     OPPONENTS = ["StupidAI", "BattleAI", "MMAI_SCRIPT_SUMMONER", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
 
-    ACTION_SPACE = gym.spaces.Discrete(N_ACTIONS)
-
-    OBSERVATION_SPACE = gym.spaces.Dict({
-        "observation": gym.spaces.Box(low=STATE_VALUE_NA, high=1, shape=(STATE_SIZE,), dtype=np.float32),
-        "action_mask": gym.spaces.Box(low=0, high=1, shape=(N_ACTIONS,), dtype=bool)
-    })
-
     STATE_SIZE = STATE_SIZE
     STATE_SIZE_HEXES = STATE_SIZE_HEXES
     STATE_SIZE_GLOBAL = STATE_SIZE_GLOBAL
     STATE_SIZE_ONE_PLAYER = STATE_SIZE_ONE_PLAYER
+    LINK_ATTR_SIZE = 1 + len(LINK_TYPE_MAP)  # 1 value + onehot(type)
+
+    ACTION_SPACE = gym.spaces.Discrete(N_ACTIONS)
+
+    OBSERVATION_SPACE = gym.spaces.Dict({
+        "observation": gym.spaces.Box(low=STATE_VALUE_NA, high=1, shape=(STATE_SIZE,), dtype=np.float32),
+        "action_mask": gym.spaces.Box(low=0, high=1, shape=(N_ACTIONS,), dtype=bool),
+        "edge_index": EdgeIndexSpace(num_nodes=165),
+        "edge_attrs": EdgeAttrsSpace(attrs_space=gym.spaces.Box(low=0, high=10, shape=(LINK_ATTR_SIZE,), dtype=np.float32))
+    })
 
     ENV_VERSION = 9
 
@@ -284,13 +305,12 @@ class VcmiEnv(gym.Env):
                 print(self.render())
                 raise Exception("Invalid action given: %s" % action)
 
-        bf = Decoder.decode(res.state)
+        bf = Decoder.decode(res, only_global=True)
         term = bf.global_stats.BATTLE_WINNER.v is not None
         rew = self.__class__.calc_reward(res, bf, self.reward_cfg)
 
         res.actmask[0] = False  # prevent retreats for now
-        obs = {"observation": res.state, "action_mask": res.actmask}
-
+        obs = self.__class__.build_obs(res)
         trunc = self.actions_total >= self.max_steps
 
         self._update_vars_after_step(obs, res, rew, term, trunc)
@@ -305,7 +325,7 @@ class VcmiEnv(gym.Env):
         super().reset(seed=seed)
 
         result = self.connector.reset()
-        obs = {"observation": result.state, "action_mask": result.actmask}
+        obs = self.__class__.build_obs(result)
 
         self._reset_vars(result, obs)
         if self.render_each_step:
@@ -354,7 +374,7 @@ class VcmiEnv(gym.Env):
         return self.__class__.decode_obs(self.result)
 
     def defend_action(self):
-        bf = self.decode()
+        bf = Decoder.decode(self.result)
         ahex = None
         for hex in [h for row in bf.hexes for h in row]:
             if hex.STACK_QUEUE_POS.v == 0 and not hex.IS_REAR.v:
@@ -374,8 +394,17 @@ class VcmiEnv(gym.Env):
         return np.random.choice(actions)
 
     @staticmethod
+    def build_obs(pyresult):
+        return {
+            "observation": pyresult.state,
+            "action_mask": pyresult.actmask,
+            "edge_index": pyresult.edge_index,
+            "edge_attrs": pyresult.edge_attrs,
+        }
+
+    @staticmethod
     def decode_obs(pyresult):
-        return Decoder.decode(pyresult.state)
+        return Decoder.decode(pyresult)
 
     #
     # private
@@ -400,7 +429,7 @@ class VcmiEnv(gym.Env):
         self.reward_clip_abs_max = 0
         self.terminated = False
         self.truncated = False
-        self.bf = Decoder.decode(res.state)
+        self.bf = Decoder.decode(res, only_global=True)
 
     def _maybe_render(self):
         if self.render_each_step:

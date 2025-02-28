@@ -111,7 +111,7 @@ class TBXDummyCallback(ray.tune.logger.TBXLoggerCallback):
 
 
 def new_tuner(algo, experiment_name, config, scheduler, searcher=None, param_space=None):
-    assert algo in ["mppo", "mppo_lstm", "mppo_lstm2", "mppo_dna", "mppo_dna_dual", "mppg", "mppo_heads", "mppo_autoencoder", "mppo_embedding", "mppo_dna_embedding"], f"Unsupported algo: {algo}"
+    assert algo in ["mppo", "mppo_lstm", "mppo_lstm2", "mppo_dna", "mppo_dna_dual", "mppg", "mppo_heads", "mppo_autoencoder", "mppo_embedding", "mppo_dna_embedding", "mppo_dna_gnn"], f"Unsupported algo: {algo}"
     assert re.match(r"^[0-9A-Za-z_-]+$", experiment_name)
     trainable_mod = importlib.import_module("rl.raytune.trainable")
     trainable_cls = getattr(trainable_mod, "Trainable")

@@ -36,12 +36,13 @@ class Battlefield():
     def __repr__(self):
         return "Battlefield(11x15)"
 
-    def __init__(self, envstate):
+    def __init__(self, pyresult):
         self.hexes = []
+        self.links = []
         self.left_stats = None
         self.left_stats = None
         # self.stacks = [[], []]  # left, right stacks
-        self.envstate = envstate
+        self.pyresult = pyresult
 
     def get_hex(self, y_or_n, x=None):
         if x is not None:

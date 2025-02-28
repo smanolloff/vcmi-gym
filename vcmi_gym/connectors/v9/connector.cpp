@@ -12,6 +12,12 @@ namespace Connector::V9 {
         py::class_<P_State>(m, "P_State")
             .def("get_state", &P_State::get_state)
             .def("get_actmask", &P_State::get_actmask)
+            // .def("get_edge_sources", &P_State::get_edge_sources)
+            // .def("get_edge_targets", &P_State::get_edge_targets)
+            // .def("get_edge_values", &P_State::get_edge_values)
+            // .def("get_edge_types", &P_State::get_edge_types)
+            .def("get_edge_attrs", &P_State::get_edge_attrs)
+            .def("get_edge_index", &P_State::get_edge_index)
             .def("get_errcode", &P_State::get_errcode);
 
         py::class_<Proc::Connector, std::unique_ptr<Proc::Connector>>(m, "ProcConnector")

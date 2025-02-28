@@ -43,17 +43,22 @@ STATE_SIZE_GLOBAL = EXPORTER.get_state_size_global()
 STATE_SIZE_ONE_PLAYER = EXPORTER.get_state_size_one_player()
 STATE_SIZE_HEXES = EXPORTER.get_state_size_hexes()
 STATE_SIZE_ONE_HEX = EXPORTER.get_state_size_one_hex()
+STATE_SIZE_ONE_LINK = EXPORTER.get_state_size_one_link()
 STATE_SEQUENCE = ["global", "player", "player", "hexes"]
 STATE_VALUE_NA = EXPORTER.get_state_value_na()
 
 GLOBAL_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_global_attribute_mapping()]))
 PLAYER_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_player_attribute_mapping()]))
 HEX_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
+LINK_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_link_attribute_mapping()]))
 STACK_FLAG_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag_mapping()]))
 
 HEX_ACT_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_hex_actions())]))
 HEX_STATE_MAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_hex_states())]))
+LINK_TYPE_MAP = types.MappingProxyType(OrderedDict([(type, i) for i, type in enumerate(EXPORTER.get_link_types())]))
 SIDE_MAP = types.MappingProxyType(OrderedDict([("LEFT", EXPORTER.get_side_left()), ("RIGHT", EXPORTER.get_side_right())]))
+
+NUM_LINK_TYPES = len(LINK_TYPE_MAP)
 
 PyState = ctypes.c_float * STATE_SIZE
 PyAction = ctypes.c_int
@@ -92,10 +97,10 @@ def tracelog(func, maxlen=MAXLEN):
 
 # Same as connector's P_Result, but with values converted to ctypes
 class PyResult():
-    def __init__(self, cres, shm):
-        # self.state = np.ctypeslib.as_array(cres.state)
-        self.statesize = np.ctypeslib.as_array(cres.statesize)
-        self.state = np.ndarray((cres.statesize,), dtype=np.float32, buffer=shm.buf)
+    def __init__(self, cres, shm_state, shm_edge_index, shm_edge_attrs):
+        self.state = np.ndarray((STATE_SIZE,), dtype=np.float32, buffer=shm_state.buf)
+        self.edge_index = np.ndarray((2, cres.num_edges), dtype=np.int64, buffer=shm_edge_index.buf)
+        self.edge_attrs = np.ndarray((cres.num_edges, NUM_LINK_TYPES), dtype=np.float32, buffer=shm_edge_attrs.buf)
         self.actmask = np.ctypeslib.as_array(cres.actmask)
         self.errcode = cres.errcode
 
@@ -109,8 +114,8 @@ class PyProcConnector():
     # Needs to be overwritten by subclasses => define in PyProcConnector body
     class PyRawState(ctypes.Structure):
         _fields_ = [
+            ("num_edges", ctypes.c_int),
             ("statesize", ctypes.c_int),
-            ("state", PyState),
             ("actmask", PyActmask),
             ("errcode", ctypes.c_int),
         ]
@@ -174,13 +179,20 @@ class PyProcConnector():
             6*30,            # BLOCKED_BY: 1 unit can block 6 shooters; 30 max shooters...
             30*30,           # MELEE_DMG_REL: 30 max units
             30*30,           # RANGED_DMG_REL: 30 max units
+            30*30,           # RETAL_DMG_MOD: 30 max units
             165*30,          # RANGED_DMG_MOD: 30 max shooters
             165*30,          # REACH
             30,              # SECONDARY
         ])
 
-        safe_size = STATE_SIZE + max_links
-        self.shm = multiprocessing.shared_memory.SharedMemory(create=True, size=safe_size * np.float32().itemsize)
+        self.shm_state = multiprocessing.shared_memory.SharedMemory(create=True, size=STATE_SIZE * ctypes.sizeof(ctypes.c_float))
+        # self.shm_edge_sources = multiprocessing.shared_memory.SharedMemory(create=True, size=max_links * ctypes.sizeof(ctypes.c_int))
+        # self.shm_edge_targets = multiprocessing.shared_memory.SharedMemory(create=True, size=max_links * ctypes.sizeof(ctypes.c_int))
+        self.shm_edge_index = multiprocessing.shared_memory.SharedMemory(create=True, size=2 * max_links * ctypes.sizeof(ctypes.c_int))
+
+        # self.shm_edge_values = multiprocessing.shared_memory.SharedMemory(create=True, size=max_links * ctypes.sizeof(ctypes.c_float))
+        # self.shm_edge_types = multiprocessing.shared_memory.SharedMemory(create=True, size=max_links * len(LINK_TYPE_MAP) * ctypes.sizeof(ctypes.c_int))
+        self.shm_edge_attrs = multiprocessing.shared_memory.SharedMemory(create=True, size=max_links * len(LINK_TYPE_MAP) * ctypes.sizeof(ctypes.c_float))
 
         # Process synchronization:
         # cond.notify() will wake up the other proc (which immediately tries to acquire the lock)
@@ -202,7 +214,7 @@ class PyProcConnector():
                 raise Exception("Failed to acquire semaphore")
 
         # return PyResult(self.v_result_act, np.copy(self.array))
-        return PyResult(self.v_result_act, self.shm)
+        return PyResult(self.v_result_act, self.shm_state, self.shm_edge_index, self.shm_edge_attrs)
 
     def shutdown(self):
         if self.shutting_down.is_set():
@@ -264,7 +276,7 @@ class PyProcConnector():
             self.cond.notify()
             self._wait_vcmi()
         # return PyResult(self.v_result_act, np.copy(self.array))
-        return PyResult(self.v_result_act, self.shm)
+        return PyResult(self.v_result_act, self.shm_state, self.shm_edge_index, self.shm_edge_attrs)
 
     @tracelog
     def step(self, action):
@@ -274,7 +286,7 @@ class PyProcConnector():
             self.cond.notify()
             self._wait_vcmi()
         # return PyResult(self.v_result_act, np.copy(self.array))
-        return PyResult(self.v_result_act, self.shm)
+        return PyResult(self.v_result_act, self.shm_state, self.shm_edge_index, self.shm_edge_attrs)
 
     @tracelog
     def render(self):
@@ -367,14 +379,20 @@ class PyProcConnector():
     def set_v_result_act(self, result):
         self.v_result_act.statesize = result.get_state().size
 
-        # XXX: the numpy object itself is temporary
-        # It is used only as a write interface to the shm block
+        state = result.get_state()
+        assert state.nbytes <= self.shm_state.size, f"{state.nbytes} <= {self.shm_state.size}"
+        self.shm_state.buf[:state.nbytes] = result.get_state().tobytes()
 
-        # XXX: same as:
-        #   ary = np.ndarray((self.v_result_act.statesize,), dtype=np.float32, buffer=self.shm.buf)
-        #   np.copyto(ary, result.get_state())
-        self.shm.buf[: result.get_state().nbytes] = result.get_state().tobytes()
+        edge_index = result.get_edge_index()
+        assert edge_index.nbytes <= self.shm_edge_index.size
+        self.shm_edge_index.buf[:edge_index.nbytes] = edge_index.tobytes()
 
+        edge_attrs = result.get_edge_attrs()
+        assert edge_attrs.nbytes <= self.shm_edge_attrs.size
+        self.shm_edge_attrs.buf[:edge_attrs.nbytes] = edge_attrs.tobytes()
+
+        assert len(edge_index) % 2 == 0
+        self.v_result_act.num_edges = len(edge_index) // 2
         self.v_result_act.actmask = np.ctypeslib.as_ctypes(result.get_actmask())
         self.v_result_act.errcode = ctypes.c_int(result.get_errcode())
 

@@ -17,7 +17,7 @@
 import gymnasium
 from .envs.v3.vcmi_env import VcmiEnv as VcmiEnv_v3
 from .envs.v8.vcmi_env import VcmiEnv as VcmiEnv_v8
-from .envs.v8.vcmi_env import VcmiEnv as VcmiEnv_v9
+from .envs.v9.vcmi_env import VcmiEnv as VcmiEnv_v9
 
 from .envs.util.dual_env import DualEnvController, DualEnvClient
 

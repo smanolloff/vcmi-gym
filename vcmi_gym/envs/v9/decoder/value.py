@@ -80,6 +80,9 @@ class Value:
         elif enctype.startswith("LINNORM"):
             assert len(raw_nonnull) == 1, f"internal error: len(raw_nonnull): {len(raw_nonnull)} != 1"
             self.v = round(raw_nonnull[0] * vmax)
+        elif enctype == "RAW":
+            assert len(raw_nonnull) == 1, f"internal error: len(raw_nonnull): {len(raw_nonnull)} != 1"
+            self.v = raw_nonnull[0]
 
         self._compare()
 

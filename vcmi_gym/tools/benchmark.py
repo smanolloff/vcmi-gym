@@ -33,7 +33,7 @@ def get_action(model, obs):
 
 def main():
     total_steps = 1000
-    env = vcmi_gym.VcmiEnv_v8(
+    env = vcmi_gym.VcmiEnv_v9(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
         random_heroes=0,
         random_obstacles=0,
@@ -42,6 +42,7 @@ def main():
         max_steps=1000,
         # swap_sides=1,
     )
+    print("VCMI ver: %d" % env.ENV_VERSION)
     obs, info = env.reset()
     term = False
     trunc = False

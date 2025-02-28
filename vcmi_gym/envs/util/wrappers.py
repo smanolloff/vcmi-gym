@@ -33,6 +33,12 @@ class LegacyObservationSpaceWrapper(gym.Wrapper):
     def action_mask(self):
         return self._dict_obs["action_mask"]
 
+    def edge_index(self):
+        return self._dict_obs["edge_index"]
+
+    def edge_attrs(self):
+        return self._dict_obs["edge_attrs"]
+
     def step(self, *args, **kwargs):
         obs, *rest = self.env.step(*args, **kwargs)
         self._dict_obs = obs
