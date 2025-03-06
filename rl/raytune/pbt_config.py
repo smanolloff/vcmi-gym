@@ -183,8 +183,6 @@ config = {
             # => (B, 64)
         ],
         "encoder_merged": [
-            {"t": "LazyLinear", "out_features": 1024},
-            {"t": "LeakyReLU"},
             # => (B, 1024)
         ],
         "actor": {"t": "LazyLinear", "out_features": 1322},

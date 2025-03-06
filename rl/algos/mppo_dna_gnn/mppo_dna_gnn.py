@@ -351,22 +351,27 @@ class AgentNN(nn.Module):
             layer = AgentNN.build_layer(spec)
             self.encoder_other.append(layer)
 
+        make_gine = lambda dimin, dimhid, dimout: gnn.GINEConv(
+            torch.nn.Sequential(
+                torch.nn.Linear(dimin, dimhid),
+                torch.nn.LeakyReLU(),
+                torch.nn.Linear(dimhid, dimout),
+                torch.nn.LeakyReLU(),
+            ),
+            edge_dim=dim_attr
+        )
+
         signature0 = "x, edge_index, edge_attr"
         signature1 = "x, edge_index, edge_attr -> x"
         self.encoder_graph = torch_geometric.nn.Sequential(signature0, [
-            (torch.nn.Unflatten(dim=0, unflattened_size=[165, self.dim_1hex]), "x -> x"),
+            (nn.Unflatten(dim=0, unflattened_size=[165, self.dim_1hex]), "x -> x"),
             # => (165, E)
-            (gnn.GATConv(in_channels=self.dim_1hex, out_channels=64, heads=1, edge_dim=dim_attr), signature1),
-            torch.nn.LeakyReLU(),
-            # => (165, 64*2)
-            (gnn.GATConv(in_channels=64, out_channels=32, heads=1, edge_dim=dim_attr), signature1),
-            torch.nn.LeakyReLU(),
-            # => (165, 32*2)
-            (gnn.GATConv(in_channels=32, out_channels=16, heads=1, edge_dim=dim_attr), signature1),
-            torch.nn.LeakyReLU(),
+            (make_gine(self.dim_1hex, 64, 64), signature1),
+            (make_gine(64, 64, 64), signature1),
+            (make_gine(64, 64, 64), signature1),
             # => (165, 32)
             torch.nn.Flatten(start_dim=0)
-            # => (5280)
+            # => (10560)
         ])
 
         self.encoder_merged = torch.nn.Sequential()
@@ -1269,9 +1274,6 @@ def debug_args():
                 # => 64
             ],
             "encoder_merged": [
-                {"t": "LazyLinear", "out_features": 1024},
-                {"t": "LeakyReLU"},
-                # => 1024
             ],
             "actor": {"t": "LazyLinear", "out_features": 1322},
             "critic": {"t": "LazyLinear", "out_features": 1}

@@ -287,18 +287,22 @@ class HexConv(nn.Module):
 
 
 class HexConvResBlock(nn.Module):
-    def __init__(self, channels, act={"t": "LeakyReLU"}):
+    def __init__(self, channels, depth=1, act={"t": "LeakyReLU"}):
         super().__init__()
 
-        self.conv1 = HexConv(channels)
-        self.conv2 = HexConv(channels)
-        self.act = AgentNN.build_layer(act)
+        self.layers = []
+        for _ in range(depth):
+            self.layers.append((
+                HexConv(channels),
+                AgentNN.build_layer(act),
+                HexConv(channels),
+            ))
 
     def forward(self, x):
         assert x.is_contiguous
-        # identity = x.contiguous()
-        out = self.conv2(self.act(self.conv1(x)))
-        return out.add_(x)
+        for conv1, act, conv2 in self.layers:
+            x = act(conv2(act(conv1(x))).add_(x))
+        return x
 
 
 class SelfAttention(nn.Module):
@@ -1180,15 +1184,7 @@ def debug_args():
                 #
                 # HexConv (variant B: residual conv)
                 #
-                {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-                {"t": "LeakyReLU"},
-                # => (B, 165, H)
-                {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-                {"t": "LeakyReLU"},
-                # => (B, 165, H)
-                {"t": "HexConvResBlock", "channels": 101, "act": {"t": "LeakyReLU"}},
-                {"t": "LeakyReLU"},
-                # => (B, 165, H)
+                {"t": "HexConvResBlock", "channels": 101, "depth": 7},
 
                 #
                 # HexConv COMMON
