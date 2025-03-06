@@ -37,7 +37,7 @@ def main():
         "gym/generated/4096/4096-6stack-100K-01.vmap",
         random_heroes=0,
         random_obstacles=0,
-        conntype="proc",
+        conntype="thread",
         opponent="StupidAI",
         max_steps=1000,
         # swap_sides=1,
