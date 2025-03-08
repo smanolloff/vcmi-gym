@@ -284,7 +284,7 @@ class VcmiEnv(gym.Env):
                 print(self.render())
                 raise Exception("Invalid action given: %s" % action)
 
-        bf = Decoder.decode(res.state)
+        bf = Decoder.decode(res.state, only_global=True)
         term = bf.global_stats.BATTLE_WINNER.v is not None
         rew = self.__class__.calc_reward(res, bf, self.reward_cfg)
 

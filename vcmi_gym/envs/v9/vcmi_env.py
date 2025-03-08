@@ -154,9 +154,9 @@ class VcmiEnv(gym.Env):
         swap_sides: int = 0,
         allow_retreat: bool = False,
         reward_err_exclusive: int = -10,
-        reward_step_fixed: int = -1,
-        reward_dmg_mult: int = 1,
-        reward_term_mult: int = 1,
+        reward_step_fixed: float = -1,
+        reward_dmg_mult: float = 1,
+        reward_term_mult: float = 1,
         conntype: str = "proc",
         other_env: Optional["VcmiEnv"] = None,
         nostart: bool = False
@@ -466,6 +466,7 @@ class VcmiEnv(gym.Env):
         ended = bf.global_stats.BATTLE_WINNER.v is not None
         term_rew = net_value_acc if ended else 0
 
+        # print(f"net_value: {net_value}, net_dmg: {net_dmg}, step_fixed: {cfg.step_fixed}")
         # print("REWARD: net_value=%d (%d - %d)" % (net_value, bf.enemy_stats.VALUE_LOST_REL.v, bf.my_stats.VALUE_LOST_REL.v))
 
         return (

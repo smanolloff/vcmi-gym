@@ -451,7 +451,11 @@ class VcmiEnv(gym.Env):
             self.reward_scaling_factor = self.reward_army_value_ref / avg_army_value
             self._step_reward_calc = self.step_reward_fixed + self.step_reward_frac * avg_army_value
 
-        rew = self.net_value + self.reward_dmg_factor * self.net_dmg
+        # these are not calculated yet (update_vars_after_step() not yet called)
+        net_dmg = res.dmg_dealt - res.dmg_received
+        net_value = res.value_killed - res.value_lost
+
+        rew = net_value + self.reward_dmg_factor * net_dmg
         rew *= self.step_reward_mult
 
         if res.is_battle_over:
