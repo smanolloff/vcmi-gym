@@ -370,7 +370,10 @@ class VcmiEnv(gym.Env):
         if self.terminated or self.truncated:
             return None
         actions = np.where(self.obs["action_mask"])[0]
-        assert actions.any(), "action mask allows no actions, but last result was not terminal"
+        if not actions.any():
+            print(list(self.obs["action_mask"]))
+            print(self.render())
+            raise Exception("action mask allows no actions, but last result was not terminal")
         return np.random.choice(actions)
 
     @staticmethod

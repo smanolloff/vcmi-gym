@@ -35,15 +35,18 @@ class HexActionFlags(namedtuple("HexActionFlags", list(HEX_ACT_MAP.keys()))):
         return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
 
 
-class Hex(namedtuple("Hex", ["data"] + list(HEX_ATTR_MAP.keys()))):
+class Hex(namedtuple("Hex", ["data", "stack"] + list([k for k in HEX_ATTR_MAP.keys() if not k.startswith("STACK_")]))):
     def __repr__(self):
-        return f'Hex(y={self.Y_COORD.v} x={self.X_COORD.v})'
+        desc = f'y={self.Y_COORD.v} x={self.X_COORD.v}'
+        if self.stack:
+            desc += f" {self.stack}"
+        return f"Hex({desc})"
 
     def dump(self, compact=True):
         maxlen = 0
         lines = []
         for field in self._fields:
-            if field == "data":
+            if field in ["data", "stack"]:
                 continue
 
             value = getattr(self, field)

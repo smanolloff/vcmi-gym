@@ -15,21 +15,15 @@
 # =============================================================================
 
 import numpy as np
-from collections import namedtuple
 
 from .battlefield import Battlefield
 from .value import Value
 from .stats import GlobalStats, PlayerStats
 from .hex import Hex, HexStateFlags, HexActionFlags
-# from .stack import Stack, StackFlags
+from .stack import Stack, StackFlags
 from .. import pyprocconnector as pyconnector
 
 NA = pyconnector.STATE_VALUE_NA
-
-
-class StackFlags(namedtuple("StackFlags", list(pyconnector.STACK_FLAG_MAP.keys()))):
-    def __repr__(self):
-        return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
 
 
 class Decoder:
@@ -70,7 +64,10 @@ class Decoder:
             row = []
             for x in range(15):
                 hexdata = hexes[y][x]
-                row.append(cls.decode_hex(hexdata, verbose))
+                hex, stack = cls.decode_hex(hexdata, verbose)
+                row.append(hex)
+                if stack and not hex.IS_REAR.v:
+                    res.stacks[stack.SIDE.v].append(stack)
             res.hexes.append(row)
 
         return res
@@ -107,38 +104,11 @@ class Decoder:
 
         return PlayerStats(**res, data=playerdata)
 
-    #
-    # XXX: not adjusted for v8
-    #
-
-    # @classmethod
-    # def decode_stack(cls, stackdata, stackdata0=None, precision=None, roundfracs=None, verbose=False):
-    #     res = {}
-    #     for attr, (enctype, offset, n, vmax) in pyconnector.STACK_ATTR_MAP.items():
-    #         attrdata = stackdata[offset:][:n]
-    #         attrdata0 = stackdata0[offset:][:n] if stackdata0 is not None else None
-    #         kwargs = dict(
-    #             name=attr,
-    #             enctype=enctype,
-    #             n=n,
-    #             vmax=vmax,
-    #             raw=attrdata,
-    #             raw0=attrdata0,
-    #             precision=precision,    # number of digits after "."
-    #             roundfracs=roundfracs,  # 5 = round to nearest 0.2 (3.14 => 3.2)
-    #             verbose=verbose
-    #         )
-
-    #         if attr == "FLAGS":
-    #             res[attr] = Value(**dict(kwargs, struct_cls=StackFlags, struct_mapping=pyconnector.STACK_FLAG_MAP))
-    #         else:
-    #             res[attr] = Value(**kwargs)
-
-    #     return Stack(**dict(res, data=stackdata))
-
     @classmethod
     def decode_hex(cls, hexdata, verbose=False):
         res = {}
+        sres = {}
+
         for attr, (enctype, offset, n, vmax) in pyconnector.HEX_ATTR_MAP.items():
             attrdata = hexdata[offset:][:n]
             kwargs = dict(
@@ -150,13 +120,24 @@ class Decoder:
                 verbose=verbose,
             )
 
-            if attr == "STATE_MASK":
+            if attr.startswith("STACK_"):
+                sattr = attr.removeprefix("STACK_")
+                if sattr == "FLAGS":
+                    sres[sattr] = Value(**dict(kwargs, struct_cls=StackFlags, struct_mapping=pyconnector.STACK_FLAG_MAP))
+                else:
+                    sres[sattr] = Value(**kwargs)
+            elif attr == "STATE_MASK":
                 res[attr] = Value(**dict(kwargs, struct_cls=HexStateFlags, struct_mapping=pyconnector.HEX_STATE_MAP))
             elif attr == "ACTION_MASK":
                 res[attr] = Value(**dict(kwargs, struct_cls=HexActionFlags, struct_mapping=pyconnector.HEX_ACT_MAP))
-            elif attr == "STACK_FLAGS":
-                res[attr] = Value(**dict(kwargs, struct_cls=StackFlags, struct_mapping=pyconnector.STACK_FLAG_MAP))
             else:
                 res[attr] = Value(**kwargs)
 
-        return Hex(**dict(res, data=hexdata))
+        stack0 = Stack(hex=None, **dict(sres)) if sres["SIDE"].v is not None else None
+        hex = Hex(**dict(res, data=hexdata, stack=None))
+
+        # NOTE: no circular dependency (hex.stack.hex will be None and vice versa)
+        # "shallow" links are still quite useful though
+        stack = stack0._replace(hex=hex) if stack0 else None
+
+        return hex._replace(stack=stack0), stack
