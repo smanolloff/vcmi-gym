@@ -1,10 +1,11 @@
 # from vcmi_gym.envs.v8.vcmi_env import VcmiEnv; env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap")
-# from rl.encoder.transition_model import TransitionModel; import torch; weights = torch.load("data/autoencoder/bfyevnzy-model.pt", weights_only=True); model = TransitionModel(); model.load_state_dict(weights, strict=True)
+# from rl.encoder.transition_model import TransitionModel; import torch; weights = torch.load("data/autoencoder/yeabjfrl-model.pt", weights_only=True); model = TransitionModel(); model.load_state_dict(weights, strict=True)
 # from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
 # obs = env.result.state.copy()
+# bf = Decoder.decode(obs)
 # action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
 # obs_pred = model.predict(obs, action)
-# obs_next, * = env.step(action)
+# obs_next, *_ = env.step(action)
 # obs_next = obs_next["observation"]
 # torch.nn.functional.mse_loss(torch.as_tensor(obs_next), torch.as_tensor(obs))
 # # print(Decoder.decode(obs_pred).render())
@@ -17,15 +18,18 @@ import random
 import string
 import json
 import yaml
+import shutil
 import argparse
+import time
 import numpy as np
+import pathlib
+from datetime import datetime
 from functools import partial
 
 from torch.nn.functional import mse_loss
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.nn.functional import cross_entropy
 from torch.nn.functional import one_hot
-from datetime import datetime
 
 from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
 from vcmi_gym.envs.v8.pyprocconnector import (
@@ -36,9 +40,51 @@ from vcmi_gym.envs.v8.pyprocconnector import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
-    STATE_SEQUENCE,
     N_ACTIONS,
 )
+
+
+def wandb_log(*args, **kwargs):
+    pass
+
+
+def setup_wandb(config, model, src_file):
+    import wandb
+
+    resumed = config["run"]["resumed_config"] is not None
+
+    wandb.init(
+        project="vcmi-gym",
+        group="transition-model",
+        name="%s-%s" % (datetime.now().strftime("%Y%m%d_%H%M%S"), config["run"]["id"]),
+        id=config["run"]["id"],
+        resume="must" if resumed else "never",
+        # resume="allow",  # XXX: reuse id for insta-failed runs
+        config=config,
+        sync_tensorboard=False,
+        save_code=False,  # code saved manually below
+        allow_val_change=resumed,
+        settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
+    )
+
+    # https://docs.wandb.ai/ref/python/run#log_code
+    # XXX: "path" is relative to `root`
+    #      but args.cfg_file is relative to vcmi-gym ROOT dir
+    src_file = pathlib.Path(src_file)
+
+    def code_include_fn(path):
+        p = pathlib.Path(path).absolute()
+        return p.samefile(src_file)
+
+    wandb.run.log_code(root=src_file.parent, include_fn=code_include_fn)
+    wandb.watch(model, log="all", log_graph=True, log_freq=1000)
+
+    global wandb_log
+
+    # For wandb.log, commit=True by default
+    # for wandb_log, commit=False by default
+    def wandb_log(*args, **kwargs):
+        wandb.log(*args, **dict({"commit": False}, **kwargs))
 
 
 def to_tensor(dict_obs):
@@ -119,112 +165,190 @@ class Buffer:
             )
 
 
+class Swap(nn.Module):
+    def __init__(self, axis1, axis2):
+        super().__init__()
+        self.axis1 = axis1
+        self.axis2 = axis2
+
+    def forward(self, x):
+        return x.swapaxes(self.axis1, self.axis2)
+
+
 class TransitionModel(nn.Module):
     def __init__(self):
         super().__init__()
 
         self._build_indices()
+        self._build_counters()
 
-        self.encoder_global = nn.Sequential(
-            nn.LazyLinear(32),
-            nn.LeakyReLU(),
-        )
+        #
+        # Global
+        #
 
-        self.encoder_player = nn.Sequential(
-            nn.LazyLinear(32),
-            nn.LeakyReLU(),
-        )
+        if len(self.obs_index["global"]["continuous"]):
+            self.encoder_global_continuous = nn.Sequential(
+                # (B, C)
+                nn.LazyBatchNorm1d(),
+                nn.LazyLinear(32),
+                nn.LeakyReLU(),
+            )
+        else:
+            self.encoder_global_continuous = nn.Identity()
 
-        self.encoder_hex = nn.Sequential(
-            nn.LazyLinear(128),
-            nn.LeakyReLU(),
-            nn.LazyLinear(64),
-            nn.LeakyReLU(),
-        )
+        if len(self.obs_index["global"]["discrete"]):
+            self.encoder_global_discrete = nn.Sequential(
+                nn.LazyLinear(32),
+                nn.LeakyReLU(),
+            )
+        else:
+            self.encoder_global_discrete = nn.Identity()
+
+        #
+        # Player
+        #
+
+        if len(self.obs_index["player"]["continuous"]):
+            self.encoder_player_continuous = nn.Sequential(
+                Swap(1, 2),  # (B, 2, C) -> (B, C, 2)
+                nn.LazyBatchNorm1d(),
+                Swap(1, 2),  # (B, C, 2) -> (B, 2, C)
+                nn.LazyLinear(32),
+                nn.LeakyReLU(),
+            )
+        else:
+            self.encoder_player_continuous = nn.Identity()
+
+        if len(self.obs_index["player"]["discrete"]):
+            self.encoder_player_discrete = nn.Sequential(
+                nn.LazyLinear(32),
+                nn.LeakyReLU(),
+            )
+        else:
+            self.encoder_player_discrete = nn.Identity()
+
+        #
+        # Hex
+        #
+
+        n_hex_continuous = len(self.hex_index["continuous"])
+        if n_hex_continuous:
+            self.encoder_hex_continuous = nn.Sequential(
+                Swap(1, 2),  # (B, 165, C) -> (B, C, 165)
+                nn.LazyBatchNorm1d(),
+                Swap(1, 2),  # (B, C, 165) -> (B, 165, C)
+                nn.LazyLinear(128),
+                nn.LeakyReLU(),
+                nn.LazyLinear(64),
+                nn.LeakyReLU(),
+            )
+        else:
+            self.encoder_hex_continuous = nn.Identity()
+
+        if len(self.obs_index["hex"]["discrete"]):
+            self.encoder_hex_discrete = nn.Sequential(
+                nn.LazyLinear(128),
+                nn.LeakyReLU(),
+                nn.LazyLinear(64),
+                nn.LeakyReLU(),
+            )
+        else:
+            self.encoder_hex_discrete = nn.Identity()
 
         self.encoder_merged = nn.Sequential(
-            # => (B, N_ACTIONS + 32 + 64 + 10560)
+            # => (B, N_ACTIONS + 32 + 2*32 + 165*64)
             nn.LazyLinear(1024),
             nn.LeakyReLU(),
         )
 
         # Global heads
 
+        if len(self.obs_index["global"]["continuous"]):
+            self.global_continuous_head = nn.LazyLinear(len(self.global_index["continuous"]))
+
         if len(self.global_index["binary"]):
             self.global_binary_head = nn.LazyLinear(len(self.global_index["binary"]))
-
-        if len(self.global_index["continuous"]):
-            self.global_continuous_head = nn.LazyLinear(len(self.global_index["continuous"]))
 
         if len(self.global_index["categoricals"]):
             self.global_categorical_heads = nn.ModuleList([nn.LazyLinear(len(ind)) for ind in self.global_index["categoricals"]])
 
         # Player heads
 
-        if len(self.player_index["binary"]):
-            self.player_binary_head = nn.LazyLinear(len(self.player_index["binary"]))
-
         if len(self.player_index["continuous"]):
             self.player_continuous_head = nn.LazyLinear(len(self.player_index["continuous"]))
+
+        if len(self.player_index["binary"]):
+            self.player_binary_head = nn.LazyLinear(len(self.player_index["binary"]))
 
         if len(self.player_index["categoricals"]):
             self.player_categorical_heads = nn.ModuleList([nn.LazyLinear(len(ind)) for ind in self.player_index["categoricals"]])
 
         # Hex heads
 
-        if len(self.hex_index["binary"]):
-            self.hex_binary_head = nn.LazyLinear(len(self.hex_index["binary"]))
-
         if len(self.hex_index["continuous"]):
             self.hex_continuous_head = nn.LazyLinear(len(self.hex_index["continuous"]))
+
+        if len(self.hex_index["binary"]):
+            self.hex_binary_head = nn.LazyLinear(len(self.hex_index["binary"]))
 
         if len(self.hex_index["categoricals"]):
             self.hex_categorical_heads = nn.ModuleList([nn.LazyLinear(len(ind)) for ind in self.hex_index["categoricals"]])
 
         # Init lazy layers
         with torch.no_grad():
-            self(torch.randn([1, STATE_SIZE]), torch.tensor([1]))
+            self(torch.randn([2, STATE_SIZE]), torch.tensor([1, 1]))
 
         layer_init(self)
 
     def forward(self, obs, action):
-        assert STATE_SEQUENCE == ["global", "player", "player", "hexes"]
-        delims = [STATE_SIZE_GLOBAL, STATE_SIZE_ONE_PLAYER * 2, STATE_SIZE_ONE_HEX * 165]
-        obs_global, obs_players, obs_hexes = torch.split(obs, delims, dim=1)
-        obs_players = obs_players.unflatten(1, [2, STATE_SIZE_ONE_PLAYER])
-        obs_hexes = obs_hexes.unflatten(1, [165, STATE_SIZE_ONE_HEX])
+        action_in = one_hot(torch.as_tensor(action), num_classes=N_ACTIONS)
 
-        oh_action = one_hot(torch.as_tensor(action), num_classes=N_ACTIONS)
-        z_global = self.encoder_global(obs_global)
-        z_players = self.encoder_player(obs_players)
-        z_hexes = self.encoder_hex(obs_hexes)
+        global_continuous_in = obs[:, self.obs_index["global"]["continuous"]]
+        global_discrete_in = obs[:, self.obs_index["global"]["discrete"]]
+        player_continuous_in = obs[:, self.obs_index["player"]["continuous"]]
+        player_discrete_in = obs[:, self.obs_index["player"]["discrete"]]
+        hex_continuous_in = obs[:, self.obs_index["hex"]["continuous"]]
+        hex_discrete_in = obs[:, self.obs_index["hex"]["discrete"]]
 
-        merged = torch.cat((oh_action, z_global, z_players.flatten(1), z_hexes.flatten(1)), dim=-1)
+        global_continuous_z = self.encoder_global_continuous(global_continuous_in)
+        global_discrete_z = self.encoder_global_discrete(global_discrete_in)
+        player_continuous_z = self.encoder_player_continuous(player_continuous_in)
+        player_discrete_z = self.encoder_player_discrete(player_discrete_in)
+        hex_continuous_z = self.encoder_hex_continuous(hex_continuous_in)
+        hex_discrete_z = self.encoder_hex_discrete(hex_discrete_in)
 
-        z = self.encoder_merged(merged)
+        global_z = torch.cat((global_continuous_z, global_discrete_z), dim=-1)
+        # => (B, Zg)
+        player_z = torch.cat((player_continuous_z, player_discrete_z), dim=-1)
+        # => (B, 2, Zp)
+        hex_z = torch.cat((hex_continuous_z, hex_discrete_z), dim=-1)
+        # => (B, 165, Zh)
+
+        merged_z = torch.cat((action_in, global_z, player_z.flatten(1), hex_z.flatten(1)), dim=-1)
+        z = self.encoder_merged(merged_z)
         # => (B, Z)
 
-        global_binary_out = torch.tensor([])
         global_continuous_out = torch.tensor([])
+        global_binary_out = torch.tensor([])
         global_categorical_outs = torch.tensor([])
-        player_binary_out = torch.tensor([])
         player_continuous_out = torch.tensor([])
+        player_binary_out = torch.tensor([])
         player_categorical_outs = torch.tensor([])
-        hex_binary_out = torch.tensor([])
         hex_continuous_out = torch.tensor([])
+        hex_binary_out = torch.tensor([])
         hex_categorical_outs = torch.tensor([])
 
         #
         # Global
         #
 
-        global_input = torch.cat((z_global, z), dim=1)
-
-        if len(self.global_index["binary"]):
-            global_binary_out = self.global_binary_head(global_input)
+        global_input = torch.cat((global_z, z), dim=1)
 
         if len(self.global_index["continuous"]):
             global_continuous_out = self.global_continuous_head(global_input)
+
+        if len(self.global_index["binary"]):
+            global_binary_out = self.global_binary_head(global_input)
 
         if len(self.global_index["categoricals"]):
             global_categorical_outs = [head(global_input) for head in self.global_categorical_heads]
@@ -237,16 +361,16 @@ class TransitionModel(nn.Module):
         z_expanded_for_players = z.unsqueeze(1).expand(z.shape[0], 2, z.shape[1])
         # => (B, 2, Z)
 
-        player_inputs = torch.cat((z_expanded_for_players, z_players), dim=2)
+        player_inputs = torch.cat((z_expanded_for_players, player_z), dim=2)
         # => (B, 2, Z+ZP)
-
-        if len(self.player_index["binary"]):
-            player_binary_out = self.player_binary_head(player_inputs)
-            # => (B, 2, PBIN)
 
         if len(self.player_index["continuous"]):
             player_continuous_out = self.player_continuous_head(player_inputs)
             # => (B, 2, PCAT)
+
+        if len(self.player_index["binary"]):
+            player_binary_out = self.player_binary_head(player_inputs)
+            # => (B, 2, PBIN)
 
         if len(self.player_index["categoricals"]):
             player_categorical_outs = [head(player_inputs) for head in self.player_categorical_heads]
@@ -260,33 +384,30 @@ class TransitionModel(nn.Module):
         z_expanded_for_hexes = z.unsqueeze(1).expand(z.shape[0], 165, z.shape[1])
         # => (B, 165, Z)
 
-        hex_inputs = torch.cat((z_expanded_for_hexes, z_hexes), dim=2)
+        hex_inputs = torch.cat((z_expanded_for_hexes, hex_z), dim=2)
         # => (B, 165, Z+ZH)
-
-        if len(self.hex_index["binary"]):
-            hex_binary_out = self.hex_binary_head(hex_inputs)
-            # => (B, 165, HBIN)
 
         if len(self.hex_index["continuous"]):
             hex_continuous_out = self.hex_continuous_head(hex_inputs)
             # => (B, 165, HCAT)
 
+        if len(self.hex_index["binary"]):
+            hex_binary_out = self.hex_binary_head(hex_inputs)
+            # => (B, 165, HBIN)
+
         if len(self.hex_index["categoricals"]):
             hex_categorical_outs = [head(hex_inputs) for head in self.hex_categorical_heads]
             # => [N, (B, 165, C*)] where C* is num_classes (may differ)
 
-        # global_binary_index = self.global_index["binary"].unsqueeze(0).expand(global_binary_out.shape)
-        # next_obs.scatter_(1, global_binary_index, global_binary_out)
-
         return (
-            global_binary_out,
             global_continuous_out,
+            global_binary_out,
             global_categorical_outs,
-            player_binary_out,
             player_continuous_out,
+            player_binary_out,
             player_categorical_outs,
-            hex_binary_out,
             hex_continuous_out,
+            hex_binary_out,
             hex_categorical_outs,
         )
 
@@ -339,16 +460,16 @@ class TransitionModel(nn.Module):
         return next_obs[0].numpy()
 
     def _build_indices(self):
-        self.global_index = {"binary": [], "continuous": [], "categoricals": []}
-        self.player_index = {"binary": [], "continuous": [], "categoricals": []}
-        self.hex_index = {"binary": [], "continuous": [], "categoricals": []}
+        self.global_index = {"continuous": [], "binary": [], "categoricals": []}
+        self.player_index = {"continuous": [], "binary": [], "categoricals": []}
+        self.hex_index = {"continuous": [], "binary": [], "categoricals": []}
 
         self._add_indices(GLOBAL_ATTR_MAP, self.global_index)
         self._add_indices(PLAYER_ATTR_MAP, self.player_index)
         self._add_indices(HEX_ATTR_MAP, self.hex_index)
 
         for index in [self.global_index, self.player_index, self.hex_index]:
-            for type in ["binary", "continuous"]:
+            for type in ["continuous", "binary"]:
                 index[type] = torch.tensor(index[type])
 
             index["categoricals"] = [torch.tensor(ind) for ind in index["categoricals"]]
@@ -406,22 +527,31 @@ class TransitionModel(nn.Module):
     # - self.hex_index contains *relative* indexes for 1 hex
     # - self.obs_index["hex"] contains *absolute* indexes for all 165 hexes
     def _build_obs_indices(self):
+        t = lambda ary: torch.tensor(ary, dtype=torch.int64)
+
+        # XXX: Discrete (or "noncontinuous") is a combination of binary + categoricals
+        #      where for direct extraction from obs
         self.obs_index = {
-            "global": {"binary": [], "continuous": [], "categoricals": []},
-            "player": {"binary": [], "continuous": [], "categoricals": []},
-            "hex": {"binary": [], "continuous": [], "categoricals": []},
+            "global": {"continuous": t([]), "binary": t([]), "categoricals": [], "discrete": t([])},
+            "player": {"continuous": t([]), "binary": t([]), "categoricals": [], "discrete": t([])},
+            "hex": {"continuous": t([]), "binary": t([]), "categoricals": [], "discrete": t([])},
         }
 
         # Global
 
-        if len(self.global_index["binary"]):
-            self.obs_index["global"]["binary"] = self.global_index["binary"]
-
         if len(self.global_index["continuous"]):
             self.obs_index["global"]["continuous"] = self.global_index["continuous"]
 
-        if len(self.global_index["continuous"]):
+        if len(self.global_index["binary"]):
+            self.obs_index["global"]["binary"] = self.global_index["binary"]
+
+        if len(self.global_index["categoricals"]):
             self.obs_index["global"]["categoricals"] = self.global_index["categoricals"]
+
+        global_discrete = torch.zeros(0, dtype=torch.int64)
+        global_discrete = torch.cat((global_discrete, self.obs_index["global"]["binary"]), dim=0)
+        global_discrete = torch.cat((global_discrete, *self.obs_index["global"]["categoricals"]), dim=0)
+        self.obs_index["global"]["discrete"] = global_discrete
 
         # Helper function to reduce code duplication
         # Essentially replaces this:
@@ -448,7 +578,7 @@ class TransitionModel(nn.Module):
         # - `indexes` is an array of *relative* indexes for 1 element (e.g. hex)
         def repeating_index(n, base_offset, repeating_offset, indexes):
             if len(indexes) == 0:
-                return []
+                return torch.zeros([n, 0], dtype=torch.int64)
             ind = torch.zeros([n, len(indexes)], dtype=torch.int64)
             for i in range(n):
                 offset = base_offset + i*repeating_offset
@@ -464,10 +594,15 @@ class TransitionModel(nn.Module):
             STATE_SIZE_ONE_PLAYER
         )
 
-        self.obs_index["player"]["binary"] = repind_players(self.player_index["binary"])
         self.obs_index["player"]["continuous"] = repind_players(self.player_index["continuous"])
+        self.obs_index["player"]["binary"] = repind_players(self.player_index["binary"])
         for cat_ind in self.player_index["categoricals"]:
             self.obs_index["player"]["categoricals"].append(repind_players(cat_ind))
+
+        player_discrete = torch.zeros([2, 0], dtype=torch.int64)
+        player_discrete = torch.cat((player_discrete, self.obs_index["player"]["binary"]), dim=1)
+        player_discrete = torch.cat((player_discrete, *self.obs_index["player"]["categoricals"]), dim=1)
+        self.obs_index["player"]["discrete"] = player_discrete
 
         # Hexes (165)
         repind_hexes = partial(
@@ -477,10 +612,45 @@ class TransitionModel(nn.Module):
             STATE_SIZE_ONE_HEX
         )
 
-        self.obs_index["hex"]["binary"] = repind_hexes(self.hex_index["binary"])
         self.obs_index["hex"]["continuous"] = repind_hexes(self.hex_index["continuous"])
+        self.obs_index["hex"]["binary"] = repind_hexes(self.hex_index["binary"])
         for cat_ind in self.hex_index["categoricals"]:
             self.obs_index["hex"]["categoricals"].append(repind_hexes(cat_ind))
+
+        hex_discrete = torch.zeros([165, 0], dtype=torch.int64)
+        hex_discrete = torch.cat((hex_discrete, self.obs_index["hex"]["binary"]), dim=1)
+        hex_discrete = torch.cat((hex_discrete, *self.obs_index["hex"]["categoricals"]), dim=1)
+        self.obs_index["hex"]["discrete"] = hex_discrete
+
+    def _build_counters(self):
+        # global_index = {"binary": [], "continuous": [], "categoricals": []}
+        # player_index = {"binary": [], "continuous": [], "categoricals": []}
+        # hex_index = {"binary": [], "continuous": [], "categoricals": []}
+
+        self.sample_counter = 0
+
+        # for 10 binaries => tensor(10, 2)
+        self.counters = {
+            "global": {
+                "continuous": torch.zeros(*self.global_index["continuous"].shape, 2, dtype=torch.int64),
+                "binary": torch.zeros(*self.global_index["binary"].shape, 2, dtype=torch.int64),
+                "categorical": [torch.zeros(ind.shape, dtype=torch.int64) for ind in self.global_index["categoricals"]],
+            },
+            "player": {
+                "continuous": torch.zeros(*self.global_index["continuous"].shape, 2, dtype=torch.int64),
+                "binary": torch.zeros(*self.global_index["binary"].shape, 2, dtype=torch.int64),
+                "categorical": [torch.zeros(ind.shape, dtype=torch.int64) for ind in self.global_index["categoricals"]],
+            },
+            "hex": {
+                "continuous": torch.zeros(*self.global_index["continuous"].shape, 2, dtype=torch.int64),
+                "binary": torch.zeros(*self.global_index["binary"].shape, 2, dtype=torch.int64),
+                "categorical": [torch.zeros(ind.shape, dtype=torch.int64) for ind in self.global_index["categoricals"]],
+            }
+        }
+        # To calculate binaries:
+        # num = math.prod(obs[:, model.obs_index["player"]["binary"]].shape[:-1])
+        # pos = obs[:, model.obs_index["hex"]["binary"]].sum(dim=(0, 1))
+        # neg = num - pos
 
 
 class StructuredLogger:
@@ -544,47 +714,143 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
     logger.log(dict(observations_collected=n, progress=100, terms=terms, truncs=truncs))
 
 
-def compute_losses(logger, obs_index, obs, logits):
+class Stats:
+    def __init__(self, model):
+        # Store [mean, var] for each continuous feature
+        # Shape: (N_CONT_FEATURES, 2)
+        self.continuous = {
+            "global": torch.zeros(*model.global_index["continuous"].shape, 2),
+            "player": torch.zeros(*model.player_index["continuous"].shape, 2),
+            "hex": torch.zeros(*model.hex_index["continuous"].shape, 2),
+        }
+
+        # Store [n_ones, n] for each binary feature
+        # Shape: (N_BIN_FEATURES, 2)
+        self.binary = {
+            "global": torch.zeros(*model.global_index["binary"].shape, 2, dtype=torch.int64),
+            "player": torch.zeros(*model.player_index["binary"].shape, 2, dtype=torch.int64),
+            "hex": torch.zeros(*model.hex_index["binary"].shape, 2, dtype=torch.int64),
+        }
+
+        # Store [n_ones_class0, n_ones_class1, ...]  for each categorical feature
+        # Python list with N_CAT_FEATURES elements
+        # Each element has shape: (N_CLASSES, 2), where N_CLASSES varies
+        # e.g.
+        # [
+        #  [n_ones_F1_class0, n_ones_F1_class1, n_ones_F1_class2],
+        #  [n_ones_F2_class0, n_ones_F2_class2, n_ones_F2_class3, n_ones_F2_class4],
+        #  ...etc
+        # ]
+        self.categoricals = {
+            "global": [torch.zeros(ind.shape, dtype=torch.int64) for ind in model.global_index["categoricals"]],
+            "player": [torch.zeros(ind.shape, dtype=torch.int64) for ind in model.player_index["categoricals"]],
+            "hex": [torch.zeros(ind.shape, dtype=torch.int64) for ind in model.hex_index["categoricals"]],
+        }
+
+        # Simple counter. 1 sample = 1 obs
+        # i.e. the counter for each hex feature will be 165*num_samples
+        self.num_samples = 0
+
+        # Number of updates, should correspond to training iteration
+        self.iteration = 0
+
+    def export_data(self):
+        return {
+            "iteration": self.iteration,
+            "num_samples": self.num_samples,
+            "continuous": self.continuous,
+            "binary": self.binary,
+            "categoricals": self.categoricals
+        }
+
+    def load(self, data):
+        self.continuous = data["continuous"]
+        self.binary = data["binary"]
+        self.categoricals = data["categoricals"]
+
+    def update(self, buffer, model):
+        with torch.no_grad():
+            self._update(buffer, model)
+
+    def _update(self, buffer, model):
+        self.num_samples += buffer.capacity
+
+        self.continuous["global"][:, 0] = model.encoder_global_continuous[0].running_mean
+        self.continuous["global"][:, 1] = model.encoder_global_continuous[0].running_var
+        self.continuous["player"][:, 0] = model.encoder_player_continuous[1].running_mean
+        self.continuous["player"][:, 1] = model.encoder_player_continuous[1].running_var
+        self.continuous["hex"][:, 0] = model.encoder_hex_continuous[1].running_mean
+        self.continuous["hex"][:, 1] = model.encoder_hex_continuous[1].running_var
+
+        obs = buffer.obs_buffer
+
+        # stat.add_(obs[:, ind].sum(0).round().long())
+        values_global = obs[:, model.obs_index["global"]["binary"]].round().long()
+        self.binary["global"][:, 0] += values_global.sum(0)
+        self.binary["global"][:, 1] += np.prod(values_global.shape)
+
+        values_player = obs[:, model.obs_index["player"]["binary"]].flatten(end_dim=1).round().long()
+        self.binary["player"][:, 0] += values_player.sum(0)
+        self.binary["player"][:, 1] += np.prod(values_player.shape)
+
+        values_hex = obs[:, model.obs_index["hex"]["binary"]].flatten(end_dim=1).round().long()
+        self.binary["hex"][:, 0] += values_hex.sum(0)
+        self.binary["hex"][:, 1] += np.prod(values_hex.shape)
+
+        for ind, stat in zip(model.obs_index["global"]["categoricals"], self.categoricals["global"]):
+            stat.add_(obs[:, ind].round().long().sum(0))
+
+        for ind, stat in zip(model.obs_index["player"]["categoricals"], self.categoricals["player"]):
+            stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
+
+        for ind, stat in zip(model.obs_index["hex"]["categoricals"], self.categoricals["hex"]):
+            stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
+
+
+def compute_losses(logger, obs_index, loss_weights, obs, logits):
     (
-        logits_global_binary,
         logits_global_continuous,
+        logits_global_binary,
         logits_global_categoricals,
-        logits_player_binary,
         logits_player_continuous,
+        logits_player_binary,
         logits_player_categoricals,
-        logits_hex_binary,
         logits_hex_continuous,
+        logits_hex_binary,
         logits_hex_categoricals,
     ) = logits
 
-    loss_binary = 0
     loss_continuous = 0
+    loss_binary = 0
     loss_categorical = 0
 
     # Global
-
-    if len(logits_global_binary):
-        target_global_binary = obs[:, obs_index["global"]["binary"]]
-        loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
 
     if len(logits_global_continuous):
         target_global_continuous = obs[:, obs_index["global"]["continuous"]]
         loss_continuous += mse_loss(logits_global_continuous, target_global_continuous)
 
+    if len(logits_global_binary):
+        target_global_binary = obs[:, obs_index["global"]["binary"]]
+        weight_global_binary = loss_weights["binary"]["global"]
+        loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
+
     if len(logits_global_categoricals):
         target_global_categoricals = [obs[:, index] for index in obs_index["global"]["categoricals"]]
-        for logits, target in zip(logits_global_categoricals, target_global_categoricals):
-            loss_categorical += cross_entropy(logits, target)
+        weight_global_categoricals = loss_weights["categoricals"]["global"]
+        for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
+            loss_categorical += cross_entropy(logits, target, weight=weight)
 
     # Player (2x)
-
-    if len(logits_player_binary):
-        target_player_binary = obs[:, obs_index["player"]["binary"]]
-        loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
 
     if len(logits_player_continuous):
         target_player_continuous = obs[:, obs_index["player"]["continuous"]]
         loss_continuous += mse_loss(logits_player_continuous, target_player_continuous)
+
+    if len(logits_player_binary):
+        target_player_binary = obs[:, obs_index["player"]["binary"]]
+        weight_player_binary = loss_weights["binary"]["player"]
+        loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
 
     # XXX: CrossEntropyLoss expects (B, C, *) input where C=num_classes
     #      => transpose (B, 2, C) => (B, C, 2)
@@ -594,25 +860,67 @@ def compute_losses(logger, obs_index, obs, logits):
 
     if len(logits_player_categoricals):
         target_player_categoricals = [obs[:, index] for index in obs_index["player"]["categoricals"]]
-        for logits, target in zip(logits_player_categoricals, target_player_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+        weight_player_categoricals = loss_weights["categoricals"]["player"]
+        for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
+            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
 
     # Hex (165x)
-
-    if len(logits_hex_binary):
-        target_hex_binary = obs[:, obs_index["hex"]["binary"]]
-        loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary)
 
     if len(logits_hex_continuous):
         target_hex_continuous = obs[:, obs_index["hex"]["continuous"]]
         loss_continuous += mse_loss(logits_hex_continuous, target_hex_continuous)
 
+    if len(logits_hex_binary):
+        target_hex_binary = obs[:, obs_index["hex"]["binary"]]
+        weight_hex_binary = loss_weights["binary"]["hex"]
+        loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
+
     if len(logits_hex_categoricals):
         target_hex_categoricals = [obs[:, index] for index in obs_index["hex"]["categoricals"]]
-        for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+        weight_hex_categoricals = loss_weights["categoricals"]["hex"]
+        for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
+            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
 
     return loss_binary, loss_continuous, loss_categorical
+
+
+def compute_loss_weights(stats):
+    weights = {
+        "binary": {
+            "global": torch.tensor(0.),
+            "player": torch.tensor(0.),
+            "hex": torch.tensor(0.)
+        },
+        "categoricals": {
+            "global": [],
+            "player": [],
+            "hex": []
+        },
+    }
+
+    # NOTE: Clamping weights to prevent huge weights for binaries
+    # which are never positive (e.g. SLEEPING stack flag)
+    for type in weights["binary"].keys():
+        s = stats.binary[type]
+        if len(s) == 0:
+            continue
+        num_positives = s[:, 0]
+        num_negatives = s[:, 1] - num_positives
+        pos_weights = num_negatives / num_positives
+        weights["binary"][type] = pos_weights.clamp(max=100)
+
+    # NOTE: Computing weights only for labels that have appeared
+    # to prevent huge weights for labels which never occur
+    # (e.g. hex.IS_REAR) from making the other weights very small
+    for type, cat_weights in weights["categoricals"].items():
+        for cat_stats in stats.categoricals[type]:
+            w = torch.zeros(cat_stats.shape, dtype=torch.float32)
+            mask = cat_stats > 0
+            masked_stats = cat_stats[mask].float()
+            w[mask] = masked_stats.mean() / masked_stats
+            cat_weights.append(w.clamp(max=100))
+
+    return weights
 
 
 def train_model(
@@ -620,25 +928,27 @@ def train_model(
     model,
     optimizer,
     buffer,
+    stats,
+    loss_weights,
     train_epochs,
     train_batch_size
 ):
     model.train()
 
     for epoch in range(train_epochs):
-        binary_losses = []
         continuous_losses = []
+        binary_losses = []
         categorical_losses = []
         total_losses = []
 
         for batch in buffer.sample_iter(train_batch_size):
             obs, action, next_rew, next_obs, next_mask, next_done = batch
             logits = model(obs, action)
-            loss_bin, loss_cont, loss_cat = compute_losses(logger, model.obs_index, next_obs, logits)
+            loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, logits)
 
-            loss_tot = loss_bin + loss_cont + loss_cat
-            binary_losses.append(loss_bin.item())
+            loss_tot = loss_cont + loss_bin + loss_cat
             continuous_losses.append(loss_cont.item())
+            binary_losses.append(loss_bin.item())
             categorical_losses.append(loss_cat.item())
             total_losses.append(loss_tot.item())
 
@@ -653,51 +963,49 @@ def train_model(
 
             optimizer.step()
 
-        binary_loss = sum(binary_losses) / len(binary_losses)
         continuous_loss = sum(continuous_losses) / len(continuous_losses)
+        binary_loss = sum(binary_losses) / len(binary_losses)
         categorical_loss = sum(categorical_losses) / len(categorical_losses)
         total_loss = sum(total_losses) / len(total_losses)
 
         logger.log(dict(
             train_epoch=epoch,
-            binary_loss=round(binary_loss, 6),
             continuous_loss=round(continuous_loss, 6),
+            binary_loss=round(binary_loss, 6),
             categorical_loss=round(categorical_loss, 6),
             total_loss=round(total_loss, 6),
         ))
 
 
-def eval_model(logger, model, buffer, eval_env_steps):
+def eval_model(logger, model, buffer, loss_weights, eval_env_steps):
     model.eval()
     batch_size = eval_env_steps // 10
 
-    binary_losses = []
     continuous_losses = []
+    binary_losses = []
     categorical_losses = []
     total_losses = []
 
     for batch in buffer.sample_iter(batch_size):
         obs, action, next_rew, next_obs, next_mask, next_done = batch
         logits = model(obs, action)
-        loss_bin, loss_cont, loss_cat = compute_losses(logger, model.obs_index, next_obs, logits)
+        loss_bin, loss_cont, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, logits)
         loss_tot = loss_bin + loss_cont + loss_cat
 
-        binary_losses.append(loss_bin.item())
         continuous_losses.append(loss_cont.item())
+        binary_losses.append(loss_bin.item())
         categorical_losses.append(loss_cat.item())
         total_losses.append(loss_tot.item())
 
-    binary_loss = sum(binary_losses) / len(binary_losses)
     continuous_loss = sum(continuous_losses) / len(continuous_losses)
+    binary_loss = sum(binary_losses) / len(binary_losses)
     categorical_loss = sum(categorical_losses) / len(categorical_losses)
     total_loss = sum(total_losses) / len(total_losses)
 
-    return binary_loss, continuous_loss, categorical_loss, total_loss
+    return continuous_loss, binary_loss, categorical_loss, total_loss
 
 
 def train(resume_config, dry_run):
-    run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
-
     # Usage:
     # python -m rl.encoder.autoencoder [path/to/config.json]
 
@@ -706,10 +1014,10 @@ def train(resume_config, dry_run):
             print(f"Resuming from config: {f.name}")
             config = json.load(f)
 
-        resumed_run_id = config["run"]["id"]
-        config["run"]["id"] = run_id
+        run_id = config["run"]["id"]
         config["run"]["resumed_config"] = resume_config
     else:
+        run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
         config = dict(
             run=dict(
                 id=run_id,
@@ -720,6 +1028,7 @@ def train(resume_config, dry_run):
                 # opponent="BattleAI",  # BROKEN in develop1.6 from 2025-01-31
                 opponent="StupidAI",
                 mapname="gym/generated/4096/4x1024.vmap",
+                # mapname="gym/A1.vmap",
                 max_steps=1000,
                 random_heroes=1,
                 random_obstacles=1,
@@ -739,16 +1048,16 @@ def train(resume_config, dry_run):
                 # TODO: consider torch.optim.lr_scheduler.StepLR
                 learning_rate=1e-3,
 
-                buffer_capacity=10_000,
-                train_epochs=3,
-                train_batch_size=1000,
-                eval_env_steps=10_000,
+                # buffer_capacity=10_000,
+                # train_epochs=3,
+                # train_batch_size=1000,
+                # eval_env_steps=10_000,
 
                 # Debug
-                # buffer_capacity=100,
-                # train_epochs=2,
-                # train_batch_size=10,
-                # eval_env_steps=100,
+                buffer_capacity=100,
+                train_epochs=1,
+                train_batch_size=10,
+                eval_env_steps=100,
             )
         )
 
@@ -774,19 +1083,35 @@ def train(resume_config, dry_run):
     env = VcmiEnv(**config["env"])
     model = TransitionModel()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    buffer = Buffer(capacity=buffer_capacity, dim_obs=STATE_SIZE, n_actions=N_ACTIONS, device="cpu")
+    stats = Stats(model)
 
     if resume_config:
-        filename = "%s/%s-model.pt" % (config["run"]["out_dir"], resumed_run_id)
-        logger.log(f"Loading model weights from {filename}")
+        filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
+        backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+
+        logger.log(f"Backup resumed model weights as {backname}")
+        shutil.copy2(filename, backname)
+        logger.log(f"Load model weights from {filename}")
         model.load_state_dict(torch.load(filename, weights_only=True), strict=True)
 
-        filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], resumed_run_id)
-        logger.log(f"Loading optimizer weights from {filename}")
+        filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], run_id)
+        backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+        logger.log(f"Backup optimizer weights as {backname}")
+        shutil.copy2(filename, backname)
+        logger.log(f"Load optimizer weights from {filename}")
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
 
-    buffer = Buffer(capacity=buffer_capacity, dim_obs=STATE_SIZE, n_actions=N_ACTIONS, device="cpu")
+        filename = "%s/%s-stats.pt" % (config["run"]["out_dir"], run_id)
+        backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+        logger.log(f"Backup training stats as {backname}")
+        shutil.copy2(filename, backname)
+        logger.log(f"Load training stats from {filename}")
+        stats.load_data(torch.load(filename, weights_only=True))
 
-    iteration = 0
+    if not dry_run:
+        setup_wandb(config, model, __file__)
+
     while True:
         collect_observations(
             logger=logger,
@@ -797,17 +1122,33 @@ def train(resume_config, dry_run):
         )
         assert buffer.full and not buffer.index
 
-        binary_loss, continuous_loss, categorical_loss, total_loss = eval_model(
+        # NOTE: this assumes no old observations are left in the buffer
+        stats.update(buffer, model)
+        wandb_log({"stats/num_samples": stats.num_samples})
+
+        loss_weights = compute_loss_weights(stats)
+        # wandb_log({"loss/weights": ???})
+
+        continuous_loss, binary_loss, categorical_loss, total_loss = eval_model(
             logger=logger,
             model=model,
             buffer=buffer,
+            loss_weights=loss_weights,
             eval_env_steps=eval_env_steps,
         )
 
+        wandb_log({
+            "iteration": stats.iteration,
+            "loss/continuous": continuous_loss,
+            "loss/binary": binary_loss,
+            "loss/categorical": categorical_loss,
+            "loss/total": total_loss
+        })
+
         logger.log(dict(
-            iteration=iteration,
-            binary_loss=round(binary_loss, 6),
+            iteration=stats.iteration,
             continuous_loss=round(continuous_loss, 6),
+            binary_loss=round(binary_loss, 6),
             categorical_loss=round(categorical_loss, 6),
             total_loss=round(total_loss, 6),
         ))
@@ -817,6 +1158,8 @@ def train(resume_config, dry_run):
             model=model,
             optimizer=optimizer,
             buffer=buffer,
+            stats=stats,
+            loss_weights=loss_weights,
             train_epochs=train_epochs,
             train_batch_size=train_batch_size
         )
@@ -830,7 +1173,9 @@ def train(resume_config, dry_run):
             logger.log(f"Saving optimizer weights to {filename}")
             torch.save(optimizer.state_dict(), filename)
 
-        iteration += 1
+            filename = os.path.join(config["run"]["out_dir"], f"{run_id}-stats.pt")
+            logger.log(f"Saving training stats to {filename}")
+            torch.save(stats.export_data(), filename)
 
 
 if __name__ == "__main__":
