@@ -1,48 +1,3 @@
-# TEST CODE (not working -- obs is still invalid, e.g. stacks with some attributes set to NULL instead of 0)
-# import torch
-# from rl.encoder.old_transition_model import TransitionModel
-# from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
-# from vcmi_gym.envs.v8.decoder.decoder import Decoder
-# if __name__ == "__main__":
-#     dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER; dim_hexes = VcmiEnv.STATE_SIZE_HEXES; dim_obs = dim_other + dim_hexes; n_actions = VcmiEnv.ACTION_SPACE.n
-#     model = TransitionModel(dim_other, dim_hexes, n_actions)
-#     w = torch.load("data/autoencoder/cgpefvda-model.pt", weights_only=True)
-#     model.load_state_dict(w, strict=True)
-#     env = VcmiEnv("gym/generated/4096/4x1024.vmap")
-#     print(env.render())
-#     bf = env.decode()
-#     print(bf.render())
-#     obs_old = env.obs["observation"]
-#     obs_pred = model(torch.as_tensor(obs_old).unsqueeze(0), torch.tensor(592))[0].detach()
-#     obs_real, *_ = env.step(592)
-#     obs_real = obs_real["observation"]
-#     torch.nn.functional.mse_loss(obs_pred, torch.as_tensor(obs_real))
-#     model._build_indices()
-#     obs_pred[model.obs_index["global"]["binary"]] = torch.sigmoid(obs_pred[model.obs_index["global"]["binary"]]).round()
-#     obs_pred[model.obs_index["global"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["global"]["continuous"]], 0, 1)
-#     for ind in model.obs_index["global"]["categoricals"]:
-#         out = obs_pred[ind]
-#         one_hot = torch.zeros_like(out)
-#         one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
-#         obs_pred[ind] = one_hot
-#     obs_pred[model.obs_index["player"]["binary"]] = torch.sigmoid(obs_pred[model.obs_index["player"]["binary"]]).round()
-#     obs_pred[model.obs_index["player"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["player"]["continuous"]], 0, 1)
-#     for ind in model.obs_index["player"]["categoricals"]:
-#         out = obs_pred[ind]
-#         one_hot = torch.zeros_like(out)
-#         one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
-#         obs_pred[ind] = one_hot
-#     obs_pred[model.obs_index["hex"]["binary"]] = torch.sigmoid(obs_pred[model.obs_index["hex"]["binary"]]).round()
-#     obs_pred[model.obs_index["hex"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["hex"]["continuous"]], 0, 1)
-#     for ind in model.obs_index["hex"]["categoricals"]:
-#         out = obs_pred[ind]
-#         one_hot = torch.zeros_like(out)
-#         one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
-#         obs_pred[ind] = one_hot
-#
-#     print(Decoder.decode(obs_pred.numpy()).render())
-
-
 import os
 import torch
 import torch.nn as nn
@@ -50,6 +5,7 @@ import random
 import string
 import json
 import yaml
+import pathlib
 import argparse
 from functools import partial
 
@@ -59,14 +15,55 @@ from vcmi_gym.envs.v8.pyprocconnector import (
     GLOBAL_ATTR_MAP,
     PLAYER_ATTR_MAP,
     HEX_ATTR_MAP,
-    STATE_SIZE,
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
-    N_ACTIONS,
 )
 
 from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
+
+
+def wandb_log(*args, **kwargs):
+    pass
+
+
+def setup_wandb(config, model, src_file):
+    import wandb
+
+    resumed = config["run"]["resumed_config"] is not None
+
+    wandb.init(
+        project="vcmi-gym",
+        group="transition-model",
+        name="%s-%s" % (datetime.now().strftime("%Y%m%d_%H%M%S"), config["run"]["id"]),
+        id=config["run"]["id"],
+        resume="must" if resumed else "never",
+        # resume="allow",  # XXX: reuse id for insta-failed runs
+        config=config,
+        sync_tensorboard=False,
+        save_code=False,  # code saved manually below
+        allow_val_change=resumed,
+        settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
+    )
+
+    # https://docs.wandb.ai/ref/python/run#log_code
+    # XXX: "path" is relative to `root`
+    #      but args.cfg_file is relative to vcmi-gym ROOT dir
+    src_file = pathlib.Path(src_file)
+
+    def code_include_fn(path):
+        p = pathlib.Path(path).absolute()
+        return p.samefile(src_file)
+
+    wandb.run.log_code(root=src_file.parent, include_fn=code_include_fn)
+    wandb.watch(model, log="all", log_graph=True, log_freq=1000)
+
+    global wandb_log
+
+    # For wandb.log, commit=True by default
+    # for wandb_log, commit=False by default
+    def wandb_log(*args, **kwargs):
+        wandb.log(*args, **dict({"commit": False}, **kwargs))
 
 
 def to_tensor(dict_obs):
@@ -191,6 +188,12 @@ class TransitionModel(nn.Module):
         # next_done = self.head_done(z)
         # return next_obs, next_rew, next_mask, next_done
         return next_obs
+
+    def predict(self, obs, action):
+        with torch.no_grad():
+            obs = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
+            action = torch.tensor(action, dtype=torch.int64)
+            return self(obs, action)[0].numpy()
 
     def _build_indices(self):
         self.global_index = {"continuous": [], "binary": [], "categoricals": []}
@@ -507,7 +510,7 @@ def eval_model(logger, model, buffer, eval_env_steps):
     return obs_loss
 
 
-def train(resume_config):
+def train(resume_config, dry_run):
     run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
 
     # Usage:
@@ -605,6 +608,17 @@ def train(resume_config):
         logger.log(f"Loading optimizer weights from {filename}")
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
 
+    if not dry_run:
+        setup_wandb(config, model, __file__)
+
+    wandb_log({
+        "params/learning_rate": learning_rate,
+        "params/buffer_capacity": buffer_capacity,
+        "params/train_epochs": train_epochs,
+        "params/train_batch_size": train_batch_size,
+        "params/eval_env_steps": eval_env_steps,
+    })
+
     buffer = Buffer(capacity=buffer_capacity, dim_obs=dim_obs, n_actions=n_actions, device="cpu")
 
     iteration = 0
@@ -626,6 +640,11 @@ def train(resume_config):
             eval_env_steps=eval_env_steps,
         )
 
+        wandb_log({
+            "iteration": iteration,
+            "loss/total": obs_loss
+        }, commit=True)
+
         logger.log(dict(
             iteration=iteration,
             obs_loss=round(obs_loss, 6),
@@ -644,20 +663,109 @@ def train(resume_config):
             train_batch_size=train_batch_size
         )
 
-        filename = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
-        logger.log(f"Saving model weights to {filename}")
-        torch.save(model.state_dict(), filename)
+        if not dry_run:
+            filename = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
+            logger.log(f"Saving model weights to {filename}")
+            torch.save(model.state_dict(), filename)
 
-        filename = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
-        logger.log(f"Saving optimizer weights to {filename}")
-        torch.save(optimizer.state_dict(), filename)
+            filename = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
+            logger.log(f"Saving optimizer weights to {filename}")
+            torch.save(optimizer.state_dict(), filename)
 
         iteration += 1
+
+
+def test():
+    import importlib
+    from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
+
+    run_id = os.path.basename(__file__).removesuffix(".py")
+    mod = importlib.import_module(f"rl.encoder.old_code.{run_id}")
+    dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
+    dim_hexes = VcmiEnv.STATE_SIZE_HEXES
+    n_actions = VcmiEnv.ACTION_SPACE.n
+    model = mod.TransitionModel(dim_other, dim_hexes, n_actions)
+    weights = torch.load(f"data/autoencoder/{run_id}-model.pt", weights_only=True)
+    model.load_state_dict(weights, strict=True)
+    model.eval()
+
+    env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap")
+    obs_prev = env.result.state.copy()
+    bf = Decoder.decode(obs_prev)
+    action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
+
+    obs_pred = torch.as_tensor(model.predict(obs_prev, action))
+    obs_real = env.step(action)[0]["observation"]
+    obs_dirty = obs_pred.clone()
+
+    # print("*** Before preprocessing: ***")
+    # print("Loss: %s" % torch.nn.functional.mse_loss(torch.as_tensor(obs_pred), torch.as_tensor(obs_next)))
+    # print(Decoder.decode(obs_pred).render())
+
+    model._build_indices()
+    obs_pred[model.obs_index["global"]["binary"]] = (obs_pred[model.obs_index["global"]["binary"]] > 0.5).float()
+    obs_pred[model.obs_index["global"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["global"]["continuous"]], 0, 1)
+    for ind in model.obs_index["global"]["categoricals"]:
+        out = obs_pred[ind]
+        one_hot = torch.zeros_like(out)
+        one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
+        obs_pred[ind] = one_hot
+    obs_pred[model.obs_index["player"]["binary"]] = (obs_pred[model.obs_index["player"]["binary"]] > 0.5).float()
+    obs_pred[model.obs_index["player"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["player"]["continuous"]], 0, 1)
+    for ind in model.obs_index["player"]["categoricals"]:
+        out = obs_pred[ind]
+        one_hot = torch.zeros_like(out)
+        one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
+        obs_pred[ind] = one_hot
+    obs_pred[model.obs_index["hex"]["binary"]] = (obs_pred[model.obs_index["hex"]["binary"]] > 0.5).float()
+    obs_pred[model.obs_index["hex"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["hex"]["continuous"]], 0, 1)
+    for ind in model.obs_index["hex"]["categoricals"]:
+        out = obs_pred[ind]
+        one_hot = torch.zeros_like(out)
+        one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
+        obs_pred[ind] = one_hot
+
+    render = {"dirty": {}, "prev": {}, "pred": {}, "real": {}, "combined": {}}
+
+    import re
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+    def prepare(obs, name, headline):
+        render[name] = {}
+        render[name]["raw"] = Decoder.decode(obs).render()
+        render[name]["lines"] = render[name]["raw"].split("\n")
+        render[name]["bf_lines"] = render[name]["lines"][:15]
+        render[name]["bf_lines"].insert(0, headline)
+        render[name]["bf_len"] = [len(l) for l in render[name]["bf_lines"]]
+        render[name]["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render[name]["bf_lines"]]
+        render[name]["bf_maxlen"] = max(render[name]["bf_len"])
+        render[name]["bf_maxprintlen"] = max(render[name]["bf_printlen"])
+        render[name]["bf_lines"] = [l + " "*(render[name]["bf_maxprintlen"] - pl) for l, pl in zip(render[name]["bf_lines"], render[name]["bf_printlen"])]
+
+    prepare(obs_prev, "prev", "Previous:")
+    prepare(obs_real, "real", "Real:")
+    prepare(obs_pred.numpy(), "pred", "Predicted:")
+    # prepare(obs_dirty, "dirty", "Dirty:")
+
+    render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render["prev"]["bf_lines"], render["real"]["bf_lines"], render["pred"]["bf_lines"]))
+    print(render["combined"]["bf"])
+
+    # print("Dirty (all):")
+    # print(render["dirty"]["raw"])
+    print("Pred (all):")
+    print(render["pred"]["raw"])
+    print("Real (all):")
+    print(render["real"]["raw"])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', metavar="FILE", help="config file to resume or test")
+    parser.add_argument('--dry-run', action="store_true", help="do not save model")
+    parser.add_argument('--test', action="store_true", help="test instead of train")
     args = parser.parse_args()
 
-    train(args.f)
+    if args.test:
+        test()
+    else:
+        train(args.f, args.dry_run)

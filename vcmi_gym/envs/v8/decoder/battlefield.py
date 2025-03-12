@@ -81,14 +81,14 @@ class Battlefield():
     # XXX: this is C++ code translated in Python and it's quite ugly
     def render(self, strict=False):
         arr = lambda x, n: [x for _ in range(n)]
-        stacks = [[], []]  # left, right
+        stacks = [[], [], []]  # left, right, ukn
 
         nocol = "\033[0m"
         redcol = "\033[31m"  # red
         bluecol = "\033[34m"  # blue
         darkcol = "\033[90m"
         activemod = "\033[107m\033[7m"  # bold+reversed
-        # ukncol = "\033[7m"  # white
+        ukncol = "\033[7m"  # white
 
         lines = []
 
@@ -178,16 +178,24 @@ class Battlefield():
 
                 if hex.stack:
                     sym = "?"
-                    col = bluecol if hex.stack.SIDE.v else redcol
+                    if hex.stack.SIDE.v is None:
+                        col = ukncol
+                    elif hex.stack.SIDE.v:
+                        col = bluecol
+                    else:
+                        col = redcol
 
                     if not hex.IS_REAR:
-                        stacks[hex.stack.SIDE.v].append(hex.stack)
-                    if hex.stack.QUANTITY.v == -1:
+                        if hex.stack.SIDE.v is None:
+                            stacks[2].append(hex.stack)
+                        else:
+                            stacks[hex.stack.SIDE.v].append(hex.stack)
+                    if hex.stack.QUANTITY.v is None:
                         col += "\033[1;47"
                     elif hex.stack.QUEUE_POS.v == 0:
                         col += activemod
 
-                    if hex.stack.FLAGS.struct.IS_WIDE:
+                    if hex.stack.FLAGS.v is not None and hex.stack.FLAGS.struct.IS_WIDE:
                         if hex.stack.SIDE.v == 0 and hex.IS_REAR.v:
                             sym += "↠"
                             addspace = False
@@ -308,36 +316,56 @@ class Battlefield():
                     value = ""
 
                     if stack:
-                        flags = stack.FLAGS.struct
-                        color = bluecol if stack.SIDE.v else redcol
+                        flags = stack.FLAGS.struct if stack.FLAGS.v is not None else None
+                        color = bluecol if side else redcol
 
                         if a == "ID":
                             value = stack.alias()
                         elif a == "VALUE":
-                            if stack.VALUE_ONE.v < 1000:
+                            if stack.VALUE_ONE.v is None:
+                                value = "?"
+                            elif stack.VALUE_ONE.v < 1000:
                                 value = str(stack.VALUE_ONE.v)
-                            if stack.VALUE_ONE.v >= 1000:
+                            elif stack.VALUE_ONE.v >= 1000:
                                 value = "%.1f" % (stack.VALUE_ONE.v / 1000.0)
                                 value = value[:-2] + "k" + value[-1]
                                 if value.endswith("k0"):
                                     value = value[:-1]
                         elif a == "STATE":
-                            value = ""
-                            value += "W" if flags.CAN_WAIT else " "
-                            value += "A" if flags.WILL_ACT else " "
-                            value += "R" if flags.CAN_RETALIATE else " "
+                            if flags is None:
+                                value = "?"
+                            else:
+                                value = ""
+                                value += "W" if flags.CAN_WAIT else " "
+                                value += "A" if flags.WILL_ACT else " "
+                                value += "R" if flags.CAN_RETALIATE else " "
                         elif a == "ATTACK MODS":
-                            value = ""
-                            value += "D" if flags.ADDITIONAL_ATTACK else " "
-                            value += "B" if flags.BLIND_LIKE_ATTACK else " "
+                            if flags is None:
+                                value = "?"
+                            else:
+                                value = ""
+                                value += "D" if flags and flags.ADDITIONAL_ATTACK else " "
+                                value += "B" if flags and flags.BLIND_LIKE_ATTACK else " "
                         elif a == "BLOCKED/ING":
-                            value = "%s/%s" % (flags.BLOCKED, flags.BLOCKING)
+                            if flags is None:
+                                value = "?"
+                            else:
+                                value = "%s/%s" % (flags.BLOCKED, flags.BLOCKING)
                         elif a == "FLY/SLEEP":
-                            value = "%s/%s" % (flags.FLYING, flags.SLEEPING)
+                            if flags is None:
+                                value = "?"
+                            else:
+                                value = "%s/%s" % (flags.FLYING, flags.SLEEPING)
                         elif a == "NO RETAL/MELEE":
-                            value = "%s/%s" % (flags.BLOCKS_RETALIATION, flags.NO_MELEE_PENALTY)
+                            if flags is None:
+                                value = "?"
+                            else:
+                                value = "%s/%s" % (flags.BLOCKS_RETALIATION, flags.NO_MELEE_PENALTY)
                         elif a == "WIDE/BREATH":
-                            value = "%s/%s" % (flags.IS_WIDE, flags.TWO_HEX_ATTACK_BREATH)
+                            if flags is None:
+                                value = "?"
+                            else:
+                                value = "%s/%s" % (flags.IS_WIDE, flags.TWO_HEX_ATTACK_BREATH)
                         elif a == "Y_COORD":
                             value = str(stack.hex.Y_COORD.v)
                         elif a == "X_COORD":
