@@ -763,7 +763,7 @@ class Stats:
             "categoricals": self.categoricals
         }
 
-    def load(self, data):
+    def load_data(self, data):
         self.continuous = data["continuous"]
         self.binary = data["binary"]
         self.categoricals = data["categoricals"]
@@ -956,7 +956,6 @@ def train_model(
             loss_tot.backward()
 
             total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'))  # No clipping, just measuring
-            print(f"Gradient norm before clipping: {total_norm}")
 
             max_norm = 1.0  # Adjust as needed
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
@@ -974,6 +973,7 @@ def train_model(
             binary_loss=round(binary_loss, 6),
             categorical_loss=round(categorical_loss, 6),
             total_loss=round(total_loss, 6),
+            gradient_norm=round(total_norm.item(), 6),
         ))
 
 
@@ -1048,16 +1048,16 @@ def train(resume_config, dry_run):
                 # TODO: consider torch.optim.lr_scheduler.StepLR
                 learning_rate=1e-3,
 
-                # buffer_capacity=10_000,
-                # train_epochs=3,
-                # train_batch_size=1000,
-                # eval_env_steps=10_000,
+                buffer_capacity=10_000,
+                train_epochs=3,
+                train_batch_size=1000,
+                eval_env_steps=10_000,
 
                 # Debug
-                buffer_capacity=100,
-                train_epochs=1,
-                train_batch_size=10,
-                eval_env_steps=100,
+                # buffer_capacity=100,
+                # train_epochs=1,
+                # train_batch_size=10,
+                # eval_env_steps=100,
             )
         )
 
@@ -1112,6 +1112,14 @@ def train(resume_config, dry_run):
     if not dry_run:
         setup_wandb(config, model, __file__)
 
+    wandb_log({
+        "params/learning_rate": learning_rate,
+        "params/buffer_capacity": buffer_capacity,
+        "params/train_epochs": train_epochs,
+        "params/train_batch_size": train_batch_size,
+        "params/eval_env_steps": eval_env_steps,
+    })
+
     while True:
         collect_observations(
             logger=logger,
@@ -1143,7 +1151,7 @@ def train(resume_config, dry_run):
             "loss/binary": binary_loss,
             "loss/categorical": categorical_loss,
             "loss/total": total_loss
-        })
+        }, commit=True)
 
         logger.log(dict(
             iteration=stats.iteration,
