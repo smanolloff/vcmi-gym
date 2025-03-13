@@ -822,12 +822,10 @@ def train(resume_config, dry_run):
 
 
 def test():
-    import importlib
     from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
 
     run_id = os.path.basename(__file__).removesuffix(".py")
-    mod = importlib.import_module(f"rl.encoder.old_code.{run_id}")
-    model = mod.TransitionModel()
+    model = TransitionModel()
     weights = torch.load(f"data/autoencoder/{run_id}-model.pt", weights_only=True)
     model.load_state_dict(weights, strict=True)
     model.eval()

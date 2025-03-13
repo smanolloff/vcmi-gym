@@ -78,7 +78,7 @@ class Buffer:
         self.obs_buffer = torch.empty((capacity, dim_obs), dtype=torch.float32, device=device)
         self.mask_buffer = torch.empty((capacity, n_actions), dtype=torch.float32, device=device)
         self.done_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
-        self.action_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
+        self.action_buffer = torch.empty((capacity,), dtype=torch.int64, device=device)
         self.reward_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
 
         self.index = 0
@@ -90,7 +90,7 @@ class Buffer:
         self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32)
         self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32)
         self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32)
-        self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.float32)
+        self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64)
         self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32)
 
         self.index = (self.index + 1) % self.capacity
@@ -180,7 +180,7 @@ class TransitionModel(nn.Module):
 
         zother = self.encoder_other(other)
         zhexes = self.encoder_hex(hexes)
-        merged = torch.cat((nn.functional.one_hot(action.unsqueeze(-1), VcmiEnv.ACTION_SPACE.n), zother, zhexes), dim=-1)
+        merged = torch.cat((nn.functional.one_hot(action, VcmiEnv.ACTION_SPACE.n), zother, zhexes), dim=-1)
         z = self.encoder_merged(merged)
         next_obs = self.head_obs(z)
         # next_rew = self.head_rew(z)
@@ -448,7 +448,7 @@ def train_model(
             # done_loss = binary_cross_entropy_with_logits(next_done_pred, next_done)
             # total_loss = obs_loss + rew_loss + mask_loss + done_loss
 
-            # obs_losses.append(obs_loss.item())
+            obs_losses.append(obs_loss.item())
             # rew_losses.append(rew_loss.item())
             # mask_losses.append(mask_loss.item())
             # done_losses.append(done_loss.item())
@@ -511,8 +511,6 @@ def eval_model(logger, model, buffer, eval_env_steps):
 
 
 def train(resume_config, dry_run):
-    run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
-
     # Usage:
     # python -m rl.encoder.autoencoder [path/to/config.json]
 
@@ -521,10 +519,10 @@ def train(resume_config, dry_run):
             print(f"Resuming from config: {f.name}")
             config = json.load(f)
 
-        resumed_run_id = config["run"]["id"]
-        config["run"]["id"] = run_id
+        run_id = config["run"]["id"]
         config["run"]["resumed_config"] = resume_config
     else:
+        run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
         config = dict(
             run=dict(
                 id=run_id,
@@ -600,11 +598,11 @@ def train(resume_config, dry_run):
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     if resume_config:
-        filename = "%s/%s-model.pt" % (config["run"]["out_dir"], resumed_run_id)
+        filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
         logger.log(f"Loading model weights from {filename}")
         model.load_state_dict(torch.load(filename, weights_only=True), strict=True)
 
-        filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], resumed_run_id)
+        filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], run_id)
         logger.log(f"Loading optimizer weights from {filename}")
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
 
@@ -676,15 +674,13 @@ def train(resume_config, dry_run):
 
 
 def test():
-    import importlib
     from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
 
     run_id = os.path.basename(__file__).removesuffix(".py")
-    mod = importlib.import_module(f"rl.encoder.old_code.{run_id}")
     dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
     dim_hexes = VcmiEnv.STATE_SIZE_HEXES
     n_actions = VcmiEnv.ACTION_SPACE.n
-    model = mod.TransitionModel(dim_other, dim_hexes, n_actions)
+    model = TransitionModel(dim_other, dim_hexes, n_actions)
     weights = torch.load(f"data/autoencoder/{run_id}-model.pt", weights_only=True)
     model.load_state_dict(weights, strict=True)
     model.eval()
@@ -745,7 +741,7 @@ def test():
     prepare(obs_prev, "prev", "Previous:")
     prepare(obs_real, "real", "Real:")
     prepare(obs_pred.numpy(), "pred", "Predicted:")
-    # prepare(obs_dirty, "dirty", "Dirty:")
+    prepare(obs_dirty, "dirty", "Dirty:")
 
     render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render["prev"]["bf_lines"], render["real"]["bf_lines"], render["pred"]["bf_lines"]))
     print(render["combined"]["bf"])

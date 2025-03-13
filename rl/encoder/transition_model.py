@@ -49,7 +49,7 @@ def wandb_log(*args, **kwargs):
     pass
 
 
-def setup_wandb(config, model, src_file):
+def setup_wandb(logger, config, model, src_file):
     import wandb
 
     resumed = config["run"]["resumed_config"] is not None
@@ -79,13 +79,7 @@ def setup_wandb(config, model, src_file):
 
     wandb.run.log_code(root=src_file.parent, include_fn=code_include_fn)
     wandb.watch(model, log="all", log_graph=True, log_freq=1000)
-
-    global wandb_log
-
-    # For wandb.log, commit=True by default
-    # for wandb_log, commit=False by default
-    def wandb_log(*args, **kwargs):
-        wandb.log(*args, **dict({"commit": False}, **kwargs))
+    return wandb
 
 
 def to_tensor(dict_obs):
@@ -802,14 +796,17 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
     if logits_global_binary.numel():
         target_global_binary = obs[:, obs_index["global"]["binary"]]
-        weight_global_binary = loss_weights["binary"]["global"]
-        loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
+        # weight_global_binary = loss_weights["binary"]["global"]
+        # loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
+        loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
 
     if logits_global_categoricals:
         target_global_categoricals = [obs[:, index] for index in obs_index["global"]["categoricals"]]
-        weight_global_categoricals = loss_weights["categoricals"]["global"]
-        for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
-            loss_categorical += cross_entropy(logits, target, weight=weight)
+        # weight_global_categoricals = loss_weights["categoricals"]["global"]
+        # for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
+        #     loss_categorical += cross_entropy(logits, target, weight=weight)
+        for logits, target in zip(logits_global_categoricals, target_global_categoricals):
+            loss_categorical += cross_entropy(logits, target)
 
     # Player (2x)
 
@@ -819,8 +816,9 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
     if logits_player_binary.numel():
         target_player_binary = obs[:, obs_index["player"]["binary"]]
-        weight_player_binary = loss_weights["binary"]["player"]
-        loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
+        # weight_player_binary = loss_weights["binary"]["player"]
+        # loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
+        loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
 
     # XXX: CrossEntropyLoss expects (B, C, *) input where C=num_classes
     #      => transpose (B, 2, C) => (B, C, 2)
@@ -830,9 +828,11 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
     if logits_player_categoricals:
         target_player_categoricals = [obs[:, index] for index in obs_index["player"]["categoricals"]]
-        weight_player_categoricals = loss_weights["categoricals"]["player"]
-        for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        # weight_player_categoricals = loss_weights["categoricals"]["player"]
+        # for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
+        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        for logits, target in zip(logits_player_categoricals, target_player_categoricals):
+            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
 
     # Hex (165x)
 
@@ -842,19 +842,23 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
     if logits_hex_binary.numel():
         target_hex_binary = obs[:, obs_index["hex"]["binary"]]
-        weight_hex_binary = loss_weights["binary"]["hex"]
-        loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
+        # weight_hex_binary = loss_weights["binary"]["hex"]
+        # loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
+        loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary)
 
     if logits_hex_categoricals:
         target_hex_categoricals = [obs[:, index] for index in obs_index["hex"]["categoricals"]]
-        weight_hex_categoricals = loss_weights["categoricals"]["hex"]
-        for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        # weight_hex_categoricals = loss_weights["categoricals"]["hex"]
+        # for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
+        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
+            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
 
     return loss_binary, loss_continuous, loss_categorical
 
 
 def compute_loss_weights(stats):
+    return
     weights = {
         "binary": {
             "global": torch.tensor(0.),
@@ -976,18 +980,6 @@ def eval_model(logger, model, buffer, loss_weights, eval_env_steps):
 
 
 def train(resume_config, dry_run):
-    # Usage:
-    # python -m rl.encoder.autoencoder [path/to/config.json]
-    debug_config = dict(
-        buffer_capacity=100,
-        train_epochs=1,
-        train_batch_size=10,
-        eval_env_steps=100,
-    )
-
-    live_config=dict(
-    )
-
     if resume_config:
         with open(resume_config, "r") as f:
             print(f"Resuming from config: {f.name}")
@@ -1024,22 +1016,23 @@ def train(resume_config, dry_run):
                 # vcmi_loglevel_ai="trace",
             ),
             train={
-                "learning_rate": 1e-2,
+                "lr_start": 1e-2,
+                "lr_min": 1e-5,
+                "lr_step_size": 60,  # 1step ~= 1min if epochs=3 and buf=10K
+                "lr_gamma": 0.75,
+
                 "buffer_capacity": 10_000,
                 "train_epochs": 3,
-                "train_batch_size": 100,
+                "train_batch_size": 1000,
                 "eval_env_steps": 10_000,
 
-                # DEBUG (repeat warning OK)
-                "buffer_capacity": 100,
-                "train_epochs": 1,
-                "train_batch_size": 10,
-                "eval_env_steps": 100,
+                # !!! DEBUG (linter warning is OK) !!!
+                # "buffer_capacity": 100,
+                # "train_epochs": 1,
+                # "train_batch_size": 10,
+                # "eval_env_steps": 100,
             }
         )
-
-    # !!! DEBUG !!!
-    # debug_config()
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
@@ -1050,7 +1043,10 @@ def train(resume_config, dry_run):
     logger = StructuredLogger(filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
     logger.log(dict(config=config))
 
-    learning_rate = config["train"]["learning_rate"]
+    lr_start = config["train"]["lr_start"]
+    lr_min = config["train"]["lr_min"]
+    lr_step_size = config["train"]["lr_step_size"]
+    lr_gamma = config["train"]["lr_gamma"]
     buffer_capacity = config["train"]["buffer_capacity"]
     train_epochs = config["train"]["train_epochs"]
     train_batch_size = config["train"]["train_batch_size"]
@@ -1062,7 +1058,8 @@ def train(resume_config, dry_run):
     # Initialize environment, buffer, and model
     env = VcmiEnv(**config["env"])
     model = TransitionModel()
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr_start)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
     buffer = Buffer(capacity=buffer_capacity, dim_obs=STATE_SIZE, n_actions=N_ACTIONS, device="cpu")
     stats = Stats(model)
 
@@ -1091,11 +1088,24 @@ def train(resume_config, dry_run):
             logger.log(f"Backup training stats as {backname}")
             shutil.copy2(filename, backname)
 
-    if not dry_run:
-        setup_wandb(config, model, __file__)
+    global wandb_log
+
+    if dry_run:
+        def wandb_log(data, commit=False):
+            logger.log(data)
+    else:
+        wandb = setup_wandb(logger, config, model, __file__)
+
+        def wandb_log(data, commit=False):
+            wandb.log(data, commit=commit)
+            logger.log(data)
+
+    for _ in range(stats.iteration):
+        if scheduler.get_last_lr()[0] <= lr_min:
+            break
+        scheduler.step()
 
     wandb_log({
-        "params/learning_rate": learning_rate,
         "params/buffer_capacity": buffer_capacity,
         "params/train_epochs": train_epochs,
         "params/train_batch_size": train_batch_size,
@@ -1114,10 +1124,8 @@ def train(resume_config, dry_run):
 
         # NOTE: this assumes no old observations are left in the buffer
         stats.update(buffer, model)
-        wandb_log({"stats/num_samples": stats.num_samples})
 
         loss_weights = compute_loss_weights(stats)
-        # wandb_log({"loss/weights": ???})
 
         continuous_loss, binary_loss, categorical_loss, total_loss = eval_model(
             logger=logger,
@@ -1129,19 +1137,14 @@ def train(resume_config, dry_run):
 
         wandb_log({
             "iteration": stats.iteration,
+            "params/learning_rate": scheduler.get_last_lr()[0],
+            "stats/num_samples": stats.num_samples,
             "loss/continuous": continuous_loss,
             "loss/binary": binary_loss,
             "loss/categorical": categorical_loss,
-            "loss/total": total_loss
+            "loss/total": total_loss,
+            # "loss/weights": ???
         }, commit=True)
-
-        logger.log(dict(
-            iteration=stats.iteration,
-            continuous_loss=round(continuous_loss, 6),
-            binary_loss=round(binary_loss, 6),
-            categorical_loss=round(categorical_loss, 6),
-            total_loss=round(total_loss, 6),
-        ))
 
         train_model(
             logger=logger,
@@ -1155,25 +1158,88 @@ def train(resume_config, dry_run):
         )
 
         if not dry_run:
-            filename = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
-            logger.log(f"Saving model weights to {filename}")
-            torch.save(model.state_dict(), filename)
+            f_base = os.path.join(config["run"]["out_dir"], run_id)
+            f_model = f"{f_base}-model.pt"
+            f_optimizer = f"{f_base}-optimizer.pt"
+            f_stats = f"{f_base}-stats.pt"
 
-            filename = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
-            logger.log(f"Saving optimizer weights to {filename}")
-            torch.save(optimizer.state_dict(), filename)
+            logger.log(dict(
+                event="Saving checkpoint...",
+                model=f_model,
+                optimizer=f_optimizer,
+                stats=f_stats
+            ))
 
-            filename = os.path.join(config["run"]["out_dir"], f"{run_id}-stats.pt")
-            logger.log(f"Saving training stats to {filename}")
-            torch.save(stats.export_data(), filename)
+            # Prevent corrupted checkpoints if terminated during torch.save
+            for f in [f_model, f_optimizer, f_stats]:
+                if os.path.exists(f):
+                    shutil.copy2(f, f"{f}~")
+
+            torch.save(model.state_dict(), f_model)
+            torch.save(optimizer.state_dict(), f_optimizer)
+            torch.save(stats.export_data(), f_stats)
 
         stats.iteration += 1
+        if scheduler.get_last_lr()[0] > lr_min:
+            scheduler.step()
+
+
+def test(weights_path):
+    from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
+
+    model = TransitionModel()
+    weights = torch.load(weights_path, weights_only=True)
+    model.load_state_dict(weights, strict=True)
+    model.eval()
+
+    env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap")
+    obs_prev = env.result.state.copy()
+    bf = Decoder.decode(obs_prev)
+    action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
+
+    obs_pred = model.predict(obs_prev, action)
+    obs_real = env.step(action)[0]["observation"]
+
+    # print("*** Predicted: ***")
+    print("Loss: %s" % torch.nn.functional.mse_loss(torch.as_tensor(obs_pred), torch.as_tensor(obs_real)))
+    render = {"prev": {}, "pred": {}, "real": {}, "combined": {}}
+
+    import re
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+    def prepare(obs, name, headline):
+        render[name] = {}
+        render[name]["raw"] = Decoder.decode(obs).render()
+        render[name]["lines"] = render[name]["raw"].split("\n")
+        render[name]["bf_lines"] = render[name]["lines"][:15]
+        render[name]["bf_lines"].insert(0, headline)
+        render[name]["bf_len"] = [len(l) for l in render[name]["bf_lines"]]
+        render[name]["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render[name]["bf_lines"]]
+        render[name]["bf_maxlen"] = max(render[name]["bf_len"])
+        render[name]["bf_maxprintlen"] = max(render[name]["bf_printlen"])
+        render[name]["bf_lines"] = [l + " "*(render[name]["bf_maxprintlen"] - pl) for l, pl in zip(render[name]["bf_lines"], render[name]["bf_printlen"])]
+
+    prepare(obs_prev, "prev", "Previous:")
+    prepare(obs_real, "real", "Real:")
+    prepare(obs_pred, "pred", "Predicted:")
+
+    render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render["prev"]["bf_lines"], render["real"]["bf_lines"], render["pred"]["bf_lines"]))
+    print(render["combined"]["bf"])
+
+    print("Pred (all):")
+    print(render["pred"]["raw"])
+    print("Real (all):")
+    print(render["real"]["raw"])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', metavar="FILE", help="config file to resume or test")
     parser.add_argument('--dry-run', action="store_true", help="do not save model")
+    parser.add_argument('--test', metavar="PATH", help="test model from PATH instead of training")
     args = parser.parse_args()
 
-    train(args.f, args.dry_run)
+    if args.test:
+        test(args.test)
+    else:
+        train(args.f, args.dry_run)
