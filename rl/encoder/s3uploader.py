@@ -71,14 +71,14 @@ def upload_files_to_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws_sec
         ext = m[3]
         s3_key = f"{s3_prefix}/{t}-{suffix}.{ext}"
 
-        # XXX: TMP linkinkg
-        target = "../../../" + local_path
-        link_name = os.path.dirname(__file__) + "/.cache/" + os.path.basename(s3_key)
-        if not os.path.exists(link_name):
-            logger.log(f"Link {local_path} to s3://{bucket_name}/{s3_key}...")
-            os.symlink(target, link_name)
-        continue
-        # EOF: TMP linkinkg
+        # # XXX: TMP linkinkg
+        # target = "../../../" + local_path
+        # link_name = os.path.dirname(__file__) + "/.cache/" + os.path.basename(s3_key)
+        # if not os.path.exists(link_name):
+        #     logger.log(f"Link {local_path} to s3://{bucket_name}/{s3_key}...")
+        #     os.symlink(target, link_name)
+        # continue
+        # # EOF: TMP linkinkg
 
         if s3_key in s3_keys:
             logger.log(f"Skip {s3_key} (already exists in S3)")
