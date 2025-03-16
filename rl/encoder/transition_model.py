@@ -44,6 +44,8 @@ from vcmi_gym.envs.v8.pyprocconnector import (
     N_ACTIONS,
 )
 
+from .s3dataset import S3Dataset
+
 
 def wandb_log(*args, **kwargs):
     pass
@@ -122,6 +124,26 @@ class Buffer:
         if self.index == 0:
             self.full = True
 
+    def add_batch(self, obs, mask, done, action, reward):
+        batch_size = obs.shape[0]
+        start = self.index
+        end = self.index + batch_size
+
+        assert end <= self.capacity, f"{end} <= {self.capacity}"
+        assert self.index % batch_size == 0, f"{self.index} % {batch_size} == 0"
+        assert self.capacity % batch_size == 0, f"{self.capacity} % {batch_size} == 0"
+
+        self.obs_buffer[start:end] = torch.as_tensor(obs, dtype=torch.float32)
+        self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32)
+        self.done_buffer[start:end] = torch.as_tensor(done, dtype=torch.float32)
+        self.action_buffer[start:end] = torch.as_tensor(action, dtype=torch.int64)
+        self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32)
+
+        self.index = end
+        if self.index == self.capacity:
+            self.index = 0
+            self.full = True
+
     def sample(self, batch_size):
         max_index = self.capacity if self.full else self.index
 
@@ -159,6 +181,31 @@ class Buffer:
                 self.done_buffer[batch_indices + 1]
             )
 
+    def save(self, out_dir, metadata):
+        if os.path.exists(out_dir):
+            print(f"WARNINNG: dir {out_dir} already exists, will NOT save this buffer")
+            return False
+
+        os.makedirs(out_dir, exist_ok=True)
+
+        md = dict(metadata)
+        md["shapes"] = dict(
+            created_at=int(time.time()),
+            capacity=self.capacity,
+            shapes={}
+        )
+
+        for type in ["obs", "mask", "done", "action", "reward"]:
+            fname = os.path.join(out_dir, f"{type}.npz")
+            buf = getattr(self, f"{type}_buffer")
+            np.savez_compressed(fname, buf)
+            md["shapes"][type] = list(buf.shape)
+
+        with open(os.path.join(out_dir, "metadata.json"), "w") as mdfile:
+            json.dump(md, mdfile)
+
+        return True
+
 
 class Swap(nn.Module):
     def __init__(self, axis1, axis2):
@@ -183,7 +230,7 @@ class TransitionModel(nn.Module):
         if self.obs_index["global"]["continuous"].numel():
             self.encoder_global_continuous = nn.Sequential(
                 # (B, C)
-                nn.LazyBatchNorm1d(),
+                # nn.LazyBatchNorm1d(),
                 nn.LazyLinear(32),
                 nn.LeakyReLU(),
             )
@@ -204,9 +251,9 @@ class TransitionModel(nn.Module):
 
         if self.obs_index["player"]["continuous"].numel():
             self.encoder_player_continuous = nn.Sequential(
-                Swap(1, 2),  # (B, 2, C) -> (B, C, 2)
-                nn.LazyBatchNorm1d(),
-                Swap(1, 2),  # (B, C, 2) -> (B, 2, C)
+                # Swap(1, 2),  # (B, 2, C) -> (B, C, 2)
+                # nn.LazyBatchNorm1d(),
+                # Swap(1, 2),  # (B, C, 2) -> (B, 2, C)
                 nn.LazyLinear(32),
                 nn.LeakyReLU(),
             )
@@ -227,10 +274,12 @@ class TransitionModel(nn.Module):
 
         if self.hex_index["continuous"].numel():
             self.encoder_hex_continuous = nn.Sequential(
-                Swap(1, 2),  # (B, 165, C) -> (B, C, 165)
-                nn.LazyBatchNorm1d(),
-                Swap(1, 2),  # (B, C, 165) -> (B, 165, C)
+                # Swap(1, 2),  # (B, 165, C) -> (B, C, 165)
+                # nn.LazyBatchNorm1d(),
+                # Swap(1, 2),  # (B, C, 165) -> (B, 165, C)
                 nn.LazyLinear(128),
+                nn.LeakyReLU(),
+                nn.LazyLinear(256),
                 nn.LeakyReLU(),
                 nn.LazyLinear(64),
                 nn.LeakyReLU(),
@@ -242,6 +291,8 @@ class TransitionModel(nn.Module):
             self.encoder_hex_discrete = nn.Sequential(
                 nn.LazyLinear(128),
                 nn.LeakyReLU(),
+                nn.LazyLinear(256),
+                nn.LeakyReLU(),
                 nn.LazyLinear(64),
                 nn.LeakyReLU(),
             )
@@ -252,6 +303,7 @@ class TransitionModel(nn.Module):
             # => (B, N_ACTIONS + 32 + 2*32 + 165*64)
             nn.LazyLinear(1024),
             nn.LeakyReLU(),
+            nn.LazyLinear(1024),
         )
 
         # Global heads
@@ -678,6 +730,12 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
     logger.log(dict(observations_collected=n, progress=100, terms=terms, truncs=truncs))
 
 
+def load_observations(logger, dataloader, buffer):
+    logger.log("Loading observations...")
+    buffer.add_batch(*next(dataloader))
+    logger.log(f"Loaded {buffer.capacity} observations")
+
+
 class Stats:
     def __init__(self, model):
         # Store [mean, var] for each continuous feature
@@ -796,15 +854,15 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
     if logits_global_binary.numel():
         target_global_binary = obs[:, obs_index["global"]["binary"]]
-        # weight_global_binary = loss_weights["binary"]["global"]
-        # loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
+        weight_global_binary = loss_weights["binary"]["global"]
+        loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
         loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
 
     if logits_global_categoricals:
         target_global_categoricals = [obs[:, index] for index in obs_index["global"]["categoricals"]]
-        # weight_global_categoricals = loss_weights["categoricals"]["global"]
-        # for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
-        #     loss_categorical += cross_entropy(logits, target, weight=weight)
+        weight_global_categoricals = loss_weights["categoricals"]["global"]
+        for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
+            loss_categorical += cross_entropy(logits, target, weight=weight)
         for logits, target in zip(logits_global_categoricals, target_global_categoricals):
             loss_categorical += cross_entropy(logits, target)
 
@@ -816,8 +874,8 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
     if logits_player_binary.numel():
         target_player_binary = obs[:, obs_index["player"]["binary"]]
-        # weight_player_binary = loss_weights["binary"]["player"]
-        # loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
+        weight_player_binary = loss_weights["binary"]["player"]
+        loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
         loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
 
     # XXX: CrossEntropyLoss expects (B, C, *) input where C=num_classes
@@ -828,9 +886,9 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
     if logits_player_categoricals:
         target_player_categoricals = [obs[:, index] for index in obs_index["player"]["categoricals"]]
-        # weight_player_categoricals = loss_weights["categoricals"]["player"]
-        # for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
-        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        weight_player_categoricals = loss_weights["categoricals"]["player"]
+        for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
+            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
         for logits, target in zip(logits_player_categoricals, target_player_categoricals):
             loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
 
@@ -842,15 +900,15 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
     if logits_hex_binary.numel():
         target_hex_binary = obs[:, obs_index["hex"]["binary"]]
-        # weight_hex_binary = loss_weights["binary"]["hex"]
-        # loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
+        weight_hex_binary = loss_weights["binary"]["hex"]
+        loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
         loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary)
 
     if logits_hex_categoricals:
         target_hex_categoricals = [obs[:, index] for index in obs_index["hex"]["categoricals"]]
-        # weight_hex_categoricals = loss_weights["categoricals"]["hex"]
-        # for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
-        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        weight_hex_categoricals = loss_weights["categoricals"]["hex"]
+        for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
+            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
         for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
             loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
 
@@ -858,7 +916,6 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
 
 
 def compute_loss_weights(stats):
-    return
     weights = {
         "binary": {
             "global": torch.tensor(0.),
@@ -979,7 +1036,7 @@ def eval_model(logger, model, buffer, loss_weights, eval_env_steps):
     return continuous_loss, binary_loss, categorical_loss, total_loss
 
 
-def train(resume_config, dry_run):
+def train(resume_config, dry_run, collect_samples):
     if resume_config:
         with open(resume_config, "r") as f:
             print(f"Resuming from config: {f.name}")
@@ -1014,6 +1071,17 @@ def train(resume_config, dry_run):
                 conntype="thread",
                 # vcmi_loglevel_global="trace",
                 # vcmi_loglevel_ai="trace",
+            ),
+            data=dict(
+                bucket_name="vcmi-gym",
+                s3_prefix="v8",
+                # Don't put in dict (to avoid saving)
+                # aws_access_key=os.environ["S3_RW_ACCESS_KEY"],
+                # aws_secret_key=os.environ["S3_RW_SECRET_KEY"],
+                region_name="eu-north-1",
+                cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), ".cache")),
+                num_workers=1,
+                prefetch_factor=1,
             ),
             train={
                 "lr_start": 1e-2,
@@ -1061,6 +1129,21 @@ def train(resume_config, dry_run):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr_start)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
     buffer = Buffer(capacity=buffer_capacity, dim_obs=STATE_SIZE, n_actions=N_ACTIONS, device="cpu")
+    dataloader = torch.utils.data.DataLoader(
+        S3Dataset(
+            bucket_name=config["data"]["bucket_name"],
+            s3_prefix=config["data"]["s3_prefix"],
+            cache_dir=config["data"]["cache_dir"],
+            aws_access_key=os.environ["S3_RW_ACCESS_KEY"],
+            aws_secret_key=os.environ["S3_RW_SECRET_KEY"],
+            region_name=config["data"]["region_name"]
+        ),
+        batch_size=buffer.capacity,
+        num_workers=config["data"]["num_workers"],
+        prefetch_factor=config["data"]["prefetch_factor"],
+    )
+    dataloader = iter(dataloader)
+
     stats = Stats(model)
 
     if resume_config:
@@ -1090,7 +1173,7 @@ def train(resume_config, dry_run):
 
     global wandb_log
 
-    if dry_run:
+    if dry_run or collect_samples:
         def wandb_log(data, commit=False):
             logger.log(data)
     else:
@@ -1113,17 +1196,28 @@ def train(resume_config, dry_run):
     })
 
     while True:
-        collect_observations(
-            logger=logger,
-            env=env,
-            buffer=buffer,
-            n=buffer.capacity,
-            progress_report_steps=0
-        )
-        assert buffer.full and not buffer.index
+        if collect_samples:
+            collect_observations(
+                logger=logger,
+                env=env,
+                buffer=buffer,
+                n=buffer.capacity,
+                progress_report_steps=0
+            )
+        else:
+            load_observations(logger=logger, dataloader=dataloader, buffer=buffer)
 
+        assert buffer.full and not buffer.index
         # NOTE: this assumes no old observations are left in the buffer
+
         stats.update(buffer, model)
+
+        if collect_samples:
+            bufdir = os.path.join(config["run"]["out_dir"], "samples", f"v{env.ENV_VERSION}", "%s-%05d" % (run_id, stats.iteration))
+            logger.log(f"Saving samples to {bufdir}")
+            buffer.save(bufdir, dict(run_id=run_id, iteration=stats.iteration))
+            stats.iteration += 1
+            continue
 
         loss_weights = compute_loss_weights(stats)
 
@@ -1207,7 +1301,7 @@ def test(weights_path):
     import re
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
-    def prepare(obs, name, headline):
+    def prepare_bf(obs, name, headline):
         render[name] = {}
         render[name]["raw"] = Decoder.decode(obs).render()
         render[name]["lines"] = render[name]["raw"].split("\n")
@@ -1219,9 +1313,9 @@ def test(weights_path):
         render[name]["bf_maxprintlen"] = max(render[name]["bf_printlen"])
         render[name]["bf_lines"] = [l + " "*(render[name]["bf_maxprintlen"] - pl) for l, pl in zip(render[name]["bf_lines"], render[name]["bf_printlen"])]
 
-    prepare(obs_prev, "prev", "Previous:")
-    prepare(obs_real, "real", "Real:")
-    prepare(obs_pred, "pred", "Predicted:")
+    prepare_bf(obs_prev, "prev", "Previous:")
+    prepare_bf(obs_real, "real", "Real:")
+    prepare_bf(obs_pred.numpy(), "pred", "Predicted:")
 
     render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render["prev"]["bf_lines"], render["real"]["bf_lines"], render["pred"]["bf_lines"]))
     print(render["combined"]["bf"])
@@ -1236,10 +1330,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-f', metavar="FILE", help="config file to resume or test")
     parser.add_argument('--dry-run', action="store_true", help="do not save model")
+    parser.add_argument('--collect-samples', action="store_true", help="only collect samples (no training)")
     parser.add_argument('--test', metavar="PATH", help="test model from PATH instead of training")
     args = parser.parse_args()
 
     if args.test:
         test(args.test)
     else:
-        train(args.f, args.dry_run)
+        train(args.f, args.dry_run, args.collect_samples)
