@@ -11,6 +11,7 @@ import time
 import numpy as np
 import pathlib
 import argparse
+import shutil
 from functools import partial
 
 from torch.nn.functional import mse_loss
@@ -89,6 +90,26 @@ class Buffer:
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
+            self.full = True
+
+    def add_batch(self, obs, mask, done, action, reward):
+        batch_size = obs.shape[0]
+        start = self.index
+        end = self.index + batch_size
+
+        assert end <= self.capacity, f"{end} <= {self.capacity}"
+        assert self.index % batch_size == 0, f"{self.index} % {batch_size} == 0"
+        assert self.capacity % batch_size == 0, f"{self.capacity} % {batch_size} == 0"
+
+        self.obs_buffer[start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+        self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
+        self.done_buffer[start:end] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
+        self.action_buffer[start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+
+        self.index = end
+        if self.index == self.capacity:
+            self.index = 0
             self.full = True
 
     def sample(self, batch_size):
@@ -550,77 +571,12 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         run_id = config["run"]["id"]
         config["run"]["resumed_config"] = resume_config
     else:
+        from .config import config
         run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
-
-        #
-        # Depending on the `env` and `s3data` configs, the behaviour is:
-        #
-        # env=no    s3data=no   => ERROR
-        # env=yes   s3data=no   => sample from env
-        # env=no    s3data=yes  => load samples from S3
-        # env=yes   s3data=yes  => sample from env + save to S3
-        #
-        # NOTE: saving to S3 in this script is not implemented
-        #       Files are saved to local disk only (see `bufdir`)
-        #       and can be later uploaded via s3uploader.py
-        #
-        config = dict(
-            run=dict(
-                id=run_id,
-                out_dir=os.path.abspath("data/autoencoder"),
-                resumed_config=None,
-            ),
-
-            # env=None,
-            env=dict(
-                # opponent="BattleAI",  # BROKEN in develop1.6 from 2025-01-31
-                opponent="StupidAI",
-                mapname="gym/generated/4096/4x1024.vmap",
-                max_steps=1000,
-                random_heroes=1,
-                random_obstacles=1,
-                town_chance=30,
-                warmachine_chance=40,
-                random_terrain_chance=100,
-                tight_formation_chance=20,
-                allow_invalid_actions=True,
-                user_timeout=3600,
-                vcmi_timeout=3600,
-                boot_timeout=300,
-                conntype="thread",
-                # vcmi_loglevel_global="trace",
-                # vcmi_loglevel_ai="trace",
-            ),
-
-            # s3data=None,
-            s3data=dict(
-                bucket_name="vcmi-gym",
-                s3_prefix="v8",
-                # Must not be part of the config (clear-text in metadata.json)
-                # aws_access_key=os.environ["AWS_ACCESS_KEY"],
-                # aws_secret_key=os.environ["AWS_SECRET_KEY"],
-                region_name="eu-north-1",
-                cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
-                num_workers=1,
-                prefetch_factor=1,
-                shuffle=True,
-            ),
-
-            train={
-                # TODO: consider torch.optim.lr_scheduler.StepLR
-                "learning_rate": 1e-4,
-
-                "buffer_capacity": 10_000,
-                "train_epochs": 1,
-                "train_batch_size": 1000,
-                "eval_env_steps": 10_000,
-
-                # !!! DEBUG (linter warning is OK) !!!
-                # "buffer_capacity": 100,
-                # "train_epochs": 1,
-                # "train_batch_size": 10,
-                # "eval_env_steps": 100,
-            }
+        config["run"] = dict(
+            id=run_id,
+            out_dir=os.path.abspath("data/transition_model"),
+            resumed_config=None,
         )
 
     sample_from_env = config["env"] is not None
@@ -650,14 +606,13 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     if sample_from_env:
         env = VcmiEnv(**config["env"])
 
-    dict_obs, _ = env.reset()
-
     dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
     dim_hexes = VcmiEnv.STATE_SIZE_HEXES
     dim_obs = dim_other + dim_hexes
     n_actions = VcmiEnv.ACTION_SPACE.n
 
-    model = TransitionModel(dim_other, dim_hexes, n_actions)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = TransitionModel(dim_other, dim_hexes, n_actions, device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     buffer = Buffer(capacity=buffer_capacity, dim_obs=dim_obs, n_actions=n_actions, device=device)
 
@@ -680,12 +635,20 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
     if resume_config:
         filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
-        logger.log(f"Loading model weights from {filename}")
+        logger.log(f"Load model weights from {filename}")
         model.load_state_dict(torch.load(filename, weights_only=True), strict=True)
+        if not dry_run:
+            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+            logger.log(f"Backup resumed model weights as {backname}")
+            shutil.copy2(filename, backname)
 
         filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], run_id)
-        logger.log(f"Loading optimizer weights from {filename}")
+        logger.log(f"Load optimizer weights from {filename}")
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
+        if not dry_run:
+            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+            logger.log(f"Backup optimizer weights as {backname}")
+            shutil.copy2(filename, backname)
 
     global wandb_log
 
@@ -767,21 +730,26 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             train_batch_size=train_batch_size
         )
 
-        filename = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
-        msg = f"Saving model weights to {filename}"
-        if dry_run:
-            logger.log(f"{msg} (--dry-run)")
-        else:
-            logger.log(msg)
-            torch.save(model.state_dict(), filename)
+        f_model = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
+        f_optimizer = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
+        msg = dict(
+            event="Saving checkpoint...",
+            model=f_model,
+            optimizer=f_optimizer,
+        )
 
-        filename = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
-        msg = f"Saving optimizer weights to {filename}"
         if dry_run:
-            logger.log(f"{msg} (--dry-run)")
+            msg["event"] += " (--dry-run)"
+            logger.log(msg)
         else:
             logger.log(msg)
-            torch.save(optimizer.state_dict(), filename)
+            # Prevent corrupted checkpoints if terminated during torch.save
+            for f in [f_model, f_optimizer]:
+                if os.path.exists(f):
+                    shutil.copy2(f, f"{f}~")
+
+            torch.save(model.state_dict(), f_model)
+            torch.save(optimizer.state_dict(), f_optimizer)
 
         iteration += 1
 
