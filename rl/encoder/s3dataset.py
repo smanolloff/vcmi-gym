@@ -157,8 +157,8 @@ if __name__ == "__main__":
         bucket_name="vcmi-gym",
         s3_prefix="v8",
         cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), ".cache")),
-        aws_access_key=os.environ["S3_RW_ACCESS_KEY"],
-        aws_secret_key=os.environ["S3_RW_SECRET_KEY"],
+        aws_access_key=os.environ["AWS_ACCESS_KEY"],
+        aws_secret_key=os.environ["AWS_SECRET_KEY"],
         region_name="eu-north-1"
     )
 

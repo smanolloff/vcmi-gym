@@ -336,6 +336,8 @@ class TransitionModel(nn.Module):
         if self.hex_index["categoricals"]:
             self.hex_categorical_heads = nn.ModuleList([nn.LazyLinear(len(ind)) for ind in self.hex_index["categoricals"]])
 
+        self.to(device)
+
         # Init lazy layers
         with torch.no_grad():
             self(torch.randn([2, STATE_SIZE], device=device), torch.tensor([1, 1], device=device))
@@ -345,7 +347,7 @@ class TransitionModel(nn.Module):
     def forward(self, obs, action):
         action_in = one_hot(torch.as_tensor(action), num_classes=N_ACTIONS).to(self.device)
 
-        assert obs.device == self.device
+        assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
 
         global_continuous_in = obs[:, self.obs_index["global"]["continuous"]]
         global_discrete_in = obs[:, self.obs_index["global"]["discrete"]]
@@ -1075,8 +1077,8 @@ def train(resume_config, dry_run, collect_samples):
                 bucket_name="vcmi-gym",
                 s3_prefix="v8",
                 # Don't put in dict (to avoid saving)
-                # aws_access_key=os.environ["S3_RW_ACCESS_KEY"],
-                # aws_secret_key=os.environ["S3_RW_SECRET_KEY"],
+                # aws_access_key=os.environ["AWS_ACCESS_KEY"],
+                # aws_secret_key=os.environ["AWS_SECRET_KEY"],
                 region_name="eu-north-1",
                 cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), ".cache")),
                 num_workers=1,
@@ -1134,8 +1136,8 @@ def train(resume_config, dry_run, collect_samples):
             bucket_name=config["data"]["bucket_name"],
             s3_prefix=config["data"]["s3_prefix"],
             cache_dir=config["data"]["cache_dir"],
-            aws_access_key=os.environ["S3_RW_ACCESS_KEY"],
-            aws_secret_key=os.environ["S3_RW_SECRET_KEY"],
+            aws_access_key=os.environ["AWS_ACCESS_KEY"],
+            aws_secret_key=os.environ["AWS_SECRET_KEY"],
             region_name=config["data"]["region_name"]
         ),
         batch_size=buffer.capacity,

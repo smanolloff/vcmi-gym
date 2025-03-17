@@ -126,7 +126,7 @@ upload_files_to_s3(
     localdir="data/autoencoder/samples/v8",
     bucket_name="vcmi-gym",  # see big note above
     s3_prefix="v8",
-    aws_access_key=os.environ["S3_RW_ACCESS_KEY"],
-    aws_secret_key=os.environ["S3_RW_SECRET_KEY"],
+    aws_access_key=os.environ["AWS_ACCESS_KEY"],
+    aws_secret_key=os.environ["AWS_SECRET_KEY"],
     region_name="eu-north-1"
 )
