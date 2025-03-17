@@ -92,6 +92,11 @@ class S3Dataset(IterableDataset):
         if dropped:
             print("WARNING: dropped %d incomplete prefixes: %s" % (len(dropped), dropped))
 
+        # DEBUG
+        print("XXXXXXX: USING JUST 3 PREFIXES (DEBUG)")
+        prefixes = prefixes[:3]
+        # /DEBUG
+
         print("Found %d sample packs" % len(prefixes))
 
         self.types = types
@@ -119,6 +124,7 @@ class S3Dataset(IterableDataset):
         samples = {}
 
         while True:
+            random.shuffle(worker_prefixes)  # Randomize on each full pass
             for prefix in worker_prefixes:
                 for t in self.types:
                     s3_path = f"{self.s3_prefix}/{t}-{prefix}.npz"
@@ -133,7 +139,6 @@ class S3Dataset(IterableDataset):
 
             self.epoch_count += 1  # Track how many times we’ve exhausted S3 files
             print(f"Epoch {self.epoch_count} completed. Restarting dataset.")
-            random.shuffle(worker_prefixes)  # Randomize on each full pass
 
     def __iter__(self):
         """ Creates an iterable dataset that streams from S3 """
@@ -151,7 +156,7 @@ if __name__ == "__main__":
     dataset = S3Dataset(
         bucket_name="vcmi-gym",
         s3_prefix="v8",
-        cache_dir="/tmp/s3_cache",
+        cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), ".cache")),
         aws_access_key=os.environ["S3_RW_ACCESS_KEY"],
         aws_secret_key=os.environ["S3_RW_SECRET_KEY"],
         region_name="eu-north-1"

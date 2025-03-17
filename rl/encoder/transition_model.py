@@ -84,10 +84,6 @@ def setup_wandb(logger, config, model, src_file):
     return wandb
 
 
-def to_tensor(dict_obs):
-    return torch.as_tensor(dict_obs["observation"])
-
-
 def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
     if isinstance(layer, torch.nn.Linear):
         torch.nn.init.orthogonal_(layer.weight, gain)
@@ -102,11 +98,11 @@ class Buffer:
         self.capacity = capacity
         self.device = device
 
-        self.obs_buffer = torch.empty((capacity, dim_obs), dtype=torch.float32, device=device)
-        self.mask_buffer = torch.empty((capacity, n_actions), dtype=torch.float32, device=device)
-        self.done_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
-        self.action_buffer = torch.empty((capacity,), dtype=torch.int64, device=device)
-        self.reward_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
+        self.obs_buffer = torch.empty((capacity, dim_obs), dtype=torch.float32, device=self.device)
+        self.mask_buffer = torch.empty((capacity, n_actions), dtype=torch.float32, device=self.device)
+        self.done_buffer = torch.empty((capacity,), dtype=torch.float32, device=self.device)
+        self.action_buffer = torch.empty((capacity,), dtype=torch.int64, device=self.device)
+        self.reward_buffer = torch.empty((capacity,), dtype=torch.float32, device=self.device)
 
         self.index = 0
         self.full = False
@@ -114,11 +110,11 @@ class Buffer:
     # Using compact version with single obs and mask buffers
     # def add(self, obs, action_mask, done, action, reward, next_obs, next_action_mask, next_done):
     def add(self, obs, action_mask, done, action, reward):
-        self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32)
-        self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32)
-        self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32)
-        self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64)
-        self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32)
+        self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+        self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
+        self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
+        self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
@@ -133,11 +129,11 @@ class Buffer:
         assert self.index % batch_size == 0, f"{self.index} % {batch_size} == 0"
         assert self.capacity % batch_size == 0, f"{self.capacity} % {batch_size} == 0"
 
-        self.obs_buffer[start:end] = torch.as_tensor(obs, dtype=torch.float32)
-        self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32)
-        self.done_buffer[start:end] = torch.as_tensor(done, dtype=torch.float32)
-        self.action_buffer[start:end] = torch.as_tensor(action, dtype=torch.int64)
-        self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32)
+        self.obs_buffer[start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+        self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
+        self.done_buffer[start:end] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
+        self.action_buffer[start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = end
         if self.index == self.capacity:
@@ -150,7 +146,7 @@ class Buffer:
         # Get valid indices where done=False (episode not ended)
         # XXX: float->bool conversion is OK given floats are exactly 1 or 0
         valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
-        sampled_indices = valid_indices[torch.randint(len(valid_indices), (batch_size,))]
+        sampled_indices = valid_indices[torch.randint(len(valid_indices), (batch_size,), device=self.device)]
 
         obs = self.obs_buffer[sampled_indices]
         # action_mask = self.mask_buffer[sampled_indices]
@@ -168,7 +164,7 @@ class Buffer:
         # Get valid indices where done=False
         # XXX: float->bool conversion is OK given floats are exactly 1 or 0
         valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
-        shuffled_indices = valid_indices[torch.randperm(len(valid_indices))]
+        shuffled_indices = valid_indices[torch.randperm(len(valid_indices), device=self.device)]
 
         for i in range(0, len(shuffled_indices), batch_size):
             batch_indices = shuffled_indices[i:i + batch_size]
@@ -218,7 +214,8 @@ class Swap(nn.Module):
 
 
 class TransitionModel(nn.Module):
-    def __init__(self):
+    def __init__(self, device="cpu"):
+        self.device = device
         super().__init__()
 
         self._build_indices()
@@ -230,7 +227,7 @@ class TransitionModel(nn.Module):
         if self.obs_index["global"]["continuous"].numel():
             self.encoder_global_continuous = nn.Sequential(
                 # (B, C)
-                # nn.LazyBatchNorm1d(),
+                # nn.LazyBatchNorm1d(),  # XXX: also uncomment running_mean calc in Stats
                 nn.LazyLinear(32),
                 nn.LeakyReLU(),
             )
@@ -341,12 +338,14 @@ class TransitionModel(nn.Module):
 
         # Init lazy layers
         with torch.no_grad():
-            self(torch.randn([2, STATE_SIZE]), torch.tensor([1, 1]))
+            self(torch.randn([2, STATE_SIZE], device=device), torch.tensor([1, 1], device=device))
 
         layer_init(self)
 
     def forward(self, obs, action):
-        action_in = one_hot(torch.as_tensor(action), num_classes=N_ACTIONS)
+        action_in = one_hot(torch.as_tensor(action), num_classes=N_ACTIONS).to(self.device)
+
+        assert obs.device == self.device
 
         global_continuous_in = obs[:, self.obs_index["global"]["continuous"]]
         global_discrete_in = obs[:, self.obs_index["global"]["discrete"]]
@@ -374,15 +373,15 @@ class TransitionModel(nn.Module):
         # => (B, Z)
 
         b = obs.shape[0]
-        global_continuous_out = torch.zeros([b, 0])
-        global_binary_out = torch.zeros([b, 0])
+        global_continuous_out = torch.zeros([b, 0], device=self.device)
+        global_binary_out = torch.zeros([b, 0], device=self.device)
         global_categorical_outs = []
-        player_continuous_out = torch.zeros([b, 0])
-        player_binary_out = torch.zeros([b, 0])
+        player_continuous_out = torch.zeros([b, 0], device=self.device)
+        player_binary_out = torch.zeros([b, 0], device=self.device)
         player_categorical_outs = []
-        hex_continuous_out = torch.zeros([b, 0])
-        hex_binary_out = torch.zeros([b, 0])
-        hex_categorical_outs = torch.zeros([b, 0])
+        hex_continuous_out = torch.zeros([b, 0], device=self.device)
+        hex_binary_out = torch.zeros([b, 0], device=self.device)
+        hex_categorical_outs = []
 
         #
         # Global
@@ -465,8 +464,8 @@ class TransitionModel(nn.Module):
     # private
 
     def _predict(self, obs, action):
-        obs = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
-        action = torch.tensor(action, dtype=torch.int64).unsqueeze(0)
+        obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+        action = torch.tensor(action, dtype=torch.int64, device=self.device).unsqueeze(0)
 
         (
             global_continuous_out,
@@ -516,9 +515,9 @@ class TransitionModel(nn.Module):
 
         for index in [self.global_index, self.player_index, self.hex_index]:
             for type in ["continuous", "binary"]:
-                index[type] = torch.tensor(index[type])
+                index[type] = torch.tensor(index[type], device=self.device)
 
-            index["categoricals"] = [torch.tensor(ind) for ind in index["categoricals"]]
+            index["categoricals"] = [torch.tensor(ind, device=self.device) for ind in index["categoricals"]]
 
         self._build_obs_indices()
 
@@ -573,7 +572,7 @@ class TransitionModel(nn.Module):
     # - self.hex_index contains *relative* indexes for 1 hex
     # - self.obs_index["hex"] contains *absolute* indexes for all 165 hexes
     def _build_obs_indices(self):
-        t = lambda ary: torch.tensor(ary, dtype=torch.int64)
+        t = lambda ary: torch.tensor(ary, dtype=torch.int64, device=self.device)
 
         # XXX: Discrete (or "noncontinuous") is a combination of binary + categoricals
         #      where for direct extraction from obs
@@ -594,7 +593,7 @@ class TransitionModel(nn.Module):
         if self.global_index["categoricals"]:
             self.obs_index["global"]["categoricals"] = self.global_index["categoricals"]
 
-        global_discrete = torch.zeros(0, dtype=torch.int64)
+        global_discrete = torch.zeros(0, dtype=torch.int64, device=self.device)
         global_discrete = torch.cat((global_discrete, self.obs_index["global"]["binary"]), dim=0)
         global_discrete = torch.cat((global_discrete, *self.obs_index["global"]["categoricals"]), dim=0)
         self.obs_index["global"]["discrete"] = global_discrete
@@ -624,8 +623,8 @@ class TransitionModel(nn.Module):
         # - `indexes` is an array of *relative* indexes for 1 element (e.g. hex)
         def repeating_index(n, base_offset, repeating_offset, indexes):
             if indexes.numel() == 0:
-                return torch.zeros([n, 0], dtype=torch.int64)
-            ind = torch.zeros([n, len(indexes)], dtype=torch.int64)
+                return torch.zeros([n, 0], dtype=torch.int64, device=self.device)
+            ind = torch.zeros([n, len(indexes)], dtype=torch.int64, device=self.device)
             for i in range(n):
                 offset = base_offset + i*repeating_offset
                 ind[i, :] = indexes + offset
@@ -645,7 +644,7 @@ class TransitionModel(nn.Module):
         for cat_ind in self.player_index["categoricals"]:
             self.obs_index["player"]["categoricals"].append(repind_players(cat_ind))
 
-        player_discrete = torch.zeros([2, 0], dtype=torch.int64)
+        player_discrete = torch.zeros([2, 0], dtype=torch.int64, device=self.device)
         player_discrete = torch.cat((player_discrete, self.obs_index["player"]["binary"]), dim=1)
         player_discrete = torch.cat((player_discrete, *self.obs_index["player"]["categoricals"]), dim=1)
         self.obs_index["player"]["discrete"] = player_discrete
@@ -663,7 +662,7 @@ class TransitionModel(nn.Module):
         for cat_ind in self.hex_index["categoricals"]:
             self.obs_index["hex"]["categoricals"].append(repind_hexes(cat_ind))
 
-        hex_discrete = torch.zeros([165, 0], dtype=torch.int64)
+        hex_discrete = torch.zeros([165, 0], dtype=torch.int64, device=self.device)
         hex_discrete = torch.cat((hex_discrete, self.obs_index["hex"]["binary"]), dim=1)
         hex_discrete = torch.cat((hex_discrete, *self.obs_index["hex"]["categoricals"]), dim=1)
         self.obs_index["hex"]["discrete"] = hex_discrete
@@ -675,7 +674,7 @@ class StructuredLogger:
         self.log(dict(filename=filename))
 
     def log(self, obj):
-        timestamp = datetime.utcnow().isoformat(timespec='milliseconds')
+        timestamp = datetime.utcnow().isoformat(timespec="milliseconds")
         if isinstance(obj, dict):
             log_obj = dict(timestamp=timestamp, message=obj)
         else:
@@ -737,21 +736,21 @@ def load_observations(logger, dataloader, buffer):
 
 
 class Stats:
-    def __init__(self, model):
+    def __init__(self, model, device):
         # Store [mean, var] for each continuous feature
         # Shape: (N_CONT_FEATURES, 2)
         self.continuous = {
-            "global": torch.zeros(*model.global_index["continuous"].shape, 2),
-            "player": torch.zeros(*model.player_index["continuous"].shape, 2),
-            "hex": torch.zeros(*model.hex_index["continuous"].shape, 2),
+            "global": torch.zeros(*model.global_index["continuous"].shape, 2, device=device),
+            "player": torch.zeros(*model.player_index["continuous"].shape, 2, device=device),
+            "hex": torch.zeros(*model.hex_index["continuous"].shape, 2, device=device),
         }
 
         # Store [n_ones, n] for each binary feature
         # Shape: (N_BIN_FEATURES, 2)
         self.binary = {
-            "global": torch.zeros(*model.global_index["binary"].shape, 2, dtype=torch.int64),
-            "player": torch.zeros(*model.player_index["binary"].shape, 2, dtype=torch.int64),
-            "hex": torch.zeros(*model.hex_index["binary"].shape, 2, dtype=torch.int64),
+            "global": torch.zeros(*model.global_index["binary"].shape, 2, dtype=torch.int64, device=device),
+            "player": torch.zeros(*model.player_index["binary"].shape, 2, dtype=torch.int64, device=device),
+            "hex": torch.zeros(*model.hex_index["binary"].shape, 2, dtype=torch.int64, device=device),
         }
 
         # Store [n_ones_class0, n_ones_class1, ...]  for each categorical feature
@@ -764,9 +763,9 @@ class Stats:
         #  ...etc
         # ]
         self.categoricals = {
-            "global": [torch.zeros(ind.shape, dtype=torch.int64) for ind in model.global_index["categoricals"]],
-            "player": [torch.zeros(ind.shape, dtype=torch.int64) for ind in model.player_index["categoricals"]],
-            "hex": [torch.zeros(ind.shape, dtype=torch.int64) for ind in model.hex_index["categoricals"]],
+            "global": [torch.zeros(ind.shape, dtype=torch.int64, device=device) for ind in model.global_index["categoricals"]],
+            "player": [torch.zeros(ind.shape, dtype=torch.int64, device=device) for ind in model.player_index["categoricals"]],
+            "hex": [torch.zeros(ind.shape, dtype=torch.int64, device=device) for ind in model.hex_index["categoricals"]],
         }
 
         # Simple counter. 1 sample = 1 obs
@@ -797,12 +796,12 @@ class Stats:
     def _update(self, buffer, model):
         self.num_samples += buffer.capacity
 
-        self.continuous["global"][:, 0] = model.encoder_global_continuous[0].running_mean
-        self.continuous["global"][:, 1] = model.encoder_global_continuous[0].running_var
-        self.continuous["player"][:, 0] = model.encoder_player_continuous[1].running_mean
-        self.continuous["player"][:, 1] = model.encoder_player_continuous[1].running_var
-        self.continuous["hex"][:, 0] = model.encoder_hex_continuous[1].running_mean
-        self.continuous["hex"][:, 1] = model.encoder_hex_continuous[1].running_var
+        # self.continuous["global"][:, 0] = model.encoder_global_continuous[0].running_mean
+        # self.continuous["global"][:, 1] = model.encoder_global_continuous[0].running_var
+        # self.continuous["player"][:, 0] = model.encoder_player_continuous[1].running_mean
+        # self.continuous["player"][:, 1] = model.encoder_player_continuous[1].running_var
+        # self.continuous["hex"][:, 0] = model.encoder_hex_continuous[1].running_mean
+        # self.continuous["hex"][:, 1] = model.encoder_hex_continuous[1].running_var
 
         obs = buffer.obs_buffer
 
@@ -915,12 +914,12 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
     return loss_binary, loss_continuous, loss_categorical
 
 
-def compute_loss_weights(stats):
+def compute_loss_weights(stats, device):
     weights = {
         "binary": {
-            "global": torch.tensor(0.),
-            "player": torch.tensor(0.),
-            "hex": torch.tensor(0.)
+            "global": torch.tensor(0., device=device),
+            "player": torch.tensor(0., device=device),
+            "hex": torch.tensor(0., device=device)
         },
         "categoricals": {
             "global": [],
@@ -945,7 +944,7 @@ def compute_loss_weights(stats):
     # (e.g. hex.IS_REAR) from making the other weights very small
     for type, cat_weights in weights["categoricals"].items():
         for cat_stats in stats.categoricals[type]:
-            w = torch.zeros(cat_stats.shape, dtype=torch.float32)
+            w = torch.zeros(cat_stats.shape, dtype=torch.float32, device=device)
             mask = cat_stats > 0
             masked_stats = cat_stats[mask].float()
             w[mask] = masked_stats.mean() / masked_stats
@@ -986,7 +985,7 @@ def train_model(
             optimizer.zero_grad()
             loss_tot.backward()
 
-            total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float('inf'))  # No clipping, just measuring
+            total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))  # No clipping, just measuring
 
             max_norm = 1.0  # Adjust as needed
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
@@ -1045,7 +1044,7 @@ def train(resume_config, dry_run, collect_samples):
         run_id = config["run"]["id"]
         config["run"]["resumed_config"] = resume_config
     else:
-        run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
+        run_id = "".join(random.choices(string.ascii_lowercase, k=8))
         config = dict(
             run=dict(
                 id=run_id,
@@ -1085,12 +1084,12 @@ def train(resume_config, dry_run, collect_samples):
             ),
             train={
                 "lr_start": 1e-2,
-                "lr_min": 1e-5,
+                "lr_min": 1e-3,
                 "lr_step_size": 60,  # 1step ~= 1min if epochs=3 and buf=10K
                 "lr_gamma": 0.75,
 
                 "buffer_capacity": 10_000,
-                "train_epochs": 3,
+                "train_epochs": 1,
                 "train_batch_size": 1000,
                 "eval_env_steps": 10_000,
 
@@ -1123,9 +1122,10 @@ def train(resume_config, dry_run, collect_samples):
     assert buffer_capacity % train_batch_size == 0  # needed for train_steps
     assert eval_env_steps % 10 == 0  # needed for eval batch_size
 
-    # Initialize environment, buffer, and model
-    env = VcmiEnv(**config["env"])
-    model = TransitionModel()
+    if collect_samples:
+        env = VcmiEnv(**config["env"])
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = TransitionModel(device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr_start)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
     buffer = Buffer(capacity=buffer_capacity, dim_obs=STATE_SIZE, n_actions=N_ACTIONS, device="cpu")
@@ -1144,7 +1144,7 @@ def train(resume_config, dry_run, collect_samples):
     )
     dataloader = iter(dataloader)
 
-    stats = Stats(model)
+    stats = Stats(model, device=device)
 
     if resume_config:
         filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
@@ -1195,7 +1195,8 @@ def train(resume_config, dry_run, collect_samples):
         "params/eval_env_steps": eval_env_steps,
     })
 
-    while True:
+    # while True:
+    while stats.iteration == 0:
         if collect_samples:
             collect_observations(
                 logger=logger,
@@ -1219,7 +1220,7 @@ def train(resume_config, dry_run, collect_samples):
             stats.iteration += 1
             continue
 
-        loss_weights = compute_loss_weights(stats)
+        loss_weights = compute_loss_weights(stats, device=device)
 
         continuous_loss, binary_loss, categorical_loss, total_loss = eval_model(
             logger=logger,
@@ -1308,7 +1309,7 @@ def test(weights_path):
         render[name]["bf_lines"] = render[name]["lines"][:15]
         render[name]["bf_lines"].insert(0, headline)
         render[name]["bf_len"] = [len(l) for l in render[name]["bf_lines"]]
-        render[name]["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render[name]["bf_lines"]]
+        render[name]["bf_printlen"] = [len(ansi_escape.sub("", l)) for l in render[name]["bf_lines"]]
         render[name]["bf_maxlen"] = max(render[name]["bf_len"])
         render[name]["bf_maxprintlen"] = max(render[name]["bf_printlen"])
         render[name]["bf_lines"] = [l + " "*(render[name]["bf_maxprintlen"] - pl) for l, pl in zip(render[name]["bf_lines"], render[name]["bf_printlen"])]
@@ -1328,13 +1329,26 @@ def test(weights_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-f', metavar="FILE", help="config file to resume or test")
-    parser.add_argument('--dry-run', action="store_true", help="do not save model")
-    parser.add_argument('--collect-samples', action="store_true", help="only collect samples (no training)")
-    parser.add_argument('--test', metavar="PATH", help="test model from PATH instead of training")
+    parser.add_argument("-f", metavar="FILE", help="config file to resume or test")
+    parser.add_argument("--dry-run", action="store_true", help="do not save model")
+    parser.add_argument("--collect-samples", action="store_true", help="only collect samples (no training)")
+    parser.add_argument("--test", metavar="PATH", help="test model from PATH instead of training")
+    parser.add_argument("--prof", action="store_true", help="run a profiler (will exit after 1 training iteration)")
     args = parser.parse_args()
 
     if args.test:
         test(args.test)
     else:
-        train(args.f, args.dry_run, args.collect_samples)
+        fn = partial(train, args.f, args.dry_run, args.collect_samples)
+        if args.prof:
+            assert args.dry_run is True
+            assert not args.f
+            assert not args.collect_samples
+            from torch.profiler import profile, record_function, ProfilerActivity
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+                with record_function("train"):
+                    fn()
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+            prof.export_chrome_trace("trace.json")
+        else:
+            fn()
