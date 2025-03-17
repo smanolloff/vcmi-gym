@@ -1,3 +1,5 @@
+# An (updated) version of `cgpefvda`
+
 import os
 import torch
 import torch.nn as nn
@@ -5,6 +7,8 @@ import random
 import string
 import json
 import yaml
+import time
+import numpy as np
 import pathlib
 import argparse
 from functools import partial
@@ -20,6 +24,7 @@ from vcmi_gym.envs.v8.pyprocconnector import (
     STATE_SIZE_ONE_HEX,
 )
 
+from ..util.s3dataset import S3Dataset
 from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
 
 
@@ -58,20 +63,9 @@ def setup_wandb(config, model, src_file):
     wandb.run.log_code(root=src_file.parent, include_fn=code_include_fn)
     wandb.watch(model, log="all", log_graph=True, log_freq=1000)
 
-    global wandb_log
-
-    # For wandb.log, commit=True by default
-    # for wandb_log, commit=False by default
-    def wandb_log(*args, **kwargs):
-        wandb.log(*args, **dict({"commit": False}, **kwargs))
-
-
-def to_tensor(dict_obs):
-    return torch.as_tensor(dict_obs["observation"])
-
 
 class Buffer:
-    def __init__(self, capacity, dim_obs, n_actions, device="cpu"):
+    def __init__(self, capacity, dim_obs, n_actions, device=torch.device("cpu")):
         self.capacity = capacity
         self.device = device
 
@@ -87,11 +81,11 @@ class Buffer:
     # Using compact version with single obs and mask buffers
     # def add(self, obs, action_mask, done, action, reward, next_obs, next_action_mask, next_done):
     def add(self, obs, action_mask, done, action, reward):
-        self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32)
-        self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32)
-        self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32)
-        self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64)
-        self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32)
+        self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+        self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
+        self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
+        self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
@@ -102,8 +96,8 @@ class Buffer:
 
         # Get valid indices where done=False (episode not ended)
         # XXX: float->bool conversion is OK given floats are exactly 1 or 0
-        valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
-        sampled_indices = valid_indices[torch.randint(len(valid_indices), (batch_size,))]
+        valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True,)[0]
+        sampled_indices = valid_indices[torch.randint(len(valid_indices), (batch_size,), device=self.device)]
 
         obs = self.obs_buffer[sampled_indices]
         # action_mask = self.mask_buffer[sampled_indices]
@@ -121,7 +115,7 @@ class Buffer:
         # Get valid indices where done=False
         # XXX: float->bool conversion is OK given floats are exactly 1 or 0
         valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
-        shuffled_indices = valid_indices[torch.randperm(len(valid_indices))]
+        shuffled_indices = valid_indices[torch.randperm(len(valid_indices), device=self.device)]
 
         for i in range(0, len(shuffled_indices), batch_size):
             batch_indices = shuffled_indices[i:i + batch_size]
@@ -134,10 +128,36 @@ class Buffer:
                 self.done_buffer[batch_indices + 1]
             )
 
+    def save(self, out_dir, metadata):
+        if os.path.exists(out_dir):
+            print(f"WARNINNG: dir {out_dir} already exists, will NOT save this buffer")
+            return False
+
+        os.makedirs(out_dir, exist_ok=True)
+
+        md = dict(metadata)
+        md["shapes"] = dict(
+            created_at=int(time.time()),
+            capacity=self.capacity,
+            shapes={}
+        )
+
+        for type in ["obs", "mask", "done", "action", "reward"]:
+            fname = os.path.join(out_dir, f"{type}.npz")
+            buf = getattr(self, f"{type}_buffer")
+            np.savez_compressed(fname, buf)
+            md["shapes"][type] = list(buf.shape)
+
+        with open(os.path.join(out_dir, "metadata.json"), "w") as mdfile:
+            json.dump(md, mdfile)
+
+        return True
+
 
 class TransitionModel(nn.Module):
-    def __init__(self, dim_other, dim_hexes, n_actions):
+    def __init__(self, dim_other, dim_hexes, n_actions, device=torch.device("cpu")):
         super().__init__()
+        self.device = device
 
         assert dim_hexes % 165 == 0
         self.dim_other = dim_other
@@ -175,6 +195,8 @@ class TransitionModel(nn.Module):
         # self.head_rew = nn.Sequential(nn.LazyLinear(1), nn.Flatten(0))
         # self.head_done = nn.Sequential(nn.LazyLinear(1), nn.Flatten(0))
 
+        self.to(device)
+
     def forward(self, obs, action):
         other, hexes = torch.split(obs, [self.dim_other, self.dim_hexes], dim=1)
 
@@ -191,8 +213,8 @@ class TransitionModel(nn.Module):
 
     def predict(self, obs, action):
         with torch.no_grad():
-            obs = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
-            action = torch.tensor(action, dtype=torch.int64)
+            obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+            action = torch.tensor(action, dtype=torch.int64, device=self.device)
             return self(obs, action)[0].numpy()
 
     def _build_indices(self):
@@ -206,9 +228,9 @@ class TransitionModel(nn.Module):
 
         for index in [self.global_index, self.player_index, self.hex_index]:
             for type in ["continuous", "binary"]:
-                index[type] = torch.tensor(index[type])
+                index[type] = torch.tensor(index[type], device=self.device)
 
-            index["categoricals"] = [torch.tensor(ind) for ind in index["categoricals"]]
+            index["categoricals"] = [torch.tensor(ind, device=self.device) for ind in index["categoricals"]]
 
         self._build_obs_indices()
 
@@ -263,7 +285,7 @@ class TransitionModel(nn.Module):
     # - self.hex_index contains *relative* indexes for 1 hex
     # - self.obs_index["hex"] contains *absolute* indexes for all 165 hexes
     def _build_obs_indices(self):
-        t = lambda ary: torch.tensor(ary, dtype=torch.int64)
+        t = lambda ary: torch.tensor(ary, dtype=torch.int64, device=self.device)
 
         # XXX: Discrete (or "noncontinuous") is a combination of binary + categoricals
         #      where for direct extraction from obs
@@ -284,7 +306,7 @@ class TransitionModel(nn.Module):
         if len(self.global_index["categoricals"]):
             self.obs_index["global"]["categoricals"] = self.global_index["categoricals"]
 
-        global_discrete = torch.zeros(0, dtype=torch.int64)
+        global_discrete = torch.zeros(0, dtype=torch.int64, device=self.device)
         global_discrete = torch.cat((global_discrete, self.obs_index["global"]["binary"]), dim=0)
         global_discrete = torch.cat((global_discrete, *self.obs_index["global"]["categoricals"]), dim=0)
         self.obs_index["global"]["discrete"] = global_discrete
@@ -314,8 +336,8 @@ class TransitionModel(nn.Module):
         # - `indexes` is an array of *relative* indexes for 1 element (e.g. hex)
         def repeating_index(n, base_offset, repeating_offset, indexes):
             if len(indexes) == 0:
-                return torch.zeros([n, 0], dtype=torch.int64)
-            ind = torch.zeros([n, len(indexes)], dtype=torch.int64)
+                return torch.zeros([n, 0], dtype=torch.int64, device=self.device)
+            ind = torch.zeros([n, len(indexes)], dtype=torch.int64, device=self.device)
             for i in range(n):
                 offset = base_offset + i*repeating_offset
                 ind[i, :] = indexes + offset
@@ -335,7 +357,7 @@ class TransitionModel(nn.Module):
         for cat_ind in self.player_index["categoricals"]:
             self.obs_index["player"]["categoricals"].append(repind_players(cat_ind))
 
-        player_discrete = torch.zeros([2, 0], dtype=torch.int64)
+        player_discrete = torch.zeros([2, 0], dtype=torch.int64, device=self.device)
         player_discrete = torch.cat((player_discrete, self.obs_index["player"]["binary"]), dim=1)
         player_discrete = torch.cat((player_discrete, *self.obs_index["player"]["categoricals"]), dim=1)
         self.obs_index["player"]["discrete"] = player_discrete
@@ -353,7 +375,7 @@ class TransitionModel(nn.Module):
         for cat_ind in self.hex_index["categoricals"]:
             self.obs_index["hex"]["categoricals"].append(repind_hexes(cat_ind))
 
-        hex_discrete = torch.zeros([165, 0], dtype=torch.int64)
+        hex_discrete = torch.zeros([165, 0], dtype=torch.int64, device=self.device)
         hex_discrete = torch.cat((hex_discrete, self.obs_index["hex"]["binary"]), dim=1)
         hex_discrete = torch.cat((hex_discrete, *self.obs_index["hex"]["categoricals"]), dim=1)
         self.obs_index["hex"]["discrete"] = hex_discrete
@@ -418,6 +440,12 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
             dict_obs = next_obs
 
     logger.log(dict(observations_collected=n, progress=100, terms=terms, truncs=truncs))
+
+
+def load_observations(logger, dataloader, buffer):
+    logger.log("Loading observations...")
+    buffer.add_batch(*next(dataloader))
+    logger.log(f"Loaded {buffer.capacity} observations")
 
 
 def train_model(
@@ -510,7 +538,7 @@ def eval_model(logger, model, buffer, eval_env_steps):
     return obs_loss
 
 
-def train(resume_config, dry_run):
+def train(resume_config, dry_run, no_wandb, sample_only):
     # Usage:
     # python -m rl.encoder.autoencoder [path/to/config.json]
 
@@ -523,12 +551,27 @@ def train(resume_config, dry_run):
         config["run"]["resumed_config"] = resume_config
     else:
         run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
+
+        #
+        # Depending on the `env` and `s3data` configs, the behaviour is:
+        #
+        # env=no    s3data=no   => ERROR
+        # env=yes   s3data=no   => sample from env
+        # env=no    s3data=yes  => load samples from S3
+        # env=yes   s3data=yes  => sample from env + save to S3
+        #
+        # NOTE: saving to S3 in this script is not implemented
+        #       Files are saved to local disk only (see `bufdir`)
+        #       and can be later uploaded via s3uploader.py
+        #
         config = dict(
             run=dict(
                 id=run_id,
                 out_dir=os.path.abspath("data/autoencoder"),
                 resumed_config=None,
             ),
+
+            # env=None,
             env=dict(
                 # opponent="BattleAI",  # BROKEN in develop1.6 from 2025-01-31
                 opponent="StupidAI",
@@ -548,22 +591,43 @@ def train(resume_config, dry_run):
                 # vcmi_loglevel_global="trace",
                 # vcmi_loglevel_ai="trace",
             ),
-            train=dict(
+
+            # s3data=None,
+            s3data=dict(
+                bucket_name="vcmi-gym",
+                s3_prefix="v8",
+                # Must not be part of the config (clear-text in metadata.json)
+                # aws_access_key=os.environ["AWS_ACCESS_KEY"],
+                # aws_secret_key=os.environ["AWS_SECRET_KEY"],
+                region_name="eu-north-1",
+                cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
+                num_workers=1,
+                prefetch_factor=1,
+                shuffle=True,
+            ),
+
+            train={
                 # TODO: consider torch.optim.lr_scheduler.StepLR
-                learning_rate=1e-4,
+                "learning_rate": 1e-4,
 
-                buffer_capacity=10_000,
-                train_epochs=3,
-                train_batch_size=1000,
-                eval_env_steps=10_000,
+                "buffer_capacity": 10_000,
+                "train_epochs": 1,
+                "train_batch_size": 1000,
+                "eval_env_steps": 10_000,
 
-                # Debug
-                # buffer_capacity=100,
-                # train_epochs=2,
-                # train_batch_size=10,
-                # eval_env_steps=100,
-            )
+                # !!! DEBUG (linter warning is OK) !!!
+                # "buffer_capacity": 100,
+                # "train_epochs": 1,
+                # "train_batch_size": 10,
+                # "eval_env_steps": 100,
+            }
         )
+
+    sample_from_env = config["env"] is not None
+    sample_from_s3 = config["env"] is None and config["s3data"] is not None
+    save_samples = config["env"] is not None and config["s3data"] is not None
+
+    assert config.get("env") or config.get("s3data")
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
@@ -583,8 +647,8 @@ def train(resume_config, dry_run):
     assert buffer_capacity % train_batch_size == 0  # needed for train_steps
     assert eval_env_steps % 10 == 0  # needed for eval batch_size
 
-    # Initialize environment, buffer, and model
-    env = VcmiEnv(**config["env"])
+    if sample_from_env:
+        env = VcmiEnv(**config["env"])
 
     dict_obs, _ = env.reset()
 
@@ -594,8 +658,25 @@ def train(resume_config, dry_run):
     n_actions = VcmiEnv.ACTION_SPACE.n
 
     model = TransitionModel(dim_other, dim_hexes, n_actions)
-
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    buffer = Buffer(capacity=buffer_capacity, dim_obs=dim_obs, n_actions=n_actions, device=device)
+
+    if sample_from_s3:
+        dataloader = torch.utils.data.DataLoader(
+            S3Dataset(
+                bucket_name=config["s3data"]["bucket_name"],
+                s3_prefix=config["s3data"]["s3_prefix"],
+                cache_dir=config["s3data"]["cache_dir"],
+                aws_access_key=os.environ["AWS_ACCESS_KEY"],
+                aws_secret_key=os.environ["AWS_SECRET_KEY"],
+                region_name=config["s3data"]["region_name"],
+                shuffle=config["s3data"]["shuffle"],
+            ),
+            batch_size=buffer.capacity,
+            num_workers=config["s3data"]["num_workers"],
+            prefetch_factor=config["s3data"]["prefetch_factor"],
+        )
+        dataloader = iter(dataloader)
 
     if resume_config:
         filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
@@ -606,8 +687,17 @@ def train(resume_config, dry_run):
         logger.log(f"Loading optimizer weights from {filename}")
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
 
-    if not dry_run:
-        setup_wandb(config, model, __file__)
+    global wandb_log
+
+    if no_wandb:
+        def wandb_log(data, commit=False):
+            logger.log(data)
+    else:
+        wandb = setup_wandb(logger, config, model, __file__)
+
+        def wandb_log(data, commit=False):
+            wandb.log(data, commit=commit)
+            logger.log(data)
 
     wandb_log({
         "params/learning_rate": learning_rate,
@@ -617,18 +707,34 @@ def train(resume_config, dry_run):
         "params/eval_env_steps": eval_env_steps,
     })
 
-    buffer = Buffer(capacity=buffer_capacity, dim_obs=dim_obs, n_actions=n_actions, device="cpu")
-
     iteration = 0
     while True:
-        collect_observations(
-            logger=logger,
-            env=env,
-            buffer=buffer,
-            n=buffer.capacity,
-            progress_report_steps=0
-        )
+        if sample_from_env:
+            collect_observations(
+                logger=logger,
+                env=env,
+                buffer=buffer,
+                n=buffer.capacity,
+                progress_report_steps=0
+            )
+        elif sample_from_s3:
+            load_observations(logger=logger, dataloader=dataloader, buffer=buffer)
+
         assert buffer.full and not buffer.index
+
+        if save_samples:
+            # NOTE: this assumes no old observations are left in the buffer
+            bufdir = os.path.join(config["run"]["out_dir"], "samples", "%s-%d" % (run_id, time.time()))
+            msg = f"Saving buffer to {bufdir}"
+
+            if dry_run:
+                logger.log(f"{msg} (--dry-run)")
+            else:
+                logger.log(msg)
+                buffer.save(bufdir, dict(run_id=run_id))
+
+        if sample_only:
+            continue
 
         # obs_loss, rew_loss, mask_loss, done_loss, total_loss = eval_model(
         obs_loss = eval_model(
@@ -661,13 +767,20 @@ def train(resume_config, dry_run):
             train_batch_size=train_batch_size
         )
 
-        if not dry_run:
-            filename = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
-            logger.log(f"Saving model weights to {filename}")
+        filename = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
+        msg = f"Saving model weights to {filename}"
+        if dry_run:
+            logger.log(f"{msg} (--dry-run)")
+        else:
+            logger.log(msg)
             torch.save(model.state_dict(), filename)
 
-            filename = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
-            logger.log(f"Saving optimizer weights to {filename}")
+        filename = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
+        msg = f"Saving optimizer weights to {filename}"
+        if dry_run:
+            logger.log(f"{msg} (--dry-run)")
+        else:
+            logger.log(msg)
             torch.save(optimizer.state_dict(), filename)
 
         iteration += 1
@@ -756,12 +869,18 @@ def test():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-f', metavar="FILE", help="config file to resume or test")
-    parser.add_argument('--dry-run', action="store_true", help="do not save model")
-    parser.add_argument('--test', action="store_true", help="test instead of train")
+    parser.add_argument("-f", metavar="FILE", help="config file to resume or test")
+    parser.add_argument("--dry-run", action="store_true", help="do not save anything to disk (implies --no-wandb)")
+    parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
+    parser.add_argument('action', metavar="ACTION", type=str, help="train | test | sample")
     args = parser.parse_args()
 
-    if args.test:
-        test()
-    else:
-        train(args.f, args.dry_run)
+    if args.dry_run:
+        args.no_wandb = True
+
+    if args.action == "test":
+        test(args.test)
+    elif args.action == "train":
+        train(args.f, args.dry_run, args.no_wandb, False)
+    elif args.action == "sample":
+        train(args.f, args.dry_run, args.no_wandb, True)

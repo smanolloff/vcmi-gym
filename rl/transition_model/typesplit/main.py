@@ -1,17 +1,3 @@
-# run_id = "fpdqxykk"
-# from vcmi_gym.envs.v8.vcmi_env import VcmiEnv; env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap")
-# from rl.encoder.transition_model import TransitionModel; import torch; weights = torch.load(f"data/autoencoder/{run_id}-model.pt", weights_only=True); model = TransitionModel(); model.load_state_dict(weights, strict=True); model.eval()
-# from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
-# obs = env.result.state.copy()
-# bf = Decoder.decode(obs)
-# action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
-# obs_pred = model.predict(obs, action)
-# obs_next, *_ = env.step(action)
-# obs_next = obs_next["observation"]
-# torch.nn.functional.mse_loss(torch.as_tensor(obs_next), torch.as_tensor(obs))
-# # print(Decoder.decode(obs_pred).render())
-# # print(Decoder.decode(obs_next).render())
-
 import os
 import torch
 import torch.nn as nn
@@ -44,7 +30,7 @@ from vcmi_gym.envs.v8.pyprocconnector import (
     N_ACTIONS,
 )
 
-from .s3dataset import S3Dataset
+from ..util.s3dataset import S3Dataset
 
 
 def wandb_log(*args, **kwargs):
@@ -94,7 +80,7 @@ def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
 
 
 class Buffer:
-    def __init__(self, capacity, dim_obs, n_actions, device="cpu"):
+    def __init__(self, capacity, dim_obs, n_actions, device=torch.device("cpu")):
         self.capacity = capacity
         self.device = device
 
@@ -214,9 +200,9 @@ class Swap(nn.Module):
 
 
 class TransitionModel(nn.Module):
-    def __init__(self, device="cpu"):
-        self.device = device
+    def __init__(self, device=torch.device("cpu")):
         super().__init__()
+        self.device = device
 
         self._build_indices()
 
@@ -1037,7 +1023,7 @@ def eval_model(logger, model, buffer, loss_weights, eval_env_steps):
     return continuous_loss, binary_loss, categorical_loss, total_loss
 
 
-def train(resume_config, dry_run, collect_samples):
+def train(resume_config, dry_run, no_wandb, sample_only):
     if resume_config:
         with open(resume_config, "r") as f:
             print(f"Resuming from config: {f.name}")
@@ -1047,12 +1033,27 @@ def train(resume_config, dry_run, collect_samples):
         config["run"]["resumed_config"] = resume_config
     else:
         run_id = "".join(random.choices(string.ascii_lowercase, k=8))
+
+        #
+        # Depending on the `env` and `s3data` configs, the behaviour is:
+        #
+        # env=no    s3data=no   => ERROR
+        # env=yes   s3data=no   => sample from env
+        # env=no    s3data=yes  => load samples from S3
+        # env=yes   s3data=yes  => sample from env + save to S3
+        #
+        # NOTE: saving to S3 in this script is not implemented
+        #       Files are saved to local disk only (see `bufdir`)
+        #       and can be later uploaded via s3uploader.py
+        #
         config = dict(
             run=dict(
                 id=run_id,
                 out_dir=os.path.abspath("data/autoencoder"),
                 resumed_config=None,
             ),
+
+            # env=None,
             env=dict(
                 # opponent="BattleAI",  # BROKEN in develop1.6 from 2025-01-31
                 opponent="StupidAI",
@@ -1073,17 +1074,21 @@ def train(resume_config, dry_run, collect_samples):
                 # vcmi_loglevel_global="trace",
                 # vcmi_loglevel_ai="trace",
             ),
-            data=dict(
+
+            # s3data=None,
+            s3data=dict(
                 bucket_name="vcmi-gym",
                 s3_prefix="v8",
-                # Don't put in dict (to avoid saving)
+                # Must not be part of the config (clear-text in metadata.json)
                 # aws_access_key=os.environ["AWS_ACCESS_KEY"],
                 # aws_secret_key=os.environ["AWS_SECRET_KEY"],
                 region_name="eu-north-1",
-                cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), ".cache")),
+                cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
                 num_workers=1,
                 prefetch_factor=1,
+                shuffle=True,
             ),
+
             train={
                 "lr_start": 1e-2,
                 "lr_min": 1e-3,
@@ -1096,12 +1101,18 @@ def train(resume_config, dry_run, collect_samples):
                 "eval_env_steps": 10_000,
 
                 # !!! DEBUG (linter warning is OK) !!!
-                # "buffer_capacity": 100,
-                # "train_epochs": 1,
-                # "train_batch_size": 10,
-                # "eval_env_steps": 100,
+                "buffer_capacity": 100,
+                "train_epochs": 1,
+                "train_batch_size": 10,
+                "eval_env_steps": 100,
             }
         )
+
+    sample_from_env = config["env"] is not None
+    sample_from_s3 = config["env"] is None and config["s3data"] is not None
+    save_samples = config["env"] is not None and config["s3data"] is not None
+
+    assert config.get("env") or config.get("s3data")
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
@@ -1124,27 +1135,31 @@ def train(resume_config, dry_run, collect_samples):
     assert buffer_capacity % train_batch_size == 0  # needed for train_steps
     assert eval_env_steps % 10 == 0  # needed for eval batch_size
 
-    if collect_samples:
+    if sample_from_env:
         env = VcmiEnv(**config["env"])
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TransitionModel(device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr_start)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
-    buffer = Buffer(capacity=buffer_capacity, dim_obs=STATE_SIZE, n_actions=N_ACTIONS, device="cpu")
-    dataloader = torch.utils.data.DataLoader(
-        S3Dataset(
-            bucket_name=config["data"]["bucket_name"],
-            s3_prefix=config["data"]["s3_prefix"],
-            cache_dir=config["data"]["cache_dir"],
-            aws_access_key=os.environ["AWS_ACCESS_KEY"],
-            aws_secret_key=os.environ["AWS_SECRET_KEY"],
-            region_name=config["data"]["region_name"]
-        ),
-        batch_size=buffer.capacity,
-        num_workers=config["data"]["num_workers"],
-        prefetch_factor=config["data"]["prefetch_factor"],
-    )
-    dataloader = iter(dataloader)
+    buffer = Buffer(capacity=buffer_capacity, dim_obs=STATE_SIZE, n_actions=N_ACTIONS, device=device)
+
+    if sample_from_s3:
+        dataloader = torch.utils.data.DataLoader(
+            S3Dataset(
+                bucket_name=config["s3data"]["bucket_name"],
+                s3_prefix=config["s3data"]["s3_prefix"],
+                cache_dir=config["s3data"]["cache_dir"],
+                aws_access_key=os.environ["AWS_ACCESS_KEY"],
+                aws_secret_key=os.environ["AWS_SECRET_KEY"],
+                region_name=config["s3data"]["region_name"],
+                shuffle=config["s3data"]["shuffle"],
+            ),
+            batch_size=buffer.capacity,
+            num_workers=config["s3data"]["num_workers"],
+            prefetch_factor=config["s3data"]["prefetch_factor"],
+        )
+        dataloader = iter(dataloader)
 
     stats = Stats(model, device=device)
 
@@ -1175,7 +1190,7 @@ def train(resume_config, dry_run, collect_samples):
 
     global wandb_log
 
-    if dry_run or collect_samples:
+    if no_wandb:
         def wandb_log(data, commit=False):
             logger.log(data)
     else:
@@ -1197,9 +1212,8 @@ def train(resume_config, dry_run, collect_samples):
         "params/eval_env_steps": eval_env_steps,
     })
 
-    # while True:
-    while stats.iteration == 0:
-        if collect_samples:
+    while True:
+        if sample_from_env:
             collect_observations(
                 logger=logger,
                 env=env,
@@ -1207,18 +1221,24 @@ def train(resume_config, dry_run, collect_samples):
                 n=buffer.capacity,
                 progress_report_steps=0
             )
-        else:
+        elif sample_from_s3:
             load_observations(logger=logger, dataloader=dataloader, buffer=buffer)
 
         assert buffer.full and not buffer.index
-        # NOTE: this assumes no old observations are left in the buffer
 
         stats.update(buffer, model)
 
-        if collect_samples:
+        if save_samples:
+            # NOTE: this assumes no old observations are left in the buffer
             bufdir = os.path.join(config["run"]["out_dir"], "samples", f"v{env.ENV_VERSION}", "%s-%05d" % (run_id, stats.iteration))
-            logger.log(f"Saving samples to {bufdir}")
-            buffer.save(bufdir, dict(run_id=run_id, iteration=stats.iteration))
+            msg = f"Saving samples to {bufdir}"
+            if dry_run:
+                logger.log(f"{msg} (--dry-run)")
+            else:
+                logger.log(msg)
+                buffer.save(bufdir, dict(run_id=run_id, iteration=stats.iteration))
+
+        if sample_only:
             stats.iteration += 1
             continue
 
@@ -1254,19 +1274,23 @@ def train(resume_config, dry_run, collect_samples):
             train_batch_size=train_batch_size
         )
 
-        if not dry_run:
-            f_base = os.path.join(config["run"]["out_dir"], run_id)
-            f_model = f"{f_base}-model.pt"
-            f_optimizer = f"{f_base}-optimizer.pt"
-            f_stats = f"{f_base}-stats.pt"
+        f_base = os.path.join(config["run"]["out_dir"], run_id)
+        f_model = f"{f_base}-model.pt"
+        f_optimizer = f"{f_base}-optimizer.pt"
+        f_stats = f"{f_base}-stats.pt"
 
-            logger.log(dict(
-                event="Saving checkpoint...",
-                model=f_model,
-                optimizer=f_optimizer,
-                stats=f_stats
-            ))
+        msg = dict(
+            event="Saving checkpoint...",
+            model=f_model,
+            optimizer=f_optimizer,
+            stats=f_stats
+        )
 
+        if dry_run:
+            msg["event"] += " (--dry-run)"
+            logger.log(msg)
+        else:
+            logger.log(msg)
             # Prevent corrupted checkpoints if terminated during torch.save
             for f in [f_model, f_optimizer, f_stats]:
                 if os.path.exists(f):
@@ -1332,25 +1356,17 @@ def test(weights_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-f", metavar="FILE", help="config file to resume or test")
-    parser.add_argument("--dry-run", action="store_true", help="do not save model")
-    parser.add_argument("--collect-samples", action="store_true", help="only collect samples (no training)")
-    parser.add_argument("--test", metavar="PATH", help="test model from PATH instead of training")
-    parser.add_argument("--prof", action="store_true", help="run a profiler (will exit after 1 training iteration)")
+    parser.add_argument("--dry-run", action="store_true", help="do not save anything to disk (implies --no-wandb)")
+    parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
+    parser.add_argument('action', metavar="ACTION", type=str, help="train | test | sample")
     args = parser.parse_args()
 
-    if args.test:
+    if args.dry_run:
+        args.no_wandb = True
+
+    if args.action == "test":
         test(args.test)
-    else:
-        fn = partial(train, args.f, args.dry_run, args.collect_samples)
-        if args.prof:
-            assert args.dry_run is True
-            assert not args.f
-            assert not args.collect_samples
-            from torch.profiler import profile, record_function, ProfilerActivity
-            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-                with record_function("train"):
-                    fn()
-            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
-            prof.export_chrome_trace("trace.json")
-        else:
-            fn()
+    elif args.action == "train":
+        train(args.f, args.dry_run, args.no_wandb, False)
+    elif args.action == "sample":
+        train(args.f, args.dry_run, args.no_wandb, True)

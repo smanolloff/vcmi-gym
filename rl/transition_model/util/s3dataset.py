@@ -12,17 +12,16 @@ class S3Dataset(IterableDataset):
         self,
         bucket_name,
         s3_prefix,
-        cache_dir="/tmp/s3_cache",
-        max_samples_in_memory=1000,
+        cache_dir,
         aws_access_key=None,
         aws_secret_key=None,
-        region_name="eu-north-1"
+        region_name="eu-north-1",
+        shuffle=False
     ):
         """
         Args:
             bucket_name (str): S3 bucket name.
             cache_dir (str): Directory to cache downloaded files.
-            max_samples_in_memory (int): Maximum number of samples kept in memory.
             aws_access_key (str, optional): AWS Access Key ID.
             aws_secret_key (str, optional): AWS Secret Access Key.
             region_name (str, optional): AWS region.
@@ -30,7 +29,7 @@ class S3Dataset(IterableDataset):
         self.bucket_name = bucket_name
         self.s3_prefix = s3_prefix
         self.cache_dir = cache_dir
-        self.max_samples_in_memory = max_samples_in_memory
+        self.shuffle = False
 
         print("Cache dir: %s" % self.cache_dir)
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -86,7 +85,7 @@ class S3Dataset(IterableDataset):
             else:
                 break
 
-        prefixes = [prefix for prefix, counter in prefix_counters.items() if counter == len(types)]
+        prefixes = list(sorted(prefix for prefix, counter in prefix_counters.items() if counter == len(types)))
 
         dropped = [prefix for prefix in prefix_counters.keys() if prefix not in prefixes]
         if dropped:
@@ -124,7 +123,9 @@ class S3Dataset(IterableDataset):
         samples = {}
 
         while True:
-            random.shuffle(worker_prefixes)  # Randomize on each full pass
+            if self.shuffle:
+                random.shuffle(worker_prefixes)
+
             for prefix in worker_prefixes:
                 for t in self.types:
                     s3_path = f"{self.s3_prefix}/{t}-{prefix}.npz"
@@ -156,7 +157,7 @@ if __name__ == "__main__":
     dataset = S3Dataset(
         bucket_name="vcmi-gym",
         s3_prefix="v8",
-        cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), ".cache")),
+        cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
         aws_access_key=os.environ["AWS_ACCESS_KEY"],
         aws_secret_key=os.environ["AWS_SECRET_KEY"],
         region_name="eu-north-1"
