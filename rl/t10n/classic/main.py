@@ -71,10 +71,10 @@ class Buffer:
         self.device = device
 
         self.obs_buffer = torch.empty((capacity, dim_obs), dtype=torch.float32, device=device)
-        self.mask_buffer = torch.empty((capacity, n_actions), dtype=torch.float32, device=device)
+        #self.mask_buffer = torch.empty((capacity, n_actions), dtype=torch.float32, device=device)
         self.done_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
         self.action_buffer = torch.empty((capacity,), dtype=torch.int64, device=device)
-        self.reward_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
+        #self.reward_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
 
         self.index = 0
         self.full = False
@@ -83,16 +83,17 @@ class Buffer:
     # def add(self, obs, action_mask, done, action, reward, next_obs, next_action_mask, next_done):
     def add(self, obs, action_mask, done, action, reward):
         self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
+        #self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
         self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
-        self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+        #self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
             self.full = True
 
-    def add_batch(self, obs, mask, done, action, reward):
+    #def add_batch(self, obs, mask, done, action, reward):
+    def add_batch(self, obs, action, done):
         batch_size = obs.shape[0]
         start = self.index
         end = self.index + batch_size
@@ -102,10 +103,10 @@ class Buffer:
         assert self.capacity % batch_size == 0, f"{self.capacity} % {batch_size} == 0"
 
         self.obs_buffer[start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
+        #self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
         self.done_buffer[start:end] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.action_buffer[start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
-        self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+        #self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = end
         if self.index == self.capacity:
@@ -123,12 +124,13 @@ class Buffer:
         obs = self.obs_buffer[sampled_indices]
         # action_mask = self.mask_buffer[sampled_indices]
         action = self.action_buffer[sampled_indices]
-        reward = self.reward_buffer[sampled_indices]
+        #reward = self.reward_buffer[sampled_indices]
         next_obs = self.obs_buffer[sampled_indices + 1]
-        next_action_mask = self.mask_buffer[sampled_indices + 1]
+        #next_action_mask = self.mask_buffer[sampled_indices + 1]
         next_done = self.done_buffer[sampled_indices + 1]
 
-        return obs, action, reward, next_obs, next_action_mask, next_done
+        #return obs, action, reward, next_obs, next_action_mask, next_done
+        return obs, action, next_obs
 
     def sample_iter(self, batch_size):
         max_index = self.capacity if self.full else self.index
@@ -143,10 +145,10 @@ class Buffer:
             yield (
                 self.obs_buffer[batch_indices],
                 self.action_buffer[batch_indices],
-                self.reward_buffer[batch_indices],
+                #self.reward_buffer[batch_indices],
                 self.obs_buffer[batch_indices + 1],
-                self.mask_buffer[batch_indices + 1],
-                self.done_buffer[batch_indices + 1]
+                #self.mask_buffer[batch_indices + 1],
+                #self.done_buffer[batch_indices + 1]
             )
 
     def save(self, out_dir, metadata):
@@ -473,6 +475,7 @@ def train_model(
     logger,
     model,
     optimizer,
+    scaler,
     buffer,
     train_epochs,
     train_batch_size
@@ -481,21 +484,23 @@ def train_model(
 
     for epoch in range(train_epochs):
         obs_losses = []
-        rew_losses = []
-        mask_losses = []
-        done_losses = []
-        total_losses = []
+        #rew_losses = []
+        #mask_losses = []
+        #done_losses = []
+        #total_losses = []
 
         for batch in buffer.sample_iter(train_batch_size):
-            obs, action, next_rew, next_obs, next_mask, next_done = batch
+            #obs, action, next_rew, next_obs, next_mask, next_done = batch
+            obs, action, next_obs= batch
             # next_obs_pred, next_rew_pred, next_mask_pred, next_done_pred = model(obs, action)
-            next_obs_pred = model(obs, action)
+            with torch.amp.autocast(model.device.type):
+                next_obs_pred = model(obs, action)
 
-            obs_loss = mse_loss(next_obs_pred, next_obs)
-            # rew_loss = 0.1 * mse_loss(next_rew_pred, next_rew)
-            # mask_loss = binary_cross_entropy_with_logits(next_mask_pred, next_mask)
-            # done_loss = binary_cross_entropy_with_logits(next_done_pred, next_done)
-            # total_loss = obs_loss + rew_loss + mask_loss + done_loss
+                obs_loss = mse_loss(next_obs_pred, next_obs)
+                # rew_loss = 0.1 * mse_loss(next_rew_pred, next_rew)
+                # mask_loss = binary_cross_entropy_with_logits(next_mask_pred, next_mask)
+                # done_loss = binary_cross_entropy_with_logits(next_done_pred, next_done)
+                # total_loss = obs_loss + rew_loss + mask_loss + done_loss
 
             obs_losses.append(obs_loss.item())
             # rew_losses.append(rew_loss.item())
@@ -504,9 +509,11 @@ def train_model(
             # total_losses.append(total_loss.item())
 
             optimizer.zero_grad()
-            # total_loss.backward()
-            obs_loss.backward()
-            optimizer.step()
+            #obs_loss.backward()
+            #optimizer.step()
+            scaler.scale(obs_loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
         obs_loss = sum(obs_losses) / len(obs_losses)
         # rew_loss = sum(rew_losses) / len(rew_losses)
@@ -527,15 +534,17 @@ def eval_model(logger, model, buffer, eval_env_steps):
     model.eval()
     batch_size = eval_env_steps // 10
     obs_losses = []
-    rew_losses = []
-    mask_losses = []
-    done_losses = []
-    total_losses = []
+    #rew_losses = []
+    #mask_losses = []
+    #done_losses = []
+    #total_losses = []
 
     for batch in buffer.sample_iter(batch_size):
-        obs, action, next_rew, next_obs, next_mask, next_done = batch
-        # next_obs_pred, next_rew_pred, next_mask_pred, next_done_pred = model(obs, action)
-        next_obs_pred = model(obs, action)
+        #obs, action, next_rew, next_obs, next_mask, next_done = batch
+        obs, action, next_obs = batch
+        with torch.no_grad():
+            # next_obs_pred, next_rew_pred, next_mask_pred, next_done_pred = model(obs, action)
+            next_obs_pred = model(obs, action)
 
         obs_loss = mse_loss(next_obs_pred, next_obs)
         # rew_loss = 0.1 * mse_loss(next_rew_pred, next_rew)
@@ -611,9 +620,13 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     dim_obs = dim_other + dim_hexes
     n_actions = VcmiEnv.ACTION_SPACE.n
 
+    # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
+    torch.backends.cudnn.benchmark = True
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TransitionModel(dim_other, dim_hexes, n_actions, device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    scaler = torch.amp.GradScaler()
     buffer = Buffer(capacity=buffer_capacity, dim_obs=dim_obs, n_actions=n_actions, device=device)
 
     if sample_from_s3:
@@ -630,6 +643,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             batch_size=buffer.capacity,
             num_workers=config["s3data"]["num_workers"],
             prefetch_factor=config["s3data"]["prefetch_factor"],
+            pin_memory=True
         )
         dataloader = iter(dataloader)
 
@@ -649,6 +663,17 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
             logger.log(f"Backup optimizer weights as {backname}")
             shutil.copy2(filename, backname)
+
+        filename = "%s/%s-scaler.pt" % (config["run"]["out_dir"], run_id)
+        if os.path.exists(filename):
+            logger.log(f"Load scaler weights from {filename}")
+            scaler.load_state_dict(torch.load(filename, weights_only=True))
+            if not dry_run:
+                backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+                logger.log(f"Backup scaler weights as {backname}")
+                shutil.copy2(filename, backname)
+        else:
+            logger.log(f"WARNING: scaler weights not found: {filename}")
 
     global wandb_log
 
@@ -725,6 +750,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             logger=logger,
             model=model,
             optimizer=optimizer,
+            scaler=scaler,
             buffer=buffer,
             train_epochs=train_epochs,
             train_batch_size=train_batch_size
@@ -732,10 +758,12 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
         f_model = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
         f_optimizer = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
+        f_scaler = os.path.join(config["run"]["out_dir"], f"{run_id}-scaler.pt")
         msg = dict(
             event="Saving checkpoint...",
             model=f_model,
             optimizer=f_optimizer,
+            scaler=f_scaler,
         )
 
         if dry_run:
@@ -750,6 +778,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
             torch.save(model.state_dict(), f_model)
             torch.save(optimizer.state_dict(), f_optimizer)
+            torch.save(scaler.state_dict(), f_scaler)
 
         iteration += 1
 

@@ -61,7 +61,8 @@ class S3Dataset(IterableDataset):
         # XXX: dont set self.s3_client here (forking fails later)
         s3_client = self._init_s3_client()
 
-        types = ["obs", "mask", "done", "action", "reward"]
+        #types = ["obs", "mask", "done", "action", "reward"]
+        types = ["obs", "action", "done"]
         prefix_counters = {}
         regex = re.compile(fr"{self.s3_prefix}/({'|'.join(types)})-(.*)\.npz")
         request = {"Bucket": self.bucket_name, "Prefix": self.s3_prefix}
@@ -72,7 +73,9 @@ class S3Dataset(IterableDataset):
 
             for f in sorted(all_files):
                 m = regex.match(f)
-                assert m, f"Unexpected filename in S3: {f}"
+                if not m: 
+                    #assert m, f"Unexpected filename in S3: {f}"
+                    continue
                 prefix = m[2]
 
                 if prefix not in prefix_counters:
@@ -135,7 +138,8 @@ class S3Dataset(IterableDataset):
                 lengths = [len(s) for s in samples.values()]
                 assert all(lengths[0] == l for l in lengths[1:]), lengths
 
-                for sample_group in zip(samples["obs"], samples["mask"], samples["done"], samples["action"], samples["reward"]):
+                #for sample_group in zip(samples["obs"], samples["mask"], samples["done"], samples["action"], samples["reward"]):
+                for sample_group in zip(samples["obs"], samples["action"], samples["done"]):
                     yield sample_group
 
             self.epoch_count += 1  # Track how many times we’ve exhausted S3 files
