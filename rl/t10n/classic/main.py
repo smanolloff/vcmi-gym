@@ -575,7 +575,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
         config["run"] = dict(
             id=run_id,
-            out_dir=os.path.abspath("data/transition_model"),
+            out_dir=os.path.abspath("data/t10n"),
             resumed_config=None,
         )
 
