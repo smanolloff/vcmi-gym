@@ -13,6 +13,7 @@ import pathlib
 import argparse
 import shutil
 import boto3
+import botocore.exceptions
 import threading
 
 from functools import partial
@@ -579,6 +580,15 @@ def eval_model(logger, model, buffer, eval_env_steps):
     return obs_loss
 
 
+def init_s3_client():
+    return boto3.client(
+        's3',
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY"],
+        aws_secret_access_key=os.environ["AWS_SECRET_KEY"],
+        region_name="eu-north-1"
+    )
+
+
 def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, s3_config, uploading_event):
     f_model = os.path.join(out_dir, f"{run_id}-model.pt")
     f_optimizer = os.path.join(out_dir, f"{run_id}-optimizer.pt")
@@ -621,12 +631,7 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
 
     bucket = s3_config["bucket_name"]
     s3_dir = s3_config["s3_dir"]
-    s3 = boto3.client(
-        's3',
-        aws_access_key_id=os.environ["AWS_ACCESS_KEY"],
-        aws_secret_access_key=os.environ["AWS_SECRET_KEY"],
-        region_name="eu-north-1"
-    )
+    s3 = init_s3_client()
 
     files.insert(0, os.path.join(out_dir, f"{run_id}-config.json"))
 
@@ -738,7 +743,14 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     if resume_config:
         filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
         logger.log(f"Load model weights from {filename}")
+        if not os.path.exists(filename):
+            logger.log("Local file does not exist, try S3")
+            s3_config = config["s3"]["checkpoint"]
+            s3_filename = f"{s3_config["s3_dir"]}/{os.path.basename(filename)}"
+            logger.log(f"Download s3://{s3_config["bucket_name"]}/{s3_filename} ...")
+            init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
         model.load_state_dict(torch.load(filename, weights_only=True), strict=True)
+
         if not dry_run:
             backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
             logger.log(f"Backup resumed model weights as {backname}")
@@ -746,6 +758,12 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
         filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], run_id)
         logger.log(f"Load optimizer weights from {filename}")
+        if not os.path.exists(filename):
+            logger.log("Local file does not exist, try S3")
+            s3_config = config["s3"]["checkpoint"]
+            s3_filename = f"{s3_config["s3_dir"]}/{os.path.basename(filename)}"
+            logger.log(f"Download s3://{s3_config["bucket_name"]}/{s3_filename} ...")
+            init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
         if not dry_run:
             backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
@@ -754,6 +772,18 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
         if scaler:
             filename = "%s/%s-scaler.pt" % (config["run"]["out_dir"], run_id)
+            if not os.path.exists(filename):
+                logger.log("Local file does not exist, try S3")
+                s3_config = config["s3"]["checkpoint"]
+                s3_filename = f"{s3_config["s3_dir"]}/{os.path.basename(filename)}"
+                logger.log(f"Download s3://{s3_config["bucket_name"]}/{s3_filename} ...")
+                try:
+                    init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
+                except botocore.exceptions.ClientError as e:
+                    if e.response["Error"]["Code"] != "404":
+                        logger.log(f"File does not exist in s3: {s3_config["bucket_name"]}/{s3_filename} ...")
+                        raise
+
             if os.path.exists(filename):
                 logger.log(f"Load scaler weights from {filename}")
                 scaler.load_state_dict(torch.load(filename, weights_only=True))

@@ -7,13 +7,13 @@ numpy
 pyyaml
 wandb
 gymnasium
-onnx-pytorch
+#onnx-pytorch
 pygit2
 boto3
 
-ray[tune]
-ray[rllib]==2.38.0
-ray[default]==2.38.0
+#ray[tune]
+#ray[rllib]==2.38.0
+#ray[default]==2.38.0
 
 # ray's DreamerV3 is tf-only
 #tensorflow
