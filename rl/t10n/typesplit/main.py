@@ -1004,21 +1004,22 @@ def eval_model(logger, model, buffer, loss_weights, eval_env_steps):
     categorical_losses = []
     total_losses = []
 
-    for batch in buffer.sample_iter(batch_size):
-        obs, action, next_rew, next_obs, next_mask, next_done = batch
-        logits = model(obs, action)
-        loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, logits)
-        loss_tot = loss_cont + loss_bin + loss_cat
+    with torch.no_grad():
+        for batch in buffer.sample_iter(batch_size):
+            obs, action, next_rew, next_obs, next_mask, next_done = batch
+            logits = model(obs, action)
+            loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, logits)
+            loss_tot = loss_cont + loss_bin + loss_cat
 
-        continuous_losses.append(loss_cont.item())
-        binary_losses.append(loss_bin.item())
-        categorical_losses.append(loss_cat.item())
-        total_losses.append(loss_tot.item())
+            continuous_losses.append(loss_cont.item())
+            binary_losses.append(loss_bin.item())
+            categorical_losses.append(loss_cat.item())
+            total_losses.append(loss_tot.item())
 
-    continuous_loss = sum(continuous_losses) / len(continuous_losses)
-    binary_loss = sum(binary_losses) / len(binary_losses)
-    categorical_loss = sum(categorical_losses) / len(categorical_losses)
-    total_loss = sum(total_losses) / len(total_losses)
+        continuous_loss = sum(continuous_losses) / len(continuous_losses)
+        binary_loss = sum(binary_losses) / len(binary_losses)
+        categorical_loss = sum(categorical_losses) / len(categorical_losses)
+        total_loss = sum(total_losses) / len(total_losses)
 
     return continuous_loss, binary_loss, categorical_loss, total_loss
 

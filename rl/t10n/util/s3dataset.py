@@ -4,6 +4,7 @@ import numpy as np
 import os
 import re
 import random
+import glob
 from torch.utils.data import IterableDataset
 
 
@@ -11,8 +12,9 @@ class S3Dataset(IterableDataset):
     def __init__(
         self,
         bucket_name,
-        s3_prefix,
+        s3_dir,
         cache_dir,
+        cached_files_max=None,
         aws_access_key=None,
         aws_secret_key=None,
         region_name="eu-north-1",
@@ -27,8 +29,9 @@ class S3Dataset(IterableDataset):
             region_name (str, optional): AWS region.
         """
         self.bucket_name = bucket_name
-        self.s3_prefix = s3_prefix
+        self.s3_dir = s3_dir
         self.cache_dir = cache_dir
+        self.cached_files_max = cached_files_max
         self.shuffle = False
 
         print("Cache dir: %s" % self.cache_dir)
@@ -64,8 +67,8 @@ class S3Dataset(IterableDataset):
         #types = ["obs", "mask", "done", "action", "reward"]
         types = ["obs", "action", "done"]
         prefix_counters = {}
-        regex = re.compile(fr"{self.s3_prefix}/({'|'.join(types)})-(.*)\.npz")
-        request = {"Bucket": self.bucket_name, "Prefix": self.s3_prefix}
+        regex = re.compile(fr"{self.s3_dir}/({'|'.join(types)})-(.*)\.npz")
+        request = {"Bucket": self.bucket_name, "Prefix": self.s3_dir}
 
         while True:
             response = s3_client.list_objects_v2(**request)
@@ -73,7 +76,7 @@ class S3Dataset(IterableDataset):
 
             for f in sorted(all_files):
                 m = regex.match(f)
-                if not m: 
+                if not m:
                     #assert m, f"Unexpected filename in S3: {f}"
                     continue
                 prefix = m[2]
@@ -94,10 +97,9 @@ class S3Dataset(IterableDataset):
         if dropped:
             print("WARNING: dropped %d incomplete prefixes: %s" % (len(dropped), dropped))
 
-        # DEBUG
-        print("XXXXXXX: USING JUST 3 PREFIXES (DEBUG)")
-        prefixes = prefixes[:3]
-        # /DEBUG
+        if os.getenv("S3_DEBUG"):
+            print("XXXXXXX: USING JUST 3 PREFIXES (DEBUG)")
+            prefixes = prefixes[:3]
 
         print("Found %d sample packs" % len(prefixes))
 
@@ -117,8 +119,22 @@ class S3Dataset(IterableDataset):
         if os.path.exists(local_path):
             print("Using cached file %s" % local_path)
         else:
-            print("Downloading %s" % file_key)
+            print("Downloading %s ..." % file_key)
             self.s3_client.download_file(self.bucket_name, file_key, local_path)
+            print("Download complete: %s" % file_key)
+
+            if self.cached_files_max is not None:
+                print("uyyyyyy")
+                # Keep the most recent 100 files and delete the rest
+                files = sorted(glob.glob(os.path.join(self.cache_dir, "*")), key=os.path.getmtime, reverse=True)
+                print(list(files))
+                for file in files[self.cached_files_max:]:
+                    try:
+                        os.remove(file)
+                        print(f"Deleting: {file}")
+                    except Exception as e:
+                        print(f"Error deleting {file}: {e}")
+
         return local_path
 
     def _stream_samples(self, worker_id, worker_prefixes):
@@ -131,7 +147,7 @@ class S3Dataset(IterableDataset):
 
             for prefix in worker_prefixes:
                 for t in self.types:
-                    s3_path = f"{self.s3_prefix}/{t}-{prefix}.npz"
+                    s3_path = f"{self.s3_dir}/{t}-{prefix}.npz"
                     local_path = self._download_file(s3_path)
                     samples[t] = np.load(local_path)['arr_0']
 
@@ -160,7 +176,7 @@ class S3Dataset(IterableDataset):
 if __name__ == "__main__":
     dataset = S3Dataset(
         bucket_name="vcmi-gym",
-        s3_prefix="v8",
+        s3_dir="v8",
         cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
         aws_access_key=os.environ["AWS_ACCESS_KEY"],
         aws_secret_key=os.environ["AWS_SECRET_KEY"],

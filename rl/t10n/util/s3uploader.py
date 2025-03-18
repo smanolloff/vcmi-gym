@@ -36,8 +36,8 @@ def file_exists_in_s3(s3_client, bucket_name, s3_key):
             raise  # Some other error
 
 
-def upload_files_to_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws_secret_key, region_name):
-    assert s3_prefix
+def upload_files_to_s3(localdir, bucket_name, s3_dir, aws_access_key, aws_secret_key, region_name):
+    assert s3_dir
 
     logger = StructuredLogger(filename=os.path.join("s3uploader.log"))
 
@@ -48,7 +48,7 @@ def upload_files_to_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws_sec
         region_name=region_name
     )
 
-    request = {"Bucket": bucket_name, "Prefix": s3_prefix}
+    request = {"Bucket": bucket_name, "Prefix": s3_dir}
     s3_keys = []
     while True:
         response = s3_client.list_objects_v2(**request)
@@ -69,7 +69,7 @@ def upload_files_to_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws_sec
         suffix = m[1]
         t = m[2]
         ext = m[3]
-        s3_key = f"{s3_prefix}/{t}-{suffix}.{ext}"
+        s3_key = f"{s3_dir}/{t}-{suffix}.{ext}"
 
         # # XXX: TMP linkinkg
         # target = "../../../" + local_path
@@ -110,7 +110,7 @@ def upload_files_to_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws_sec
 #   ./mask.npz
 #   ./bar.npz
 #
-# Files will be uploaded to s3 as {s3_prefix}/{type}-{dir}, e.g.:
+# Files will be uploaded to s3 as {s3_dir}/{type}-{dir}, e.g.:
 #
 #   v8/action-eqmnojqh-00000.npz
 #   v8/action-tfklvbdl-00000.npz
@@ -125,7 +125,7 @@ def upload_files_to_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws_sec
 upload_files_to_s3(
     localdir="data/autoencoder/samples/v8",
     bucket_name="vcmi-gym",  # see big note above
-    s3_prefix="v8",
+    s3_dir="v8",
     aws_access_key=os.environ["AWS_ACCESS_KEY"],
     aws_secret_key=os.environ["AWS_SECRET_KEY"],
     region_name="eu-north-1"

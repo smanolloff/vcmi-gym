@@ -24,8 +24,8 @@ class StructuredLogger:
             f.write(json.dumps(log_obj) + "\n")
 
 
-def download_files_from_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws_secret_key, region_name):
-    assert s3_prefix
+def download_files_from_s3(localdir, bucket_name, s3_dir, aws_access_key, aws_secret_key, region_name):
+    assert s3_dir
 
     logger = StructuredLogger(filename=os.path.join("s3downloader.log"))
 
@@ -36,7 +36,7 @@ def download_files_from_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws
         region_name=region_name
     )
 
-    request = {"Bucket": bucket_name, "Prefix": s3_prefix}
+    request = {"Bucket": bucket_name, "Prefix": s3_dir}
     s3_keys = []
     while True:
         response = s3_client.list_objects_v2(**request)
@@ -47,7 +47,7 @@ def download_files_from_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws
             break
 
     logger.log("Found %d S3 keys" % len(s3_keys))
-    pattern = re.compile(fr"{s3_prefix}/(.*?)-(.*)\.(npz|json)")
+    pattern = re.compile(fr"{s3_dir}/(.*?)-(.*)\.(npz|json)")
 
     for s3_key in s3_keys:
         m = pattern.match(s3_key)
@@ -87,7 +87,7 @@ def download_files_from_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws
 #   ./mask.npz
 #   ./bar.npz
 #
-# Files will be uploaded to s3 as {s3_prefix}/{type}-{dir}, e.g.:
+# Files will be uploaded to s3 as {s3_dir}/{type}-{dir}, e.g.:
 #
 #   v8/action-eqmnojqh-00000.npz
 #   v8/action-tfklvbdl-00000.npz
@@ -102,7 +102,7 @@ def download_files_from_s3(localdir, bucket_name, s3_prefix, aws_access_key, aws
 download_files_from_s3(
     localdir="data/autoencoder/samples/v8",
     bucket_name="vcmi-gym",  # see big note above
-    s3_prefix="v8",
+    s3_dir="v8",
     aws_access_key=os.environ["AWS_ACCESS_KEY"],
     aws_secret_key=os.environ["AWS_SECRET_KEY"],
     region_name="eu-north-1"

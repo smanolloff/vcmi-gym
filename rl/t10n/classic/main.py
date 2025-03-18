@@ -12,21 +12,27 @@ import numpy as np
 import pathlib
 import argparse
 import shutil
+import boto3
+import threading
+
 from functools import partial
 
 from torch.nn.functional import mse_loss
 from datetime import datetime
-from vcmi_gym.envs.v8.pyprocconnector import (
+
+
+# from vcmi_gym.envs.v8.pyprocconnector import (
+from ..constants_v8 import (
     GLOBAL_ATTR_MAP,
     PLAYER_ATTR_MAP,
     HEX_ATTR_MAP,
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
+    N_ACTIONS,
 )
 
 from ..util.s3dataset import S3Dataset
-from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
 
 
 def wandb_log(*args, **kwargs):
@@ -71,10 +77,10 @@ class Buffer:
         self.device = device
 
         self.obs_buffer = torch.empty((capacity, dim_obs), dtype=torch.float32, device=device)
-        #self.mask_buffer = torch.empty((capacity, n_actions), dtype=torch.float32, device=device)
+        # self.mask_buffer = torch.empty((capacity, n_actions), dtype=torch.float32, device=device)
         self.done_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
         self.action_buffer = torch.empty((capacity,), dtype=torch.int64, device=device)
-        #self.reward_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
+        # self.reward_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
 
         self.index = 0
         self.full = False
@@ -83,16 +89,16 @@ class Buffer:
     # def add(self, obs, action_mask, done, action, reward, next_obs, next_action_mask, next_done):
     def add(self, obs, action_mask, done, action, reward):
         self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        #self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
+        # self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
         self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
-        #self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+        # self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
             self.full = True
 
-    #def add_batch(self, obs, mask, done, action, reward):
+    # def add_batch(self, obs, mask, done, action, reward):
     def add_batch(self, obs, action, done):
         batch_size = obs.shape[0]
         start = self.index
@@ -103,10 +109,10 @@ class Buffer:
         assert self.capacity % batch_size == 0, f"{self.capacity} % {batch_size} == 0"
 
         self.obs_buffer[start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        #self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
+        # self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
         self.done_buffer[start:end] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.action_buffer[start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
-        #self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+        # self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = end
         if self.index == self.capacity:
@@ -124,12 +130,12 @@ class Buffer:
         obs = self.obs_buffer[sampled_indices]
         # action_mask = self.mask_buffer[sampled_indices]
         action = self.action_buffer[sampled_indices]
-        #reward = self.reward_buffer[sampled_indices]
+        # reward = self.reward_buffer[sampled_indices]
         next_obs = self.obs_buffer[sampled_indices + 1]
-        #next_action_mask = self.mask_buffer[sampled_indices + 1]
-        next_done = self.done_buffer[sampled_indices + 1]
+        # next_action_mask = self.mask_buffer[sampled_indices + 1]
+        # next_done = self.done_buffer[sampled_indices + 1]
 
-        #return obs, action, reward, next_obs, next_action_mask, next_done
+        # return obs, action, reward, next_obs, next_action_mask, next_done
         return obs, action, next_obs
 
     def sample_iter(self, batch_size):
@@ -145,10 +151,10 @@ class Buffer:
             yield (
                 self.obs_buffer[batch_indices],
                 self.action_buffer[batch_indices],
-                #self.reward_buffer[batch_indices],
+                # self.reward_buffer[batch_indices],
                 self.obs_buffer[batch_indices + 1],
-                #self.mask_buffer[batch_indices + 1],
-                #self.done_buffer[batch_indices + 1]
+                # self.mask_buffer[batch_indices + 1],
+                # self.done_buffer[batch_indices + 1]
             )
 
     def save(self, out_dir, metadata):
@@ -225,7 +231,7 @@ class TransitionModel(nn.Module):
 
         zother = self.encoder_other(other)
         zhexes = self.encoder_hex(hexes)
-        merged = torch.cat((nn.functional.one_hot(action, VcmiEnv.ACTION_SPACE.n), zother, zhexes), dim=-1)
+        merged = torch.cat((nn.functional.one_hot(action, N_ACTIONS), zother, zhexes), dim=-1)
         z = self.encoder_merged(merged)
         next_obs = self.head_obs(z)
         # next_rew = self.head_rew(z)
@@ -484,23 +490,26 @@ def train_model(
 
     for epoch in range(train_epochs):
         obs_losses = []
-        #rew_losses = []
-        #mask_losses = []
-        #done_losses = []
-        #total_losses = []
+        # rew_losses = []
+        # mask_losses = []
+        # done_losses = []
+        # total_losses = []
 
         for batch in buffer.sample_iter(train_batch_size):
-            #obs, action, next_rew, next_obs, next_mask, next_done = batch
-            obs, action, next_obs= batch
+            # obs, action, next_rew, next_obs, next_mask, next_done = batch
+            obs, action, next_obs = batch
             # next_obs_pred, next_rew_pred, next_mask_pred, next_done_pred = model(obs, action)
-            with torch.amp.autocast(model.device.type):
+            if scaler:
+                with torch.amp.autocast(model.device.type):
+                    next_obs_pred = model(obs, action)
+                    obs_loss = mse_loss(next_obs_pred, next_obs)
+                    # rew_loss = 0.1 * mse_loss(next_rew_pred, next_rew)
+                    # mask_loss = binary_cross_entropy_with_logits(next_mask_pred, next_mask)
+                    # done_loss = binary_cross_entropy_with_logits(next_done_pred, next_done)
+                    # total_loss = obs_loss + rew_loss + mask_loss + done_loss
+            else:
                 next_obs_pred = model(obs, action)
-
                 obs_loss = mse_loss(next_obs_pred, next_obs)
-                # rew_loss = 0.1 * mse_loss(next_rew_pred, next_rew)
-                # mask_loss = binary_cross_entropy_with_logits(next_mask_pred, next_mask)
-                # done_loss = binary_cross_entropy_with_logits(next_done_pred, next_done)
-                # total_loss = obs_loss + rew_loss + mask_loss + done_loss
 
             obs_losses.append(obs_loss.item())
             # rew_losses.append(rew_loss.item())
@@ -509,11 +518,13 @@ def train_model(
             # total_losses.append(total_loss.item())
 
             optimizer.zero_grad()
-            #obs_loss.backward()
-            #optimizer.step()
-            scaler.scale(obs_loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            if scaler:
+                scaler.scale(obs_loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                obs_loss.backward()
+                optimizer.step()
 
         obs_loss = sum(obs_losses) / len(obs_losses)
         # rew_loss = sum(rew_losses) / len(rew_losses)
@@ -534,13 +545,13 @@ def eval_model(logger, model, buffer, eval_env_steps):
     model.eval()
     batch_size = eval_env_steps // 10
     obs_losses = []
-    #rew_losses = []
-    #mask_losses = []
-    #done_losses = []
-    #total_losses = []
+    # rew_losses = []
+    # mask_losses = []
+    # done_losses = []
+    # total_losses = []
 
     for batch in buffer.sample_iter(batch_size):
-        #obs, action, next_rew, next_obs, next_mask, next_done = batch
+        # obs, action, next_rew, next_obs, next_mask, next_done = batch
         obs, action, next_obs = batch
         with torch.no_grad():
             # next_obs_pred, next_rew_pred, next_mask_pred, next_done_pred = model(obs, action)
@@ -568,10 +579,80 @@ def eval_model(logger, model, buffer, eval_env_steps):
     return obs_loss
 
 
-def train(resume_config, dry_run, no_wandb, sample_only):
-    # Usage:
-    # python -m rl.encoder.autoencoder [path/to/config.json]
+def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, s3_config, uploading_event):
+    f_model = os.path.join(out_dir, f"{run_id}-model.pt")
+    f_optimizer = os.path.join(out_dir, f"{run_id}-optimizer.pt")
+    f_scaler = os.path.join(out_dir, f"{run_id}-scaler.pt")
+    msg = dict(
+        event="Saving checkpoint...",
+        model=f_model,
+        optimizer=f_optimizer,
+        scaler=f_scaler,
+    )
 
+    files = [f_model, f_optimizer]
+    if scaler:
+        files.append(f_scaler)
+
+    if dry_run:
+        msg["event"] += " (--dry-run)"
+        logger.log(msg)
+    else:
+        logger.log(msg)
+        # Prevent corrupted checkpoints if terminated during torch.save
+        for f in files:
+            if os.path.exists(f):
+                shutil.copy2(f, f"{f}~")
+
+        torch.save(model.state_dict(), f_model)
+        torch.save(optimizer.state_dict(), f_optimizer)
+        if scaler:
+            torch.save(scaler.state_dict(), f_scaler)
+
+    if not s3_config:
+        return
+
+    if uploading_event.is_set():
+        logger.log("Still uploading previous checkpoint, will not upload this one to S3")
+        return
+
+    uploading_event.set()
+    logger.log("uploading_event: set")
+
+    bucket = s3_config["bucket_name"]
+    s3_dir = s3_config["s3_dir"]
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY"],
+        aws_secret_access_key=os.environ["AWS_SECRET_KEY"],
+        region_name="eu-north-1"
+    )
+
+    files.insert(0, os.path.join(out_dir, f"{run_id}-config.json"))
+
+    for f in files:
+        key = f"{s3_dir}/{os.path.basename(f)}"
+        msg = f"Uploading to s3://{bucket}/{key} ..."
+
+        if dry_run:
+            logger.log(f"{msg} (--dry-run)")
+        else:
+            logger.log(msg)
+            try:
+                s3.head_object(Bucket=bucket, Key=key)
+                s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": key}, Key=f"{key}.bak")
+            except s3.exceptions.ClientError as e:
+                if e.response['Error']['Code'] != '404':
+                    raise  # Reraise if it's not a 404 (file not found) error
+
+            s3.upload_file(f, bucket, key)
+            logger.log(f"Upload finished: s3://{bucket}/{key}")
+
+    uploading_event.reset()
+    logger.log("uploading_event: reset")
+
+
+def train(resume_config, dry_run, no_wandb, sample_only):
     if resume_config:
         with open(resume_config, "r") as f:
             print(f"Resuming from config: {f.name}")
@@ -585,14 +666,15 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         config["run"] = dict(
             id=run_id,
             out_dir=os.path.abspath("data/t10n"),
+            checkpoint_interval_s=5,
             resumed_config=None,
         )
 
     sample_from_env = config["env"] is not None
-    sample_from_s3 = config["env"] is None and config["s3data"] is not None
-    save_samples = config["env"] is not None and config["s3data"] is not None
+    sample_from_s3 = config["env"] is None and config["s3"]["data"] is not None
+    save_samples = config["env"] is not None and config["s3"]["data"] is not None
 
-    assert config.get("env") or config.get("s3data")
+    assert config.get("env") or config.get("s3", {}).get("data")
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
@@ -613,12 +695,13 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     assert eval_env_steps % 10 == 0  # needed for eval batch_size
 
     if sample_from_env:
+        from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
         env = VcmiEnv(**config["env"])
 
-    dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
-    dim_hexes = VcmiEnv.STATE_SIZE_HEXES
+    dim_other = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
+    dim_hexes = 165*STATE_SIZE_ONE_HEX
     dim_obs = dim_other + dim_hexes
-    n_actions = VcmiEnv.ACTION_SPACE.n
+    n_actions = N_ACTIONS
 
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
     torch.backends.cudnn.benchmark = True
@@ -626,23 +709,28 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TransitionModel(dim_other, dim_hexes, n_actions, device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    scaler = torch.amp.GradScaler()
     buffer = Buffer(capacity=buffer_capacity, dim_obs=dim_obs, n_actions=n_actions, device=device)
+
+    if device.type == "cuda":
+        scaler = torch.amp.GradScaler()
+    else:
+        scaler = None
 
     if sample_from_s3:
         dataloader = torch.utils.data.DataLoader(
             S3Dataset(
-                bucket_name=config["s3data"]["bucket_name"],
-                s3_prefix=config["s3data"]["s3_prefix"],
-                cache_dir=config["s3data"]["cache_dir"],
+                bucket_name=config["s3"]["data"]["bucket_name"],
+                s3_dir=config["s3"]["data"]["s3_dir"],
+                cache_dir=config["s3"]["data"]["cache_dir"],
+                cached_files_max=config["s3"]["data"]["cached_files_max"],
+                shuffle=config["s3"]["data"]["shuffle"],
+                # Don't store keys in config (will appear in clear text in config.json)
                 aws_access_key=os.environ["AWS_ACCESS_KEY"],
                 aws_secret_key=os.environ["AWS_SECRET_KEY"],
-                region_name=config["s3data"]["region_name"],
-                shuffle=config["s3data"]["shuffle"],
             ),
             batch_size=buffer.capacity,
-            num_workers=config["s3data"]["num_workers"],
-            prefetch_factor=config["s3data"]["prefetch_factor"],
+            num_workers=config["s3"]["data"]["num_workers"],
+            prefetch_factor=config["s3"]["data"]["prefetch_factor"],
             pin_memory=True
         )
         dataloader = iter(dataloader)
@@ -664,16 +752,17 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             logger.log(f"Backup optimizer weights as {backname}")
             shutil.copy2(filename, backname)
 
-        filename = "%s/%s-scaler.pt" % (config["run"]["out_dir"], run_id)
-        if os.path.exists(filename):
-            logger.log(f"Load scaler weights from {filename}")
-            scaler.load_state_dict(torch.load(filename, weights_only=True))
-            if not dry_run:
-                backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
-                logger.log(f"Backup scaler weights as {backname}")
-                shutil.copy2(filename, backname)
-        else:
-            logger.log(f"WARNING: scaler weights not found: {filename}")
+        if scaler:
+            filename = "%s/%s-scaler.pt" % (config["run"]["out_dir"], run_id)
+            if os.path.exists(filename):
+                logger.log(f"Load scaler weights from {filename}")
+                scaler.load_state_dict(torch.load(filename, weights_only=True))
+                if not dry_run:
+                    backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+                    logger.log(f"Backup scaler weights as {backname}")
+                    shutil.copy2(filename, backname)
+            else:
+                logger.log(f"WARNING: scaler weights not found: {filename}")
 
     global wandb_log
 
@@ -696,6 +785,9 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     })
 
     iteration = 0
+    last_checkpoint_at = 0
+    uploading_event = threading.Event()
+
     while True:
         if sample_from_env:
             collect_observations(
@@ -724,27 +816,16 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         if sample_only:
             continue
 
-        # obs_loss, rew_loss, mask_loss, done_loss, total_loss = eval_model(
-        obs_loss = eval_model(
-            logger=logger,
-            model=model,
-            buffer=buffer,
-            eval_env_steps=eval_env_steps,
-        )
+        if iteration % config["train"]["eval_every"] == 0:
+            # obs_loss, rew_loss, mask_loss, done_loss, total_loss = eval_model(
+            obs_loss = eval_model(
+                logger=logger,
+                model=model,
+                buffer=buffer,
+                eval_env_steps=eval_env_steps,
+            )
 
-        wandb_log({
-            "iteration": iteration,
-            "loss/total": obs_loss
-        }, commit=True)
-
-        logger.log(dict(
-            iteration=iteration,
-            obs_loss=round(obs_loss, 6),
-            # rew_loss=round(rew_loss, 6),
-            # mask_loss=round(mask_loss, 6),
-            # done_loss=round(done_loss, 6),
-            # total_loss=round(total_loss, 6)
-        ))
+            wandb_log({"iteration": iteration, "loss/total": obs_loss}, commit=True)
 
         train_model(
             logger=logger,
@@ -756,34 +837,26 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             train_batch_size=train_batch_size
         )
 
-        f_model = os.path.join(config["run"]["out_dir"], f"{run_id}-model.pt")
-        f_optimizer = os.path.join(config["run"]["out_dir"], f"{run_id}-optimizer.pt")
-        f_scaler = os.path.join(config["run"]["out_dir"], f"{run_id}-scaler.pt")
-        msg = dict(
-            event="Saving checkpoint...",
-            model=f_model,
-            optimizer=f_optimizer,
-            scaler=f_scaler,
-        )
-
-        if dry_run:
-            msg["event"] += " (--dry-run)"
-            logger.log(msg)
-        else:
-            logger.log(msg)
-            # Prevent corrupted checkpoints if terminated during torch.save
-            for f in [f_model, f_optimizer]:
-                if os.path.exists(f):
-                    shutil.copy2(f, f"{f}~")
-
-            torch.save(model.state_dict(), f_model)
-            torch.save(optimizer.state_dict(), f_optimizer)
-            torch.save(scaler.state_dict(), f_scaler)
+        if time.time() - last_checkpoint_at > config["run"]["checkpoint_interval_s"]:
+            last_checkpoint_at = time.time()
+            thread = threading.Thread(target=save_checkpoint, kwargs=dict(
+                logger=logger,
+                dry_run=dry_run,
+                model=model,
+                optimizer=optimizer,
+                scaler=scaler,
+                out_dir=config["run"]["out_dir"],
+                run_id=run_id,
+                s3_config=config.get("s3", {}).get("checkpoint"),
+                uploading_event=uploading_event
+            ))
+            thread.start()
 
         iteration += 1
 
 
 def test():
+    from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
     from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
 
     run_id = os.path.basename(__file__).removesuffix(".py")
@@ -791,7 +864,7 @@ def test():
     dim_hexes = VcmiEnv.STATE_SIZE_HEXES
     n_actions = VcmiEnv.ACTION_SPACE.n
     model = TransitionModel(dim_other, dim_hexes, n_actions)
-    weights = torch.load(f"data/autoencoder/{run_id}-model.pt", weights_only=True)
+    weights = torch.load(f"data/t10n/{run_id}-model.pt", weights_only=True)
     model.load_state_dict(weights, strict=True)
     model.eval()
 
