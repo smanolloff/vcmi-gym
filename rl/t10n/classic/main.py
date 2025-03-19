@@ -15,6 +15,7 @@ import shutil
 import boto3
 import botocore.exceptions
 import threading
+import logging
 
 from functools import partial
 
@@ -424,15 +425,12 @@ class TransitionModel(nn.Module):
 
 
 class StructuredLogger:
-    def __init__(self, filename):
+    def __init__(self, level, filename):
         self.filename = filename
         self.log(dict(filename=filename))
 
-        self.debug = self.log
-        self.info = self.log
-        self.warn = self.log
-        self.warning = self.log
-        self.error = self.log
+        assert level in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
+        self.level = level
 
     def log(self, obj):
         timestamp = datetime.utcnow().isoformat(timespec='milliseconds')
@@ -446,6 +444,26 @@ class StructuredLogger:
         if self.filename:
             with open(self.filename, "a+") as f:
                 f.write(json.dumps(log_obj) + "\n")
+
+    def debug(self, obj):
+        if self.level <= logging.DEBUG:
+            self.log(dict(obj, level="DEBUG"))
+
+    def info(self, obj):
+        if self.level <= logging.INFO:
+            self.log(dict(obj, level="INFO"))
+
+    def warn(self, obj):
+        if self.level <= logging.WARN:
+            self.log(dict(obj, level="WARN"))
+
+    def warning(self, obj):
+        if self.level <= logging.WARNING:
+            self.log(dict(obj, level="WARNING"))
+
+    def error(self, obj):
+        if self.level <= logging.ERROR:
+            self.log(dict(obj, level="ERROR"))
 
 
 # progress_report_steps=0 => quiet
@@ -473,7 +491,7 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
         progress = round(i / n, 3)
         if progress >= next_progress_report_at:
             next_progress_report_at += progress_report_step
-            logger.log(dict(observations_collected=i, progress=progress*100, terms=terms, truncs=truncs))
+            logger.debug(dict(observations_collected=i, progress=progress*100, terms=terms, truncs=truncs))
 
         action = env.random_action()
         if action is None:
@@ -489,13 +507,13 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
             buffer.add(dict_obs["observation"], dict_obs["action_mask"], False, action, rew)
             dict_obs = next_obs
 
-    logger.log(dict(observations_collected=n, progress=100, terms=terms, truncs=truncs))
+    logger.debug(dict(observations_collected=n, progress=100, terms=terms, truncs=truncs))
 
 
 def load_observations(logger, dataloader, buffer):
-    logger.log("Loading observations...")
+    logger.debug("Loading observations...")
     buffer.add_batch(*next(dataloader))
-    logger.log(f"Loaded {buffer.capacity} observations")
+    logger.debug(f"Loaded {buffer.capacity} observations")
 
 
 def train_model(
@@ -552,7 +570,7 @@ def train_model(
         # mask_loss = sum(mask_losses) / len(mask_losses)
         # done_loss = sum(done_losses) / len(done_losses)
         # total_loss = sum(total_losses) / len(total_losses)
-        logger.log(dict(
+        logger.info(dict(
             train_epoch=epoch,
             obs_loss=obs_loss,
             # rew_loss=rew_loss,
@@ -627,9 +645,9 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
 
     if dry_run:
         msg["event"] += " (--dry-run)"
-        logger.log(msg)
+        logger.info(msg)
     else:
-        logger.log(msg)
+        logger.info(msg)
         # Prevent corrupted checkpoints if terminated during torch.save
         for f in files:
             if os.path.exists(f):
@@ -644,11 +662,11 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
         return
 
     if uploading_event.is_set():
-        logger.log("Still uploading previous checkpoint, will not upload this one to S3")
+        logger.warn("Still uploading previous checkpoint, will not upload this one to S3")
         return
 
     uploading_event.set()
-    logger.log("uploading_event: set")
+    logger.debug("uploading_event: set")
 
     bucket = s3_config["bucket_name"]
     s3_dir = s3_config["s3_dir"]
@@ -661,9 +679,9 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
         msg = f"Uploading to s3://{bucket}/{key} ..."
 
         if dry_run:
-            logger.log(f"{msg} (--dry-run)")
+            logger.info(f"{msg} (--dry-run)")
         else:
-            logger.log(msg)
+            logger.info(msg)
             try:
                 s3.head_object(Bucket=bucket, Key=key)
                 s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": key}, Key=f"{key}.bak")
@@ -672,10 +690,10 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
                     raise  # Reraise if it's not a 404 (file not found) error
 
             s3.upload_file(f, bucket, key)
-            logger.log(f"Upload finished: s3://{bucket}/{key}")
+            logger.debug(f"Upload finished: s3://{bucket}/{key}")
 
     uploading_event.clear()
-    logger.log("uploading_event: clear")
+    logger.debug("uploading_event: clear")
 
 
 def train(resume_config, dry_run, no_wandb, sample_only):
@@ -709,7 +727,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         json.dump(config, f, indent=4)
 
     logger = StructuredLogger(filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
-    logger.log(dict(config=config))
+    logger.info(dict(config=config))
 
     learning_rate = config["train"]["learning_rate"]
     buffer_capacity = config["train"]["buffer_capacity"]
@@ -784,57 +802,57 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
     if resume_config:
         filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
-        logger.log(f"Load model weights from {filename}")
+        logger.info(f"Load model weights from {filename}")
         if not os.path.exists(filename):
-            logger.log("Local file does not exist, try S3")
+            logger.debug("Local file does not exist, try S3")
             s3_config = config["s3"]["checkpoint"]
             s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
-            logger.log(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
+            logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
             init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
         model.load_state_dict(torch.load(filename, weights_only=True), strict=True)
 
         if not dry_run:
             backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
-            logger.log(f"Backup resumed model weights as {backname}")
+            logger.debug(f"Backup resumed model weights as {backname}")
             shutil.copy2(filename, backname)
 
         filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], run_id)
-        logger.log(f"Load optimizer weights from {filename}")
+        logger.info(f"Load optimizer weights from {filename}")
         if not os.path.exists(filename):
-            logger.log("Local file does not exist, try S3")
+            logger.debug("Local file does not exist, try S3")
             s3_config = config["s3"]["checkpoint"]
             s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
-            logger.log(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
+            logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
             init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
         if not dry_run:
             backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
-            logger.log(f"Backup optimizer weights as {backname}")
+            logger.debug(f"Backup optimizer weights as {backname}")
             shutil.copy2(filename, backname)
 
         if scaler:
             filename = "%s/%s-scaler.pt" % (config["run"]["out_dir"], run_id)
             if not os.path.exists(filename):
-                logger.log("Local file does not exist, try S3")
+                logger.debug("Local file does not exist, try S3")
                 s3_config = config["s3"]["checkpoint"]
                 s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
-                logger.log(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
+                logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
                 try:
                     init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
                 except botocore.exceptions.ClientError as e:
                     if e.response["Error"]["Code"] != "404":
-                        logger.log(f"File does not exist in s3: {s3_config['bucket_name']}/{s3_filename} ...")
+                        logger.debug(f"File does not exist in s3: {s3_config['bucket_name']}/{s3_filename} ...")
                         raise
 
             if os.path.exists(filename):
-                logger.log(f"Load scaler weights from {filename}")
+                logger.info(f"Load scaler weights from {filename}")
                 scaler.load_state_dict(torch.load(filename, weights_only=True))
                 if not dry_run:
                     backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
-                    logger.log(f"Backup scaler weights as {backname}")
+                    logger.debug(f"Backup scaler weights as {backname}")
                     shutil.copy2(filename, backname)
             else:
-                logger.log(f"WARNING: scaler weights not found: {filename}")
+                logger.warn(f"WARNING: scaler weights not found: {filename}")
 
     global wandb_log
 
@@ -846,7 +864,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
         def wandb_log(data, commit=False):
             wandb.log(data, commit=commit)
-            logger.log(data)
+            logger.info(data)
 
     wandb_log({
         "train/learning_rate": learning_rate,
@@ -883,9 +901,9 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             msg = f"Saving buffer to {bufdir}"
 
             if dry_run:
-                logger.log(f"{msg} (--dry-run)")
+                logger.info(f"{msg} (--dry-run)")
             else:
-                logger.log(msg)
+                logger.info(msg)
                 buffer.save(bufdir, dict(run_id=run_id))
 
         if sample_only:
