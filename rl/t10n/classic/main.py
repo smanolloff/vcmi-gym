@@ -461,9 +461,9 @@ class StructuredLogger:
         if self.level > level:
             return
         if isinstance(obj, dict):
-            self.log(dict(obj, level=levelname))
+            self.log(dict(obj))
         else:
-            self.log(dict(message=dict(string=obj), level=levelname))
+            self.log(dict(message=dict(string=obj)))
 
 
 # progress_report_steps=0 => quiet
