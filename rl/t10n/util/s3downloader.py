@@ -1,6 +1,6 @@
 import boto3
 import os
-import glob
+import sys
 from datetime import datetime
 import re
 import yaml
@@ -100,9 +100,9 @@ def download_files_from_s3(localdir, bucket_name, s3_dir, aws_access_key, aws_se
 #
 
 download_files_from_s3(
-    localdir="data/autoencoder/samples/v8",
+    localdir=sys.argv[1],
     bucket_name="vcmi-gym",  # see big note above
-    s3_dir="v8",
+    s3_dir="v8-100k",
     aws_access_key=os.environ["AWS_ACCESS_KEY"],
     aws_secret_key=os.environ["AWS_SECRET_KEY"],
     region_name="eu-north-1"

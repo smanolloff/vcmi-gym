@@ -70,6 +70,7 @@ def setup_wandb(config, model, src_file):
 
     wandb.run.log_code(root=src_file.parent, include_fn=code_include_fn)
     wandb.watch(model, log="all", log_graph=True, log_freq=1000)
+    return wandb
 
 
 class Buffer:
@@ -807,7 +808,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         def wandb_log(data, commit=False):
             logger.log(data)
     else:
-        wandb = setup_wandb(logger, config, model, __file__)
+        wandb = setup_wandb(config, model, __file__)
 
         def wandb_log(data, commit=False):
             wandb.log(data, commit=commit)
