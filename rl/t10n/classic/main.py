@@ -426,6 +426,7 @@ class TransitionModel(nn.Module):
 
 class StructuredLogger:
     def __init__(self, level, filename):
+        self.level = level
         self.filename = filename
         self.info(dict(filename=filename))
 
