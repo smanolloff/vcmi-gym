@@ -427,18 +427,14 @@ class TransitionModel(nn.Module):
 class StructuredLogger:
     def __init__(self, level, filename):
         self.filename = filename
-        self.log(dict(filename=filename))
+        self.info(dict(filename=filename))
 
         assert level in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
         self.level = level
 
     def log(self, obj):
         timestamp = datetime.utcnow().isoformat(timespec='milliseconds')
-        if isinstance(obj, dict):
-            log_obj = dict(timestamp=timestamp, message=obj)
-        else:
-            log_obj = dict(timestamp=timestamp, message=dict(string=obj))
-
+        log_obj = dict(timestamp=timestamp, message=obj)
         print(yaml.dump(log_obj, sort_keys=False))
 
         if self.filename:
@@ -446,24 +442,27 @@ class StructuredLogger:
                 f.write(json.dumps(log_obj) + "\n")
 
     def debug(self, obj):
-        if self.level <= logging.DEBUG:
-            self.log(dict(obj, level="DEBUG"))
+        self._level_log(obj, logging.DEBUG)
 
     def info(self, obj):
-        if self.level <= logging.INFO:
-            self.log(dict(obj, level="INFO"))
+        self._level_log(obj, logging.INFO)
 
     def warn(self, obj):
-        if self.level <= logging.WARN:
-            self.log(dict(obj, level="WARN"))
+        self._level_log(obj, logging.WARN)
 
     def warning(self, obj):
-        if self.level <= logging.WARNING:
-            self.log(dict(obj, level="WARNING"))
+        self._level_log(obj, logging.WARNING)
 
     def error(self, obj):
-        if self.level <= logging.ERROR:
-            self.log(dict(obj, level="ERROR"))
+        self._level_log(obj, logging.ERROR)
+
+    def _level_log(self, obj, level):
+        if self.level > level:
+            return
+        if isinstance(obj, dict):
+            self.log(dict(obj, level=level))
+        else:
+            self.log(dict(message=dict(string=obj), level=level))
 
 
 # progress_report_steps=0 => quiet
@@ -858,7 +857,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
     if no_wandb:
         def wandb_log(data, commit=False):
-            logger.log(data)
+            logger.info(data)
     else:
         wandb = setup_wandb(config, model, __file__)
 
