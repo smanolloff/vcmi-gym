@@ -78,7 +78,7 @@ class S3Dataset(IterableDataset):
         types = ["obs", "action", "done"]
         prefix_counters = {}
         regex = re.compile(fr"{self.s3_dir}/({'|'.join(types)})-(.*)\.npz")
-        request = {"Bucket": self.bucket_name, "Prefix": self.s3_dir}
+        request = {"Bucket": self.bucket_name, "Prefix": f"{self.s3_dir}/"}
 
         while True:
             response = s3_client.list_objects_v2(**request)
@@ -132,7 +132,7 @@ class S3Dataset(IterableDataset):
         if os.path.exists(local_path):
             self.logger.info("Using cached file %s" % local_path)
         else:
-            self.logger.info("Downloading %s ..." % file_key)
+            self.logger.warn("Downloading %s ..." % file_key)
             self.s3_client.download_file(self.bucket_name, file_key, local_path)
             self.logger.info("Download complete: %s" % file_key)
 

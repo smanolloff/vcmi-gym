@@ -36,7 +36,7 @@ def download_files_from_s3(localdir, bucket_name, s3_dir, aws_access_key, aws_se
         region_name=region_name
     )
 
-    request = {"Bucket": bucket_name, "Prefix": s3_dir}
+    request = {"Bucket": bucket_name, "Prefix": f"{s3_dir}/"}
     s3_keys = []
     while True:
         response = s3_client.list_objects_v2(**request)

@@ -43,7 +43,7 @@ config = dict(
         ),
         data=dict(
             bucket_name="vcmi-gym",
-            s3_dir="v8-100k",
+            s3_dir="v8",
             cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
             cached_files_max=None,
             num_workers=1,
