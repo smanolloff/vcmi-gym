@@ -660,8 +660,8 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
             s3.upload_file(f, bucket, key)
             logger.log(f"Upload finished: s3://{bucket}/{key}")
 
-    uploading_event.reset()
-    logger.log("uploading_event: reset")
+    uploading_event.clear()
+    logger.log("uploading_event: clear")
 
 
 def train(resume_config, dry_run, no_wandb, sample_only):
