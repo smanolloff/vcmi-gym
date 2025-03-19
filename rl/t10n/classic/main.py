@@ -416,6 +416,12 @@ class StructuredLogger:
         self.filename = filename
         self.log(dict(filename=filename))
 
+        self.debug = self.log
+        self.info = self.log
+        self.warn = self.log
+        self.warning = self.log
+        self.error = self.log
+
     def log(self, obj):
         timestamp = datetime.utcnow().isoformat(timespec='milliseconds')
         if isinstance(obj, dict):
@@ -724,6 +730,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     if sample_from_s3:
         dataloader = torch.utils.data.DataLoader(
             S3Dataset(
+                logger=logger,
                 bucket_name=config["s3"]["data"]["bucket_name"],
                 s3_dir=config["s3"]["data"]["s3_dir"],
                 cache_dir=config["s3"]["data"]["cache_dir"],

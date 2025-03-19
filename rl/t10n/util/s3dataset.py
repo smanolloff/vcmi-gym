@@ -5,12 +5,14 @@ import os
 import re
 import random
 import glob
+import logging
 from torch.utils.data import IterableDataset
 
 
 class S3Dataset(IterableDataset):
     def __init__(
         self,
+        logger,
         bucket_name,
         s3_dir,
         cache_dir,
@@ -95,13 +97,13 @@ class S3Dataset(IterableDataset):
 
         dropped = [prefix for prefix in prefix_counters.keys() if prefix not in prefixes]
         if dropped:
-            print("WARNING: dropped %d incomplete prefixes: %s" % (len(dropped), dropped))
+            logger.info("WARNING: dropped %d incomplete prefixes: %s" % (len(dropped), dropped))
 
         if os.getenv("S3_DEBUG"):
-            print("XXXXXXX: USING JUST 3 PREFIXES (DEBUG)")
+            logger.info("XXXXXXX: USING JUST 3 PREFIXES (DEBUG)")
             prefixes = prefixes[:3]
 
-        print("Found %d sample packs" % len(prefixes))
+        logger.info("Found %d sample packs" % len(prefixes))
 
         self.types = types
         self.prefixes = prefixes
@@ -117,23 +119,21 @@ class S3Dataset(IterableDataset):
 
         local_path = os.path.join(self.cache_dir, os.path.basename(file_key))
         if os.path.exists(local_path):
-            print("Using cached file %s" % local_path)
+            logger.info("Using cached file %s" % local_path)
         else:
-            print("Downloading %s ..." % file_key)
+            logger.info("Downloading %s ..." % file_key)
             self.s3_client.download_file(self.bucket_name, file_key, local_path)
-            print("Download complete: %s" % file_key)
+            logger.info("Download complete: %s" % file_key)
 
             if self.cached_files_max is not None:
-                print("uyyyyyy")
                 # Keep the most recent 100 files and delete the rest
                 files = sorted(glob.glob(os.path.join(self.cache_dir, "*")), key=os.path.getmtime, reverse=True)
-                print(list(files))
                 for file in files[self.cached_files_max:]:
                     try:
                         os.remove(file)
-                        print(f"Deleting: {file}")
+                        logger.info(f"Deleting: {file}")
                     except Exception as e:
-                        print(f"Error deleting {file}: {e}")
+                        logger.info(f"Error deleting {file}: {e}")
 
         return local_path
 
@@ -159,7 +159,7 @@ class S3Dataset(IterableDataset):
                     yield sample_group
 
             self.epoch_count += 1  # Track how many times we’ve exhausted S3 files
-            print(f"Epoch {self.epoch_count} completed. Restarting dataset.")
+            logger.info(f"Epoch {self.epoch_count} completed. Restarting dataset.")
 
     def __iter__(self):
         """ Creates an iterable dataset that streams from S3 """
@@ -174,7 +174,15 @@ class S3Dataset(IterableDataset):
 
 
 if __name__ == "__main__":
+    logger = logging.getLogger("my_logger")
+    logger.setLevel(logging.INFO)
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
     dataset = S3Dataset(
+        logger=logger,
         bucket_name="vcmi-gym",
         s3_dir="v8",
         cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
