@@ -130,11 +130,11 @@ class S3Dataset(IterableDataset):
 
         local_path = os.path.join(self.cache_dir, os.path.basename(file_key))
         if os.path.exists(local_path):
-            self.logger.info("Using cached file %s" % local_path)
+            self.logger.debug("Using cached file %s" % local_path)
         else:
             self.logger.warn("Downloading %s ..." % file_key)
             self.s3_client.download_file(self.bucket_name, file_key, local_path)
-            self.logger.info("Download complete: %s" % file_key)
+            self.logger.debug("Download complete: %s" % file_key)
 
             if self.cached_files_max is not None:
                 # Keep the most recent 100 files and delete the rest
@@ -144,7 +144,7 @@ class S3Dataset(IterableDataset):
                         os.remove(file)
                         self.logger.info(f"Deleting: {file}")
                     except Exception as e:
-                        self.logger.info(f"Error deleting {file}: {e}")
+                        self.logger.warn(f"Error deleting {file}: {e}")
 
         return local_path
 
