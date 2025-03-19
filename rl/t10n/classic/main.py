@@ -570,14 +570,6 @@ def train_model(
         # mask_loss = sum(mask_losses) / len(mask_losses)
         # done_loss = sum(done_losses) / len(done_losses)
         # total_loss = sum(total_losses) / len(total_losses)
-        logger.info(dict(
-            train_epoch=epoch,
-            obs_loss=obs_loss,
-            # rew_loss=rew_loss,
-            # mask_loss=mask_loss,
-            # done_loss=done_loss,
-            # total_loss=total_loss,
-        ))
 
         return obs_loss
 
@@ -795,8 +787,8 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             split_side=1
         ),
         batch_size=eval_buffer.capacity,
-        num_workers=config["s3"]["data"]["num_workers"],
-        prefetch_factor=config["s3"]["data"]["prefetch_factor"],
+        num_workers=1,
+        prefetch_factor=1,
         pin_memory=config["s3"]["data"]["pin_memory"]
     ))
 
@@ -876,7 +868,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     })
 
     iteration = 0
-    last_checkpoint_at = 0
+    last_checkpoint_at = time.time()
     last_evaluation_at = 0
     uploading_event = threading.Event()
 
@@ -936,6 +928,11 @@ def train(resume_config, dry_run, no_wandb, sample_only):
                 "train_loss/total": train_loss,
                 "eval_loss/total": eval_loss,
             }, commit=True)
+        else:
+            logger.info({
+                "iteration": iteration,
+                "train_loss/total": train_loss,
+            })
 
         if now - last_checkpoint_at > config["s3"]["checkpoint"]["interval_s"]:
             last_checkpoint_at = now
