@@ -726,7 +726,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         print(f"Saving new config to: {f.name}")
         json.dump(config, f, indent=4)
 
-    logger = StructuredLogger(filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
+    logger = StructuredLogger(level=logging.INFO, filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
     logger.info(dict(config=config))
 
     learning_rate = config["train"]["learning_rate"]
