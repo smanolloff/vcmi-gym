@@ -746,8 +746,8 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         if not os.path.exists(filename):
             logger.log("Local file does not exist, try S3")
             s3_config = config["s3"]["checkpoint"]
-            s3_filename = f"{s3_config["s3_dir"]}/{os.path.basename(filename)}"
-            logger.log(f"Download s3://{s3_config["bucket_name"]}/{s3_filename} ...")
+            s3_filename = f'{s3_config['s3_dir']}/{os.path.basename(filename)}'
+            logger.log(f'Download s3://{s3_config['bucket_name']}/{s3_filename} ...')
             init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
         model.load_state_dict(torch.load(filename, weights_only=True), strict=True)
 
@@ -761,8 +761,8 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         if not os.path.exists(filename):
             logger.log("Local file does not exist, try S3")
             s3_config = config["s3"]["checkpoint"]
-            s3_filename = f"{s3_config["s3_dir"]}/{os.path.basename(filename)}"
-            logger.log(f"Download s3://{s3_config["bucket_name"]}/{s3_filename} ...")
+            s3_filename = f'{s3_config['s3_dir']}/{os.path.basename(filename)}'
+            logger.log(f'Download s3://{s3_config['bucket_name']}/{s3_filename} ...')
             init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
         optimizer.load_state_dict(torch.load(filename, weights_only=True))
         if not dry_run:
@@ -775,13 +775,13 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             if not os.path.exists(filename):
                 logger.log("Local file does not exist, try S3")
                 s3_config = config["s3"]["checkpoint"]
-                s3_filename = f"{s3_config["s3_dir"]}/{os.path.basename(filename)}"
-                logger.log(f"Download s3://{s3_config["bucket_name"]}/{s3_filename} ...")
+                s3_filename = f'{s3_config['s3_dir']}/{os.path.basename(filename)}'
+                logger.log(f'Download s3://{s3_config['bucket_name']}/{s3_filename} ...')
                 try:
                     init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
                 except botocore.exceptions.ClientError as e:
                     if e.response["Error"]["Code"] != "404":
-                        logger.log(f"File does not exist in s3: {s3_config["bucket_name"]}/{s3_filename} ...")
+                        logger.log(f'File does not exist in s3: {s3_config['bucket_name']}/{s3_filename} ...')
                         raise
 
             if os.path.exists(filename):
@@ -956,7 +956,7 @@ def test():
     prepare(obs_pred.numpy(), "pred", "Predicted:")
     prepare(obs_dirty, "dirty", "Dirty:")
 
-    render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render["prev"]["bf_lines"], render["real"]["bf_lines"], render["pred"]["bf_lines"]))
+    render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render['prev']['bf_lines'], render['real']['bf_lines'], render['pred']['bf_lines']))
     print(render["combined"]["bf"])
 
     # print("Dirty (all):")
