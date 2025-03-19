@@ -20,7 +20,9 @@ class S3Dataset(IterableDataset):
         aws_access_key=None,
         aws_secret_key=None,
         region_name="eu-north-1",
-        shuffle=False
+        shuffle=False,
+        split_ratio=1.0,
+        split_side=0
     ):
         """
         Args:
@@ -36,6 +38,11 @@ class S3Dataset(IterableDataset):
         self.cached_files_max = cached_files_max
         self.shuffle = False
         self.logger = logger
+        self.split_ratio = split_ratio
+        self.split_side = split_side
+
+        assert split_ratio >= 0 and split_ratio <= 1, split_ratio
+        assert split_side in [0, 1], split_side
 
         print("Cache dir: %s" % self.cache_dir)
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -104,10 +111,13 @@ class S3Dataset(IterableDataset):
             self.logger.info("XXXXXXX: USING JUST 3 PREFIXES (DEBUG)")
             prefixes = prefixes[:3]
 
-        self.logger.info("Found %d sample packs" % len(prefixes))
+        self.logger.info("Found %d sample packs, will split using ratio %.2f" % (len(prefixes), self.split_ratio))
 
         self.types = types
-        self.prefixes = prefixes
+
+        split_idx = int(len(prefixes) * self.split_ratio)
+        self.prefixes = prefixes[:split_idx] if self.split_side == 0 else prefixes[split_idx:]
+        self.logger.info("Sample packs after split: %d" % len(self.prefixes))
 
     def _get_worker_prefixes(self, worker_id, num_workers):
         """ Assigns distinct file chunks to each worker """

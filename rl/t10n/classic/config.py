@@ -37,6 +37,7 @@ config = dict(
     # s3=None,
     s3=dict(
         checkpoint=dict(
+            interval_s=600,
             bucket_name="vcmi-gym",
             s3_dir="models",
         ),
@@ -47,26 +48,28 @@ config = dict(
             cached_files_max=None,
             num_workers=1,
             prefetch_factor=1,
+            pin_memory=True,
             shuffle=True,
         ),
     ),
 
+    eval={
+        "interval_s": 60,           # wandb_log will also be called here
+        "buffer_capacity": 10_000,  # eval_model() does a full pass of this buffer
+        "batch_size": 1000,
+    },
     train={
-        "eval_every": 10,
-
         # TODO: consider torch.optim.lr_scheduler.StepLR
         "learning_rate": 1e-4,
 
         "buffer_capacity": 10_000,
-        "train_epochs": 1,
-        "train_batch_size": 2000,
-        "eval_env_steps": 10_000,
+        "epochs": 1,
+        "batch_size": 2000,
 
         # !!! DEBUG (linter warning is OK) !!!
         "buffer_capacity": 10000,
-        "train_epochs": 10,
-        "train_batch_size": 2000,
-        "eval_env_steps": 100,
+        "epochs": 10,
+        "batch_size": 2000,
     }
 )
 

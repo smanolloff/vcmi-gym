@@ -54,7 +54,8 @@ def download_files_from_s3(localdir, bucket_name, s3_dir, aws_access_key, aws_se
         t = m[1]
         suffix = m[2]
         ext = m[3]
-        local_path = f"{localdir}/{suffix}/{t}.{ext}"
+        # local_path = f"{localdir}/{suffix}/{t}.{ext}"
+        local_path = f"{localdir}/{t}-{suffix}.{ext}"
 
         if os.path.exists(local_path):
             logger.log(f"Skip {s3_key} (found {local_path})")
@@ -102,7 +103,8 @@ def download_files_from_s3(localdir, bucket_name, s3_dir, aws_access_key, aws_se
 download_files_from_s3(
     localdir=sys.argv[1],
     bucket_name="vcmi-gym",  # see big note above
-    s3_dir="v8-100k",
+    # s3_dir="v8-100k",  # don't use -- cause OOM when loaded in parallel
+    s3_dir="v8",
     aws_access_key=os.environ["AWS_ACCESS_KEY"],
     aws_secret_key=os.environ["AWS_SECRET_KEY"],
     region_name="eu-north-1"

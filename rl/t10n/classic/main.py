@@ -35,6 +35,10 @@ from ..constants_v8 import (
 
 from ..util.s3dataset import S3Dataset
 
+DIM_OTHER = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
+DIM_HEXES = 165*STATE_SIZE_ONE_HEX
+DIM_OBS = DIM_OTHER + DIM_HEXES
+
 
 def wandb_log(*args, **kwargs):
     pass
@@ -147,6 +151,13 @@ class Buffer:
         # XXX: float->bool conversion is OK given floats are exactly 1 or 0
         valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
         shuffled_indices = valid_indices[torch.randperm(len(valid_indices), device=self.device)]
+
+        # The valid indices are less since than all indices
+        short = self.capacity - len(shuffled_indices)
+        if short:
+            shuffled_indices = torch.cat((shuffled_indices, valid_indices[torch.randperm(len(valid_indices), device=self.device)][:short]))
+
+        assert len(shuffled_indices) == self.capacity
 
         for i in range(0, len(shuffled_indices), batch_size):
             batch_indices = shuffled_indices[i:i + batch_size]
@@ -431,8 +442,10 @@ class StructuredLogger:
             log_obj = dict(timestamp=timestamp, message=dict(string=obj))
 
         print(yaml.dump(log_obj, sort_keys=False))
-        with open(self.filename, "a+") as f:
-            f.write(json.dumps(log_obj) + "\n")
+
+        if self.filename:
+            with open(self.filename, "a+") as f:
+                f.write(json.dumps(log_obj) + "\n")
 
 
 # progress_report_steps=0 => quiet
@@ -491,19 +504,19 @@ def train_model(
     optimizer,
     scaler,
     buffer,
-    train_epochs,
-    train_batch_size
+    epochs,
+    batch_size
 ):
     model.train()
 
-    for epoch in range(train_epochs):
+    for epoch in range(epochs):
         obs_losses = []
         # rew_losses = []
         # mask_losses = []
         # done_losses = []
         # total_losses = []
 
-        for batch in buffer.sample_iter(train_batch_size):
+        for batch in buffer.sample_iter(batch_size):
             # obs, action, next_rew, next_obs, next_mask, next_done = batch
             obs, action, next_obs = batch
             # next_obs_pred, next_rew_pred, next_mask_pred, next_done_pred = model(obs, action)
@@ -548,10 +561,11 @@ def train_model(
             # total_loss=total_loss,
         ))
 
+        return obs_loss
 
-def eval_model(logger, model, buffer, eval_env_steps):
+
+def eval_model(logger, model, buffer, batch_size):
     model.eval()
-    batch_size = eval_env_steps // 10
     obs_losses = []
     # rew_losses = []
     # mask_losses = []
@@ -678,7 +692,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         config["run"] = dict(
             id=run_id,
             out_dir=os.path.abspath("data/t10n"),
-            checkpoint_interval_s=5,
+            wandb_log_interval_s=60,
             resumed_config=None,
         )
 
@@ -699,37 +713,36 @@ def train(resume_config, dry_run, no_wandb, sample_only):
 
     learning_rate = config["train"]["learning_rate"]
     buffer_capacity = config["train"]["buffer_capacity"]
-    train_epochs = config["train"]["train_epochs"]
-    train_batch_size = config["train"]["train_batch_size"]
-    eval_env_steps = config["train"]["eval_env_steps"]
+    train_epochs = config["train"]["epochs"]
+    train_batch_size = config["train"]["batch_size"]
+
+    eval_buffer_capacity = config["eval"]["buffer_capacity"]
+    eval_batch_size = config["eval"]["batch_size"]
 
     assert buffer_capacity % train_batch_size == 0  # needed for train_steps
-    assert eval_env_steps % 10 == 0  # needed for eval batch_size
 
     if sample_from_env:
         from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
         env = VcmiEnv(**config["env"])
 
-    dim_other = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
-    dim_hexes = 165*STATE_SIZE_ONE_HEX
-    dim_obs = dim_other + dim_hexes
-    n_actions = N_ACTIONS
-
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
     torch.backends.cudnn.benchmark = True
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = TransitionModel(dim_other, dim_hexes, n_actions, device=device)
+    model = TransitionModel(DIM_OTHER, DIM_HEXES, N_ACTIONS, device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    buffer = Buffer(capacity=buffer_capacity, dim_obs=dim_obs, n_actions=n_actions, device=device)
+    buffer = Buffer(capacity=buffer_capacity, dim_obs=DIM_OBS, n_actions=N_ACTIONS, device=device)
+    eval_buffer = Buffer(capacity=eval_buffer_capacity, dim_obs=DIM_OBS, n_actions=N_ACTIONS, device=device)
 
     if device.type == "cuda":
         scaler = torch.amp.GradScaler()
     else:
         scaler = None
 
+    data_split_ratio = 0.9  # train / test
+
     if sample_from_s3:
-        dataloader = torch.utils.data.DataLoader(
+        dataloader = iter(torch.utils.data.DataLoader(
             S3Dataset(
                 logger=logger,
                 bucket_name=config["s3"]["data"]["bucket_name"],
@@ -740,13 +753,34 @@ def train(resume_config, dry_run, no_wandb, sample_only):
                 # Don't store keys in config (will appear in clear text in config.json)
                 aws_access_key=os.environ["AWS_ACCESS_KEY"],
                 aws_secret_key=os.environ["AWS_SECRET_KEY"],
+                split_ratio=data_split_ratio,
+                split_side=0
             ),
             batch_size=buffer.capacity,
             num_workers=config["s3"]["data"]["num_workers"],
             prefetch_factor=config["s3"]["data"]["prefetch_factor"],
-            pin_memory=True
-        )
-        dataloader = iter(dataloader)
+            pin_memory=config["s3"]["data"]["pin_memory"]
+        ))
+
+    eval_dataloader = iter(torch.utils.data.DataLoader(
+        S3Dataset(
+            logger=logger,
+            bucket_name=config["s3"]["data"]["bucket_name"],
+            s3_dir=config["s3"]["data"]["s3_dir"],
+            cache_dir=config["s3"]["data"]["cache_dir"],
+            cached_files_max=config["s3"]["data"]["cached_files_max"],
+            shuffle=config["s3"]["data"]["shuffle"],
+            # Don't store keys in config (will appear in clear text in config.json)
+            aws_access_key=os.environ["AWS_ACCESS_KEY"],
+            aws_secret_key=os.environ["AWS_SECRET_KEY"],
+            split_ratio=data_split_ratio,
+            split_side=1
+        ),
+        batch_size=eval_buffer.capacity,
+        num_workers=config["s3"]["data"]["num_workers"],
+        prefetch_factor=config["s3"]["data"]["prefetch_factor"],
+        pin_memory=config["s3"]["data"]["pin_memory"]
+    ))
 
     if resume_config:
         filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
@@ -815,18 +849,21 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             logger.log(data)
 
     wandb_log({
-        "params/learning_rate": learning_rate,
-        "params/buffer_capacity": buffer_capacity,
-        "params/train_epochs": train_epochs,
-        "params/train_batch_size": train_batch_size,
-        "params/eval_env_steps": eval_env_steps,
+        "train/learning_rate": learning_rate,
+        "train/buffer_capacity": buffer_capacity,
+        "train/epochs": train_epochs,
+        "train/batch_size": train_batch_size,
+        "eval/buffer_capacity": eval_buffer_capacity,
+        "eval/batch_size": eval_batch_size,
     })
 
     iteration = 0
     last_checkpoint_at = 0
+    last_evaluation_at = 0
     uploading_event = threading.Event()
 
     while True:
+        now = time.time()
         if sample_from_env:
             collect_observations(
                 logger=logger,
@@ -854,29 +891,36 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         if sample_only:
             continue
 
-        if iteration % config["train"]["eval_every"] == 0:
-            # obs_loss, rew_loss, mask_loss, done_loss, total_loss = eval_model(
-            obs_loss = eval_model(
-                logger=logger,
-                model=model,
-                buffer=buffer,
-                eval_env_steps=eval_env_steps,
-            )
-
-            wandb_log({"iteration": iteration, "loss/total": obs_loss}, commit=True)
-
-        train_model(
+        train_loss = train_model(
             logger=logger,
             model=model,
             optimizer=optimizer,
             scaler=scaler,
             buffer=buffer,
-            train_epochs=train_epochs,
-            train_batch_size=train_batch_size
+            epochs=train_epochs,
+            batch_size=train_batch_size
         )
 
-        if time.time() - last_checkpoint_at > config["run"]["checkpoint_interval_s"]:
-            last_checkpoint_at = time.time()
+        if now - last_evaluation_at > config["eval"]["interval_s"]:
+            last_evaluation_at = now
+
+            load_observations(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
+
+            eval_loss = eval_model(
+                logger=logger,
+                model=model,
+                buffer=eval_buffer,
+                batch_size=eval_batch_size,
+            )
+
+            wandb_log({
+                "iteration": iteration,
+                "train_loss/total": train_loss,
+                "eval_loss/total": eval_loss,
+            }, commit=True)
+
+        if now - last_checkpoint_at > config["s3"]["checkpoint"]["interval_s"]:
+            last_checkpoint_at = now
             thread = threading.Thread(target=save_checkpoint, kwargs=dict(
                 logger=logger,
                 dry_run=dry_run,
