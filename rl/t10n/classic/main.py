@@ -443,27 +443,27 @@ class StructuredLogger:
                 f.write(json.dumps(log_obj) + "\n")
 
     def debug(self, obj):
-        self._level_log(obj, logging.DEBUG)
+        self._level_log(obj, logging.DEBUG, "DEBUG")
 
     def info(self, obj):
-        self._level_log(obj, logging.INFO)
+        self._level_log(obj, logging.INFO, "INFO")
 
     def warn(self, obj):
-        self._level_log(obj, logging.WARN)
+        self._level_log(obj, logging.WARN, "WARN")
 
     def warning(self, obj):
-        self._level_log(obj, logging.WARNING)
+        self._level_log(obj, logging.WARNING, "WARNING")
 
     def error(self, obj):
-        self._level_log(obj, logging.ERROR)
+        self._level_log(obj, logging.ERROR, "ERROR")
 
-    def _level_log(self, obj, level):
+    def _level_log(self, obj, level, levelname):
         if self.level > level:
             return
         if isinstance(obj, dict):
-            self.log(dict(obj, level=level))
+            self.log(dict(obj, level=levelname))
         else:
-            self.log(dict(message=dict(string=obj), level=level))
+            self.log(dict(message=dict(string=obj), level=levelname))
 
 
 # progress_report_steps=0 => quiet
