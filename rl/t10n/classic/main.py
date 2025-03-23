@@ -16,6 +16,8 @@ import boto3
 import botocore.exceptions
 import threading
 import logging
+import tempfile
+
 
 from functools import partial
 
@@ -171,31 +173,6 @@ class Buffer:
                 # self.done_buffer[batch_indices + 1]
             )
 
-    def save(self, out_dir, metadata):
-        if os.path.exists(out_dir):
-            print(f"WARNINNG: dir {out_dir} already exists, will NOT save this buffer")
-            return False
-
-        os.makedirs(out_dir, exist_ok=True)
-
-        md = dict(metadata)
-        md["shapes"] = dict(
-            created_at=int(time.time()),
-            capacity=self.capacity,
-            shapes={}
-        )
-
-        for type in ["obs", "mask", "done", "action", "reward"]:
-            fname = os.path.join(out_dir, f"{type}.npz")
-            buf = getattr(self, f"{type}_buffer")
-            np.savez_compressed(fname, buf)
-            md["shapes"][type] = list(buf.shape)
-
-        with open(os.path.join(out_dir, "metadata.json"), "w") as mdfile:
-            json.dump(md, mdfile)
-
-        return True
-
 
 class TransitionModel(nn.Module):
     def __init__(self, dim_other, dim_hexes, n_actions, device=torch.device("cpu")):
@@ -257,7 +234,7 @@ class TransitionModel(nn.Module):
     def predict(self, obs, action):
         with torch.no_grad():
             obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
-            action = torch.tensor(action, dtype=torch.int64, device=self.device)
+            action = torch.tensor(action, dtype=torch.int64, device=self.device).unsqueeze(0)
             return self(obs, action)[0].numpy()
 
     def _build_indices(self):
@@ -688,7 +665,63 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
     logger.debug("uploading_event: clear")
 
 
-def train(resume_config, dry_run, no_wandb, sample_only):
+# NOTE: this assumes no old observations are left in the buffer
+def save_buffer(logger, dry_run, buffer, out_dir, run_id, s3_config, uploading_cond):
+    # XXX: this is a sub-thread
+    # Parent thread has released waits for us to notify via the cond that we have
+    # saved the buffer to files, so it can start filling the buffer with new
+    # while we are uploading.
+    # However, it won't be able to start a new upload until this one finishes.
+    bufdir = os.path.join(out_dir, "samples", "%s-%d" % (run_id, time.time()))
+    msg = f"Saving buffer to {bufdir}"
+    if dry_run:
+        logger.info(f"{msg} (--dry-run)")
+    else:
+        logger.info(msg)
+
+    s3_dir = s3_config["s3_dir"]
+    bucket = s3_config["bucket_name"]
+
+    # [(local_path, s3_path), ...)]
+    paths = []
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for type in ["obs", "done", "action"]:
+            fname = f"{type}-{run_id}-{time.time()}.npz"
+            buf = getattr(buffer, f"{type}_buffer")
+            local_path = f"{temp_dir}/{fname}"
+            if dry_run:
+                logger.info(f"{msg} (--dry-run)")
+                continue
+            np.savez_compressed(local_path, buf)
+            s3_path = f"{s3_dir}/{fname}"
+            paths.append(local_path, s3_path)
+
+        # Buffer saved to local disk =>
+        # parent thread can now proceed with collecting new obs in it
+        # We will hold the cond lock until we are done with the upload
+        # (so parent will have to wait before starting us again)
+        logger.debug("Trying to obtaining lock (sub-thread)...")
+        with uploading_cond:
+            logger.debug("Obtained lock (sub-thread); notify_all() ...")
+            uploading_cond.notify_all()
+            s3 = init_s3_client()
+
+            for local_path, s3_path in paths:
+                msg = f"Uploading to s3://{bucket}/{s3_path} ..."
+
+                if dry_run:
+                    logger.info(f"{msg} (--dry-run)")
+                    time.sleep(5)
+                    continue
+
+                logger.info(msg)
+                s3.upload_file(local_path, bucket, s3_path)
+
+            logger.info("Successfully uploaded buffer to s3")
+
+
+def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     if resume_config:
         with open(resume_config, "r") as f:
             print(f"Resuming from config: {f.name}")
@@ -702,7 +735,6 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         config["run"] = dict(
             id=run_id,
             out_dir=os.path.abspath("data/t10n"),
-            wandb_log_interval_s=60,
             resumed_config=None,
         )
 
@@ -718,7 +750,7 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         print(f"Saving new config to: {f.name}")
         json.dump(config, f, indent=4)
 
-    logger = StructuredLogger(level=logging.INFO, filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
+    logger = StructuredLogger(level=getattr(logging, loglevel), filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
     logger.info(dict(config=config))
 
     learning_rate = config["train"]["learning_rate"]
@@ -772,25 +804,26 @@ def train(resume_config, dry_run, no_wandb, sample_only):
             pin_memory=config["s3"]["data"]["pin_memory"]
         ))
 
-    eval_dataloader = iter(torch.utils.data.DataLoader(
-        S3Dataset(
-            logger=logger,
-            bucket_name=config["s3"]["data"]["bucket_name"],
-            s3_dir=config["s3"]["data"]["s3_dir"],
-            cache_dir=config["s3"]["data"]["cache_dir"],
-            cached_files_max=config["s3"]["data"]["cached_files_max"],
-            shuffle=config["s3"]["data"]["shuffle"],
-            # Don't store keys in config (will appear in clear text in config.json)
-            aws_access_key=os.environ["AWS_ACCESS_KEY"],
-            aws_secret_key=os.environ["AWS_SECRET_KEY"],
-            split_ratio=data_split_ratio,
-            split_side=1
-        ),
-        batch_size=eval_buffer.capacity,
-        num_workers=1,
-        prefetch_factor=1,
-        pin_memory=config["s3"]["data"]["pin_memory"]
-    ))
+    if not sample_only:
+        eval_dataloader = iter(torch.utils.data.DataLoader(
+            S3Dataset(
+                logger=logger,
+                bucket_name=config["s3"]["data"]["bucket_name"],
+                s3_dir=config["s3"]["data"]["s3_dir"],
+                cache_dir=config["s3"]["data"]["cache_dir"],
+                cached_files_max=config["s3"]["data"]["cached_files_max"],
+                shuffle=config["s3"]["data"]["shuffle"],
+                # Don't store keys in config (will appear in clear text in config.json)
+                aws_access_key=os.environ["AWS_ACCESS_KEY"],
+                aws_secret_key=os.environ["AWS_SECRET_KEY"],
+                split_ratio=data_split_ratio,
+                split_side=1
+            ),
+            batch_size=eval_buffer.capacity,
+            num_workers=1,
+            prefetch_factor=1,
+            pin_memory=config["s3"]["data"]["pin_memory"]
+        ))
 
     if resume_config:
         filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
@@ -870,7 +903,12 @@ def train(resume_config, dry_run, no_wandb, sample_only):
     iteration = 0
     last_checkpoint_at = time.time()
     last_evaluation_at = 0
+
+    # during training, we simply check if the event is set and optionally skip the upload
     uploading_event = threading.Event()
+
+    # during sample collection, we use a cond lock to prevent more than 1 upload at a time
+    uploading_cond = threading.Condition()
 
     while True:
         now = time.time()
@@ -888,15 +926,26 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         assert buffer.full and not buffer.index
 
         if save_samples:
-            # NOTE: this assumes no old observations are left in the buffer
-            bufdir = os.path.join(config["run"]["out_dir"], "samples", "%s-%d" % (run_id, time.time()))
-            msg = f"Saving buffer to {bufdir}"
+            # If a previous upload is still in progress, block here until it finishes
+            logger.debug("Trying to obtaining lock (main thread)...")
+            with uploading_cond:
+                logger.debug("Obtained lock (main thread); starting sub-thread...")
 
-            if dry_run:
-                logger.info(f"{msg} (--dry-run)")
-            else:
-                logger.info(msg)
-                buffer.save(bufdir, dict(run_id=run_id))
+                thread = threading.Thread(target=save_buffer, kwargs=dict(
+                    logger=logger,
+                    dry_run=dry_run,
+                    buffer=buffer,
+                    out_dir=config["run"]["out_dir"],
+                    run_id=run_id,
+                    s3_config=config.get("s3", {}).get("data"),
+                    uploading_cond=uploading_cond
+                ))
+                thread.start()
+                # sub-thread should save the buffer to temp dir and notify us
+                logger.debug("Waiting on cond (main thread) ...")
+                if not uploading_cond.wait(timeout=10):
+                    logger.error("Thread for buffer upload did not start properly")
+                logger.debug("Notified; releasing lock (main thread) ...")
 
         if sample_only:
             continue
@@ -952,16 +1001,18 @@ def train(resume_config, dry_run, no_wandb, sample_only):
         iteration += 1
 
 
-def test():
+def test(cfg_file):
     from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
     from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
 
-    run_id = os.path.basename(__file__).removesuffix(".py")
+    run_id = os.path.basename(cfg_file).removesuffix("-config.json")
     dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
     dim_hexes = VcmiEnv.STATE_SIZE_HEXES
     n_actions = VcmiEnv.ACTION_SPACE.n
     model = TransitionModel(dim_other, dim_hexes, n_actions)
-    weights = torch.load(f"data/t10n/{run_id}-model.pt", weights_only=True)
+    weights_file = f"data/t10n/{run_id}-model.pt"
+    print(f"Loading {weights_file}")
+    weights = torch.load(weights_file, weights_only=True, map_location=torch.device("cpu"))
     model.load_state_dict(weights, strict=True)
     model.eval()
 
@@ -1021,7 +1072,7 @@ def test():
     prepare(obs_prev, "prev", "Previous:")
     prepare(obs_real, "real", "Real:")
     prepare(obs_pred.numpy(), "pred", "Predicted:")
-    prepare(obs_dirty, "dirty", "Dirty:")
+    prepare(obs_dirty.numpy(), "dirty", "Dirty:")
 
     render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render['prev']['bf_lines'], render['real']['bf_lines'], render['pred']['bf_lines']))
     print(render["combined"]["bf"])
@@ -1039,6 +1090,7 @@ if __name__ == "__main__":
     parser.add_argument("-f", metavar="FILE", help="config file to resume or test")
     parser.add_argument("--dry-run", action="store_true", help="do not save anything to disk (implies --no-wandb)")
     parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
+    parser.add_argument("--loglevel", metavar="LOGLEVEL", default="INFO", help="DEBUG | INFO | WARN | ERROR")
     parser.add_argument('action', metavar="ACTION", type=str, help="train | test | sample")
     args = parser.parse_args()
 
@@ -1046,8 +1098,8 @@ if __name__ == "__main__":
         args.no_wandb = True
 
     if args.action == "test":
-        test(args.test)
+        test(args.f)
     elif args.action == "train":
-        train(args.f, args.dry_run, args.no_wandb, False)
+        train(args.f, args.loglevel, args.dry_run, args.no_wandb, False)
     elif args.action == "sample":
-        train(args.f, args.dry_run, args.no_wandb, True)
+        train(args.f, args.loglevel, args.dry_run, args.no_wandb, True)

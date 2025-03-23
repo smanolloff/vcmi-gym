@@ -33,12 +33,12 @@ def get_action(model, obs):
 
 def main():
     total_steps = 1000
-    env = vcmi_gym.VcmiEnv_v8(
+    env = vcmi_gym.VcmiEnv_v10(
         "gym/generated/4096/4096-6stack-100K-01.vmap",
         random_heroes=0,
         random_obstacles=0,
         conntype="thread",
-        opponent="BattleAI",
+        opponent="StupidAI",
         max_steps=1000,
         # swap_sides=1,
     )

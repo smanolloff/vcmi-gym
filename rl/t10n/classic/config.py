@@ -13,42 +13,42 @@ import os
 #       and can be later uploaded via s3uploader.py
 #
 config = dict(
-    env=None,
-    #env=dict(
-    #    # opponent="BattleAI",
-    #    opponent="StupidAI",
-    #    mapname="gym/generated/4096/4x1024.vmap",
-    #    max_steps=1000,
-    #    random_heroes=1,
-    #    random_obstacles=1,
-    #    town_chance=30,
-    #    warmachine_chance=40,
-    #    random_terrain_chance=100,
-    #    tight_formation_chance=20,
-    #    allow_invalid_actions=True,
-    #    user_timeout=3600,
-    #    vcmi_timeout=3600,
-    #    boot_timeout=300,
-    #    conntype="thread",
-    #    # vcmi_loglevel_global="trace",
-    #    # vcmi_loglevel_ai="trace",
-    #),
+    # env=None,
+    env=dict(
+       # opponent="BattleAI",
+       opponent="StupidAI",
+       mapname="gym/generated/4096/4x1024.vmap",
+       max_steps=1000,
+       random_heroes=1,
+       random_obstacles=1,
+       town_chance=30,
+       warmachine_chance=40,
+       random_terrain_chance=100,
+       tight_formation_chance=20,
+       allow_invalid_actions=True,
+       user_timeout=3600,
+       vcmi_timeout=3600,
+       boot_timeout=300,
+       conntype="thread",
+       # vcmi_loglevel_global="trace",
+       # vcmi_loglevel_ai="trace",
+    ),
 
     # s3=None,
     s3=dict(
         checkpoint=dict(
             interval_s=600,
-            bucket_name="vcmi-gym",
+            bucket_name="vcmi-gym-test",
             s3_dir="models",
         ),
         data=dict(
-            bucket_name="vcmi-gym",
+            bucket_name="vcmi-gym-test",
             s3_dir="v8",
             cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
             cached_files_max=None,
             num_workers=1,
             prefetch_factor=1,
-            pin_memory=True,
+            pin_memory=False,       # causes hangs when enabled
             shuffle=True,
         ),
     ),
@@ -67,9 +67,9 @@ config = dict(
         "batch_size": 2000,
 
         # !!! DEBUG (linter warning is OK) !!!
-        "buffer_capacity": 10000,
+        "buffer_capacity": 1000,
         "epochs": 10,
-        "batch_size": 2000,
+        "batch_size": 100,
     }
 )
 
