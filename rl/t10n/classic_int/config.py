@@ -37,13 +37,13 @@ config = dict(
     # s3=None,
     s3=dict(
         checkpoint=dict(
-            interval_s=600,
-            bucket_name="vcmi-gym-test",
+            interval_s=3600,
+            bucket_name="vcmi-gym",
             s3_dir="models",
         ),
         data=dict(
-            bucket_name="vcmi-gym-test",
-            s3_dir="v8",
+            bucket_name="vcmi-gym",
+            s3_dir="v10",
             cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
             cached_files_max=None,
             num_workers=1,
@@ -67,9 +67,9 @@ config = dict(
         "batch_size": 2000,
 
         # !!! DEBUG (linter warning is OK) !!!
-        "buffer_capacity": 1000,
-        "epochs": 10,
-        "batch_size": 100,
+        # "buffer_capacity": 1000,
+        # "epochs": 10,
+        # "batch_size": 100,
     }
 )
 
