@@ -243,6 +243,7 @@ namespace Connector::V10::Thread {
         //      array of float32 floats in pyconnector.set_v_result_act()
         //      (which copies the data anyway and is ultimately slower).
 
+        LOG("Construct P_BattlefieldState...");
         auto &bs = s->getBattlefieldState();
         P_BattlefieldState pbs(bs.size());
         auto pbsmd = pbs.mutable_data();
@@ -251,30 +252,62 @@ namespace Connector::V10::Thread {
 
         auto &actmask = s->getActionMask();
 
+        LOG("Construct P_ActionMask...");
         auto pam = P_ActionMask(actmask.size());
         auto pammd = pam.mutable_data();
         for (int i=0; i < actmask.size(); i++)
             pammd[i] = actmask[i];
 
+        LOG("Construct StateTransitions...");
         auto st = sup->getStateTransitions();
         ssize_t d0 = st.size();
-        ssize_t d1 = MMAI::Schema::V10::BATTLEFIELD_STATE_SIZE;
-        auto midstates = P_IntermediateStates({d0, d1});  // np.ndarray((d0, d1), dtype=np.float32)
+        constexpr ssize_t dstate = MMAI::Schema::V10::BATTLEFIELD_STATE_SIZE;
+        constexpr ssize_t dmask = MMAI::Schema::V10::N_ACTIONS;
+        auto midstates = P_IntermediateStates({d0, dstate});  // np.ndarray((d0, dstate), dtype=np.float32)
+        auto midmasks = P_IntermediateActionMasks({d0, dmask});  // np.ndarray((d0, dmask), dtype=np.bool)
         auto midactions = P_IntermediateActions(d0);
 
-        for (int i = 0; i < d0; ++i) {
-            auto [act, state] = st.at(i);
-            midactions.mutable_at(i) = act;
-            for (int j = 0; j < state->size(); ++j) {
-                midstates.mutable_at(i, j) = state->at(j);
-            }
+        for (int i = 0; i < static_cast<int>(st.size()); ++i) {
+            auto [a, m, s] = st.at(i);
+            LOG("TREHADCONNECTOR[%d]: m.size=" + std::to_string(m->size()) + ", s.size()=" + std::to_string(s->size()));
         }
+
+        LOG("Dims: b=" + std::to_string(d0) +", dstate=" + std::to_string(dstate) + ", dmask=" + std::to_string(dmask));
+        int i = 0;
+        int j = 0;
+        try {
+            for (i = 0; i < d0; ++i) {
+                auto [act, mask, state] = st.at(i);
+                midactions.mutable_at(i) = act;
+
+                static_assert(dmask < dstate);
+
+                LOG("Mutating masks AND states shared...");
+                LOG("(mask.size()=" + std::to_string(mask->size()) + ", state.size()=" + std::to_string(state->size()));
+                for (j = 0; j < dmask; ++j) {
+                    midmasks.mutable_at(i, j) = mask->at(j);
+                    midstates.mutable_at(i, j) = state->at(j);
+                }
+
+                LOG("Mutating states only...");
+                for (j = dmask; j < dstate; ++j) {
+                    midstates.mutable_at(i, j) = state->at(j);
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cout << "FATAL ERROR: " << e.what() << "\n";
+            std::cout << "i=" << i << ", j=" << j << "\n";
+            throw;
+        }
+
+        LOG("Creating P_State...");
 
         auto res = P_State(
              sup->getType(),
              pbs,
              pam,
              midstates,
+             midmasks,
              midactions,
              sup->getErrorCode(),
              sup->getAnsiRender()

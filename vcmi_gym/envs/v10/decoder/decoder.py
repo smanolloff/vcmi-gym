@@ -20,7 +20,7 @@ from .battlefield import Battlefield
 from .value import Value
 from .stats import GlobalStats, PlayerStats
 from .hex import Hex, HexStateFlags, HexActionFlags
-from .stack import Stack, StackFlags
+from .stack import Stack, StackFlags1, StackFlags2
 from .. import pyprocconnector as pyconnector
 
 NA = pyconnector.STATE_VALUE_NA
@@ -122,8 +122,10 @@ class Decoder:
 
             if attr.startswith("STACK_"):
                 sattr = attr.removeprefix("STACK_")
-                if sattr == "FLAGS":
-                    sres[sattr] = Value(**dict(kwargs, struct_cls=StackFlags, struct_mapping=pyconnector.STACK_FLAG_MAP))
+                if sattr == "FLAGS1":
+                    sres[sattr] = Value(**dict(kwargs, struct_cls=StackFlags1, struct_mapping=pyconnector.STACK_FLAG1_MAP))
+                elif sattr == "FLAGS2":
+                    sres[sattr] = Value(**dict(kwargs, struct_cls=StackFlags2, struct_mapping=pyconnector.STACK_FLAG2_MAP))
                 else:
                     sres[sattr] = Value(**kwargs)
             elif attr == "STATE_MASK":

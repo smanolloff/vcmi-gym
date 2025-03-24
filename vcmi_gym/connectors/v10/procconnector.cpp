@@ -156,14 +156,24 @@ namespace Connector::V10::Proc {
 
         auto st = sup->getStateTransitions();
         ssize_t d0 = st.size();
-        ssize_t d1 = MMAI::Schema::V10::BATTLEFIELD_STATE_SIZE;
-        auto midstates = P_IntermediateStates({d0, d1});  // np.ndarray((d0, d1), dtype=np.float32)
+        constexpr ssize_t dstate = MMAI::Schema::V10::BATTLEFIELD_STATE_SIZE;
+        constexpr ssize_t dmask = MMAI::Schema::V10::N_ACTIONS;
+        auto midstates = P_IntermediateStates({d0, dstate});  // np.ndarray((d0, dstate), dtype=np.float32)
+        auto midmasks = P_IntermediateActionMasks({d0, dmask});  // np.ndarray((d0, dmask), dtype=np.bool)
         auto midactions = P_IntermediateActions(d0);
 
         for (int i = 0; i < d0; ++i) {
-            auto [act, state] = st.at(i);
+            auto [act, mask, state] = st.at(i);
             midactions.mutable_at(i) = act;
-            for (int j = 0; j < state->size(); ++j) {
+
+            static_assert(dmask < dstate);
+
+            for (int j = 0; j < dmask; ++j) {
+                midmasks.mutable_at(i, j) = mask->at(j);
+                midstates.mutable_at(i, j) = state->at(j);
+            }
+
+            for (int j = dmask; j < dstate; ++j) {
                 midstates.mutable_at(i, j) = state->at(j);
             }
         }
@@ -173,6 +183,7 @@ namespace Connector::V10::Proc {
              pbs,
              pam,
              midstates,
+             midmasks,
              midactions,
              sup->getErrorCode(),
              sup->getAnsiRender()

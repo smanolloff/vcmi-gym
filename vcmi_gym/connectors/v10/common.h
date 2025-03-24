@@ -43,8 +43,12 @@ namespace Connector::V10 {
 
     using P_BattlefieldState = py::array_t<float>;
     using P_ActionMask = py::array_t<bool>;
-    using P_IntermediateStates = py::array_t<float>;  // but of shape (d0, d1)
-    using P_IntermediateActions = py::array_t<long>;
+
+
+    // XXX: these are also py::array_t, but are 2D
+    using P_IntermediateStates = py::array_t<float>;        // shape (d0, STATE_SIZE)
+    using P_IntermediateActionMasks = py::array_t<bool>;    // shape (d0, N_ACTIONS)
+    using P_IntermediateActions = py::array_t<long>;        // shape (d0,)
 
 
     MMAI::Schema::Action RandomValidAction(const MMAI::Schema::IState * s);
@@ -56,6 +60,7 @@ namespace Connector::V10 {
             P_BattlefieldState state_,
             P_ActionMask actmask_,
             P_IntermediateStates intstates_,
+            P_IntermediateActionMasks intmasks_,
             P_IntermediateActions intactions_,
             const MMAI::Schema::V10::ErrorCode errcode_,
             const std::string ansiRender_
@@ -63,6 +68,7 @@ namespace Connector::V10 {
           , state(state_)
           , actmask(actmask_)
           , intstates(intstates_)
+          , intmasks(intmasks_)
           , intactions(intactions_)
           , errcode(static_cast<int>(errcode_))
           , ansiRender(ansiRender_) {}
@@ -71,6 +77,7 @@ namespace Connector::V10 {
         const P_BattlefieldState state;
         const P_ActionMask actmask;
         const P_IntermediateStates intstates;
+        const P_IntermediateActionMasks intmasks;
         const P_IntermediateActions intactions;
         const int errcode;
         const std::string ansiRender;
@@ -78,6 +85,7 @@ namespace Connector::V10 {
         const P_BattlefieldState get_state() const { return state; }
         const P_ActionMask get_actmask() const { return actmask; }
         const P_IntermediateStates get_intermediate_states() const { return intstates; }
+        const P_IntermediateActionMasks get_intermediate_action_masks() const { return intmasks; }
         const P_IntermediateActions get_intermediate_actions() const { return intactions; }
 
         const int get_errcode() const { return errcode; }

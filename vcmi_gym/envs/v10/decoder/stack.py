@@ -19,7 +19,12 @@ from collections import namedtuple
 from .. import pyprocconnector as pyconnector
 
 
-class StackFlags(namedtuple("StackFlags", list(pyconnector.STACK_FLAG_MAP.keys()))):
+class StackFlags1(namedtuple("StackFlags1", list(pyconnector.STACK_FLAG1_MAP.keys()))):
+    def __repr__(self):
+        return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
+
+
+class StackFlags2(namedtuple("StackFlags2", list(pyconnector.STACK_FLAG2_MAP.keys()))):
     def __repr__(self):
         return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
 

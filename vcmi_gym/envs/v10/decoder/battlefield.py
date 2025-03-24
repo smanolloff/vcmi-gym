@@ -21,6 +21,7 @@ from ..pyprocconnector import (
 
 from .hex import HEX_ACT_MAP
 
+
 class Battlefield():
     def __repr__(self):
         return "Battlefield(11x15)"
@@ -181,7 +182,7 @@ class Battlefield():
                     sym = "◌" if sym == "○" else sym
 
                 if hex.stack:
-                    sym = "?"
+                    sym = hex.stack.alias()
                     if hex.stack.SIDE.v is None:
                         col = ukncol
                     elif hex.stack.SIDE.v:
@@ -197,7 +198,7 @@ class Battlefield():
                         col += activemod
                         aside = hex.stack.SIDE.v
 
-                    if hex.stack.FLAGS.v is not None and hex.stack.FLAGS.struct.IS_WIDE:
+                    if hex.stack.FLAGS1.v is not None and hex.stack.FLAGS1.struct.IS_WIDE:
                         if hex.stack.SIDE.v == 0 and hex.IS_REAR.v:
                             sym += "↠"
                             addspace = False
@@ -230,11 +231,12 @@ class Battlefield():
         #
         #  3. Add side table stuff
         #
-        #    ▕₁▕₂▕₃▕₄▕₅▕₆▕₇▕₈▕₉▕₀▕₁▕₂▕₃▕₄▕₅▕
-        #   ┃▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔┃         Player: RED
-        #  ₁┨  ○ ○ ○ ○ ○ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ┠₁    Last action:
-        #  ₂┨ ○ ○ ○ ○ ○ ○ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌  ┠₂      DMG dealt: 0
-        #  ₃┨  1 ○ ○ ○ ○ ○ ◌ ◌ ▦ ▦ ◌ ◌ ◌ ◌ 1 ┠₃   Units killed: 0
+        #     ₀▏₁▏₂▏₃▏₄▏₅▏₆▏₇▏₈▏₉▏₀▏₁▏₂▏₃▏₄
+        #  ┃▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔┃            Player: BLUE
+        # ₀┨  ◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌ ┠₀           Action: SHOOT (y=4 x=5)
+        # ₁┨ ◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌  ┠₁        DMG dealt: 0 (20988 since start)
+        # ₂┨  ◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌▏◌ ┠₂     DMG received: 0 (7178 since start)
+        # ₃┨ ◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕◌▕○▕○▕○  ┠₃     Value killed: 0 (1686820 since start)
         #  ...
 
         gstats = self.global_stats
@@ -252,10 +254,10 @@ class Battlefield():
             match i:
                 case 1:
                     name = "Player"
-                    if aside:
+                    if aside is not None:
                         value = (bluecol + "BLUE" + nocol) if aside else (redcol + "RED" + nocol)
                 case 2:
-                    name = "Last action"
+                    name = "Action"
                     if self.last_action:
                         assert N_NONHEX_ACTIONS == 2
                         if self.last_action < 2:
@@ -320,8 +322,8 @@ class Battlefield():
 
         # using RowDef = std::tuple<StackAttribute, std::string>;
 
-        # All cell text is aligned right (4=default col width)
-        colwidths = arr(4, 24)
+        # All cell text is aligned right (5=default col width)
+        colwidths = arr(5, 24)
         colwidths[0] = 16  # header col
 
         # Divider column indexes
@@ -403,7 +405,8 @@ class Battlefield():
                     value = ""
 
                     if stack:
-                        flags = stack.FLAGS.struct if stack.FLAGS.v is not None else None
+                        flags1 = stack.FLAGS1.struct if stack.FLAGS1.v is not None else None
+                        flags2 = stack.FLAGS2.struct if stack.FLAGS2.v is not None else None
                         color = bluecol if side else redcol
 
                         if a == "ID":
@@ -419,42 +422,42 @@ class Battlefield():
                                 if value.endswith("k0"):
                                     value = value[:-1]
                         elif a == "STATE":
-                            if flags is None:
+                            if flags1 is None:
                                 value = "?"
                             else:
                                 value = ""
-                                value += "W" if flags.CAN_WAIT else " "
-                                value += "A" if flags.WILL_ACT else " "
-                                value += "R" if flags.CAN_RETALIATE else " "
+                                value += "W" if flags1.CAN_WAIT else " "
+                                value += "A" if flags1.WILL_ACT else " "
+                                value += "R" if flags1.CAN_RETALIATE else " "
                         elif a == "QUEUE":
                             value = str(stack.QUEUE.v.argmax())  # gets pos of first "1""
                         elif a == "ATTACK MODS":
-                            if flags is None:
+                            if flags1 is None:
                                 value = "?"
                             else:
                                 value = ""
-                                value += "D" if flags and flags.ADDITIONAL_ATTACK else " "
-                                value += "B" if flags and flags.BLIND_LIKE_ATTACK else " "
+                                value += "D" if flags1 and flags1.ADDITIONAL_ATTACK else " "
+                                value += "B" if flags2 and (flags2.BLIND_ATTACK or flags2.PETRIFY_ATTACK) else " "
                         elif a == "BLOCKED/ING":
-                            if flags is None:
+                            if flags1 is None:
                                 value = "?"
                             else:
-                                value = "%s/%s" % (flags.BLOCKED, flags.BLOCKING)
+                                value = "%s/%s" % (flags1.BLOCKED, flags1.BLOCKING)
                         elif a == "FLY/SLEEP":
-                            if flags is None:
+                            if flags1 is None:
                                 value = "?"
                             else:
-                                value = "%s/%s" % (flags.FLYING, flags.SLEEPING)
+                                value = "%s/%s" % (flags1.FLYING, flags1.SLEEPING)
                         elif a == "NO RETAL/MELEE":
-                            if flags is None:
+                            if flags1 is None:
                                 value = "?"
                             else:
-                                value = "%s/%s" % (flags.BLOCKS_RETALIATION, flags.NO_MELEE_PENALTY)
+                                value = "%s/%s" % (flags1.BLOCKS_RETALIATION, flags1.NO_MELEE_PENALTY)
                         elif a == "WIDE/BREATH":
-                            if flags is None:
+                            if flags1 is None:
                                 value = "?"
                             else:
-                                value = "%s/%s" % (flags.IS_WIDE, flags.TWO_HEX_ATTACK_BREATH)
+                                value = "%s/%s" % (flags1.IS_WIDE, flags1.TWO_HEX_ATTACK_BREATH)
                         elif a == "Y_COORD":
                             value = str(stack.hex.Y_COORD.v)
                         elif a == "X_COORD":

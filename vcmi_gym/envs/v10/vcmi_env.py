@@ -16,6 +16,7 @@
 
 import numpy as np
 import gymnasium as gym
+import os
 from typing import Optional, NamedTuple
 
 from ..util import log
@@ -34,7 +35,7 @@ from .pyprocconnector import (
 
 from .pythreadconnector import PyThreadConnector
 
-TRACE = False
+TRACE = os.getenv("VCMIGYM_DEBUG", "0") == "1"
 
 
 def tracelog(func, maxlen=80):
@@ -100,6 +101,7 @@ class VcmiEnv(gym.Env):
         "action_mask": actmask_space,
         "transitions": gym.spaces.Dict({
             "observations": gym.spaces.Sequence(obs_space, stack=True),
+            "action_masks": gym.spaces.Sequence(actmask_space, stack=True),
             "actions": gym.spaces.Sequence(ACTION_SPACE, stack=True),
         })
     })
@@ -407,6 +409,7 @@ class VcmiEnv(gym.Env):
             "action_mask": pyresult.actmask,
             "transitions": {
                 "observations": pyresult.intstates,
+                "action_masks": pyresult.intmasks,
                 "actions": pyresult.intactions,
             }
         }

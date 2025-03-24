@@ -45,7 +45,8 @@ STATE_VALUE_NA = EXPORTER.get_state_value_na()
 GLOBAL_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_global_attribute_mapping()]))
 PLAYER_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_player_attribute_mapping()]))
 HEX_ATTR_MAP = types.MappingProxyType(OrderedDict([(k, tuple(v)) for k, *v in EXPORTER.get_hex_attribute_mapping()]))
-STACK_FLAG_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag_mapping()]))
+STACK_FLAG1_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag1_mapping()]))
+STACK_FLAG2_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTER.get_stack_flag2_mapping()]))
 
 HEX_ACT_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_hex_actions())]))
 HEX_STATE_MAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_hex_states())]))
@@ -75,6 +76,7 @@ class PyResult():
     def __init__(self, result):
         self.state = result.get_state()
         self.intstates = result.get_intermediate_states()
+        self.intmasks = result.get_intermediate_action_masks()
         self.intactions = result.get_intermediate_actions()
         self.actmask = result.get_actmask()
         self.errcode = result.get_errcode()

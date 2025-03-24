@@ -117,7 +117,8 @@ namespace Connector::V10 {
             break; case HA::STACK_SPEED:                 attrname = "STACK_SPEED";
             break; case HA::STACK_QUEUE:                 attrname = "STACK_QUEUE";
             break; case HA::STACK_VALUE_ONE:             attrname = "STACK_VALUE_ONE";
-            break; case HA::STACK_FLAGS:                 attrname = "STACK_FLAGS";
+            break; case HA::STACK_FLAGS1:                attrname = "STACK_FLAGS1";
+            break; case HA::STACK_FLAGS2:                attrname = "STACK_FLAGS2";
             break; case HA::STACK_VALUE_REL:             attrname = "STACK_VALUE_REL";
             break; case HA::STACK_VALUE_REL0:            attrname = "STACK_VALUE_REL0";
             break; case HA::STACK_VALUE_KILLED_REL:      attrname = "STACK_VALUE_KILLED_REL";
@@ -140,30 +141,41 @@ namespace Connector::V10 {
         return res;
     }
 
-    const std::vector<FlagMapping> Exporter::getStackFlagMapping() const {
+    const std::vector<FlagMapping> Exporter::getStackFlag1Mapping() const {
         // attrname => offset
         auto res = std::vector<FlagMapping> {};
 
-        for (int i=0; i<EI(StackFlag::_count); i++) {
+        for (int i=0; i<EI(StackFlag1::_count); i++) {
             std::string flagname;
 
-            using SF = StackFlag;
+            using SF1 = StackFlag1;
 
-            switch (StackFlag(i)) {
-            break; case SF::IS_ACTIVE:             flagname = "IS_ACTIVE";
-            break; case SF::WILL_ACT:              flagname = "WILL_ACT";
-            break; case SF::CAN_WAIT:              flagname = "CAN_WAIT";
-            break; case SF::CAN_RETALIATE:         flagname = "CAN_RETALIATE";
-            break; case SF::SLEEPING:              flagname = "SLEEPING";
-            break; case SF::BLOCKED:               flagname = "BLOCKED";
-            break; case SF::BLOCKING:              flagname = "BLOCKING";
-            break; case SF::IS_WIDE:               flagname = "IS_WIDE";
-            break; case SF::FLYING:                flagname = "FLYING";
-            break; case SF::BLIND_LIKE_ATTACK:     flagname = "BLIND_LIKE_ATTACK";
-            break; case SF::ADDITIONAL_ATTACK:     flagname = "ADDITIONAL_ATTACK";
-            break; case SF::NO_MELEE_PENALTY:      flagname = "NO_MELEE_PENALTY";
-            break; case SF::TWO_HEX_ATTACK_BREATH: flagname = "TWO_HEX_ATTACK_BREATH";
-            break; case SF::BLOCKS_RETALIATION:    flagname = "BLOCKS_RETALIATION";
+            switch (StackFlag1(i)) {
+            break; case SF1::IS_ACTIVE:                 flagname = "IS_ACTIVE";
+            break; case SF1::WILL_ACT:                  flagname = "WILL_ACT";
+            break; case SF1::CAN_WAIT:                  flagname = "CAN_WAIT";
+            break; case SF1::CAN_RETALIATE:             flagname = "CAN_RETALIATE";
+            break; case SF1::SLEEPING:                  flagname = "SLEEPING";
+            break; case SF1::BLOCKED:                   flagname = "BLOCKED";
+            break; case SF1::BLOCKING:                  flagname = "BLOCKING";
+            break; case SF1::IS_WIDE:                   flagname = "IS_WIDE";
+            break; case SF1::FLYING:                    flagname = "FLYING";
+            break; case SF1::ADDITIONAL_ATTACK:         flagname = "ADDITIONAL_ATTACK";
+            break; case SF1::NO_MELEE_PENALTY:          flagname = "NO_MELEE_PENALTY";
+            break; case SF1::TWO_HEX_ATTACK_BREATH:     flagname = "TWO_HEX_ATTACK_BREATH";
+            break; case SF1::BLOCKS_RETALIATION:        flagname = "BLOCKS_RETALIATION";
+            break; case SF1::SHOOTER:                   flagname = "SHOOTER";
+            break; case SF1::NON_LIVING:                flagname = "NON_LIVING";
+            break; case SF1::WAR_MACHINE:               flagname = "WAR_MACHINE";
+            break; case SF1::FIREBALL:                  flagname = "FIREBALL";
+            break; case SF1::DEATH_CLOUD:               flagname = "DEATH_CLOUD";
+            break; case SF1::THREE_HEADED_ATTACK:       flagname = "THREE_HEADED_ATTACK";
+            break; case SF1::ALL_AROUND_ATTACK:         flagname = "ALL_AROUND_ATTACK";
+            break; case SF1::RETURN_AFTER_STRIKE:       flagname = "RETURN_AFTER_STRIKE";
+            break; case SF1::ENEMY_DEFENCE_REDUCTION:   flagname = "ENEMY_DEFENCE_REDUCTION";
+            break; case SF1::LIFE_DRAIN:                flagname = "LIFE_DRAIN";
+            break; case SF1::DOUBLE_DAMAGE_CHANCE:      flagname = "DOUBLE_DAMAGE_CHANCE";
+            break; case SF1::DEATH_STARE:               flagname = "DEATH_STARE";
             break; default:
                 throw std::runtime_error("Unexpected stack flag: " + std::to_string(i));
             }
@@ -174,6 +186,40 @@ namespace Connector::V10 {
         return res;
     }
 
+    const std::vector<FlagMapping> Exporter::getStackFlag2Mapping() const {
+        // attrname => offset
+        auto res = std::vector<FlagMapping> {};
+
+        for (int i=0; i<EI(StackFlag2::_count); i++) {
+            std::string flagname;
+
+            using SF2 = StackFlag2;
+
+            switch (StackFlag2(i)) {
+            break; case SF2::AGE:               flagname = "AGE";
+            break; case SF2::AGE_ATTACK:        flagname = "AGE_ATTACK";
+            break; case SF2::BIND:              flagname = "BIND";
+            break; case SF2::BIND_ATTACK:       flagname = "BIND_ATTACK";
+            break; case SF2::BLIND:             flagname = "BLIND";
+            break; case SF2::BLIND_ATTACK:      flagname = "BLIND_ATTACK";
+            break; case SF2::CURSE:             flagname = "CURSE";
+            break; case SF2::CURSE_ATTACK:      flagname = "CURSE_ATTACK";
+            break; case SF2::DISPEL_ATTACK:     flagname = "DISPEL_ATTACK";
+            break; case SF2::PETRIFY:           flagname = "PETRIFY";
+            break; case SF2::PETRIFY_ATTACK:    flagname = "PETRIFY_ATTACK";
+            break; case SF2::POISON:            flagname = "POISON";
+            break; case SF2::POISON_ATTACK:     flagname = "POISON_ATTACK";
+            break; case SF2::WEAKNESS:          flagname = "WEAKNESS";
+            break; case SF2::WEAKNESS_ATTACK:   flagname = "WEAKNESS_ATTACK";
+            break; default:
+                throw std::runtime_error("Unexpected stack flag: " + std::to_string(i));
+            }
+
+            res.emplace_back(flagname, i);
+        }
+
+        return res;
+    }
     const std::vector<AttributeMapping> Exporter::getGlobalAttributeMapping() const {
         // attrname => (encname, offset, n, vmax)
         auto res = std::vector<AttributeMapping> {};
@@ -306,6 +352,7 @@ namespace Connector::V10 {
             .def("get_hex_attribute_mapping", &Exporter::getHexAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
             .def("get_player_attribute_mapping", &Exporter::getPlayerAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
             .def("get_global_attribute_mapping", &Exporter::getGlobalAttributeMapping, "Get attrname => (encname, offset, n, vmax)")
-            .def("get_stack_flag_mapping", &Exporter::getStackFlagMapping, "Get flagname => offset");
+            .def("get_stack_flag1_mapping", &Exporter::getStackFlag1Mapping, "Get flagname => offset")
+            .def("get_stack_flag2_mapping", &Exporter::getStackFlag2Mapping, "Get flagname => offset");
     }
 }

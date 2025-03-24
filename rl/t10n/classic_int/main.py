@@ -25,8 +25,7 @@ from torch.nn.functional import mse_loss
 from datetime import datetime
 
 
-# from vcmi_gym.envs.v8.pyprocconnector import (
-from ..constants_v8 import (
+from ..constants_v10 import (
     GLOBAL_ATTR_MAP,
     PLAYER_ATTR_MAP,
     HEX_ATTR_MAP,
@@ -96,7 +95,7 @@ class Buffer:
 
     # Using compact version with single obs and mask buffers
     # def add(self, obs, action_mask, done, action, reward, next_obs, next_action_mask, next_done):
-    def add(self, obs, action_mask, done, action, reward):
+    def add(self, obs, action_mask, done, action):
         self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
         # self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
         self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
@@ -462,27 +461,40 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
     term = env.terminated
     trunc = env.truncated
     dict_obs = env.obs
+    i = 0
 
-    for i in range(n):
+    while i < n:
         # Ensure logging on final obs
         progress = round(i / n, 3)
         if progress >= next_progress_report_at:
             next_progress_report_at += progress_report_step
             logger.debug(dict(observations_collected=i, progress=progress*100, terms=terms, truncs=truncs))
 
-        action = env.random_action()
-        if action is None:
+        tr = dict_obs["transitions"]
+        for obs, mask, action in zip(tr["observations"], tr["action_masks"], tr["actions"]):
+            buffer.add(obs, mask, False, action)
+            i += 1
+
+        next_action = env.random_action()
+        if next_action is None:
             assert term or trunc
+
+            # The current obs is typically oldest one in the next obs's `transitions`
+            # However, the env must be reset here, i.e. the obs's transitions will be blank
+            # => add it explicitly
+
+            # terms are OK, but truncs are not predictable
+            if term:
+                buffer.add(dict_obs["observation"], dict_obs["action_mask"], True, -1)
+                i += 1
+
             terms += term
             truncs += trunc
             term = False
             trunc = False
-            buffer.add(dict_obs["observation"], dict_obs["action_mask"], True, -1, -1)
             dict_obs, _info = env.reset()
         else:
-            next_obs, rew, term, trunc, _info = env.step(action)
-            buffer.add(dict_obs["observation"], dict_obs["action_mask"], False, action, rew)
-            dict_obs = next_obs
+            dict_obs, _rew, term, trunc, _info = env.step(next_action)
 
     logger.debug(dict(observations_collected=n, progress=100, terms=terms, truncs=truncs))
 
@@ -764,7 +776,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     assert buffer_capacity % train_batch_size == 0  # needed for train_steps
 
     if sample_from_env:
-        from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
+        from vcmi_gym.envs.v10.vcmi_env import VcmiEnv
         env = VcmiEnv(**config["env"])
 
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
@@ -923,6 +935,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         elif sample_from_s3:
             load_observations(logger=logger, dataloader=dataloader, buffer=buffer)
 
+        import ipdb; ipdb.set_trace()  # noqa
         assert buffer.full and not buffer.index
 
         if save_samples:
@@ -1002,8 +1015,8 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
 
 def test(cfg_file):
-    from vcmi_gym.envs.v8.vcmi_env import VcmiEnv
-    from vcmi_gym.envs.v8.decoder.decoder import Decoder, pyconnector
+    from vcmi_gym.envs.v10.vcmi_env import VcmiEnv
+    from vcmi_gym.envs.v10.decoder.decoder import Decoder, pyconnector
 
     run_id = os.path.basename(cfg_file).removesuffix("-config.json")
     dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
