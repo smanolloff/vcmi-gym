@@ -141,17 +141,6 @@ namespace Connector::V10::Proc {
         auto sup = extractSupplementaryData(s);
         assert(sup->getType() == MMAI::Schema::V10::ISupplementaryData::Type::REGULAR);
 
-        // XXX: these do not improve performance, better avoid the const_cast
-        // auto pbs = P_BattlefieldState(bs.size(), const_cast<float*>(bs.data()));
-        // auto patm = P_AttentionMask(attnmask.size(), const_cast<float*>(attnmask.data()));
-
-        // XXX: manually copying the state into py::array_t<float> is
-        //      ~10% faster than storing the BattlefieldState& reference in
-        //      P_State as pybind's STL automatically converts it to a python
-        //      list of python floats, which needs to be converted to a numpy
-        //      array of float32 floats in pyconnector.set_v_result_act()
-        //      (which copies the data anyway and is ultimately slower).
-
         auto &bs = s->getBattlefieldState();
         P_BattlefieldState pbs(bs.size());
         auto pbsmd = pbs.mutable_data();

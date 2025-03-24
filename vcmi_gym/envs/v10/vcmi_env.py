@@ -92,9 +92,16 @@ class VcmiEnv(gym.Env):
 
     ACTION_SPACE = gym.spaces.Discrete(N_ACTIONS)
 
+    obs_space = gym.spaces.Box(low=STATE_VALUE_NA, high=1, shape=(STATE_SIZE,), dtype=np.float32)
+    actmask_space = gym.spaces.Box(low=0, high=1, shape=(N_ACTIONS,), dtype=bool)
+
     OBSERVATION_SPACE = gym.spaces.Dict({
-        "observation": gym.spaces.Box(low=STATE_VALUE_NA, high=1, shape=(STATE_SIZE,), dtype=np.float32),
-        "action_mask": gym.spaces.Box(low=0, high=1, shape=(N_ACTIONS,), dtype=bool),
+        "observation": obs_space,
+        "action_mask": actmask_space,
+        "transitions": gym.spaces.Dict({
+            "observations": gym.spaces.Sequence(obs_space, stack=True),
+            "actions": gym.spaces.Sequence(ACTION_SPACE, stack=True),
+        })
     })
 
     ENV_VERSION = 10
@@ -284,7 +291,7 @@ class VcmiEnv(gym.Env):
                 print(self.render())
                 raise Exception("Invalid action given: %s" % action)
 
-        bf = Decoder.decode(res.state, only_global=True)
+        bf = Decoder.decode(action, res.state, only_global=True)
         term = bf.global_stats.BATTLE_WINNER.v is not None
         rew = self.__class__.calc_reward(res, bf, self.reward_cfg)
 
@@ -292,7 +299,7 @@ class VcmiEnv(gym.Env):
         obs = self.__class__.build_obs(res)
         trunc = self.actions_total >= self.max_steps
 
-        self._update_vars_after_step(obs, res, rew, term, trunc)
+        self._update_vars_after_step(action, obs, res, rew, term, trunc)
         self._maybe_render()
 
         info = self.__class__.build_info(res, term, trunc, bf, self.actions_total)
@@ -328,7 +335,7 @@ class VcmiEnv(gym.Env):
                 self.actions_total,
                 round(self.reward, 2),
                 round(self.reward_total, 2),
-                self.bf.enemy_stats.VALUE_LOST_REL.v - self.bf.my_stats.VALUE_LOST_REL.v,
+                self.bf.enemy_stats.VALUE_LOST_NOW_REL.v - self.bf.my_stats.VALUE_LOST_NOW_REL.v,
                 self.bf.enemy_stats.VALUE_LOST_ACC_REL0.v - self.bf.my_stats.VALUE_LOST_ACC_REL0.v
             )
         elif self.render_mode == "rgb_array":
@@ -346,14 +353,35 @@ class VcmiEnv(gym.Env):
             self.logger.removeHandler(handler)
             handler.close()
 
+    def render_transitions(self):
+        def prepare(action, obs, headline):
+            import re
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            render = {}
+            render["bf_lines"] = Decoder.decode(action, obs).render_battlefield()[0][:-1]
+            render["bf_len"] = [len(l) for l in render["bf_lines"]]
+            render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
+            render["bf_maxlen"] = max(render["bf_len"])
+            render["bf_maxprintlen"] = max(render["bf_printlen"])
+            render["bf_lines"].insert(0, headline.rjust(render["bf_maxprintlen"]))
+            render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+            render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
+            return render["bf_lines"]
+
+        bfields = [prepare(action, state, f"Action: {action}") for action, state in zip(self.result.intactions, self.result.intstates)]
+        print("")
+        print("\n".join([(" → ".join(rowlines) + " →") for rowlines in zip(*bfields)]))
+        print("")
+        print(self.render())
+
     def __del__(self):
         self.close()
 
     def decode(self):
-        return self.__class__.decode_obs(self.result.state)
+        return self.__class__.decode_obs(self.last_action, self.result.state)
 
     def defend_action(self):
-        bf = Decoder.decode(self.result.state)
+        bf = Decoder.decode(self.last_action, self.result.state)
         ahex = None
         for hex in [h for row in bf.hexes for h in row]:
             if hex.STACK_QUEUE_POS.v == 0 and not hex.IS_REAR.v:
@@ -377,17 +405,22 @@ class VcmiEnv(gym.Env):
         return {
             "observation": pyresult.state,
             "action_mask": pyresult.actmask,
+            "transitions": {
+                "observations": pyresult.intstates,
+                "actions": pyresult.intactions,
+            }
         }
 
     @staticmethod
-    def decode_obs(pyresult):
-        return Decoder.decode(pyresult.state)
+    def decode_obs(last_action, pyresult):
+        return Decoder.decode(last_action, pyresult.state)
 
     #
     # private
     #
 
-    def _update_vars_after_step(self, obs, res, rew, term, trunc):
+    def _update_vars_after_step(self, action, obs, res, rew, term, trunc):
+        self.last_action = action
         self.actions_total += 1
         self.obs = obs
         self.result = res
@@ -397,6 +430,7 @@ class VcmiEnv(gym.Env):
         self.truncated = trunc
 
     def _reset_vars(self, res, obs):
+        self.last_action = None
         self.actions_total = 0
         self.obs = obs
         self.result = res
@@ -406,7 +440,7 @@ class VcmiEnv(gym.Env):
         self.reward_clip_abs_max = 0
         self.terminated = False
         self.truncated = False
-        self.bf = Decoder.decode(res.state, only_global=True)
+        self.bf = Decoder.decode(self.last_action, res.state, only_global=True)
 
     def _maybe_render(self):
         if self.render_each_step:
@@ -437,8 +471,8 @@ class VcmiEnv(gym.Env):
         if res.errcode > 0:
             return cfg.err_exclusive
 
-        net_value = bf.enemy_stats.VALUE_LOST_REL.v - bf.my_stats.VALUE_LOST_REL.v
-        net_dmg = bf.enemy_stats.DMG_RECEIVED_REL.v - bf.my_stats.DMG_RECEIVED_REL.v
+        net_value = bf.enemy_stats.VALUE_LOST_NOW_REL.v - bf.my_stats.VALUE_LOST_NOW_REL.v
+        net_dmg = bf.enemy_stats.DMG_RECEIVED_NOW_REL.v - bf.my_stats.DMG_RECEIVED_NOW_REL.v
         net_value_acc = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
         ended = bf.global_stats.BATTLE_WINNER.v is not None
         term_rew = net_value_acc if ended else 0

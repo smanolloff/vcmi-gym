@@ -60,11 +60,10 @@ class Stack(namedtuple("Stack", ["hex"] + list([k.removeprefix("STACK_") for k i
         return list(pyconnector.SIDE_MAP)[self.SIDE.v]
 
     def alias(self):
-        import ipdb; ipdb.set_trace()  # noqa
-        if self.SLOT.v == "7":
+        if self.SLOT.v == 7:
             return "M"
-        elif self.SLOT.v == "8":
+        elif self.SLOT.v == 8:
             return "S"
         else:
-            assert self.slot >= 0 and self.slot < 7
-            return str(self.slot)
+            assert self.SLOT.v in range(7)
+            return str(self.SLOT.v)

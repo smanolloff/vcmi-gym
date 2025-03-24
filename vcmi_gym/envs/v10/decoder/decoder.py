@@ -33,7 +33,7 @@ class Decoder:
     # XXX: `state0` is used in autoencoder testing scenarios where it
     #      represents the real state, while `state` is the reconstructed one
     @classmethod
-    def decode(cls, state, only_global=False, verbose=False):
+    def decode(cls, last_action, state, only_global=False, verbose=False):
         obs = state
         assert obs.shape == (pyconnector.STATE_SIZE,), f"{obs.shape} == ({pyconnector.STATE_SIZE},)"
 
@@ -51,7 +51,7 @@ class Decoder:
 
         gstats, lstats, rstats, hexes = np.split(obs, delimiters)
 
-        res = Battlefield(state)
+        res = Battlefield(last_action, state)
         res.global_stats = cls.decode_global(gstats, verbose)
         res.left_stats = cls.decode_player(lstats, verbose)
         res.right_stats = cls.decode_player(rstats, verbose)

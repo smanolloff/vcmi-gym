@@ -16,19 +16,22 @@
 
 from ..pyprocconnector import (
     HEX_STATE_MAP,
+    N_NONHEX_ACTIONS
 )
 
+from .hex import HEX_ACT_MAP
 
 class Battlefield():
     def __repr__(self):
         return "Battlefield(11x15)"
 
-    def __init__(self, envstate):
+    def __init__(self, last_action, envstate):
         self.hexes = []
         self.global_stats = None
         self.left_stats = None
         self.right_stats = None
         self.stacks = [[], []]  # left, right stacks
+        self.last_action = last_action
         self.envstate = envstate
 
     def get_hex(self, y_or_n, x=None):
@@ -79,10 +82,7 @@ class Battlefield():
     #         print("Invalid stack (ID=%s)" % i)
 
     # XXX: this is C++ code translated in Python and it's quite ugly
-    def render(self, strict=False):
-        arr = lambda x, n: [x for _ in range(n)]
-        stacks = [[], [], []]  # left, right, ukn
-
+    def render_battlefield(self):
         nocol = "\033[0m"
         redcol = "\033[31m"  # red
         bluecol = "\033[34m"  # blue
@@ -90,6 +90,7 @@ class Battlefield():
         activemod = "\033[107m\033[7m"  # bold+reversed
         ukncol = "\033[7m"  # white
 
+        stacks = [[], []]  # left, right
         lines = []
 
         #
@@ -114,6 +115,9 @@ class Battlefield():
         #  ┃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁┃
         #   ▕¹▕²▕³▕⁴▕⁵▕⁶▕⁷▕⁸▕⁹▕⁰▕¹▕²▕³▕⁴▕⁵▕
         #
+
+        aside = None
+        tablestartrow = len(lines)
 
         lines.append("    ₀▏₁▏₂▏₃▏₄▏₅▏₆▏₇▏₈▏₉▏₀▏₁▏₂▏₃▏₄")
         lines.append(" ┃▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔┃ ")
@@ -186,14 +190,12 @@ class Battlefield():
                         col = redcol
 
                     if not hex.IS_REAR:
-                        if hex.stack.SIDE.v is None:
-                            stacks[2].append(hex.stack)
-                        else:
-                            stacks[hex.stack.SIDE.v].append(hex.stack)
+                        stacks[hex.stack.SIDE.v].append(hex.stack)
                     if hex.stack.QUANTITY.v is None:
                         col += "\033[1;47"
                     elif hex.stack.QUEUE.v[0] == 1:
                         col += activemod
+                        aside = hex.stack.SIDE.v
 
                     if hex.stack.FLAGS.v is not None and hex.stack.FLAGS.struct.IS_WIDE:
                         if hex.stack.SIDE.v == 0 and hex.IS_REAR.v:
@@ -218,6 +220,91 @@ class Battlefield():
 
         lines.append("")
 
+        return lines, aside, tablestartrow
+
+    def render_side_stats(self, lines, aside, tablestartrow):
+        nocol = "\033[0m"
+        redcol = "\033[31m"  # red
+        bluecol = "\033[34m"  # blue
+
+        #
+        #  3. Add side table stuff
+        #
+        #    ▕₁▕₂▕₃▕₄▕₅▕₆▕₇▕₈▕₉▕₀▕₁▕₂▕₃▕₄▕₅▕
+        #   ┃▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔┃         Player: RED
+        #  ₁┨  ○ ○ ○ ○ ○ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ┠₁    Last action:
+        #  ₂┨ ○ ○ ○ ○ ○ ○ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌ ◌  ┠₂      DMG dealt: 0
+        #  ₃┨  1 ○ ○ ○ ○ ○ ◌ ◌ ▦ ▦ ◌ ◌ ◌ ◌ 1 ┠₃   Units killed: 0
+        #  ...
+
+        gstats = self.global_stats
+        lpstats = self.left_stats
+        rpstats = self.right_stats
+
+        ended = gstats.BATTLE_WINNER.v is not None
+        side = gstats.BATTLE_SIDE.v
+        mystats = rpstats if side else rpstats
+
+        for i, line in enumerate(lines):
+            name = ""
+            value = ""
+
+            match i:
+                case 1:
+                    name = "Player"
+                    if aside:
+                        value = (bluecol + "BLUE" + nocol) if aside else (redcol + "RED" + nocol)
+                case 2:
+                    name = "Last action"
+                    if self.last_action:
+                        assert N_NONHEX_ACTIONS == 2
+                        if self.last_action < 2:
+                            value = "Wait" if self.last_action else "Retreat"
+                        else:
+                            hex = self.get_hex((self.last_action - 2) // len(HEX_ACT_MAP))
+                            act = list(HEX_ACT_MAP)[(self.last_action - 2) % len(HEX_ACT_MAP)]
+                            value = "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
+                case 3:
+                    name = "DMG dealt"
+                    value = "%d (%d since start)" % (mystats.DMG_DEALT_NOW_ABS.v, mystats.DMG_DEALT_ACC_ABS.v)
+                case 4:
+                    name = "DMG received"
+                    value = "%d (%d since start)" % (mystats.DMG_RECEIVED_NOW_ABS.v, mystats.DMG_RECEIVED_ACC_ABS.v)
+                case 5:
+                    name = "Value killed"
+                    value = "%d (%d since start)" % (mystats.VALUE_KILLED_NOW_ABS.v, mystats.VALUE_KILLED_ACC_ABS.v)
+                case 6:
+                    name = "Value lost"
+                    value = "%d (%d since start)" % (mystats.VALUE_LOST_NOW_ABS.v, mystats.VALUE_LOST_ACC_ABS.v)
+                case 7:
+                    # XXX: if there's a draw, this text will be incorrect
+                    restext = (bluecol + "BLUE WINS") if gstats.BATTLE_WINNER.v else (redcol + "RED WINS")
+                    name = "Battle result"
+                    value = (restext + nocol) if ended else ""
+
+                case 8:
+                    name = "Army value (L)"
+                    value = "%d (%.0f%% of current BF value)" % (lpstats.ARMY_VALUE_NOW_ABS.v, lpstats.ARMY_VALUE_NOW_REL.v)
+                case 9:
+                    name = "Army value (R)"
+                    value = "%d (%.0f%% of current BF value)" % (rpstats.ARMY_VALUE_NOW_ABS.v, rpstats.ARMY_VALUE_NOW_REL.v)
+                case 10:
+                    name = "Current BF value"
+                    value = "%d (%.0f%% of starting BF value)" % (gstats.BFIELD_VALUE_NOW_ABS.v, gstats.BFIELD_VALUE_NOW_REL0.v)
+                case _:
+                    continue
+
+            lines[tablestartrow + i] += ("%s: %s" % (name.rjust(17), value))
+
+        lines.append("")
+
+    def render_stacks_table(self, lines):
+        nocol = "\033[0m"
+        redcol = "\033[31m"  # red
+        bluecol = "\033[34m"  # blue
+        activemod = "\033[107m\033[7m"  # bold+reversed
+
+        arr = lambda x, n: [x for _ in range(n)]
         #
         # 5. Add stacks table:
         #
@@ -393,7 +480,8 @@ class Battlefield():
 
             lines.append(line)
 
-        #
-        # 7. Join rows into a single string
-        #
+    def render(self):
+        lines, aside, tablestartrow = self.render_battlefield()
+        self.render_side_stats(lines, aside, tablestartrow)
+        self.render_stacks_table(lines)
         return "\n".join(lines)

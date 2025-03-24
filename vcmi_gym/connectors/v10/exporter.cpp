@@ -190,8 +190,11 @@ namespace Connector::V10 {
             break; case GA::BATTLE_SIDE:                attrname = "BATTLE_SIDE";
             break; case GA::BATTLE_WINNER:              attrname = "BATTLE_WINNER";
             break; case GA::BFIELD_VALUE_START_ABS:     attrname = "BFIELD_VALUE_START_ABS";
-            break; case GA::BFIELD_VALUE_NOW_ABS :      attrname = "BFIELD_VALUE_NOW_ABS0";
+            break; case GA::BFIELD_VALUE_NOW_ABS:       attrname = "BFIELD_VALUE_NOW_ABS";
             break; case GA::BFIELD_VALUE_NOW_REL0:      attrname = "BFIELD_VALUE_NOW_REL0";
+            break; case GA::BFIELD_HP_START_ABS:        attrname = "BFIELD_HP_START_ABS";
+            break; case GA::BFIELD_HP_NOW_ABS:          attrname = "BFIELD_HP_NOW_ABS";
+            break; case GA::BFIELD_HP_NOW_REL0:         attrname = "BFIELD_HP_NOW_REL0";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
             }
@@ -217,26 +220,29 @@ namespace Connector::V10 {
 
             using PA = PlayerAttribute;
             switch (a) {
-            break; case PA::ARMY_VALUE_NOW_ABS:     attrname = "ARMY_VALUE_NOW_ABS";
-            break; case PA::ARMY_VALUE_NOW_REL:     attrname = "ARMY_VALUE_NOW_REL";
-            break; case PA::ARMY_VALUE_NOW_ABS0:    attrname = "ARMY_VALUE_NOW_ABS0";
-            break; case PA::ARMY_VALUE_NOW_REL0:    attrname = "ARMY_VALUE_NOW_REL0";
-            break; case PA::VALUE_KILLED_ABS:       attrname = "VALUE_KILLED_ABS";
-            break; case PA::VALUE_KILLED_REL:       attrname = "VALUE_KILLED_REL";
-            break; case PA::VALUE_KILLED_ACC_ABS0:  attrname = "VALUE_KILLED_ACC_ABS0";
-            break; case PA::VALUE_KILLED_ACC_REL0:  attrname = "VALUE_KILLED_ACC_REL0";
-            break; case PA::VALUE_LOST_ABS:         attrname = "VALUE_LOST_ABS";
-            break; case PA::VALUE_LOST_REL:         attrname = "VALUE_LOST_REL";
-            break; case PA::VALUE_LOST_ACC_ABS0:    attrname = "VALUE_LOST_ACC_ABS0";
-            break; case PA::VALUE_LOST_ACC_REL0:    attrname = "VALUE_LOST_ACC_REL0";
-            break; case PA::DMG_DEALT_ABS:          attrname = "DMG_DEALT_ABS";
-            break; case PA::DMG_DEALT_REL:          attrname = "DMG_DEALT_REL";
-            break; case PA::DMG_DEALT_ACC_ABS0:     attrname = "DMG_DEALT_ACC_ABS0";
-            break; case PA::DMG_DEALT_ACC_REL0:     attrname = "DMG_DEALT_ACC_REL0";
-            break; case PA::DMG_RECEIVED_ABS:       attrname = "DMG_RECEIVED_ABS";
-            break; case PA::DMG_RECEIVED_REL:       attrname = "DMG_RECEIVED_REL";
-            break; case PA::DMG_RECEIVED_ACC_ABS0:  attrname = "DMG_RECEIVED_ACC_ABS0";
-            break; case PA::DMG_RECEIVED_ACC_REL0:  attrname = "DMG_RECEIVED_ACC_REL0";
+            break; case PA::BATTLE_SIDE:                attrname = "BATTLE_SIDE";
+            break; case PA::ARMY_VALUE_NOW_ABS:         attrname = "ARMY_VALUE_NOW_ABS";
+            break; case PA::ARMY_VALUE_NOW_REL:         attrname = "ARMY_VALUE_NOW_REL";
+            break; case PA::ARMY_VALUE_NOW_REL0:        attrname = "ARMY_VALUE_NOW_REL0";
+            break; case PA::ARMY_HP_NOW_ABS:            attrname = "ARMY_HP_NOW_ABS";
+            break; case PA::ARMY_HP_NOW_REL:            attrname = "ARMY_HP_NOW_REL";
+            break; case PA::ARMY_HP_NOW_REL0:           attrname = "ARMY_HP_NOW_REL0";
+            break; case PA::VALUE_KILLED_NOW_ABS:       attrname = "VALUE_KILLED_NOW_ABS";
+            break; case PA::VALUE_KILLED_NOW_REL:       attrname = "VALUE_KILLED_NOW_REL";
+            break; case PA::VALUE_KILLED_ACC_ABS:       attrname = "VALUE_KILLED_ACC_ABS";
+            break; case PA::VALUE_KILLED_ACC_REL0:      attrname = "VALUE_KILLED_ACC_REL0";
+            break; case PA::VALUE_LOST_NOW_ABS:         attrname = "VALUE_LOST_NOW_ABS";
+            break; case PA::VALUE_LOST_NOW_REL:         attrname = "VALUE_LOST_NOW_REL";
+            break; case PA::VALUE_LOST_ACC_ABS:         attrname = "VALUE_LOST_ACC_ABS";
+            break; case PA::VALUE_LOST_ACC_REL0:        attrname = "VALUE_LOST_ACC_REL0";
+            break; case PA::DMG_DEALT_NOW_ABS:          attrname = "DMG_DEALT_NOW_ABS";
+            break; case PA::DMG_DEALT_NOW_REL:          attrname = "DMG_DEALT_NOW_REL";
+            break; case PA::DMG_DEALT_ACC_ABS:          attrname = "DMG_DEALT_ACC_ABS";
+            break; case PA::DMG_DEALT_ACC_REL0:         attrname = "DMG_DEALT_ACC_REL0";
+            break; case PA::DMG_RECEIVED_NOW_ABS:       attrname = "DMG_RECEIVED_NOW_ABS";
+            break; case PA::DMG_RECEIVED_NOW_REL:       attrname = "DMG_RECEIVED_NOW_REL";
+            break; case PA::DMG_RECEIVED_ACC_ABS:       attrname = "DMG_RECEIVED_ACC_ABS";
+            break; case PA::DMG_RECEIVED_ACC_REL0:      attrname = "DMG_RECEIVED_ACC_REL0";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
             }
