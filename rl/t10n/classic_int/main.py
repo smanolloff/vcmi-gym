@@ -216,6 +216,10 @@ class TransitionModel(nn.Module):
 
         self.to(device)
 
+        # Init lazy layers
+        with torch.no_grad():
+            self(torch.randn([2, DIM_OBS], device=device), torch.tensor([1, 1], device=device))
+
     def forward(self, obs, action):
         other, hexes = torch.split(obs, [self.dim_other, self.dim_hexes], dim=1)
 

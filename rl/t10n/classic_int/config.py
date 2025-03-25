@@ -72,4 +72,3 @@ config = dict(
         # "batch_size": 100,
     }
 )
-
