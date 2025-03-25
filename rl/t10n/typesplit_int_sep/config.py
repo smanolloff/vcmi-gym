@@ -18,6 +18,7 @@ config = dict(
         # opponent="BattleAI",
         opponent="StupidAI",
         mapname="gym/generated/4096/4x1024.vmap",
+        # mapname="gym/A1.vmap",
         max_steps=1000,
         random_heroes=1,
         random_obstacles=1,
@@ -30,7 +31,7 @@ config = dict(
         vcmi_timeout=3600,
         boot_timeout=300,
         conntype="thread",
-        # vcmienv_loglevel="DEBUG",
+        # vcmi_loglevel_global="trace",
         # vcmi_loglevel_ai="trace",
     ),
 
@@ -60,7 +61,10 @@ config = dict(
     },
     train={
         # TODO: consider torch.optim.lr_scheduler.StepLR
-        "learning_rate": 1e-4,
+        "lr_start": 1e-2,
+        "lr_min": 1e-3,
+        "lr_step_size": 60,  # 1step ~= 1min if epochs=3 and buf=10K
+        "lr_gamma": 0.75,
 
         "buffer_capacity": 10_000,
         "epochs": 1,
@@ -72,4 +76,3 @@ config = dict(
         # "batch_size": 100,
     }
 )
-
