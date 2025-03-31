@@ -65,7 +65,7 @@ config = dict(
 
         "buffer_capacity": 10_000,
         "epochs": 1,
-        "batch_size": 2500,
+        "batch_size": 1000,
 
         # !!! DEBUG (linter warning is OK) !!!
         # "buffer_capacity": 1000,

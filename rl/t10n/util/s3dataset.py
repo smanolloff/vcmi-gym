@@ -1,3 +1,4 @@
+import botocore.config
 import boto3
 import torch
 import numpy as np
@@ -65,7 +66,8 @@ class S3Dataset(IterableDataset):
             's3',
             aws_access_key_id=self.aws_access_key,
             aws_secret_access_key=self.aws_secret_key,
-            region_name=self.region_name
+            region_name=self.region_name,
+            config=botocore.config.Config(connect_timeout=10, read_timeout=30)
         )
 
     def _build_filelist(self):

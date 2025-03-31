@@ -1,3 +1,4 @@
+import botocore.config
 import boto3
 import os
 import sys
@@ -33,7 +34,8 @@ def download_files_from_s3(localdir, bucket_name, s3_dir, aws_access_key, aws_se
         "s3",
         aws_access_key_id=aws_access_key,
         aws_secret_access_key=aws_secret_key,
-        region_name=region_name
+        region_name=region_name,
+        config=botocore.config.Config(connect_timeout=10, read_timeout=30)
     )
 
     request = {"Bucket": bucket_name, "Prefix": f"{s3_dir}/"}

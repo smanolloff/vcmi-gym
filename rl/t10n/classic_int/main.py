@@ -11,8 +11,10 @@ import numpy as np
 import pathlib
 import argparse
 import shutil
-import boto3
 import botocore.exceptions
+import botocore.config
+import boto3
+from boto3.s3.transfer import TransferConfig
 import threading
 import logging
 import tempfile
@@ -135,8 +137,8 @@ class Buffer:
         sampled_indices = valid_indices[torch.randint(len(valid_indices), (batch_size,), device=self.device)]
 
         # XXX: TEST: REMOVE
-        end_of_episode_indices = torch.nonzero(self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
-        assert not any(self.obs_buffer[end_of_episode_indices, 2])
+        # end_of_episode_indices = torch.nonzero(self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
+        # assert not any(self.obs_buffer[end_of_episode_indices, 2])
         # EOF: TEST
 
         obs = self.obs_buffer[sampled_indices]
@@ -673,7 +675,8 @@ def init_s3_client():
         's3',
         aws_access_key_id=os.environ["AWS_ACCESS_KEY"],
         aws_secret_access_key=os.environ["AWS_SECRET_KEY"],
-        region_name="eu-north-1"
+        region_name="eu-north-1",
+        config=botocore.config.Config(connect_timeout=10, read_timeout=30)
     )
 
 
@@ -756,26 +759,34 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
 
     files.insert(0, os.path.join(out_dir, f"{run_id}-config.json"))
 
-    for f in files:
-        key = f"{s3_dir}/{os.path.basename(f)}"
-        msg = f"Uploading to s3://{bucket}/{key} ..."
+    try:
+        for f in files:
+            key = f"{s3_dir}/{os.path.basename(f)}"
+            msg = f"Uploading to s3://{bucket}/{key} ..."
 
-        if dry_run:
-            logger.info(f"{msg} (--dry-run)")
-        else:
-            logger.info(msg)
-            try:
-                s3.head_object(Bucket=bucket, Key=key)
-                s3.copy_object(Bucket=bucket, CopySource={"Bucket": bucket, "Key": key}, Key=f"{key}.bak")
-            except s3.exceptions.ClientError as e:
-                if e.response['Error']['Code'] != '404':
-                    raise  # Reraise if it's not a 404 (file not found) error
+            if dry_run:
+                logger.info(f"{msg} (--dry-run)")
+            else:
+                logger.info(msg)
+                size_mb = os.path.getsize(f) / 1e6
 
-            s3.upload_file(f, bucket, key)
-            logger.debug(f"Upload finished: s3://{bucket}/{key}")
+                if size_mb < 100:
+                    logger.debug("Uploading as single chunk")
+                    s3.upload_file(f, bucket, key)
+                elif size_mb < 1000:  # 1GB
+                    logger.debug("Uploding on chunks of 50MB")
+                    tc = TransferConfig(multipart_threshold=50 * 1024 * 1024, use_threads=True)
+                    s3.upload_file(f, bucket, key, Config=tc)
+                else:
+                    logger.debug("Uploding on chunks of 500MB")
+                    tc = TransferConfig(multipart_threshold=500 * 1024 * 1024, use_threads=True)
+                    s3.upload_file(f, bucket, key, Config=tc)
 
-    uploading_event.clear()
-    logger.debug("uploading_event: cleared")
+                logger.info(f"Uploaded: s3://{bucket}/{key}")
+
+    finally:
+        uploading_event.clear()
+        logger.debug("uploading_event: cleared")
 
 
 # NOTE: this assumes no old observations are left in the buffer

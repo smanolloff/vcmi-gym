@@ -23,9 +23,10 @@ boto3
 #ray @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
 #ray[tune] @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
 
+#torch_geometric==2.5.3
+
 # Manually uncomment one of the torch packages -- see comment below
 torch==2.5.1
-torch_geometric==2.5.3
 
 # XXX: there seems to be a better way now, see https://stackoverflow.com/a/78723182
 #torch @ https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.3.1%2Bcpu.cxx11.abi-cp312-cp312-linux_x86_64.whl
