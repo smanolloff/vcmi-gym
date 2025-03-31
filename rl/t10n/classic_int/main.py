@@ -939,7 +939,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     else:
         scaler = None
 
-    data_split_ratio = 0.9  # train / test
+    data_split_ratio = 0.98  # train / test
     optimize_local_storage = config.get("s3", {}).get("optimize_local_storage")
 
     if sample_from_s3:
