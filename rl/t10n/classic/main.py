@@ -26,7 +26,7 @@ from datetime import datetime
 
 
 # from vcmi_gym.envs.v8.pyprocconnector import (
-from ..constants_v8 import (
+from ..constants_v10 import (
     GLOBAL_ATTR_MAP,
     PLAYER_ATTR_MAP,
     HEX_ATTR_MAP,

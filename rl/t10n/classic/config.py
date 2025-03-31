@@ -13,37 +13,37 @@ import os
 #       and can be later uploaded via s3uploader.py
 #
 config = dict(
-    # env=None,
-    env=dict(
-       # opponent="BattleAI",
-       opponent="StupidAI",
-       mapname="gym/generated/4096/4x1024.vmap",
-       max_steps=1000,
-       random_heroes=1,
-       random_obstacles=1,
-       town_chance=30,
-       warmachine_chance=40,
-       random_terrain_chance=100,
-       tight_formation_chance=20,
-       allow_invalid_actions=True,
-       user_timeout=3600,
-       vcmi_timeout=3600,
-       boot_timeout=300,
-       conntype="thread",
-       # vcmi_loglevel_global="trace",
-       # vcmi_loglevel_ai="trace",
-    ),
+    env=None,
+    # env=dict(
+    #    # opponent="BattleAI",
+    #    opponent="StupidAI",
+    #    mapname="gym/generated/4096/4x1024.vmap",
+    #    max_steps=1000,
+    #    random_heroes=1,
+    #    random_obstacles=1,
+    #    town_chance=30,
+    #    warmachine_chance=40,
+    #    random_terrain_chance=100,
+    #    tight_formation_chance=20,
+    #    allow_invalid_actions=True,
+    #    user_timeout=3600,
+    #    vcmi_timeout=3600,
+    #    boot_timeout=300,
+    #    conntype="thread",
+    #    # vcmi_loglevel_global="trace",
+    #    # vcmi_loglevel_ai="trace",
+    # ),
 
     # s3=None,
     s3=dict(
         checkpoint=dict(
             interval_s=600,
-            bucket_name="vcmi-gym-test",
+            bucket_name="vcmi-gym",
             s3_dir="models",
         ),
         data=dict(
-            bucket_name="vcmi-gym-test",
-            s3_dir="v8",
+            bucket_name="vcmi-gym",
+            s3_dir="v10",
             cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
             cached_files_max=None,
             num_workers=1,
@@ -66,10 +66,10 @@ config = dict(
         "epochs": 1,
         "batch_size": 2000,
 
-        # !!! DEBUG (linter warning is OK) !!!
-        "buffer_capacity": 1000,
-        "epochs": 10,
-        "batch_size": 100,
+        # # !!! DEBUG (linter warning is OK) !!!
+        # "buffer_capacity": 1000,
+        # "epochs": 10,
+        # "batch_size": 100,
     }
 )
 

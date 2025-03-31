@@ -36,7 +36,7 @@ class S3Dataset(IterableDataset):
         self.s3_dir = s3_dir
         self.cache_dir = cache_dir
         self.cached_files_max = cached_files_max
-        self.shuffle = False
+        self.shuffle = shuffle
         self.logger = logger
         self.split_ratio = split_ratio
         self.split_side = split_side

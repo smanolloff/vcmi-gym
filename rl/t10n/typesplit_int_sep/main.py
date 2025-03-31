@@ -4,7 +4,6 @@ import torch.nn as nn
 import random
 import string
 import json
-import yaml
 import boto3
 import botocore.exceptions
 import threading

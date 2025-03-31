@@ -6,7 +6,6 @@ import torch.nn as nn
 import random
 import string
 import json
-import yaml
 import time
 import numpy as np
 import pathlib
@@ -135,6 +134,11 @@ class Buffer:
         valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
         sampled_indices = valid_indices[torch.randint(len(valid_indices), (batch_size,), device=self.device)]
 
+        # XXX: TEST: REMOVE
+        end_of_episode_indices = torch.nonzero(self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
+        assert not any(self.obs_buffer[end_of_episode_indices, 2])
+        # EOF: TEST
+
         obs = self.obs_buffer[sampled_indices]
         # action_mask = self.mask_buffer[sampled_indices]
         action = self.action_buffer[sampled_indices]
@@ -182,31 +186,75 @@ class TransitionModel(nn.Module):
         self.dim_other = dim_other
         self.dim_hexes = dim_hexes
         self.dim_obs = dim_other + dim_hexes
-        d1hex = dim_hexes // 165
+        self.d1hex = dim_hexes // 165
 
         # TODO: try flat obs+action (no per-hex)
 
-        self.encoder_other = nn.Sequential(
-            nn.LazyLinear(64),
+        self.encoder1_other = nn.Sequential(
+            nn.LazyLinear(100),
             nn.LeakyReLU(),
+            nn.LazyLinear(self.dim_other),
         )
 
-        self.encoder_hex = nn.Sequential(
-            nn.Unflatten(dim=1, unflattened_size=[165, d1hex]),
-            nn.LazyLinear(128),
+        self.encoder2_other = nn.Sequential(
+            nn.LazyLinear(100),
+            # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(256),
-            nn.LeakyReLU(),
-            nn.LazyLinear(64),
-            nn.LeakyReLU(),
-            nn.Flatten(),
+            nn.LazyLinear(self.dim_other),
         )
 
-        self.encoder_merged = nn.Sequential(
-            # => (B, 64 + 10560 + 1)  // +1 action
-            nn.LazyLinear(1024),
+        self.encoder3_other = nn.Sequential(
+            nn.LazyLinear(100),
+            # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(1024),
+            nn.LazyLinear(self.dim_other),
+        )
+
+        self.encoder1_hex = nn.Sequential(
+            nn.Unflatten(dim=1, unflattened_size=[165, self.d1hex]),
+            nn.LazyLinear(500),
+            # nn.LazyBatchNorm1d(),
+            nn.LeakyReLU(),
+            nn.LazyLinear(self.d1hex),
+        )
+
+        self.encoder2_hex = nn.Sequential(
+            nn.LazyLinear(500),
+            # nn.LazyBatchNorm1d(),
+            nn.LeakyReLU(),
+            nn.LazyLinear(self.d1hex),
+        )
+
+        self.encoder3_hex = nn.Sequential(
+            nn.LazyLinear(500),
+            # nn.LazyBatchNorm1d(),
+            nn.LeakyReLU(),
+            nn.LazyLinear(self.d1hex),
+        )
+
+        self.encoder1_pre = nn.Sequential(
+            nn.LazyLinear(5000)
+        )
+
+        self.encoder1_merged = nn.Sequential(
+            nn.LazyLinear(5000),
+            nn.LazyBatchNorm1d(),
+            nn.LeakyReLU(),
+            nn.LazyLinear(5000),
+        )
+
+        self.encoder2_merged = nn.Sequential(
+            nn.LazyLinear(5000),
+            nn.LazyBatchNorm1d(),
+            nn.LeakyReLU(),
+            nn.LazyLinear(5000),
+        )
+
+        self.encoder3_merged = nn.Sequential(
+            nn.LazyLinear(5000),
+            nn.LazyBatchNorm1d(),
+            nn.LeakyReLU(),
+            nn.LazyLinear(5000),
         )
 
         self.head_obs = nn.LazyLinear(self.dim_obs)
@@ -223,15 +271,24 @@ class TransitionModel(nn.Module):
     def forward(self, obs, action):
         other, hexes = torch.split(obs, [self.dim_other, self.dim_hexes], dim=1)
 
-        zother = self.encoder_other(other)
-        zhexes = self.encoder_hex(hexes)
-        merged = torch.cat((nn.functional.one_hot(action, N_ACTIONS), zother, zhexes), dim=-1)
-        z = self.encoder_merged(merged)
-        next_obs = self.head_obs(z)
-        # next_rew = self.head_rew(z)
-        # next_mask = self.head_mask(z)
-        # next_done = self.head_done(z)
-        # return next_obs, next_rew, next_mask, next_done
+        zother1 = self.encoder1_other(other) + other
+        zother2 = self.encoder2_other(zother1) + zother1
+        zother3 = self.encoder3_other(zother2) + zother2
+
+        zhexes1 = self.encoder1_hex(hexes) + hexes.unflatten(dim=1, sizes=[165, self.d1hex])
+        zhexes2 = self.encoder2_hex(zhexes1) + zhexes1
+        zhexes3 = self.encoder3_hex(zhexes2) + zhexes2
+
+        merged = torch.cat((nn.functional.one_hot(action, N_ACTIONS), zother3, zhexes3.flatten(start_dim=1)), dim=-1)
+        merged = torch.cat((nn.functional.one_hot(action, N_ACTIONS), zother1, zhexes1.flatten(start_dim=1)), dim=-1)
+
+        zmerged_pre = self.encoder1_pre(merged)
+        zmerged1 = self.encoder1_merged(zmerged_pre) + zmerged_pre
+        zmerged2 = self.encoder2_merged(zmerged1) + zmerged1
+        zmerged3 = self.encoder3_merged(zmerged2) + zmerged2
+
+        next_obs = self.head_obs(zmerged3)
+
         return next_obs
 
     def predict(self, obs, action):
@@ -723,9 +780,10 @@ def save_buffer(logger, dry_run, buffer, run_id, s3_config, uploading_cond, uplo
             uploading_cond.notify_all()
         return
 
+    now = time.time()
     with tempfile.TemporaryDirectory() as temp_dir:
         for type in ["obs", "done", "action"]:
-            fname = f"{type}-{run_id}-{time.time():.0f}.npz"
+            fname = f"{type}-{run_id}-{now:.0f}.npz"
             buf = getattr(buffer, f"{type}_buffer")
             local_path = f"{temp_dir}/{fname}"
             msg = f"Saving buffer to {local_path}"
@@ -845,6 +903,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     if sample_from_s3:
         dataloader = iter(torch.utils.data.DataLoader(
             S3Dataset(
+                logger=logger,
                 bucket_name=config["s3"]["data"]["bucket_name"],
                 s3_dir=config["s3"]["data"]["s3_dir"],
                 cache_dir=config["s3"]["data"]["cache_dir"],
@@ -865,6 +924,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         if not sample_only:
             eval_dataloader = iter(torch.utils.data.DataLoader(
                 S3Dataset(
+                    logger=logger,
                     bucket_name=config["s3"]["data"]["bucket_name"],
                     s3_dir=config["s3"]["data"]["s3_dir"],
                     cache_dir=config["s3"]["data"]["cache_dir"],
@@ -893,8 +953,10 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
         model.load_state_dict(torch.load(filename, weights_only=True, map_location=device), strict=True)
 
+        now = time.time()
+
         if not dry_run:
-            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
             logger.debug(f"Backup resumed model weights as {backname}")
             shutil.copy2(filename, backname)
 
@@ -908,7 +970,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
         optimizer.load_state_dict(torch.load(filename, weights_only=True, map_location=device))
         if not dry_run:
-            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
             logger.debug(f"Backup optimizer weights as {backname}")
             shutil.copy2(filename, backname)
 
@@ -930,7 +992,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 logger.info(f"Load scaler weights from {filename}")
                 scaler.load_state_dict(torch.load(filename, weights_only=True, map_location=device))
                 if not dry_run:
-                    backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+                    backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
                     logger.debug(f"Backup scaler weights as {backname}")
                     shutil.copy2(filename, backname)
             else:
@@ -1060,7 +1122,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
         iteration += 1
 
-
 def test(cfg_file):
     from vcmi_gym.envs.v10.vcmi_env import VcmiEnv
     from vcmi_gym.envs.v10.decoder.decoder import Decoder, pyconnector
@@ -1076,13 +1137,15 @@ def test(cfg_file):
     model.load_state_dict(weights, strict=True)
     model.eval()
 
-    env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap")
+    env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread")
     obs_prev = env.result.state.copy()
-    bf = Decoder.decode(obs_prev)
+    bf = Decoder.decode(1, obs_prev)
     action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
+    bf = Decoder.decode(action, obs_prev)
 
     obs_pred = torch.as_tensor(model.predict(obs_prev, action))
-    obs_real = env.step(action)[0]["observation"]
+    env.step(action)
+    obs_real = env.result.intstates[1]
     obs_dirty = obs_pred.clone()
 
     # print("*** Before preprocessing: ***")
@@ -1114,35 +1177,39 @@ def test(cfg_file):
 
     render = {"dirty": {}, "prev": {}, "pred": {}, "real": {}, "combined": {}}
 
-    import re
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    def prepare(action, obs, headline):
+        import re
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        render = {}
+        render["bf_lines"] = Decoder.decode(action, obs).render_battlefield()[0][:-1]
+        render["bf_len"] = [len(l) for l in render["bf_lines"]]
+        render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
+        render["bf_maxlen"] = max(render["bf_len"])
+        render["bf_maxprintlen"] = max(render["bf_printlen"])
+        render["bf_lines"].insert(0, headline.rjust(render["bf_maxprintlen"]))
+        render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+        render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
+        return render
 
-    def prepare(obs, name, headline):
-        render[name] = {}
-        render[name]["raw"] = Decoder.decode(obs).render()
-        render[name]["lines"] = render[name]["raw"].split("\n")
-        render[name]["bf_lines"] = render[name]["lines"][:15]
-        render[name]["bf_lines"].insert(0, headline)
-        render[name]["bf_len"] = [len(l) for l in render[name]["bf_lines"]]
-        render[name]["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render[name]["bf_lines"]]
-        render[name]["bf_maxlen"] = max(render[name]["bf_len"])
-        render[name]["bf_maxprintlen"] = max(render[name]["bf_printlen"])
-        render[name]["bf_lines"] = [l + " "*(render[name]["bf_maxprintlen"] - pl) for l, pl in zip(render[name]["bf_lines"], render[name]["bf_printlen"])]
+    # bfields = [prepare(action, state, f"Action: {action}") for action, state in zip(self.result.intactions, self.result.intstates)]
 
-    prepare(obs_prev, "prev", "Previous:")
-    prepare(obs_real, "real", "Real:")
-    prepare(obs_pred.numpy(), "pred", "Predicted:")
-    prepare(obs_dirty.numpy(), "dirty", "Dirty:")
+    render["dirty"] = prepare(action, obs_dirty.numpy(), "Dirty:")
+    render["prev"] = prepare(action, obs_prev, "Previous:")
+    render["real"] = prepare(action, obs_real, "Real:")
+    render["pred"] = prepare(action, obs_pred.numpy(), "Predicted:")
 
     render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render['prev']['bf_lines'], render['real']['bf_lines'], render['pred']['bf_lines']))
     print(render["combined"]["bf"])
 
+    print(Decoder.decode(action, obs_pred.numpy()).render())
+    print(Decoder.decode(action, obs_real).render())
+
     # print("Dirty (all):")
     # print(render["dirty"]["raw"])
-    print("Pred (all):")
-    print(render["pred"]["raw"])
-    print("Real (all):")
-    print(render["real"]["raw"])
+    # print("Pred (all):")
+    # print(render["pred"]["raw"])
+    # print("Real (all):")
+    # print(render["real"]["raw"])
 
 
 if __name__ == "__main__":
@@ -1163,3 +1230,4 @@ if __name__ == "__main__":
         train(args.f, args.loglevel, args.dry_run, args.no_wandb, False)
     elif args.action == "sample":
         train(args.f, args.loglevel, args.dry_run, args.no_wandb, True)
+
