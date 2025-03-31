@@ -233,28 +233,28 @@ class TransitionModel(nn.Module):
         )
 
         self.encoder1_pre = nn.Sequential(
-            nn.LazyLinear(5000)
+            nn.LazyLinear(10000)
         )
 
         self.encoder1_merged = nn.Sequential(
-            nn.LazyLinear(5000),
+            nn.LazyLinear(10000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(5000),
+            nn.LazyLinear(10000),
         )
 
         self.encoder2_merged = nn.Sequential(
-            nn.LazyLinear(5000),
+            nn.LazyLinear(10000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(5000),
+            nn.LazyLinear(10000),
         )
 
         self.encoder3_merged = nn.Sequential(
-            nn.LazyLinear(5000),
+            nn.LazyLinear(10000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(5000),
+            nn.LazyLinear(10000),
         )
 
         self.head_obs = nn.LazyLinear(self.dim_obs)
@@ -677,7 +677,7 @@ def init_s3_client():
     )
 
 
-def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, s3_config, uploading_event):
+def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, optimize_local_storage, s3_config, uploading_event):
     f_model = os.path.join(out_dir, f"{run_id}-model.pt")
     f_optimizer = os.path.join(out_dir, f"{run_id}-optimizer.pt")
     f_scaler = os.path.join(out_dir, f"{run_id}-scaler.pt")
@@ -702,14 +702,43 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
     else:
         logger.info(msg)
         # Prevent corrupted checkpoints if terminated during torch.save
-        for f in files:
-            if os.path.exists(f):
-                shutil.copy2(f, f"{f}~")
 
-        torch.save(model.state_dict(), f_model)
-        torch.save(optimizer.state_dict(), f_optimizer)
-        if scaler:
-            torch.save(scaler.state_dict(), f_scaler)
+        if optimize_local_storage:
+            # Use "...~" as a lockfile
+            # While the lockfile exists, the original file is corrupted
+            # (i.e. save() was interrupted => S3 download is needed to load())
+
+            # NOTE: bulk create and remove lockfiles to prevent mixing up
+            #       different checkpoints when only 1 or 2 files get saved
+
+            pathlib.Path(f"{f_model}~").touch()
+            pathlib.Path(f"{f_optimizer}~").touch()
+            if scaler:
+                pathlib.Path(f"{f_scaler}~").touch()
+
+            torch.save(model.state_dict(), f_model)
+            torch.save(optimizer.state_dict(), f_optimizer)
+            if scaler:
+                torch.save(scaler.state_dict(), f_scaler)
+
+            os.unlink(f"{f_model}~")
+            os.unlink(f"{f_optimizer}~")
+            if scaler:
+                os.unlink(f"{f_scaler}~")
+        else:
+            # Use temporary files to ensure the original one is always good
+            # even if the .save is interrupted
+            # NOTE: first save all, then move all, to prevent mixing up
+            #       different checkpoints when only 1 or 2 files get saved
+            torch.save(model.state_dict(), f"{f_model}.tmp")
+            torch.save(optimizer.state_dict(), f"{f_optimizer}.tmp")
+            if scaler:
+                torch.save(scaler.state_dict(), f"{f_scaler}.tmp")
+
+            shutil.mv(f"{f_model}.tmp", f_model)
+            shutil.mv(f"{f_optimizer}.tmp", f_optimizer)
+            if scaler:
+                shutil.mv(f"{f_scaler}.tmp", f_scaler)
 
     if not s3_config:
         return
@@ -791,7 +820,8 @@ def save_buffer(logger, dry_run, buffer, run_id, s3_config, uploading_cond, uplo
                 logger.info(f"{msg} (--dry-run)")
             else:
                 logger.info(msg)
-                np.savez_compressed(local_path, buf)
+                np.savez_compressed(f"{local_path}.tmp", buf)
+                shutil.move(f"{local_path}.tmp", local_path)
             s3_path = f"{s3_dir}/{fname}"
             paths.append((local_path, s3_path))
 
@@ -899,6 +929,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         scaler = None
 
     data_split_ratio = 0.9  # train / test
+    optimize_local_storage = config.get("s3", {}).get("optimize_local_storage")
 
     if sample_from_s3:
         dataloader = iter(torch.utils.data.DataLoader(
@@ -929,7 +960,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     s3_dir=config["s3"]["data"]["s3_dir"],
                     cache_dir=config["s3"]["data"]["cache_dir"],
                     cached_files_max=config["s3"]["data"]["cached_files_max"],
-                    shuffle=config["s3"]["data"]["shuffle"],
+                    shuffle=False,  # False needed for the save space hack where split is 90/1 (not 90/10)
                     # Don't store keys in config (will appear in clear text in config.json)
                     aws_access_key=os.environ["AWS_ACCESS_KEY"],
                     aws_secret_key=os.environ["AWS_SECRET_KEY"],
@@ -943,60 +974,51 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             ))
 
     if resume_config:
-        filename = "%s/%s-model.pt" % (config["run"]["out_dir"], run_id)
-        logger.info(f"Load model weights from {filename}")
-        if not os.path.exists(filename):
-            logger.debug("Local file does not exist, try S3")
-            s3_config = config["s3"]["checkpoint"]
-            s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
-            logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
-            init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
-        model.load_state_dict(torch.load(filename, weights_only=True, map_location=device), strict=True)
+        def load_local_or_s3_checkpoint(what, torch_obj, **load_kwargs):
+            filename = "%s/%s-%s.pt" % (config["run"]["out_dir"], run_id, what)
+            logger.info(f"Load {what} from {filename}")
 
-        now = time.time()
+            if os.path.exists(f"{filename}~"):
+                if os.path.exists(filename):
+                    msg = f"Lockfile for {filename} still exists => deleting local (corrupted) file"
+                    if dry_run:
+                        logger.warn(f"{msg} (--dry-run)")
+                    else:
+                        logger.warn(msg)
+                        os.unlink(filename)
+                if not dry_run:
+                    os.unlink(f"{filename}~")
 
-        if not dry_run:
-            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
-            logger.debug(f"Backup resumed model weights as {backname}")
-            shutil.copy2(filename, backname)
-
-        filename = "%s/%s-optimizer.pt" % (config["run"]["out_dir"], run_id)
-        logger.info(f"Load optimizer weights from {filename}")
-        if not os.path.exists(filename):
-            logger.debug("Local file does not exist, try S3")
-            s3_config = config["s3"]["checkpoint"]
-            s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
-            logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
-            init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
-        optimizer.load_state_dict(torch.load(filename, weights_only=True, map_location=device))
-        if not dry_run:
-            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
-            logger.debug(f"Backup optimizer weights as {backname}")
-            shutil.copy2(filename, backname)
-
-        if scaler:
-            filename = "%s/%s-scaler.pt" % (config["run"]["out_dir"], run_id)
+            # Download is OK even if --dry-run is given (nothing overwritten)
             if not os.path.exists(filename):
                 logger.debug("Local file does not exist, try S3")
+
                 s3_config = config["s3"]["checkpoint"]
                 s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
                 logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
-                try:
-                    init_s3_client().download_file(s3_config["bucket_name"], s3_filename, filename)
-                except botocore.exceptions.ClientError as e:
-                    if e.response["Error"]["Code"] != "404":
-                        logger.debug(f"File does not exist in s3: {s3_config['bucket_name']}/{s3_filename} ...")
-                        raise
 
-            if os.path.exists(filename):
-                logger.info(f"Load scaler weights from {filename}")
-                scaler.load_state_dict(torch.load(filename, weights_only=True, map_location=device))
-                if not dry_run:
-                    backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
-                    logger.debug(f"Backup scaler weights as {backname}")
-                    shutil.copy2(filename, backname)
-            else:
-                logger.warn(f"WARNING: scaler weights not found: {filename}")
+                if os.path.exists(f"{filename}.tmp"):
+                    os.unlink(f"{filename}.tmp")
+                init_s3_client().download_file(s3_config["bucket_name"], s3_filename, f"{filename}.tmp")
+                shutil.move(f"{filename}.tmp", filename)
+            torch_obj.load_state_dict(torch.load(filename, weights_only=True, map_location=device), **load_kwargs)
+
+            if not dry_run and not optimize_local_storage:
+                backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+                logger.debug(f"Backup resumed model weights as {backname}")
+                shutil.copy2(filename, backname)
+
+        load_local_or_s3_checkpoint("model", model, strict=True)
+        load_local_or_s3_checkpoint("optimizer", optimizer)
+
+        if scaler:
+            try:
+                load_local_or_s3_checkpoint("scaler", scaler)
+            except botocore.exceptions.ClientError as e:
+                if e.response["Error"]["Code"] == "404":
+                    logger.warn("WARNING: scaler weights not found (maybe the model was trained on CPU only?)")
+                else:
+                    raise
 
     global wandb_log
 
@@ -1115,12 +1137,14 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 scaler=scaler,
                 out_dir=config["run"]["out_dir"],
                 run_id=run_id,
+                optimize_local_storage=optimize_local_storage,
                 s3_config=config.get("s3", {}).get("checkpoint"),
                 uploading_event=uploading_event
             ))
             thread.start()
 
         iteration += 1
+
 
 def test(cfg_file):
     from vcmi_gym.envs.v10.vcmi_env import VcmiEnv

@@ -43,7 +43,7 @@ def wandb_log(*args, **kwargs):
     pass
 
 
-def setup_wandb(logger, config, model, src_file):
+def setup_wandb(config, model, src_file):
     import wandb
 
     resumed = config["run"]["resumed_config"] is not None
@@ -1624,23 +1624,22 @@ def test(cfg_file):
     from vcmi_gym.envs.v10.decoder.decoder import Decoder, pyconnector
 
     run_id = os.path.basename(cfg_file).removesuffix("-config.json")
-    dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
-    dim_hexes = VcmiEnv.STATE_SIZE_HEXES
-    n_actions = VcmiEnv.ACTION_SPACE.n
-    model = TransitionModel(dim_other, dim_hexes, n_actions)
+    model = TransitionModel()
     weights_file = f"data/t10n/{run_id}-model.pt"
     print(f"Loading {weights_file}")
     weights = torch.load(weights_file, weights_only=True, map_location=torch.device("cpu"))
     model.load_state_dict(weights, strict=True)
     model.eval()
 
-    env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap")
+    env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread")
     obs_prev = env.result.state.copy()
-    bf = Decoder.decode(obs_prev)
+    bf = Decoder.decode(1, obs_prev)
     action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
+    bf = Decoder.decode(action, obs_prev)
 
     obs_pred = torch.as_tensor(model.predict(obs_prev, action))
-    obs_real = env.step(action)[0]["observation"]
+    env.step(action)
+    obs_real = env.result.intstates[1]
     obs_dirty = obs_pred.clone()
 
     # print("*** Before preprocessing: ***")
@@ -1672,25 +1671,26 @@ def test(cfg_file):
 
     render = {"dirty": {}, "prev": {}, "pred": {}, "real": {}, "combined": {}}
 
-    import re
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    def prepare(action, obs, headline):
+        import re
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        render = {}
+        render["bf_lines"] = Decoder.decode(action, obs).render_battlefield()[0][:-1]
+        render["bf_len"] = [len(l) for l in render["bf_lines"]]
+        render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
+        render["bf_maxlen"] = max(render["bf_len"])
+        render["bf_maxprintlen"] = max(render["bf_printlen"])
+        render["bf_lines"].insert(0, headline.rjust(render["bf_maxprintlen"]))
+        render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+        render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
+        return render
 
-    def prepare(obs, name, headline):
-        render[name] = {}
-        render[name]["raw"] = Decoder.decode(obs).render()
-        render[name]["lines"] = render[name]["raw"].split("\n")
-        render[name]["bf_lines"] = render[name]["lines"][:15]
-        render[name]["bf_lines"].insert(0, headline)
-        render[name]["bf_len"] = [len(l) for l in render[name]["bf_lines"]]
-        render[name]["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render[name]["bf_lines"]]
-        render[name]["bf_maxlen"] = max(render[name]["bf_len"])
-        render[name]["bf_maxprintlen"] = max(render[name]["bf_printlen"])
-        render[name]["bf_lines"] = [l + " "*(render[name]["bf_maxprintlen"] - pl) for l, pl in zip(render[name]["bf_lines"], render[name]["bf_printlen"])]
+    # bfields = [prepare(action, state, f"Action: {action}") for action, state in zip(self.result.intactions, self.result.intstates)]
 
-    prepare(obs_prev, "prev", "Previous:")
-    prepare(obs_real, "real", "Real:")
-    prepare(obs_pred.numpy(), "pred", "Predicted:")
-    prepare(obs_dirty.numpy(), "dirty", "Dirty:")
+    render["dirty"] = prepare(action, obs_dirty.numpy(), "Dirty:")
+    render["prev"] = prepare(action, obs_prev, "Previous:")
+    render["real"] = prepare(action, obs_real, "Real:")
+    render["pred"] = prepare(action, obs_pred.numpy(), "Predicted:")
 
     render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render['prev']['bf_lines'], render['real']['bf_lines'], render['pred']['bf_lines']))
     print(render["combined"]["bf"])

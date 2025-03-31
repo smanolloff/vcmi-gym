@@ -40,6 +40,7 @@ config = dict(
             interval_s=600,
             bucket_name="vcmi-gym",
             s3_dir="models",
+            optimize_local_storage=False,
         ),
         data=dict(
             bucket_name="vcmi-gym",
