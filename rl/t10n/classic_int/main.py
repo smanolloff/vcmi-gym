@@ -476,7 +476,7 @@ class StructuredLogger:
     def log(self, obj):
         timestamp = datetime.utcnow().isoformat(timespec='milliseconds')
         thread_id = np.base_repr(threading.current_thread().ident, 36).lower()
-        log_obj = dict(self.context, timestamp=timestamp, thread_id=thread_id, message=obj)
+        log_obj = dict(timestamp=timestamp, thread_id=thread_id, **dict(self.context, message=obj))
         # print(yaml.dump(log_obj, sort_keys=False))
         print(json.dumps(log_obj, sort_keys=False))
 
@@ -505,7 +505,7 @@ class StructuredLogger:
         if isinstance(obj, dict):
             self.log(dict(obj))
         else:
-            self.log(dict(message=dict(string=obj)))
+            self.log(dict(string=obj))
 
 
 # progress_report_steps=0 => quiet
