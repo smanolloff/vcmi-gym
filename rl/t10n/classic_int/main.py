@@ -1159,28 +1159,39 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
 def test(cfg_file):
     from vcmi_gym.envs.v10.vcmi_env import VcmiEnv
-    from vcmi_gym.envs.v10.decoder.decoder import Decoder, pyconnector
 
     run_id = os.path.basename(cfg_file).removesuffix("-config.json")
-    dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
-    dim_hexes = VcmiEnv.STATE_SIZE_HEXES
-    n_actions = VcmiEnv.ACTION_SPACE.n
-    model = TransitionModel(dim_other, dim_hexes, n_actions)
     weights_file = f"data/t10n/{run_id}-model.pt"
-    print(f"Loading {weights_file}")
-    weights = torch.load(weights_file, weights_only=True, map_location=torch.device("cpu"))
-    model.load_state_dict(weights, strict=True)
-    model.eval()
 
+    model = load_for_test(weights_file)
     env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread")
+    do_test(model, env)
+
+
+def load_for_test(file):
+    dim_other = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
+    dim_hexes = 165*STATE_SIZE_ONE_HEX
+    model = TransitionModel(dim_other, dim_hexes, N_ACTIONS)
+    model.eval()
+    print(f"Loading {file}")
+    weights = torch.load(file, weights_only=True, map_location=torch.device("cpu"))
+    model.load_state_dict(weights, strict=True)
+    return model
+
+
+def do_test(model, env):
+    from vcmi_gym.envs.v10.decoder.decoder import Decoder  # , pyconnector
+
     obs_prev = env.result.state.copy()
-    bf = Decoder.decode(1, obs_prev)
-    action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
-    bf = Decoder.decode(action, obs_prev)
+    print(env.render())
+    # bf = Decoder.decode(1, obs_prev)
+    # action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
+    action = env.random_action()
+    # bf = Decoder.decode(action, obs_prev)
 
     obs_pred = torch.as_tensor(model.predict(obs_prev, action))
     env.step(action)
-    obs_real = env.result.intstates[1]
+    obs_real = env.result.intstates[1] if len(env.result.intstates) > 1 else env.result.state
     obs_dirty = obs_pred.clone()
 
     # print("*** Before preprocessing: ***")
