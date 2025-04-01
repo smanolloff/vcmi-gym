@@ -13,6 +13,7 @@ import os
 #       and can be later uploaded via s3uploader.py
 #
 config = dict(
+    name_template="{datetime}-{id}",
     env=None,
     # env=dict(
     #     # opponent="BattleAI",

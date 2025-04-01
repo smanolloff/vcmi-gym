@@ -6,8 +6,8 @@ export AWS_SECRET_KEY="7d194BC________________________Opi5dcDA"
 cd $WORKSPACE/vcmi-gym
 EOF
 # XXX: sourcing ~/.bashrc does not work without interactive terminal
-export AWS_ACCESS_KEY="AKIATMRSUTRMDENAX7XH"
-export AWS_SECRET_KEY="7d194BCbO9K0________"
+export AWS_ACCESS_KEY="AKIATMR________NAX7XH"
+export AWS_SECRET_KEY="7d194BC_________________________Opi5dcDA"
 
 apt -y install vim
 

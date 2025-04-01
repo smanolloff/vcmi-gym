@@ -40,6 +40,7 @@ run '~/.tmux/plugins/tpm/tpm'
 EOF
 
 # Install tmux plugins
+tmux source ~/.tmux.conf || :
 ~/.tmux/plugins/tpm/bin/install_plugins
 
 touch ~/.no_auto_tmux

@@ -47,7 +47,7 @@ def wandb_log(*args, **kwargs):
     pass
 
 
-def setup_wandb(config, model, src_file):
+def setup_wandb(config, model, src_file, name=None):
     import wandb
 
     resumed = config["run"]["resumed_config"] is not None
@@ -55,7 +55,7 @@ def setup_wandb(config, model, src_file):
     wandb.init(
         project="vcmi-gym",
         group="transition-model",
-        name="%s-%s" % (datetime.now().strftime("%Y%m%d_%H%M%S"), config["run"]["id"]),
+        name=config["run"]["name"],
         id=config["run"]["id"],
         resume="must" if resumed else "never",
         # resume="allow",  # XXX: reuse id for insta-failed runs
@@ -193,20 +193,20 @@ class TransitionModel(nn.Module):
         # TODO: try flat obs+action (no per-hex)
 
         self.encoder1_other = nn.Sequential(
-            nn.LazyLinear(100),
+            nn.LazyLinear(30),
             nn.LeakyReLU(),
             nn.LazyLinear(self.dim_other),
         )
 
         self.encoder2_other = nn.Sequential(
-            nn.LazyLinear(100),
+            nn.LazyLinear(30),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.dim_other),
         )
 
         self.encoder3_other = nn.Sequential(
-            nn.LazyLinear(100),
+            nn.LazyLinear(30),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.dim_other),
@@ -214,49 +214,49 @@ class TransitionModel(nn.Module):
 
         self.encoder1_hex = nn.Sequential(
             nn.Unflatten(dim=1, unflattened_size=[165, self.d1hex]),
-            nn.LazyLinear(500),
+            nn.LazyLinear(50),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.d1hex),
         )
 
         self.encoder2_hex = nn.Sequential(
-            nn.LazyLinear(500),
+            nn.LazyLinear(50),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.d1hex),
         )
 
         self.encoder3_hex = nn.Sequential(
-            nn.LazyLinear(500),
+            nn.LazyLinear(50),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.d1hex),
         )
 
         self.encoder1_pre = nn.Sequential(
-            nn.LazyLinear(10000)
+            nn.LazyLinear(1000)
         )
 
         self.encoder1_merged = nn.Sequential(
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
         )
 
         self.encoder2_merged = nn.Sequential(
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
         )
 
         self.encoder3_merged = nn.Sequential(
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
         )
 
         self.head_obs = nn.LazyLinear(self.dim_obs)
@@ -464,9 +464,10 @@ class TransitionModel(nn.Module):
 
 
 class StructuredLogger:
-    def __init__(self, level, filename):
+    def __init__(self, level, filename, context={}):
         self.level = level
         self.filename = filename
+        self.context = context
         self.info(dict(filename=filename))
 
         assert level in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
@@ -475,7 +476,7 @@ class StructuredLogger:
     def log(self, obj):
         timestamp = datetime.utcnow().isoformat(timespec='milliseconds')
         thread_id = np.base_repr(threading.current_thread().ident, 36).lower()
-        log_obj = dict(timestamp=timestamp, thread_id=thread_id, message=obj)
+        log_obj = dict(self.context, timestamp=timestamp, thread_id=thread_id, message=obj)
         # print(yaml.dump(log_obj, sort_keys=False))
         print(json.dumps(log_obj, sort_keys=False))
 
@@ -738,10 +739,10 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
             if scaler:
                 torch.save(scaler.state_dict(), f"{f_scaler}.tmp")
 
-            shutil.mv(f"{f_model}.tmp", f_model)
-            shutil.mv(f"{f_optimizer}.tmp", f_optimizer)
+            shutil.move(f"{f_model}.tmp", f_model)
+            shutil.move(f"{f_optimizer}.tmp", f_optimizer)
             if scaler:
-                shutil.mv(f"{f_scaler}.tmp", f_scaler)
+                shutil.move(f"{f_scaler}.tmp", f_scaler)
 
     if not s3_config:
         return
@@ -892,6 +893,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
         config["run"] = dict(
             id=run_id,
+            name=config["name_template"].format(id=run_id, datetime=datetime.utcnow().strftime("%Y%m%d_%H%M%S")),
             out_dir=os.path.abspath("data/t10n"),
             resumed_config=None,
         )
@@ -908,7 +910,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         print(f"Saving new config to: {f.name}")
         json.dump(config, f, indent=4)
 
-    logger = StructuredLogger(level=getattr(logging, loglevel), filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"))
+    logger = StructuredLogger(level=getattr(logging, loglevel), filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"), context=dict(run_id=run_id))
     logger.info(dict(config=config))
 
     learning_rate = config["train"]["learning_rate"]
