@@ -22,11 +22,11 @@ import tempfile
 
 from functools import partial
 
-from torch.nn.functional import mse_loss
+from torch.nn.functional import cross_entropy
 from datetime import datetime
 
 
-from ..constants_v10 import (
+from ...constants_v10 import (
     GLOBAL_ATTR_MAP,
     PLAYER_ATTR_MAP,
     HEX_ATTR_MAP,
@@ -34,9 +34,10 @@ from ..constants_v10 import (
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
+    HEX_ACT_MAP
 )
 
-from ..util.s3dataset import S3Dataset
+from ...util.s3dataset import S3Dataset
 
 DIM_OTHER = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
 DIM_HEXES = 165*STATE_SIZE_ONE_HEX
@@ -54,7 +55,7 @@ def setup_wandb(config, model, src_file, name=None):
 
     wandb.init(
         project="vcmi-gym",
-        group="transition-model",
+        group="action-prediction-model",
         name=config["run"]["name"],
         id=config["run"]["id"],
         resume="must" if resumed else "never",
@@ -86,29 +87,36 @@ class Buffer:
         self.device = device
 
         self.obs_buffer = torch.empty((capacity, dim_obs), dtype=torch.float32, device=device)
-        # self.mask_buffer = torch.empty((capacity, n_actions), dtype=torch.float32, device=device)
-        self.done_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
         self.action_buffer = torch.empty((capacity,), dtype=torch.int64, device=device)
-        # self.reward_buffer = torch.empty((capacity,), dtype=torch.float32, device=device)
 
         self.index = 0
         self.full = False
 
-    # Using compact version with single obs and mask buffers
-    # def add(self, obs, action_mask, done, action, reward, next_obs, next_action_mask, next_done):
-    def add(self, obs, action_mask, done, action):
+    def add(self, obs, action):
+        # XXX: TEST: REMOVE
+        # Verify only "Blue" observations are given (we want to predict enemy actions...)
+        # XXX: reshape as if B=1 to re-use code from add_batch
+        hexes = obs.reshape(1, -1)[:, STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(1, 165, -1)
+        index_is_active = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1 if first in queue (zero null => index=offset)
+        index_is_blue = HEX_ATTR_MAP["STACK_SIDE"][1] + 2  # 1 if blue ([null, red, blue] => index=offset+2)
+        extracted = hexes[:, :, [index_is_active, index_is_blue]]
+        # => (B, 165, 2), where 2 = [is_active, is_blue]
+        mask = extracted[..., 0] != 0
+        # => (B, N)
+        idx = np.argmax(mask, axis=1)  # first nonzero index per B
+        sides = extracted[np.arange(extracted.shape[0]), idx, 1]
+        assert all(sides)  # all sides are "BLUE" (1)
+        assert action > 0  # no retreats or resets
+        # EOF: TEST
+
         self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        # self.mask_buffer[self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
-        self.done_buffer[self.index] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
-        # self.reward_buffer[self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
             self.full = True
 
-    # def add_batch(self, obs, mask, done, action, reward):
-    def add_batch(self, obs, action, done):
+    def add_batch(self, obs, action):
         batch_size = obs.shape[0]
         start = self.index
         end = self.index + batch_size
@@ -117,74 +125,44 @@ class Buffer:
         assert self.index % batch_size == 0, f"{self.index} % {batch_size} == 0"
         assert self.capacity % batch_size == 0, f"{self.capacity} % {batch_size} == 0"
 
+        # XXX: TEST: REMOVE
+        # Verify only "Blue" observations are given (we want to predict enemy actions...)
+        hexes = obs[:, STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(batch_size, 165, -1)
+        index_is_active = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1 if first in queue (zero null => index=offset)
+        index_is_blue = HEX_ATTR_MAP["STACK_SIDE"][1] + 2  # 1 if blue ([null, red, blue] => index=offset+2)
+        extracted = hexes[:, :, [index_is_active, index_is_blue]]
+        # => (B, 165, 2), where 2 = [is_active, is_blue]
+        mask = extracted[..., 0] != 0
+        # => (B, N)
+        idx = np.argmax(mask, axis=1)  # first nonzero index per B
+        sides = extracted[np.arange(extracted.shape[0]), idx, 1]
+        assert all(sides)  # all sides are "BLUE" (1)
+        assert all(action > 0)  # no retreats or resets
+        # EOF: TEST
+
         self.obs_buffer[start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        # self.mask_buffer[start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
-        self.done_buffer[start:end] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.action_buffer[start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
-        # self.reward_buffer[start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
 
         self.index = end
         if self.index == self.capacity:
             self.index = 0
             self.full = True
 
-    def sample(self, batch_size):
-        max_index = self.capacity if self.full else self.index
-
-        # Get valid indices where done=False (episode not ended)
-        # XXX: float->bool conversion is OK given floats are exactly 1 or 0
-        valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
-        sampled_indices = valid_indices[torch.randint(len(valid_indices), (batch_size,), device=self.device)]
-
-        # XXX: TEST: REMOVE
-        # end_of_episode_indices = torch.nonzero(self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
-        # assert not any(self.obs_buffer[end_of_episode_indices, 2])
-        # EOF: TEST
-
-        obs = self.obs_buffer[sampled_indices]
-        # action_mask = self.mask_buffer[sampled_indices]
-        action = self.action_buffer[sampled_indices]
-        # reward = self.reward_buffer[sampled_indices]
-        next_obs = self.obs_buffer[sampled_indices + 1]
-        # next_action_mask = self.mask_buffer[sampled_indices + 1]
-        # next_done = self.done_buffer[sampled_indices + 1]
-
-        # return obs, action, reward, next_obs, next_action_mask, next_done
-        return obs, action, next_obs
-
     def sample_iter(self, batch_size):
-        max_index = self.capacity if self.full else self.index
-
-        # Get valid indices where done=False
-        # XXX: float->bool conversion is OK given floats are exactly 1 or 0
-        valid_indices = torch.nonzero(~self.done_buffer[:max_index - 1].bool(), as_tuple=True)[0]
-        shuffled_indices = valid_indices[torch.randperm(len(valid_indices), device=self.device)]
-
-        # The valid indices are than all indices
-        short = self.capacity - len(shuffled_indices)
-        if short:
-            shuffled_indices = torch.cat((shuffled_indices, valid_indices[torch.randperm(len(valid_indices), device=self.device)][:short]))
-
-        assert len(shuffled_indices) == self.capacity
+        shuffled_indices = torch.randperm(self.capacity, device=self.device)
 
         for i in range(0, len(shuffled_indices), batch_size):
             batch_indices = shuffled_indices[i:i + batch_size]
             yield (
                 self.obs_buffer[batch_indices],
                 self.action_buffer[batch_indices],
-                # self.reward_buffer[batch_indices],
-                self.obs_buffer[batch_indices + 1],
-                # self.mask_buffer[batch_indices + 1],
-                # self.done_buffer[batch_indices + 1]
             )
 
 
-class TransitionModel(nn.Module):
-    def __init__(self, dim_other, dim_hexes, n_actions, device=torch.device("cpu"), ycptelgm=False):
+class ActionPredictionModel(nn.Module):
+    def __init__(self, dim_other, dim_hexes, n_actions, device=torch.device("cpu")):
         super().__init__()
         self.device = device
-
-        self.ycptelgm = ycptelgm
 
         assert dim_hexes % 165 == 0
         self.dim_other = dim_other
@@ -195,20 +173,20 @@ class TransitionModel(nn.Module):
         # TODO: try flat obs+action (no per-hex)
 
         self.encoder1_other = nn.Sequential(
-            nn.LazyLinear(100),
+            nn.LazyLinear(50),
             nn.LeakyReLU(),
             nn.LazyLinear(self.dim_other),
         )
 
         self.encoder2_other = nn.Sequential(
-            nn.LazyLinear(100),
+            nn.LazyLinear(50),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.dim_other),
         )
 
         self.encoder3_other = nn.Sequential(
-            nn.LazyLinear(100),
+            nn.LazyLinear(50),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.dim_other),
@@ -216,63 +194,59 @@ class TransitionModel(nn.Module):
 
         self.encoder1_hex = nn.Sequential(
             nn.Unflatten(dim=1, unflattened_size=[165, self.d1hex]),
-            nn.LazyLinear(500),
+            nn.LazyLinear(50),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.d1hex),
         )
 
         self.encoder2_hex = nn.Sequential(
-            nn.LazyLinear(500),
+            nn.LazyLinear(50),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.d1hex),
         )
 
         self.encoder3_hex = nn.Sequential(
-            nn.LazyLinear(500),
+            nn.LazyLinear(50),
             # nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
             nn.LazyLinear(self.d1hex),
         )
 
         self.encoder1_pre = nn.Sequential(
-            nn.LazyLinear(10000)
+            nn.LazyLinear(1000)
         )
 
         self.encoder1_merged = nn.Sequential(
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
         )
 
         self.encoder2_merged = nn.Sequential(
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
         )
 
         self.encoder3_merged = nn.Sequential(
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
             nn.LazyBatchNorm1d(),
             nn.LeakyReLU(),
-            nn.LazyLinear(10000),
+            nn.LazyLinear(1000),
         )
 
-        self.head_obs = nn.LazyLinear(self.dim_obs)
-        # self.head_mask = nn.LazyLinear(n_actions)
-        # self.head_rew = nn.Sequential(nn.LazyLinear(1), nn.Flatten(0))
-        # self.head_done = nn.Sequential(nn.LazyLinear(1), nn.Flatten(0))
-
+        self.head_action = nn.LazyLinear(N_ACTIONS)
         self.to(device)
 
         # Init lazy layers
         with torch.no_grad():
-            self(torch.randn([2, DIM_OBS], device=device), torch.tensor([1, 1], device=device))
+            self(torch.randn([2, DIM_OBS], device=device))
 
-    def forward(self, obs, action):
+    def forward(self, obs):
         other, hexes = torch.split(obs, [self.dim_other, self.dim_hexes], dim=1)
 
         zother1 = self.encoder1_other(other) + other
@@ -280,29 +254,27 @@ class TransitionModel(nn.Module):
         zother3 = self.encoder3_other(zother2) + zother2
 
         zhexes1 = self.encoder1_hex(hexes) + hexes.unflatten(dim=1, sizes=[165, self.d1hex])
+        zhexes2 = self.encoder2_hex(zhexes1) + zhexes1
+        zhexes3 = self.encoder3_hex(zhexes2) + zhexes2
 
-        # this bug is forever part of the "ycptelgm" model
-        if self.ycptelgm:
-            merged = torch.cat((nn.functional.one_hot(action, N_ACTIONS), zother1, zhexes1.flatten(start_dim=1)), dim=-1)
-        else:
-            zhexes2 = self.encoder2_hex(zhexes1) + zhexes1
-            zhexes3 = self.encoder3_hex(zhexes2) + zhexes2
-            merged = torch.cat((nn.functional.one_hot(action, N_ACTIONS), zother3, zhexes3.flatten(start_dim=1)), dim=-1)
+        merged = torch.cat((zother3, zhexes3.flatten(start_dim=1)), dim=-1)
 
         zmerged_pre = self.encoder1_pre(merged)
         zmerged1 = self.encoder1_merged(zmerged_pre) + zmerged_pre
         zmerged2 = self.encoder2_merged(zmerged1) + zmerged1
         zmerged3 = self.encoder3_merged(zmerged2) + zmerged2
 
-        next_obs = self.head_obs(zmerged3)
+        action_logits = self.head_action(zmerged3)
 
-        return next_obs
+        return action_logits
 
-    def predict(self, obs, action):
+    def predict(self, obs):
         with torch.no_grad():
             obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
-            action = torch.tensor(action, dtype=torch.int64, device=self.device).unsqueeze(0)
-            return self(obs, action)[0].numpy()
+            logits = self(obs)
+            # torch.max() returns tuple of values AND indices
+            confidence, action = logits[0].softmax(dim=0).max(dim=0)
+            return action.item(), confidence.item()
 
     def _build_indices(self):
         self.global_index = {"continuous": [], "binary": [], "categoricals": []}
@@ -513,13 +485,13 @@ class StructuredLogger:
             self.log(dict(string=obj))
 
 
-# progress_report_steps=0 => quiet
-# progress_report_steps=1 => report 100%
-# progress_report_steps=2 => report 50%, 100%
-# progress_report_steps=3 => report 33%, 67%, 100%
-# ...
+def load_samples(logger, dataloader, buffer):
+    logger.debug("Loading observations...")
+    buffer.add_batch(*next(dataloader))
+    logger.debug(f"Loaded {buffer.capacity} observations")
 
-def collect_observations(logger, env, buffer, n, progress_report_steps=0):
+
+def collect_samples(logger, env, buffer, n, progress_report_steps=0):
     if progress_report_steps > 0:
         progress_report_step = 1 / progress_report_steps
     else:
@@ -527,10 +499,6 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
 
     next_progress_report_at = 0
     progress = 0
-    terms = 0
-    truncs = 0
-    term = env.terminated
-    trunc = env.truncated
     dict_obs = env.obs
     buffer_index_start = buffer.index
     i = 0
@@ -540,45 +508,25 @@ def collect_observations(logger, env, buffer, n, progress_report_steps=0):
         progress = round(i / n, 3)
         if progress >= next_progress_report_at:
             next_progress_report_at += progress_report_step
-            logger.debug(dict(observations_collected=i, progress=progress*100, terms=terms, truncs=truncs))
+            logger.debug(dict(samples_collected=i, progress=progress*100))
 
         tr = dict_obs["transitions"]
-        for obs, mask, action in zip(tr["observations"], tr["action_masks"], tr["actions"]):
-            buffer.add(obs, mask, False, action)
+        for obs, mask, action in zip(tr["observations"][1:], tr["action_masks"][1:], tr["actions"][1:]):
+            buffer.add(obs, action)
             i += 1
 
         next_action = env.random_action()
         if next_action is None:
-            assert term or trunc
-
-            # The current obs is typically oldest one in the next obs's `transitions`
-            # However, the env must be reset here, i.e. the obs's transitions will be blank
-            # => add it explicitly
-
-            # terms are OK, but truncs are not predictable
-            if term:
-                buffer.add(dict_obs["observation"], dict_obs["action_mask"], True, -1)
-                i += 1
-
-            terms += term
-            truncs += trunc
-            term = False
-            trunc = False
-            dict_obs, _info = env.reset()
+            assert env.terminated or env.truncated
+            dict_obs = env.reset()[0]
         else:
-            dict_obs, _rew, term, trunc, _info = env.step(next_action)
+            dict_obs = env.step(next_action)[0]
 
     if n == buffer.capacity and buffer_index_start == 0:
         # There may be a few extra samples added due to intermediate states
         buffer.index = 0
 
-    logger.debug(dict(observations_collected=i, progress=100, terms=terms, truncs=truncs))
-
-
-def load_observations(logger, dataloader, buffer):
-    logger.debug("Loading observations...")
-    buffer.add_batch(*next(dataloader))
-    logger.debug(f"Loaded {buffer.capacity} observations")
+    logger.debug(dict(samples_collected=i, progress=100))
 
 
 def train_model(
@@ -593,87 +541,47 @@ def train_model(
     model.train()
 
     for epoch in range(epochs):
-        obs_losses = []
-        # rew_losses = []
-        # mask_losses = []
-        # done_losses = []
-        # total_losses = []
+        losses = []
 
         for batch in buffer.sample_iter(batch_size):
-            # obs, action, next_rew, next_obs, next_mask, next_done = batch
-            obs, action, next_obs = batch
-            # next_obs_pred, next_rew_pred, next_mask_pred, next_done_pred = model(obs, action)
+            obs, action = batch
             if scaler:
                 with torch.amp.autocast(model.device.type):
-                    next_obs_pred = model(obs, action)
-                    obs_loss = mse_loss(next_obs_pred, next_obs)
-                    # rew_loss = 0.1 * mse_loss(next_rew_pred, next_rew)
-                    # mask_loss = binary_cross_entropy_with_logits(next_mask_pred, next_mask)
-                    # done_loss = binary_cross_entropy_with_logits(next_done_pred, next_done)
-                    # total_loss = obs_loss + rew_loss + mask_loss + done_loss
+                    action_logits = model(obs)
+                    loss = cross_entropy(action_logits, action)
             else:
-                next_obs_pred = model(obs, action)
-                obs_loss = mse_loss(next_obs_pred, next_obs)
+                action_logits = model(obs)
+                loss = cross_entropy(action_logits, action)
 
-            obs_losses.append(obs_loss.item())
-            # rew_losses.append(rew_loss.item())
-            # mask_losses.append(mask_loss.item())
-            # done_losses.append(done_loss.item())
-            # total_losses.append(total_loss.item())
+            losses.append(loss.item())
 
             optimizer.zero_grad()
             if scaler:
-                scaler.scale(obs_loss).backward()
+                scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                obs_loss.backward()
+                loss.backward()
                 optimizer.step()
 
-        obs_loss = sum(obs_losses) / len(obs_losses)
-        # rew_loss = sum(rew_losses) / len(rew_losses)
-        # mask_loss = sum(mask_losses) / len(mask_losses)
-        # done_loss = sum(done_losses) / len(done_losses)
-        # total_loss = sum(total_losses) / len(total_losses)
-
-        return obs_loss
+        loss = sum(losses) / len(losses)
+        return loss
 
 
 def eval_model(logger, model, buffer, batch_size):
     model.eval()
-    obs_losses = []
-    # rew_losses = []
-    # mask_losses = []
-    # done_losses = []
-    # total_losses = []
+    losses = []
 
     for batch in buffer.sample_iter(batch_size):
-        # obs, action, next_rew, next_obs, next_mask, next_done = batch
-        obs, action, next_obs = batch
+        obs, action = batch
         with torch.no_grad():
-            # next_obs_pred, next_rew_pred, next_mask_pred, next_done_pred = model(obs, action)
-            next_obs_pred = model(obs, action)
+            action_logits = model(obs)
 
-        obs_loss = mse_loss(next_obs_pred, next_obs)
-        # rew_loss = 0.1 * mse_loss(next_rew_pred, next_rew)
-        # mask_loss = binary_cross_entropy_with_logits(next_mask_pred, next_mask)
-        # done_loss = binary_cross_entropy_with_logits(next_done_pred, next_done)
-        # total_loss = obs_loss + rew_loss + mask_loss + done_loss
+        loss = cross_entropy(action_logits, action)
+        losses.append(loss.item())
 
-        obs_losses.append(obs_loss.item())
-        # rew_losses.append(rew_loss.item())
-        # mask_losses.append(mask_loss.item())
-        # done_losses.append(done_loss.item())
-        # total_losses.append(total_loss.item())
-
-    obs_loss = sum(obs_losses) / len(obs_losses)
-    # rew_loss = sum(rew_losses) / len(rew_losses)
-    # mask_loss = sum(mask_losses) / len(mask_losses)
-    # done_loss = sum(done_losses) / len(done_losses)
-    # total_loss = sum(total_losses) / len(total_losses)
-
-    # return obs_loss, rew_loss, mask_loss, done_loss, total_loss
-    return obs_loss
+    loss = sum(losses) / len(losses)
+    return loss
 
 
 def init_s3_client():
@@ -936,7 +844,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     torch.backends.cudnn.benchmark = True
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = TransitionModel(DIM_OTHER, DIM_HEXES, N_ACTIONS, device=device, ycptelgm=(run_id == "ycptelgm"))
+    model = ActionPredictionModel(DIM_OTHER, DIM_HEXES, N_ACTIONS, device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     buffer = Buffer(capacity=buffer_capacity, dim_obs=DIM_OBS, n_actions=N_ACTIONS, device=device)
     eval_buffer = Buffer(capacity=eval_buffer_capacity, dim_obs=DIM_OBS, n_actions=N_ACTIONS, device=device)
@@ -1008,7 +916,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     os.unlink(f"{filename}~")
 
             # Download is OK even if --dry-run is given (nothing overwritten)
-            if not os.path.exists(filename):
+            if config["s3"]["checkpoint"] and not os.path.exists(filename):
                 logger.debug("Local file does not exist, try S3")
 
                 s3_config = config["s3"]["checkpoint"]
@@ -1075,9 +983,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     while True:
         now = time.time()
         if sample_from_env:
-            collect_observations(logger=logger, env=env, buffer=buffer, n=buffer.capacity, progress_report_steps=0)
+            collect_samples(logger=logger, env=env, buffer=buffer, n=buffer.capacity, progress_report_steps=0)
         elif sample_from_s3:
-            load_observations(logger=logger, dataloader=dataloader, buffer=buffer)
+            load_samples(logger=logger, dataloader=dataloader, buffer=buffer)
 
         assert buffer.full and not buffer.index
 
@@ -1123,9 +1031,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             last_evaluation_at = now
 
             if sample_from_env:
-                collect_observations(logger=logger, env=env, buffer=eval_buffer, n=eval_buffer.capacity, progress_report_steps=0)
+                collect_samples(logger=logger, env=env, buffer=eval_buffer, n=eval_buffer.capacity, progress_report_steps=0)
             elif sample_from_s3:
-                load_observations(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
+                load_samples(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
 
             eval_loss = eval_model(
                 logger=logger,
@@ -1145,7 +1053,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "train_loss/total": train_loss,
             })
 
-        if now - last_checkpoint_at > config["s3"]["checkpoint"]["interval_s"]:
+        if now - last_checkpoint_at > config["checkpoint_interval_s"]:
             last_checkpoint_at = now
             thread = threading.Thread(target=save_checkpoint, kwargs=dict(
                 logger=logger,
@@ -1178,7 +1086,7 @@ def test(cfg_file):
 def load_for_test(file):
     dim_other = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
     dim_hexes = 165*STATE_SIZE_ONE_HEX
-    model = TransitionModel(dim_other, dim_hexes, N_ACTIONS)
+    model = ActionPredictionModel(dim_other, dim_hexes, N_ACTIONS)
     model.eval()
     print(f"Loading {file}")
     weights = torch.load(file, weights_only=True, map_location=torch.device("cpu"))
@@ -1187,82 +1095,29 @@ def load_for_test(file):
 
 
 def do_test(model, env):
-    from vcmi_gym.envs.v10.decoder.decoder import Decoder  # , pyconnector
+    from vcmi_gym.envs.v10.decoder.decoder import Decoder
 
-    obs_prev = env.result.state.copy()
-    print(env.render())
-    # bf = Decoder.decode(1, obs_prev)
-    # action = bf.hexes[4][13].action(pyconnector.HEX_ACT_MAP["MOVE"]).item()
-    action = env.random_action()
-    # bf = Decoder.decode(action, obs_prev)
+    while len(env.result.intstates) < 2:
+        action = env.random_action()
+        env.step(action)
 
-    obs_pred = torch.as_tensor(model.predict(obs_prev, action))
-    env.step(action)
-    obs_real = env.result.intstates[1] if len(env.result.intstates) > 1 else env.result.state
-    obs_dirty = obs_pred.clone()
+    obs = env.result.intstates[1]
+    action = env.result.intactions[1]
+    action_pred, confidence = model.predict(obs)
 
-    # print("*** Before preprocessing: ***")
-    # print("Loss: %s" % torch.nn.functional.mse_loss(torch.as_tensor(obs_pred), torch.as_tensor(obs_next)))
-    # print(Decoder.decode(obs_pred).render())
+    def action_str(obs, a):
+        if a > 1:
+            bf = Decoder.decode(obs)
+            hex = bf.get_hex((a - 2) // len(HEX_ACT_MAP))
+            act = list(HEX_ACT_MAP)[(a - 2) % len(HEX_ACT_MAP)]
+            return "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
+        else:
+            assert a == 1
+            return "Wait"
 
-    model._build_indices()
-    obs_pred[model.obs_index["global"]["binary"]] = (obs_pred[model.obs_index["global"]["binary"]] > 0.5).float()
-    obs_pred[model.obs_index["global"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["global"]["continuous"]], 0, 1)
-    for ind in model.obs_index["global"]["categoricals"]:
-        out = obs_pred[ind]
-        one_hot = torch.zeros_like(out)
-        one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
-        obs_pred[ind] = one_hot
-    obs_pred[model.obs_index["player"]["binary"]] = (obs_pred[model.obs_index["player"]["binary"]] > 0.5).float()
-    obs_pred[model.obs_index["player"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["player"]["continuous"]], 0, 1)
-    for ind in model.obs_index["player"]["categoricals"]:
-        out = obs_pred[ind]
-        one_hot = torch.zeros_like(out)
-        one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
-        obs_pred[ind] = one_hot
-    obs_pred[model.obs_index["hex"]["binary"]] = (obs_pred[model.obs_index["hex"]["binary"]] > 0.5).float()
-    obs_pred[model.obs_index["hex"]["continuous"]] = torch.clamp(obs_pred[model.obs_index["hex"]["continuous"]], 0, 1)
-    for ind in model.obs_index["hex"]["categoricals"]:
-        out = obs_pred[ind]
-        one_hot = torch.zeros_like(out)
-        one_hot.scatter_(-1, torch.argmax(out, dim=-1, keepdim=True), 1)
-        obs_pred[ind] = one_hot
-
-    render = {"dirty": {}, "prev": {}, "pred": {}, "real": {}, "combined": {}}
-
-    def prepare(action, obs, headline):
-        import re
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        render = {}
-        render["bf_lines"] = Decoder.decode(action, obs).render_battlefield()[0][:-1]
-        render["bf_len"] = [len(l) for l in render["bf_lines"]]
-        render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
-        render["bf_maxlen"] = max(render["bf_len"])
-        render["bf_maxprintlen"] = max(render["bf_printlen"])
-        render["bf_lines"].insert(0, headline.rjust(render["bf_maxprintlen"]))
-        render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
-        render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
-        return render
-
-    # bfields = [prepare(action, state, f"Action: {action}") for action, state in zip(self.result.intactions, self.result.intstates)]
-
-    render["dirty"] = prepare(action, obs_dirty.numpy(), "Dirty:")
-    render["prev"] = prepare(action, obs_prev, "Previous:")
-    render["real"] = prepare(action, obs_real, "Real:")
-    render["pred"] = prepare(action, obs_pred.numpy(), "Predicted:")
-
-    render["combined"]["bf"] = "\n".join("%s → %s%s" % (l1, l2, l3) for l1, l2, l3 in zip(render['prev']['bf_lines'], render['real']['bf_lines'], render['pred']['bf_lines']))
-    print(render["combined"]["bf"])
-
-    print(Decoder.decode(action, obs_pred.numpy()).render())
-    print(Decoder.decode(action, obs_real).render())
-
-    # print("Dirty (all):")
-    # print(render["dirty"]["raw"])
-    # print("Pred (all):")
-    # print(render["pred"]["raw"])
-    # print("Real (all):")
-    # print(render["real"]["raw"])
+    print("Pred: %d: %s, confidence: %.2f" % (action_pred, action_str(obs, action_pred), confidence))
+    print("Real: %d: %s" % (action, action_str(obs, action)))
+    env.render_transitions()
 
 
 if __name__ == "__main__":
@@ -1283,4 +1138,3 @@ if __name__ == "__main__":
         train(args.f, args.loglevel, args.dry_run, args.no_wandb, False)
     elif args.action == "sample":
         train(args.f, args.loglevel, args.dry_run, args.no_wandb, True)
-
