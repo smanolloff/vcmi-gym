@@ -48,7 +48,7 @@ touch ~/.no_auto_tmux
 ###
 ### After login (manual):
 ###
-# wandb init -p vcmi-gym
+# wandb init -p vcmi-gym && wandb login
 # python3 -m rl.t10n.util.s3downloader data/t10n/.cache
 
 ###

@@ -38,6 +38,7 @@ run '~/.tmux/plugins/tpm/tpm'
 EOF
 
 # Install tmux plugins
+tmux source ~/.tmux.conf || :
 ~/.tmux/plugins/tpm/bin/install_plugins
 
 touch ~/.no_auto_tmux
@@ -45,7 +46,7 @@ touch ~/.no_auto_tmux
 ###
 ### After login (manual):
 ###
-# wandb init -p vcmi-gym
+# wandb init -p vcmi-gym && wandb login
 # python3 -m rl.t10n.util.s3downloader data/t10n/.cache
 
 ###
