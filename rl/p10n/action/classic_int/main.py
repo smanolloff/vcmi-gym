@@ -37,7 +37,7 @@ from ...constants_v10 import (
     HEX_ACT_MAP
 )
 
-from ...util.s3dataset import S3Dataset
+from ..s3dataset_action import S3DatasetAction
 
 DIM_OTHER = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
 DIM_HEXES = 165*STATE_SIZE_ONE_HEX
@@ -96,16 +96,17 @@ class Buffer:
         # XXX: TEST: REMOVE
         # Verify only "Blue" observations are given (we want to predict enemy actions...)
         # XXX: reshape as if B=1 to re-use code from add_batch
-        hexes = obs.reshape(1, -1)[:, STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(1, 165, -1)
+        hexes = obs[STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(1, 165, -1)
         index_is_active = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1 if first in queue (zero null => index=offset)
         index_is_blue = HEX_ATTR_MAP["STACK_SIDE"][1] + 2  # 1 if blue ([null, red, blue] => index=offset+2)
         extracted = hexes[:, :, [index_is_active, index_is_blue]]
         # => (B, 165, 2), where 2 = [is_active, is_blue]
         mask = extracted[..., 0] != 0
         # => (B, N)
+
         idx = np.argmax(mask, axis=1)  # first nonzero index per B
         sides = extracted[np.arange(extracted.shape[0]), idx, 1]
-        assert all(sides)  # all sides are "BLUE" (1)
+        assert all(sides), sides  # all sides are "BLUE" (1)
         assert action > 0  # no retreats or resets
         # EOF: TEST
 
@@ -859,7 +860,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
     if sample_from_s3:
         dataloader = iter(torch.utils.data.DataLoader(
-            S3Dataset(
+            S3DatasetAction(
                 logger=logger,
                 bucket_name=config["s3"]["data"]["bucket_name"],
                 s3_dir=config["s3"]["data"]["s3_dir"],
@@ -880,7 +881,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
         if not sample_only:
             eval_dataloader = iter(torch.utils.data.DataLoader(
-                S3Dataset(
+                S3DatasetAction(
                     logger=logger,
                     bucket_name=config["s3"]["data"]["bucket_name"],
                     s3_dir=config["s3"]["data"]["s3_dir"],

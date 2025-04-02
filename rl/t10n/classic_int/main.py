@@ -1175,10 +1175,10 @@ def test(cfg_file):
     do_test(model, env)
 
 
-def load_for_test(file):
+def load_for_test(file, ycptelgm=False):
     dim_other = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
     dim_hexes = 165*STATE_SIZE_ONE_HEX
-    model = TransitionModel(dim_other, dim_hexes, N_ACTIONS)
+    model = TransitionModel(dim_other, dim_hexes, N_ACTIONS, ycptelgm=ycptelgm)
     model.eval()
     print(f"Loading {file}")
     weights = torch.load(file, weights_only=True, map_location=torch.device("cpu"))

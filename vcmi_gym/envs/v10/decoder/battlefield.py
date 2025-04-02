@@ -260,12 +260,13 @@ class Battlefield():
                     name = "Action"
                     if self.last_action:
                         assert N_NONHEX_ACTIONS == 2
+                        value = "%d: " % self.last_action
                         if self.last_action < 2:
-                            value = "Wait" if self.last_action else "Retreat"
+                            value += "Wait" if self.last_action else "Retreat"
                         else:
                             hex = self.get_hex((self.last_action - 2) // len(HEX_ACT_MAP))
                             act = list(HEX_ACT_MAP)[(self.last_action - 2) % len(HEX_ACT_MAP)]
-                            value = "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
+                            value += "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
                 case 3:
                     name = "DMG dealt"
                     value = "%d (%d since start)" % (mystats.DMG_DEALT_NOW_ABS.v, mystats.DMG_DEALT_ACC_ABS.v)

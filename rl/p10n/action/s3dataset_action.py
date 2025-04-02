@@ -9,8 +9,15 @@ import glob
 import logging
 from torch.utils.data import IterableDataset
 
+from ..constants_v10 import (
+    HEX_ATTR_MAP,
+    GLOBAL_ATTR_MAP,
+    STATE_SIZE_GLOBAL,
+    STATE_SIZE_ONE_PLAYER,
+)
 
-class S3Dataset(IterableDataset):
+
+class S3DatasetAction(IterableDataset):
     def __init__(
         self,
         logger,
@@ -76,8 +83,7 @@ class S3Dataset(IterableDataset):
         # XXX: dont set self.s3_client here (forking fails later)
         s3_client = self._init_s3_client()
 
-        #types = ["obs", "mask", "done", "action", "reward"]
-        types = ["obs", "action", "done"]
+        types = ["obs", "action"]
         prefix_counters = {}
         regex = re.compile(fr"{self.s3_dir}/({'|'.join(types)})-(.*)\.npz")
         request = {"Bucket": self.bucket_name, "Prefix": f"{self.s3_dir}/"}
@@ -150,7 +156,7 @@ class S3Dataset(IterableDataset):
 
         return local_path
 
-    def _stream_samples(self, worker_id, worker_prefixes):
+    def _stream_samples(self, worker_prefixes):
         """ Reads and yields samples from S3 .npz files while managing memory constraints """
         samples = {}
 
@@ -167,9 +173,23 @@ class S3Dataset(IterableDataset):
                 lengths = [len(s) for s in samples.values()]
                 assert all(lengths[0] == l for l in lengths[1:]), lengths
 
-                #for sample_group in zip(samples["obs"], samples["mask"], samples["done"], samples["action"], samples["reward"]):
-                for sample_group in zip(samples["obs"], samples["action"], samples["done"]):
-                    yield sample_group
+                for obs, action in zip(samples["obs"], samples["action"]):
+                    hexes = obs[STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(165, -1)
+                    index_is_active = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1 if first in queue (zero null => index=offset)
+                    index_is_blue = HEX_ATTR_MAP["STACK_SIDE"][1] + 2  # 1 if blue ([null, red, blue] => index=offset+2)
+                    extracted = hexes[:, [index_is_active, index_is_blue]]
+                    # => (165, 2), where 2 = [is_active, is_blue]
+                    mask = extracted[..., 0] != 0
+                    # => 165 bools (True for hexes for which is_active=True)
+                    idx = np.argmax(mask)  # index of 1st hex with active stack on it
+                    is_blue = extracted[idx, 1]  # is_blue for that hex
+                    if is_blue:
+                        index_battle_in_progress = GLOBAL_ATTR_MAP["BATTLE_WINNER"][1]  # 1 if winner is N/A (explicit null => index=offset)
+                        if action > 0:
+                            assert obs[index_battle_in_progress] == 1, obs[index_battle_in_progress]
+                            yield obs, action
+                        else:
+                            assert obs[index_battle_in_progress] == 0, obs[index_battle_in_progress]
 
             self.epoch_count += 1  # Track how many times we’ve exhausted S3 files
             self.logger.info(f"Epoch {self.epoch_count} completed. Restarting dataset.")
@@ -183,7 +203,7 @@ class S3Dataset(IterableDataset):
         else:  # Multi-worker: Assign distinct files
             worker_prefixes = self._get_worker_prefixes(worker_info.id, worker_info.num_workers)
 
-        return self._stream_samples(worker_info.id, worker_prefixes)
+        return self._stream_samples(worker_prefixes)
 
 
 if __name__ == "__main__":
@@ -194,7 +214,7 @@ if __name__ == "__main__":
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    dataset = S3Dataset(
+    dataset = S3DatasetAction(
         logger=logger,
         bucket_name="vcmi-gym",
         s3_dir="v8",
