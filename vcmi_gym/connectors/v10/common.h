@@ -16,6 +16,9 @@
 
 #pragma once
 
+// Linux builds fail without this include (used in types.h)
+#include <bitset>
+
 #include "schema/base.h"
 #include "schema/v10/types.h"
 

@@ -22,6 +22,9 @@
 #include <thread>
 #include <filesystem>
 
+// Linux builds fail without this include (used in types.h)
+#include <bitset>
+
 #include "schema/base.h"
 #include "schema/v3/types.h"
 

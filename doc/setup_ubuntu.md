@@ -14,7 +14,7 @@ instructions for MacOS.
 
 ### Build VCMI
 
-Please follow the instructions in [this guide](https://github.com/smanolloff/vcmi/blob/mmai/docs/setup_macos.md).
+Please follow the instructions in [this guide](https://github.com/smanolloff/vcmi/blob/mmai/docs/setup_ubuntu.md).
 
 ### Build vcmi-gym C++ libs
 
