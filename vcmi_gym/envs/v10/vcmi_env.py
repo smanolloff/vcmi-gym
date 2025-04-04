@@ -386,7 +386,7 @@ class VcmiEnv(gym.Env):
         bf = Decoder.decode(self.last_action, self.result.state)
         ahex = None
         for hex in [h for row in bf.hexes for h in row]:
-            if hex.STACK_QUEUE_POS.v == 0 and not hex.IS_REAR.v:
+            if hex.stack and hex.stack.QUEUE.v[0] == 1 and not hex.IS_REAR.v:
                 ahex = hex
                 break
 

@@ -12,29 +12,40 @@ import os
 #       Files are saved to local disk only (see `bufdir`)
 #       and can be later uploaded via s3uploader.py
 #
+env_kwargs = dict(
+    opponent="StupidAI",
+    max_steps=1000,
+    random_heroes=1,
+    random_obstacles=1,
+    town_chance=30,
+    warmachine_chance=40,
+    random_terrain_chance=100,
+    tight_formation_chance=20,
+    allow_invalid_actions=True,
+    user_timeout=3600,
+    vcmi_timeout=3600,
+    boot_timeout=300,
+    conntype="thread",
+    vcmi_loglevel_global="error",
+    vcmi_loglevel_ai="error",
+)
+
 config = dict(
     name_template="{datetime}-{id}",
 
-    env=None,
-    # env=dict(
-    #     # opponent="BattleAI",
-    #     opponent="StupidAI",
-    #     mapname="gym/generated/4096/4x1024.vmap",
-    #     max_steps=1000,
-    #     random_heroes=1,
-    #     random_obstacles=1,
-    #     town_chance=30,
-    #     warmachine_chance=40,
-    #     random_terrain_chance=100,
-    #     tight_formation_chance=20,
-    #     allow_invalid_actions=True,
-    #     user_timeout=3600,
-    #     vcmi_timeout=3600,
-    #     boot_timeout=300,
-    #     conntype="thread",
-    #     # vcmienv_loglevel="DEBUG",
-    #     # vcmi_loglevel_ai="trace",
-    # ),
+    # env=None,
+    env=dict(
+        train=dict(
+            num_workers=5,
+            prefetch_factor=1,
+            kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
+        ),
+        eval=dict(
+            num_workers=1,
+            prefetch_factor=1,
+            kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
+        ),
+    ),
 
     checkpoint_interval_s=900,
     s3=dict(
@@ -46,17 +57,17 @@ config = dict(
             s3_dir="models",
         ),
 
-        # data=None,
-        data=dict(
-            bucket_name="vcmi-gym",
-            s3_dir="v10",
-            cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
-            cached_files_max=None,
-            num_workers=8,
-            prefetch_factor=1,
-            pin_memory=False,       # causes hangs when enabled
-            shuffle=False,
-        ),
+        data=None,
+        # data=dict(
+        #     bucket_name="vcmi-gym",
+        #     s3_dir="v10",
+        #     cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
+        #     cached_files_max=None,
+        #     num_workers=8,
+        #     prefetch_factor=1,
+        #     pin_memory=False,       # causes hangs when enabled
+        #     shuffle=False,
+        # ),
     ),
 
     eval={
@@ -68,7 +79,7 @@ config = dict(
         # TODO: consider torch.optim.lr_scheduler.StepLR
         "learning_rate": 1e-4,
 
-        "buffer_capacity": 10_000,
+        "buffer_capacity": 10_000,  # also number of samples each dataset worker will collect
         "epochs": 1,
         "batch_size": 1000,
 

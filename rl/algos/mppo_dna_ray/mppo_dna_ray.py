@@ -59,7 +59,6 @@ class EnvArgs:
     vcmi_loglevel_global: str = "error"
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
-    sparse_info: bool = True
     consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
     user_timeout: int = 30
     vcmi_timeout: int = 30
@@ -82,7 +81,6 @@ class EnvArgs:
     deprecated_args: list[dict] = field(default_factory=lambda: [
         "encoding_type",
         "consecutive_error_reward_factor",
-        "sparse_info",
         "true_rng"
     ])
 
@@ -752,6 +750,8 @@ def main(args):
         start_time = time.time()
         global_start_second = agent.state.global_second
 
+        # XXXXX:
+        # this is better achieved with Dataset and workers (also async)
         RemoteSampler = ray.remote(Sampler)
         sampler_steps = args.num_steps // args.num_samplers
 
@@ -1105,7 +1105,6 @@ def debug_args():
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
             vcmienv_loglevel="WARN",
-            sparse_info=True,
             random_heroes=0,
             random_obstacles=0,
             town_chance=0,

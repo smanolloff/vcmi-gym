@@ -38,6 +38,7 @@ from ...constants_v10 import (
 )
 
 from ..s3dataset_action import S3DatasetAction
+from ..vcmidataset_action import VCMIDatasetAction
 
 DIM_OTHER = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
 DIM_HEXES = 165*STATE_SIZE_ONE_HEX
@@ -543,8 +544,12 @@ def train_model(
 
     for epoch in range(epochs):
         losses = []
+        waits = []
 
+        last_sample_at = time.time()
         for batch in buffer.sample_iter(batch_size):
+            waits.append(time.time() - last_sample_at)
+
             obs, action = batch
             if scaler:
                 with torch.amp.autocast(model.device.type):
@@ -565,24 +570,32 @@ def train_model(
                 loss.backward()
                 optimizer.step()
 
+            last_sample_at = time.time()
+
         loss = sum(losses) / len(losses)
-        return loss
+        wait = sum(waits) / len(waits)
+        return loss, wait
 
 
 def eval_model(logger, model, buffer, batch_size):
     model.eval()
     losses = []
+    waits = []
 
+    last_sample_at = time.time()
     for batch in buffer.sample_iter(batch_size):
+        waits.append(time.time() - last_sample_at)
         obs, action = batch
         with torch.no_grad():
             action_logits = model(obs)
 
         loss = cross_entropy(action_logits, action)
         losses.append(loss.item())
+        last_sample_at = time.time()
 
     loss = sum(losses) / len(losses)
-    return loss
+    wait = sum(waits) / len(waits)
+    return loss, wait
 
 
 def init_s3_client():
@@ -837,10 +850,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
     assert buffer_capacity % train_batch_size == 0  # needed for train_steps
 
-    if sample_from_env:
-        from vcmi_gym.envs.v10.vcmi_env import VcmiEnv
-        env = VcmiEnv(**config["env"])
-
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
     torch.backends.cudnn.benchmark = True
 
@@ -858,7 +867,21 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     data_split_ratio = 0.98  # train / test
     optimize_local_storage = config.get("s3", {}).get("optimize_local_storage")
 
-    if sample_from_s3:
+    if sample_from_env:
+        dataloader = iter(torch.utils.data.DataLoader(
+            VCMIDatasetAction(logger=logger, env_kwargs=config["env"]["train"]["kwargs"]),
+            batch_size=buffer.capacity,
+            num_workers=config["env"]["train"]["num_workers"],
+            prefetch_factor=config["env"]["train"]["prefetch_factor"],
+        ))
+        if not sample_only:
+            eval_dataloader = iter(torch.utils.data.DataLoader(
+                VCMIDatasetAction(logger=logger, env_kwargs=config["env"]["eval"]["kwargs"]),
+                batch_size=eval_buffer.capacity,
+                num_workers=config["env"]["eval"]["num_workers"],
+                prefetch_factor=config["env"]["eval"]["prefetch_factor"],
+            ))
+    elif sample_from_s3:
         dataloader = iter(torch.utils.data.DataLoader(
             S3DatasetAction(
                 logger=logger,
@@ -983,10 +1006,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
     while True:
         now = time.time()
-        if sample_from_env:
-            collect_samples(logger=logger, env=env, buffer=buffer, n=buffer.capacity, progress_report_steps=0)
-        elif sample_from_s3:
-            load_samples(logger=logger, dataloader=dataloader, buffer=buffer)
+        load_samples(logger=logger, dataloader=dataloader, buffer=buffer)
 
         assert buffer.full and not buffer.index
 
@@ -1018,7 +1038,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         if sample_only:
             continue
 
-        train_loss = train_model(
+        train_loss, train_wait = train_model(
             logger=logger,
             model=model,
             optimizer=optimizer,
@@ -1031,12 +1051,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         if now - last_evaluation_at > config["eval"]["interval_s"]:
             last_evaluation_at = now
 
-            if sample_from_env:
-                collect_samples(logger=logger, env=env, buffer=eval_buffer, n=eval_buffer.capacity, progress_report_steps=0)
-            elif sample_from_s3:
-                load_samples(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
+            load_samples(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
 
-            eval_loss = eval_model(
+            eval_loss, eval_wait = eval_model(
                 logger=logger,
                 model=model,
                 buffer=eval_buffer,
@@ -1046,12 +1063,15 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             wandb_log({
                 "iteration": iteration,
                 "train_loss/total": train_loss,
+                "train_dataset/wait_time_ms": train_wait * 1000,
                 "eval_loss/total": eval_loss,
+                "eval_dataset/wait_time_ms": eval_wait * 1000,
             }, commit=True)
         else:
             logger.info({
                 "iteration": iteration,
                 "train_loss/total": train_loss,
+                "train_dataset/wait_time_ms": train_wait * 1000,
             })
 
         if now - last_checkpoint_at > config["checkpoint_interval_s"]:

@@ -86,8 +86,25 @@ touch ~/.no_auto_tmux
 ##
 cat <<-EOF >vcmi.sh
 set -eux
+
+[ -n "\$1" ] || { echo "Usage: \$0 H3_ZIP_PASSWORD"; exit 1; }
+
 git submodule update --init --recursive
 cd vcmi
+
+cat <<-PYEOF | python3
+import os
+import boto3
+s3 = boto3.client("s3", aws_access_key_id=os.environ["AWS_ACCESS_KEY"], aws_secret_access_key=os.environ["AWS_SECRET_KEY"], region_name="eu-north-1")
+s3.download_file("vcmi-gym", "h3.tar.zip", "h3.tar.zip")
+PYEOF
+
+unzip -P "\$1" h3.tar.zip
+tar -xf h3.tar
+rm h3.tar*
+mkdir -p data/config
+cp ML/configs/*.json data/config
+
 apt update
 apt -y install cmake g++ libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev \
     libsdl2-mixer-dev zlib1g-dev libavformat-dev libswscale-dev libboost-dev \
@@ -131,3 +148,8 @@ EOF
 ###
 ###
 # CTRL+B - SHIFT+P
+
+##
+## To build vcmi:
+##
+# bash vcmi.sh H3_ZIP_PASSWORD
