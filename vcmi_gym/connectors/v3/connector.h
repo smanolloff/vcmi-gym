@@ -22,8 +22,6 @@
 #include <cstdio>
 #include <iostream>
 
-#include "schema/base.h"
-#include "schema/v3/types.h"
 #include "common.h"
 
 namespace Connector::V3 {

@@ -24,8 +24,6 @@
 #include <atomic>
 #include <deque>
 
-#include "schema/base.h"
-#include "schema/v10/types.h"
 #include "common.h"
 #include "exporter.h"
 

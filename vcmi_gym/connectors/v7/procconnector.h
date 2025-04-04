@@ -23,8 +23,6 @@
 #include <iostream>
 #include <deque>
 
-#include "schema/base.h"
-#include "schema/v7/types.h"
 #include "common.h"
 
 namespace Connector::V7::Proc {
