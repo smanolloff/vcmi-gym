@@ -150,7 +150,7 @@ class Buffer:
             self.full = True
 
     def sample_iter(self, batch_size):
-        shuffled_indices = torch.randperm(self.capacity, device=self.device)
+        shuffled_indices = torch.randperm(self.capacity)
 
         for i in range(0, len(shuffled_indices), batch_size):
             batch_indices = shuffled_indices[i:i + batch_size]
