@@ -732,7 +732,7 @@ def main(args):
 
         # ALGO Logic: Storage setup
         obs = torch.zeros((args.num_steps, num_envs) + obs_space["observation"].shape).to(device)
-        actions = torch.zeros((args.num_steps, num_envs) + act_space.shape).to(device)
+        actions = torch.zeros((args.num_steps, num_envs) + act_space.shape, dtype=torch.int64).to(device)
         logprobs = torch.zeros((args.num_steps, num_envs)).to(device)
         rewards = torch.zeros((args.num_steps, num_envs)).to(device)
         dones = torch.zeros((args.num_steps, num_envs)).to(device)
@@ -769,6 +769,7 @@ def main(args):
 
             # XXX: eval during experience collection
             agent.eval()
+            import ipdb; ipdb.set_trace()  # noqa
 
             # tstart = time.time()
             for step in range(0, args.num_steps):
@@ -864,7 +865,7 @@ def main(args):
                     _, newlogprob, entropy, _ = agent.NN_policy.get_action(
                         b_obs[mb_inds],
                         b_masks[mb_inds],
-                        action=b_actions.long()[mb_inds],
+                        action=b_actions[mb_inds],
                         attn_mask=b_attn_masks[mb_inds] if attn else None,
                     )
                     logratio = newlogprob - b_logprobs[mb_inds]
@@ -1110,7 +1111,7 @@ def debug_args():
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
         num_envs=1,
-        num_steps=256,
+        num_steps=8,
         gamma=0.8,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,
@@ -1135,6 +1136,7 @@ def debug_args():
         seed=42,
         skip_wandb_init=False,
         skip_wandb_log_code=False,
+        envmaps=["gym/A1.vmap"],
         env=EnvArgs(
             max_steps=500,
             vcmi_loglevel_global="error",
@@ -1189,15 +1191,15 @@ def debug_args():
                 #
                 # HexConv COMMON
                 #
-                {"t": "LazyLinear", "out_features": 32},
+                {"t": "LazyLinear", "out_features": 16},
                 {"t": "LeakyReLU"},
-                # => (B, 165, 32)
+                # => (B, 165, 16)
 
                 {"t": "Flatten"},
                 # => (B, 5280)
             ],
             "encoder_merged": [
-                {"t": "LazyLinear", "out_features": 1024},
+                {"t": "LazyLinear", "out_features": 128},
                 {"t": "LeakyReLU"},
                 # => (B, 1024)
             ],

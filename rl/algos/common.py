@@ -98,14 +98,12 @@ class SerializableCategoricalMasked:
         return torch.nn.functional.softmax(self.logits, dim=-1)
 
 
-def create_venv(env_cls, args, seeds):
+def create_venv(env_cls, args, seeds=None):
     assert args.mapside in ["attacker", "defender"]
 
     # assert args.env.conntype == "proc" or args.num_envs == 1, (
     #     f"conntype='thread' not possible with args.num_envs={args.num_envs}"
     # )
-
-    assert args.num_envs == len(seeds)
 
     assert len(args.opponent_sbm_probs) == 3
     if args.opponent_sbm_probs[2]:

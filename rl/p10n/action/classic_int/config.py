@@ -38,11 +38,12 @@ config = dict(
 
     checkpoint_interval_s=900,
     s3=dict(
+        optimize_local_storage=True,
+
         # checkpoint=None,
         checkpoint=dict(
             bucket_name="vcmi-gym",
             s3_dir="models",
-            optimize_local_storage=False,
         ),
 
         # data=None,
