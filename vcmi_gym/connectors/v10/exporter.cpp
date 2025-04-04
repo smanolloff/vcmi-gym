@@ -17,11 +17,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-// Linux builds fail without this include (used in types.h)
-#include <bitset>
-
-#include "schema/v10/constants.h"
-#include "schema/v10/types.h"
 #include "exporter.h"
 
 namespace Connector::V10 {

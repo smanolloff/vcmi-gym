@@ -17,8 +17,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "schema/v8/constants.h"
-#include "schema/v8/types.h"
 #include "exporter.h"
 
 namespace Connector::V8 {

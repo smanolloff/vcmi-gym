@@ -17,8 +17,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "schema/v3/constants.h"
-#include "schema/v3/types.h"
 #include "exporter.h"
 
 namespace Connector::V3 {
