@@ -8,7 +8,8 @@ set(Python_VIRTUALENV FIRST)
 set(CMAKE_CXX_STANDARD 17)
 set(VCMI_DIR "${CMAKE_SOURCE_DIR}/../../vcmi")
 
-find_package(pybind11 REQUIRED)
+# find_package(pybind11 REQUIRED)
+add_subdirectory(pybind11)
 
 if(APPLE)
     find_package(Boost REQUIRED COMPONENTS core format)
@@ -33,26 +34,6 @@ else()
 endif()
 
 include_directories(SYSTEM ${Boost_INCLUDE_DIR})
-
-#
-# V3
-#
-set(CONNECTOR_V3_FILES v3/connector.h v3/connector.cpp v3/common.h)
-set(EXPORTER_V3_FILES v3/exporter.h v3/exporter.cpp)
-pybind11_add_module(connector_v3 ${CONNECTOR_V3_FILES})
-pybind11_add_module(exporter_v3 ${EXPORTER_V3_FILES})
-target_include_directories(connector_v3 PUBLIC "${VCMI_DIR}")
-target_include_directories(connector_v3 PUBLIC "${VCMI_DIR}/AI/MMAI")
-target_include_directories(exporter_v3 PUBLIC "${VCMI_DIR}")
-target_include_directories(exporter_v3 PUBLIC "${VCMI_DIR}/AI/MMAI")
-target_link_libraries(connector_v3 PRIVATE "${Boost_LIBRARIES}")
-target_link_libraries(connector_v3 PUBLIC ${LIBMLCLIENT})
-set_property(TARGET exporter_v3 PROPERTY SUFFIX)
-set_property(TARGET connector_v3 PROPERTY SUFFIX)
-if(DEBUG_BUILD)
-    target_compile_definitions(connector_v3 PRIVATE DEBUG_BUILD)
-    target_compile_definitions(exporter_v3 PRIVATE DEBUG_BUILD)
-endif()
 
 #
 # V7
