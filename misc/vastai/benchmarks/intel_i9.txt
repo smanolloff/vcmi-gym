@@ -1,0 +1,44 @@
+Core™ i9-14900KF
+16/32 CPU available, 64GB RAM available
+FULL 2x sampling cycles
+
+5 workers:
+{"timestamp": "2025-04-05T16:28:39.039", "thread_id": "19h9ius8hs", "run_id": "woboqcpg", "message": {"string": "Loading samples..."}}
+{"timestamp": "2025-04-05T16:29:16.820", "thread_id": "19h9ius8hs", "run_id": "woboqcpg", "message": {"string": "Loading samples..."}}
+50000 samples, 37 seconds
+=> 1351 samples/s
+
+8 workers:
+{"timestamp": "2025-04-05T16:41:46.154", "thread_id": "1atssv94w0", "run_id": "ehdpnkdb", "message": {"string": "Loading samples..."}}
+{"timestamp": "2025-04-05T16:42:29.445", "thread_id": "1atssv94w0", "run_id": "ehdpnkdb", "message": {"string": "Loading samples..."}}
+80000 samples, 43 seconds
+=> 1860 samples/s
+
+10 workers:
+{"timestamp": "2025-04-05T16:32:30.971", "thread_id": "18ctasnojk", "run_id": "zrsrqojg", "message": {"string": "Loading samples..."}}
+{"timestamp": "2025-04-05T16:33:17.277", "thread_id": "18ctasnojk", "run_id": "zrsrqojg", "message": {"string": "Loading samples..."}}
+100000 samples, 46 seconds
+=> 2174 samples/s
+
+15 workers:
+{"timestamp": "2025-04-05T16:36:50.667", "thread_id": "1buekr2hhc", "run_id": "hvixqvpi", "message": {"string": "Loading samples..."}}
+{"timestamp": "2025-04-05T16:39:21.554", "thread_id": "1buekr2hhc", "run_id": "hvixqvpi", "message": {"string": "Loading samples..."}}
+150000 samples, 150 seconds
+=> 1000 samples/s
+
+12 workers:
+{"timestamp": "2025-04-05T16:45:03.477", "thread_id": "1d4bdew7i8", "run_id": "vqzymsxv", "message": {"string": "Loading samples..."}}
+{"timestamp": "2025-04-05T16:45:56.199", "thread_id": "1d4bdew7i8", "run_id": "vqzymsxv", "message": {"string": "Loading samples..."}}
+120000 samples, 52 seconds
+=> 2308 samples/s
+
+13 workers:
+{"timestamp": "2025-04-05T16:48:19.481", "thread_id": "1ckk5ffchs", "run_id": "wvbyfwyg", "message": {"string": "Loading samples..."}}
+{"timestamp": "2025-04-05T16:49:13.015", "thread_id": "1ckk5ffchs", "run_id": "wvbyfwyg", "message": {"string": "Loading samples..."}}
+130000 samples, 53 seconds
+=> 2453 samples/s
+
+{"timestamp": "2025-04-05T17:11:43.658", "thread_id": "1c0v5zbabk", "run_id": "tambloem", "message": {"string": "Loading samples..."}}
+{"timestamp": "2025-04-05T17:13:04.283", "thread_id": "1c0v5zbabk", "run_id": "tambloem", "message": {"string": "Loading samples..."}}
+140000 samples, 80 seconds
+=> 1750 samples/s

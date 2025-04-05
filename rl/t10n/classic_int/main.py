@@ -991,6 +991,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 pin_memory=config["s3"]["data"]["pin_memory"]
             ))
 
+    import ipdb; ipdb.set_trace()  # noqa
     if resume_config:
         def load_local_or_s3_checkpoint(what, torch_obj, **load_kwargs):
             filename = "%s/%s-%s.pt" % (config["run"]["out_dir"], run_id, what)

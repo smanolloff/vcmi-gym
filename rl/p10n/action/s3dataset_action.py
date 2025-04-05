@@ -1,3 +1,5 @@
+import time
+import queue
 import botocore.config
 import boto3
 import torch
@@ -16,6 +18,8 @@ from ..constants_v10 import (
     STATE_SIZE_ONE_PLAYER,
 )
 
+from ..util.timer import Timer
+
 
 class S3DatasetAction(IterableDataset):
     def __init__(
@@ -30,7 +34,9 @@ class S3DatasetAction(IterableDataset):
         region_name="eu-north-1",
         shuffle=False,
         split_ratio=1.0,
-        split_side=0
+        split_side=0,
+        metric_queue=None,
+        metric_report_interval=5
     ):
         """
         Args:
@@ -48,6 +54,12 @@ class S3DatasetAction(IterableDataset):
         self.logger = logger
         self.split_ratio = split_ratio
         self.split_side = split_side
+        self.metric_queue = metric_queue
+        self.metric_report_interval = metric_report_interval
+        self.metric_reported_at = time.time()
+
+        self.timer_all = Timer()
+        self.timer_idle = Timer()
 
         assert split_ratio >= 0 and split_ratio <= 1, split_ratio
         assert split_side in [0, 1], split_side
@@ -119,13 +131,18 @@ class S3DatasetAction(IterableDataset):
             self.logger.info("XXXXXXX: USING JUST 3 PREFIXES (DEBUG)")
             prefixes = prefixes[:3]
 
-        self.logger.info("Found %d sample packs, will split using ratio %.2f" % (len(prefixes), self.split_ratio))
+        self.logger.info("Found %d sample packs" % len(prefixes))
+
+        if self.split_ratio < 1:
+            self.logger.info("will split using ratio %.2f" % self.split_ratio)
+            split_idx = int(len(prefixes) * self.split_ratio)
+            self.prefixes = prefixes[:split_idx] if self.split_side == 0 else prefixes[split_idx:]
+            self.logger.info("Sample packs after split: %d" % len(self.prefixes))
+        else:
+            assert self.split_size == 0, "split side is %d, but split_ratio is %f" % (self.split_side, self.split_ratio)
+            self.prefixes = prefixes
 
         self.types = types
-
-        split_idx = int(len(prefixes) * self.split_ratio)
-        self.prefixes = prefixes[:split_idx] if self.split_side == 0 else prefixes[split_idx:]
-        self.logger.info("Sample packs after split: %d" % len(self.prefixes))
 
     def _get_worker_prefixes(self, worker_id, num_workers):
         """ Assigns distinct file chunks to each worker """
@@ -157,42 +174,50 @@ class S3DatasetAction(IterableDataset):
         return local_path
 
     def _stream_samples(self, worker_prefixes):
-        """ Reads and yields samples from S3 .npz files while managing memory constraints """
         samples = {}
 
-        while True:
-            if self.shuffle:
-                random.shuffle(worker_prefixes)
+        with self.timer_all:
+            while True:
+                if self.shuffle:
+                    random.shuffle(worker_prefixes)
 
-            for prefix in worker_prefixes:
-                for t in self.types:
-                    s3_path = f"{self.s3_dir}/{t}-{prefix}.npz"
-                    local_path = self._download_file(s3_path)
-                    samples[t] = np.load(local_path)['arr_0']
+                for prefix in worker_prefixes:
+                    for t in self.types:
+                        s3_path = f"{self.s3_dir}/{t}-{prefix}.npz"
+                        local_path = self._download_file(s3_path)
+                        samples[t] = np.load(local_path)['arr_0']
 
-                lengths = [len(s) for s in samples.values()]
-                assert all(lengths[0] == l for l in lengths[1:]), lengths
+                    lengths = [len(s) for s in samples.values()]
+                    assert all(lengths[0] == l for l in lengths[1:]), lengths
 
-                for obs, action in zip(samples["obs"], samples["action"]):
-                    hexes = obs[STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(165, -1)
-                    index_is_active = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1 if first in queue (zero null => index=offset)
-                    index_is_blue = HEX_ATTR_MAP["STACK_SIDE"][1] + 2  # 1 if blue ([null, red, blue] => index=offset+2)
-                    extracted = hexes[:, [index_is_active, index_is_blue]]
-                    # => (165, 2), where 2 = [is_active, is_blue]
-                    mask = extracted[..., 0] != 0
-                    # => 165 bools (True for hexes for which is_active=True)
-                    idx = np.argmax(mask)  # index of 1st hex with active stack on it
-                    is_blue = extracted[idx, 1]  # is_blue for that hex
-                    if is_blue:
-                        index_battle_in_progress = GLOBAL_ATTR_MAP["BATTLE_WINNER"][1]  # 1 if winner is N/A (explicit null => index=offset)
-                        if action > 0:
-                            assert obs[index_battle_in_progress] == 1, obs[index_battle_in_progress]
-                            yield obs, action
-                        else:
-                            assert obs[index_battle_in_progress] == 0, obs[index_battle_in_progress]
+                    for obs, action in zip(samples["obs"], samples["action"]):
+                        hexes = obs[STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(165, -1)
+                        index_is_active = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1 if first in queue (zero null => index=offset)
+                        index_is_blue = HEX_ATTR_MAP["STACK_SIDE"][1] + 2  # 1 if blue ([null, red, blue] => index=offset+2)
+                        extracted = hexes[:, [index_is_active, index_is_blue]]
+                        # => (165, 2), where 2 = [is_active, is_blue]
+                        mask = extracted[..., 0] != 0
+                        # => 165 bools (True for hexes for which is_active=True)
+                        idx = np.argmax(mask)  # index of 1st hex with active stack on it
+                        is_blue = extracted[idx, 1]  # is_blue for that hex
+                        if is_blue:
+                            index_battle_in_progress = GLOBAL_ATTR_MAP["BATTLE_WINNER"][1]  # 1 if winner is N/A (explicit null => index=offset)
+                            if action > 0:
+                                assert obs[index_battle_in_progress] == 1, obs[index_battle_in_progress]
+                                with self.timer_idle:
+                                    yield obs, action
 
-            self.epoch_count += 1  # Track how many times we’ve exhausted S3 files
-            self.logger.info(f"Epoch {self.epoch_count} completed. Restarting dataset.")
+                                if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:
+                                    self.metric_reported_at = time.time()
+                                    try:
+                                        self.metric_queue.put(self.utilization(), block=False)
+                                    except queue.Full:
+                                        logger.warn("Failed to report metric (queue full)")
+                            else:
+                                assert obs[index_battle_in_progress] == 0, obs[index_battle_in_progress]
+
+                self.epoch_count += 1  # Track how many times we’ve exhausted S3 files
+                self.logger.info(f"Epoch {self.epoch_count} completed. Restarting dataset.")
 
     def __iter__(self):
         """ Creates an iterable dataset that streams from S3 """

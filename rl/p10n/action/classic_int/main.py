@@ -45,6 +45,10 @@ DIM_HEXES = 165*STATE_SIZE_ONE_HEX
 DIM_OBS = DIM_OTHER + DIM_HEXES
 
 
+def safe_mean(array_like) -> float:
+    return np.nan if len(array_like) == 0 else float(np.mean(array_like))
+
+
 def wandb_log(*args, **kwargs):
     pass
 
@@ -83,12 +87,15 @@ def setup_wandb(config, model, src_file, name=None):
 
 
 class Buffer:
-    def __init__(self, capacity, dim_obs, n_actions, device=torch.device("cpu")):
+    def __init__(self, capacity, batch_size, dim_obs, n_actions, device=torch.device("cpu")):
         self.capacity = capacity
+        self.batch_size = batch_size
         self.device = device
 
-        self.obs_buffer = torch.empty((capacity, dim_obs), dtype=torch.float32, device=device)
-        self.action_buffer = torch.empty((capacity,), dtype=torch.int64, device=device)
+        self.containers = {
+            "obs": torch.empty((capacity, dim_obs), dtype=torch.float32, device=device),
+            "action": torch.empty((capacity,), dtype=torch.int64, device=device)
+        }
 
         self.index = 0
         self.full = False
@@ -111,8 +118,8 @@ class Buffer:
         assert action > 0  # no retreats or resets
         # EOF: TEST
 
-        self.obs_buffer[self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        self.action_buffer[self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.containers["obs"][self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+        self.containers["action"][self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
@@ -120,6 +127,7 @@ class Buffer:
 
     def add_batch(self, obs, action):
         batch_size = obs.shape[0]
+
         start = self.index
         end = self.index + batch_size
 
@@ -142,22 +150,23 @@ class Buffer:
         assert all(action > 0)  # no retreats or resets
         # EOF: TEST
 
-        self.obs_buffer[start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        self.action_buffer[start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.containers["obs"][start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
+        self.containers["action"][start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
 
         self.index = end
         if self.index == self.capacity:
             self.index = 0
             self.full = True
 
-    def sample_iter(self, batch_size):
+    # Perform a full-pass, but in batches
+    def batched_iter(self):
         shuffled_indices = torch.randperm(self.capacity)
 
-        for i in range(0, len(shuffled_indices), batch_size):
-            batch_indices = shuffled_indices[i:i + batch_size]
+        for i in range(0, len(shuffled_indices), self.batch_size):
+            batch_indices = shuffled_indices[i:i + self.batch_size]
             yield (
-                self.obs_buffer[batch_indices],
-                self.action_buffer[batch_indices],
+                self.containers["obs"][batch_indices],
+                self.containers["action"][batch_indices],
             )
 
 
@@ -489,7 +498,16 @@ class StructuredLogger:
 
 def load_samples(logger, dataloader, buffer):
     logger.debug("Loading observations...")
-    buffer.add_batch(*next(dataloader))
+
+    # This is technically not needed, but is easier to benchmark
+    # when the batch sizes for adding and iterating are the same
+    assert buffer.index == 0, f"{buffer.index} == 0"
+    assert buffer.capacity % buffer.batch_size == 0, f"{buffer.capacity} % {buffer.batch_size} == 0"
+
+    for _ in range(buffer.capacity // buffer.batch_size):
+        buffer.add_batch(*next(dataloader))
+
+    assert buffer.index == 0, f"{buffer.index} == 0"
     logger.debug(f"Loaded {buffer.capacity} observations")
 
 
@@ -531,15 +549,7 @@ def collect_samples(logger, env, buffer, n, progress_report_steps=0):
     logger.debug(dict(samples_collected=i, progress=100))
 
 
-def train_model(
-    logger,
-    model,
-    optimizer,
-    scaler,
-    buffer,
-    epochs,
-    batch_size
-):
+def train_model(logger, model, optimizer, scaler, buffer, epochs):
     model.train()
 
     for epoch in range(epochs):
@@ -547,7 +557,7 @@ def train_model(
         waits = []
 
         last_sample_at = time.time()
-        for batch in buffer.sample_iter(batch_size):
+        for batch in buffer.batched_iter():
             waits.append(time.time() - last_sample_at)
 
             obs, action = batch
@@ -573,17 +583,17 @@ def train_model(
             last_sample_at = time.time()
 
         loss = sum(losses) / len(losses)
-        wait = sum(waits) / len(waits)
+        wait = sum(waits)
         return loss, wait
 
 
-def eval_model(logger, model, buffer, batch_size):
+def eval_model(logger, model, buffer):
     model.eval()
     losses = []
     waits = []
 
     last_sample_at = time.time()
-    for batch in buffer.sample_iter(batch_size):
+    for batch in buffer.batched_iter():
         waits.append(time.time() - last_sample_at)
         obs, action = batch
         with torch.no_grad():
@@ -594,7 +604,7 @@ def eval_model(logger, model, buffer, batch_size):
         last_sample_at = time.time()
 
     loss = sum(losses) / len(losses)
-    wait = sum(waits) / len(waits)
+    wait = sum(waits)
     return loss, wait
 
 
@@ -718,7 +728,7 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
 
 
 # NOTE: this assumes no old observations are left in the buffer
-def save_buffer(logger, dry_run, buffer, run_id, s3_config, uploading_cond, uploading_event, allow_skip=True):
+def _save_buffer(logger, dry_run, buffer, run_id, s3_config, uploading_cond, uploading_event, allow_skip=True):
     # XXX: this is a sub-thread
     # Parent thread has released waits for us to notify via the cond that we have
     # saved the buffer to files, so it can start filling the buffer with new
@@ -750,16 +760,15 @@ def save_buffer(logger, dry_run, buffer, run_id, s3_config, uploading_cond, uplo
 
     now = time.time()
     with tempfile.TemporaryDirectory() as temp_dir:
-        for type in ["obs", "done", "action"]:
+        for type, container in buffer.containers.items():
             fname = f"{type}-{run_id}-{now:.0f}.npz"
-            buf = getattr(buffer, f"{type}_buffer")
             local_path = f"{temp_dir}/{fname}"
             msg = f"Saving buffer to {local_path}"
             if dry_run:
                 logger.info(f"{msg} (--dry-run)")
             else:
                 logger.info(msg)
-                np.savez_compressed(f"{local_path}.tmp", buf)
+                np.savez_compressed(f"{local_path}.tmp", container)
                 shutil.move(f"{local_path}.tmp", local_path)
             s3_path = f"{s3_dir}/{fname}"
             paths.append((local_path, s3_path))
@@ -807,6 +816,53 @@ def save_buffer(logger, dry_run, buffer, run_id, s3_config, uploading_cond, uplo
                 logger.info("Successfully uploaded buffer to s3; releasing lock ...")
 
 
+def save_buffer_async(run_id, logger, dry_run, buffer, s3_config, allow_skip, uploading_cond, uploading_event_buf):
+    # If a previous upload is still in progress, block here until it finishes
+    logger.debug("Trying to obtain lock (main thread)...")
+    with uploading_cond:
+        logger.debug("Obtained lock (main thread); starting sub-thread...")
+
+        thread = threading.Thread(target=_save_buffer, kwargs=dict(
+            logger=logger,
+            dry_run=dry_run,
+            buffer=buffer,
+            # out_dir=config["run"]["out_dir"],
+            run_id=run_id,
+            s3_config=s3_config,
+            uploading_cond=uploading_cond,
+            uploading_event=uploading_event_buf,
+            allow_skip=allow_skip
+        ))
+        thread.start()
+        # sub-thread should save the buffer to temp dir and notify us
+        logger.debug("Waiting on cond (main thread) ...")
+        if not uploading_cond.wait(timeout=10):
+            logger.error("Thread for buffer upload did not start properly")
+        logger.debug("Notified; releasing lock (main thread) ...")
+        uploading_cond.notify_all()
+
+
+def dig(data, *keys):
+    for key in keys:
+        if isinstance(data, dict) and key in data:
+            data = data[key]
+        else:
+            return None
+    return data
+
+
+def aggregate_metrics(queue):
+    total = 0
+    count = 0
+
+    while not queue.empty():
+        item = queue.get()
+        total += item
+        count += 1
+
+    return total / count if count else None
+
+
 def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     if resume_config:
         with open(resume_config, "r") as f:
@@ -825,11 +881,20 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             resumed_config=None,
         )
 
-    sample_from_env = config["env"] is not None
-    sample_from_s3 = config["env"] is None and config["s3"]["data"] is not None
-    save_samples = config["env"] is not None and config["s3"]["data"] is not None
+    checkpoint_s3_config = dig(config, "s3", "checkpoint")
+    train_s3_config = dig(config, "s3", "data", "train")
+    eval_s3_config = dig(config, "s3", "data", "eval")
+    train_env_config = dig(config, "env", "train")
+    eval_env_config = dig(config, "env", "eval")
 
-    assert config.get("env") or config.get("s3", {}).get("data")
+    train_sample_from_env = train_env_config is not None
+    eval_sample_from_env = eval_env_config is not None
+
+    train_sample_from_s3 = (not train_sample_from_env) and train_s3_config is not None
+    eval_sample_from_s3 = (not eval_sample_from_env) and eval_s3_config is not None
+
+    train_save_samples = train_sample_from_env and train_s3_config is not None
+    eval_save_samples = eval_sample_from_env and eval_s3_config is not None
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
@@ -841,14 +906,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     logger.info(dict(config=config))
 
     learning_rate = config["train"]["learning_rate"]
-    buffer_capacity = config["train"]["buffer_capacity"]
     train_epochs = config["train"]["epochs"]
-    train_batch_size = config["train"]["batch_size"]
-
-    eval_buffer_capacity = config["eval"]["buffer_capacity"]
-    eval_batch_size = config["eval"]["batch_size"]
-
-    assert buffer_capacity % train_batch_size == 0  # needed for train_steps
 
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
     torch.backends.cudnn.benchmark = True
@@ -856,72 +914,67 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = ActionPredictionModel(DIM_OTHER, DIM_HEXES, N_ACTIONS, device=device)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    buffer = Buffer(capacity=buffer_capacity, dim_obs=DIM_OBS, n_actions=N_ACTIONS, device=device)
-    eval_buffer = Buffer(capacity=eval_buffer_capacity, dim_obs=DIM_OBS, n_actions=N_ACTIONS, device=device)
 
     if device.type == "cuda":
         scaler = torch.amp.GradScaler()
     else:
         scaler = None
 
-    data_split_ratio = 0.98  # train / test
     optimize_local_storage = config.get("s3", {}).get("optimize_local_storage")
 
-    if sample_from_env:
-        dataloader = iter(torch.utils.data.DataLoader(
-            VCMIDatasetAction(logger=logger, env_kwargs=config["env"]["train"]["kwargs"]),
-            batch_size=buffer.capacity,
-            num_workers=config["env"]["train"]["num_workers"],
-            prefetch_factor=config["env"]["train"]["prefetch_factor"],
-        ))
-        if not sample_only:
-            eval_dataloader = iter(torch.utils.data.DataLoader(
-                VCMIDatasetAction(logger=logger, env_kwargs=config["env"]["eval"]["kwargs"]),
-                batch_size=eval_buffer.capacity,
-                num_workers=config["env"]["eval"]["num_workers"],
-                prefetch_factor=config["env"]["eval"]["prefetch_factor"],
-            ))
-    elif sample_from_s3:
-        dataloader = iter(torch.utils.data.DataLoader(
+    def make_vcmi_dataloader(cfg, mq):
+        return torch.utils.data.DataLoader(
+            VCMIDatasetAction(logger=logger, env_kwargs=cfg["kwargs"], metric_queue=mq),
+            batch_size=cfg["batch_size"],
+            num_workers=cfg["num_workers"],
+            prefetch_factor=cfg["prefetch_factor"],
+            # persistent_workers=True,  # no effect here
+        )
+
+    def make_s3_dataloader(cfg, mq):
+        return torch.utils.data.DataLoader(
             S3DatasetAction(
                 logger=logger,
-                bucket_name=config["s3"]["data"]["bucket_name"],
-                s3_dir=config["s3"]["data"]["s3_dir"],
-                cache_dir=config["s3"]["data"]["cache_dir"],
-                cached_files_max=config["s3"]["data"]["cached_files_max"],
-                shuffle=config["s3"]["data"]["shuffle"],
-                # Don't store keys in config (will appear in clear text in config.json)
+                bucket_name=cfg["bucket_name"],
+                s3_dir=cfg["s3_dir"],
+                cache_dir=cfg["cache_dir"],
+                cached_files_max=cfg["cached_files_max"],
+                shuffle=cfg["shuffle"],
                 aws_access_key=os.environ["AWS_ACCESS_KEY"],
                 aws_secret_key=os.environ["AWS_SECRET_KEY"],
-                split_ratio=data_split_ratio,
-                split_side=0
+                metric_queue=mq,
             ),
-            batch_size=buffer.capacity,
-            num_workers=config["s3"]["data"]["num_workers"],
-            prefetch_factor=config["s3"]["data"]["prefetch_factor"],
-            pin_memory=config["s3"]["data"]["pin_memory"]
-        ))
+            batch_size=cfg["batch_size"],
+            num_workers=cfg["num_workers"],
+            prefetch_factor=cfg["prefetch_factor"],
+            pin_memory=cfg["pin_memory"]
+        )
 
-        if not sample_only:
-            eval_dataloader = iter(torch.utils.data.DataLoader(
-                S3DatasetAction(
-                    logger=logger,
-                    bucket_name=config["s3"]["data"]["bucket_name"],
-                    s3_dir=config["s3"]["data"]["s3_dir"],
-                    cache_dir=config["s3"]["data"]["cache_dir"],
-                    cached_files_max=config["s3"]["data"]["cached_files_max"],
-                    shuffle=False,  # False needed for the save space hack where split is 90/1 (not 90/10)
-                    # Don't store keys in config (will appear in clear text in config.json)
-                    aws_access_key=os.environ["AWS_ACCESS_KEY"],
-                    aws_secret_key=os.environ["AWS_SECRET_KEY"],
-                    split_ratio=data_split_ratio,
-                    split_side=1
-                ),
-                batch_size=eval_buffer.capacity,
-                num_workers=1,
-                prefetch_factor=1,
-                pin_memory=config["s3"]["data"]["pin_memory"]
-            ))
+    train_metric_queue = torch.multiprocessing.Queue()
+    eval_metric_queue = torch.multiprocessing.Queue()
+
+    if train_sample_from_env:
+        dataloader = make_vcmi_dataloader(train_env_config, train_metric_queue)
+    if eval_sample_from_env:
+        eval_dataloader = make_vcmi_dataloader(eval_env_config, eval_metric_queue)
+    if train_sample_from_s3:
+        dataloader = make_s3_dataloader(train_s3_config, train_metric_queue)
+    if eval_sample_from_s3:
+        eval_dataloader = make_s3_dataloader(eval_s3_config, eval_metric_queue)
+
+    def make_buffer(dloader):
+        return Buffer(
+            capacity=dloader.num_workers * dloader.batch_size,
+            batch_size=dloader.batch_size,
+            dim_obs=DIM_OBS,
+            n_actions=N_ACTIONS,
+            device=device
+        )
+
+    buffer = make_buffer(dataloader)
+    dataloader = iter(dataloader)
+    eval_buffer = make_buffer(eval_dataloader)
+    eval_dataloader = iter(eval_dataloader)
 
     if resume_config:
         def load_local_or_s3_checkpoint(what, torch_obj, **load_kwargs):
@@ -940,16 +993,15 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     os.unlink(f"{filename}~")
 
             # Download is OK even if --dry-run is given (nothing overwritten)
-            if config["s3"]["checkpoint"] and not os.path.exists(filename):
+            if checkpoint_s3_config and not os.path.exists(filename):
                 logger.debug("Local file does not exist, try S3")
 
-                s3_config = config["s3"]["checkpoint"]
-                s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
-                logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
+                s3_filename = f"{checkpoint_s3_config['s3_dir']}/{os.path.basename(filename)}"
+                logger.info(f"Download s3://{checkpoint_s3_config['bucket_name']}/{s3_filename} ...")
 
                 if os.path.exists(f"{filename}.tmp"):
                     os.unlink(f"{filename}.tmp")
-                init_s3_client().download_file(s3_config["bucket_name"], s3_filename, f"{filename}.tmp")
+                init_s3_client().download_file(checkpoint_s3_config["bucket_name"], s3_filename, f"{filename}.tmp")
                 shutil.move(f"{filename}.tmp", filename)
             torch_obj.load_state_dict(torch.load(filename, weights_only=True, map_location=device), **load_kwargs)
 
@@ -984,11 +1036,11 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
     wandb_log({
         "train/learning_rate": learning_rate,
-        "train/buffer_capacity": buffer_capacity,
+        "train/buffer_capacity": buffer.capacity,
         "train/epochs": train_epochs,
-        "train/batch_size": train_batch_size,
-        "eval/buffer_capacity": eval_buffer_capacity,
-        "eval/batch_size": eval_batch_size,
+        "train/batch_size": buffer.batch_size,
+        "eval/buffer_capacity": eval_buffer.capacity,
+        "eval/batch_size": eval_buffer.batch_size,
     })
 
     iteration = 0
@@ -998,42 +1050,33 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     # during training, we simply check if the event is set and optionally skip the upload
     # Non-bloking, but uploads may be skipped (checkpoint uploads)
     uploading_event = threading.Event()
-    uploading_event_buf = threading.Event()
+    train_uploading_event_buf = threading.Event()
+    eval_uploading_event_buf = threading.Event()
 
     # during sample collection, we use a cond lock to prevent more than 1 upload at a time
     # Blocking, but all uploads are processed (buffer uploads)
-    uploading_cond = threading.Condition()
+    train_uploading_cond = threading.Condition()
+    eval_uploading_cond = threading.Condition()
 
     while True:
         now = time.time()
+        logger.info("Loading samples...")
         load_samples(logger=logger, dataloader=dataloader, buffer=buffer)
+        logger.info("Samples loaded: %d" % buffer.capacity)
 
         assert buffer.full and not buffer.index
 
-        if save_samples:
-            # If a previous upload is still in progress, block here until it finishes
-            logger.debug("Trying to obtain lock (main thread)...")
-            with uploading_cond:
-                logger.debug("Obtained lock (main thread); starting sub-thread...")
-
-                thread = threading.Thread(target=save_buffer, kwargs=dict(
-                    logger=logger,
-                    dry_run=dry_run,
-                    buffer=buffer,
-                    # out_dir=config["run"]["out_dir"],
-                    run_id=run_id,
-                    s3_config=config.get("s3", {}).get("data"),
-                    uploading_cond=uploading_cond,
-                    uploading_event=uploading_event_buf,
-                    allow_skip=not sample_only
-                ))
-                thread.start()
-                # sub-thread should save the buffer to temp dir and notify us
-                logger.debug("Waiting on cond (main thread) ...")
-                if not uploading_cond.wait(timeout=10):
-                    logger.error("Thread for buffer upload did not start properly")
-                logger.debug("Notified; releasing lock (main thread) ...")
-                uploading_cond.notify_all()
+        if train_save_samples:
+            save_buffer_async(
+                run_id=run_id,
+                logger=logger,
+                dry_run=dry_run,
+                buffer=buffer,
+                s3_config=train_s3_config,
+                allow_skip=not sample_only,
+                uploading_cond=train_uploading_cond,
+                uploading_event_buf=train_uploading_event_buf
+            )
 
         if sample_only:
             continue
@@ -1045,7 +1088,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             scaler=scaler,
             buffer=buffer,
             epochs=train_epochs,
-            batch_size=train_batch_size
         )
 
         if now - last_evaluation_at > config["eval"]["interval_s"]:
@@ -1057,21 +1099,42 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 logger=logger,
                 model=model,
                 buffer=eval_buffer,
-                batch_size=eval_batch_size,
             )
 
-            wandb_log({
+            wlog = {
                 "iteration": iteration,
                 "train_loss/total": train_loss,
-                "train_dataset/wait_time_ms": train_wait * 1000,
+                "train_dataset/wait_time_s": train_wait,
                 "eval_loss/total": eval_loss,
-                "eval_dataset/wait_time_ms": eval_wait * 1000,
-            }, commit=True)
+                "eval_dataset/wait_time_s": eval_wait,
+            }
+
+            train_dataset_metrics = aggregate_metrics(train_metric_queue)
+            if train_dataset_metrics:
+                wlog["train_dataset/avg_worker_utilization"] = train_dataset_metrics
+
+            eval_dataset_metrics = aggregate_metrics(eval_metric_queue)
+            if eval_dataset_metrics:
+                wlog["eval_dataset/avg_worker_utilization"] = eval_dataset_metrics
+
+            wandb_log(wlog, commit=True)
+
+            if eval_save_samples:
+                save_buffer_async(
+                    run_id=run_id,
+                    logger=logger,
+                    dry_run=dry_run,
+                    buffer=eval_buffer,
+                    s3_config=eval_s3_config,
+                    allow_skip=not sample_only,
+                    uploading_cond=eval_uploading_cond,
+                    uploading_event_buf=eval_uploading_event_buf
+                )
         else:
             logger.info({
                 "iteration": iteration,
                 "train_loss/total": train_loss,
-                "train_dataset/wait_time_ms": train_wait * 1000,
+                "train_dataset/wait_time_s": train_wait,
             })
 
         if now - last_checkpoint_at > config["checkpoint_interval_s"]:

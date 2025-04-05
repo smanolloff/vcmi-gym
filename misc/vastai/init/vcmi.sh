@@ -22,13 +22,14 @@ tar -xf h3.tar
 rm h3.tar*
 mkdir -p data/config
 cp ML/configs/*.json data/config
+ln -s ../../../maps/gym data/Maps/
 
 apt update
 apt -y install cmake g++ libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev \
     libsdl2-mixer-dev zlib1g-dev libavformat-dev libswscale-dev libboost-dev \
     libboost-filesystem-dev libboost-system-dev libboost-thread-dev libboost-program-options-dev \
     libboost-locale-dev qtbase5-dev libtbb-dev libluajit-5.1-dev qttools5-dev \
-    libsqlite3-dev liblzma-dev pybind11-dev python3.10-dev ccache
+    libsqlite3-dev liblzma-dev python3.10-dev ccache
 cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0 \

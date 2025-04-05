@@ -245,13 +245,14 @@ namespace Connector::V10::Thread {
 
         LOG("Construct P_BattlefieldState...");
         auto &bs = s->getBattlefieldState();
-        P_BattlefieldState pbs(bs.size());
-        auto pbsmd = pbs.mutable_data();
-        for (int i=0; i<bs.size(); i++)
-            pbsmd[i] = bs[i];
+        P_BattlefieldState pbs(bs.size(), s->getBattlefieldState().data());
+        // auto pbsmd = pbs.mutable_data();
+        // for (int i=0; i<bs.size(); i++)
+        //     pbsmd[i] = bs[i];
 
         auto &actmask = s->getActionMask();
 
+        // Must copy (bool arrays in numpy and C++ have different memory layout)
         LOG("Construct P_ActionMask...");
         auto pam = P_ActionMask(actmask.size());
         auto pammd = pam.mutable_data();
