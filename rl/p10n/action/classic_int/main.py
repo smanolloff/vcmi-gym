@@ -87,9 +87,8 @@ def setup_wandb(config, model, src_file, name=None):
 
 
 class Buffer:
-    def __init__(self, capacity, batch_size, dim_obs, n_actions, device=torch.device("cpu")):
+    def __init__(self, capacity, dim_obs, n_actions, device=torch.device("cpu")):
         self.capacity = capacity
-        self.batch_size = batch_size
         self.device = device
 
         self.containers = {
@@ -159,11 +158,11 @@ class Buffer:
             self.full = True
 
     # Perform a full-pass, but in batches
-    def batched_iter(self):
+    def batched_iter(self, batch_size):
         shuffled_indices = torch.randperm(self.capacity)
 
-        for i in range(0, len(shuffled_indices), self.batch_size):
-            batch_indices = shuffled_indices[i:i + self.batch_size]
+        for i in range(0, len(shuffled_indices), batch_size):
+            batch_indices = shuffled_indices[i:i + batch_size]
             yield (
                 self.containers["obs"][batch_indices],
                 self.containers["action"][batch_indices],
@@ -502,9 +501,9 @@ def load_samples(logger, dataloader, buffer):
     # This is technically not needed, but is easier to benchmark
     # when the batch sizes for adding and iterating are the same
     assert buffer.index == 0, f"{buffer.index} == 0"
-    assert buffer.capacity % buffer.batch_size == 0, f"{buffer.capacity} % {buffer.batch_size} == 0"
 
-    for _ in range(buffer.capacity // buffer.batch_size):
+    buffer.full = False
+    while not buffer.full:
         buffer.add_batch(*next(dataloader))
 
     assert buffer.index == 0, f"{buffer.index} == 0"
@@ -549,7 +548,7 @@ def collect_samples(logger, env, buffer, n, progress_report_steps=0):
     logger.debug(dict(samples_collected=i, progress=100))
 
 
-def train_model(logger, model, optimizer, scaler, buffer, epochs):
+def train_model(logger, model, optimizer, scaler, buffer, epochs, batch_size):
     model.train()
 
     for epoch in range(epochs):
@@ -557,7 +556,7 @@ def train_model(logger, model, optimizer, scaler, buffer, epochs):
         waits = []
 
         last_sample_at = time.time()
-        for batch in buffer.batched_iter():
+        for batch in buffer.batched_iter(batch_size):
             waits.append(time.time() - last_sample_at)
 
             obs, action = batch
@@ -587,13 +586,13 @@ def train_model(logger, model, optimizer, scaler, buffer, epochs):
         return loss, wait
 
 
-def eval_model(logger, model, buffer):
+def eval_model(logger, model, buffer, batch_size):
     model.eval()
     losses = []
     waits = []
 
     last_sample_at = time.time()
-    for batch in buffer.batched_iter():
+    for batch in buffer.batched_iter(batch_size):
         waits.append(time.time() - last_sample_at)
         obs, action = batch
         with torch.no_grad():
@@ -896,6 +895,12 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     train_save_samples = train_sample_from_env and train_s3_config is not None
     eval_save_samples = eval_sample_from_env and eval_s3_config is not None
 
+    train_batch_size = config["train"]["batch_size"]
+    eval_batch_size = config["eval"]["batch_size"]
+
+    # Prevent guaranteed waiting time for each batch during training
+    assert train_batch_size <= (train_env_config["num_workers"] * train_env_config["batch_size"])
+
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
     with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
@@ -965,7 +970,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     def make_buffer(dloader):
         return Buffer(
             capacity=dloader.num_workers * dloader.batch_size,
-            batch_size=dloader.batch_size,
             dim_obs=DIM_OBS,
             n_actions=N_ACTIONS,
             device=device
@@ -1038,9 +1042,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         "train/learning_rate": learning_rate,
         "train/buffer_capacity": buffer.capacity,
         "train/epochs": train_epochs,
-        "train/batch_size": buffer.batch_size,
+        "train/batch_size": train_batch_size,
         "eval/buffer_capacity": eval_buffer.capacity,
-        "eval/batch_size": eval_buffer.batch_size,
+        "eval/batch_size": eval_batch_size,
     })
 
     iteration = 0
@@ -1088,6 +1092,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             scaler=scaler,
             buffer=buffer,
             epochs=train_epochs,
+            batch_size=train_batch_size,
         )
 
         if now - last_evaluation_at > config["eval"]["interval_s"]:
@@ -1099,6 +1104,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 logger=logger,
                 model=model,
                 buffer=eval_buffer,
+                batch_size=eval_batch_size,
             )
 
             wlog = {
