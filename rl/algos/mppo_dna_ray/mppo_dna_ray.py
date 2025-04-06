@@ -779,24 +779,20 @@ def main(args):
         LOG.info("[main] init %d samplers" % args.num_samplers)
         samplers = [remote_sampler_creator(i) for i in range(args.num_samplers)]
 
-        timer_all = common.Timer()
-        timer_sample = common.Timer()
-        timer_set_weights = common.Timer()
-        timer_train = common.Timer()
-        timer_value_optimization = common.Timer()
-        timer_policy_distillation = common.Timer()
-        timer_save = common.Timer()
+        timers = {
+            "all": common.Timer(),
+            "sample": common.Timer(),
+            "set_weights": common.Timer(),
+            "train": common.Timer(),
+            "value_optimization": common.Timer(),
+            "policy_distillation": common.Timer(),
+            "save": common.Timer(),
+
+        }
 
         while progress < 1:
-            timer_all.reset()
-            timer_sample.reset()
-            timer_set_weights.reset()
-            timer_train.reset()
-            timer_value_optimization.reset()
-            timer_policy_distillation.reset()
-            timer_save.reset()
-
-            timer_all.start()
+            [t.reset() for t in timers.values()]
+            timers["all"].start()
 
             if args.vsteps_total:
                 progress = agent.state.current_vstep / args.vsteps_total
@@ -812,12 +808,12 @@ def main(args):
             ep_count = 0
 
             # LOG.debug("Set weights...")
-            with timer_set_weights:
+            with timers["set_weights"]:
                 vwref = ray.put({k: v.to(sampler_device) for k, v in agent.NN_value.state_dict().items()})
                 pwref = ray.put({k: v.to(sampler_device) for k, v in agent.NN_policy.state_dict().items()})
                 ray.get([s.set_weights.remote(vwref, pwref) for s in samplers])
 
-            with timer_sample:
+            with timers["sample"]:
                 # LOG.debug("Call samplers...")
                 futures = [s.sample.remote() for s in samplers]
 
@@ -873,7 +869,7 @@ def main(args):
             clipfracs = []
 
             # Policy network optimization
-            with timer_train:
+            with timers["train"]:
                 agent.train()
                 for epoch in range(args.update_epochs_policy):
                     np.random.shuffle(b_inds)
@@ -916,7 +912,7 @@ def main(args):
                         break
 
             # Value network optimization
-            with timer_value_optimization:
+            with timers["value_optimization"]:
                 for epoch in range(args.update_epochs_value):
                     np.random.shuffle(b_inds)
                     for start in range(0, batch_size_value, minibatch_size_value):
@@ -935,7 +931,7 @@ def main(args):
                         agent.optimizer_value.step()
 
             # Value network to policy network distillation
-            with timer_policy_distillation:
+            with timers["policy_distillation"]:
                 agent.NN_policy.zero_grad(True)  # don't clone gradients
 
                 old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
@@ -1058,25 +1054,17 @@ def main(args):
 
             agent.state.current_rollout += 1
 
-            with timer_save:
+            with timers["save"]:
                 save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent)
 
-            timers = {
-                "sample": timer_sample.peek(),
-                "set_weights": timer_set_weights.peek(),
-                "train": timer_train.peek(),
-                "value_optimization": timer_value_optimization.peek(),
-                "policy_distillation": timer_policy_distillation.peek(),
-                "save": timer_save.peek(),
-            }
-
-            t_all = timer_all.peek()
+            t_all = timers["all"].peek()
             for k, v in timers.items():
-                wlog[f"timer/{k}"] = v
-                wlog[f"timer_frac/{k}"] = v / t_all
+                wlog[f"timer/{k}"] = v.peek()
+                if k != "all":
+                    wlog[f"timer_rel/{k}"] = v.peek() / t_all
 
-            wlog["timer/other"] = t_all - sum(timers.values())
-            wlog["timer_frac/other"] = (t_all - sum(timers.values())) / t_all
+            wlog["timer/other"] = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
+            wlog["timer_rel/other"] = wlog["timer/other"] / t_all
 
             wandb_log(wlog, commit=wandb_commit)
             # print("TRAIN TIME: %.2f" % (time.time() - tstart))
