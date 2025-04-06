@@ -448,7 +448,7 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "dim_other", "dim_hexes", "n_actions", "state"]
+        attrs = ["args", "dim_other", "dim_hexes", "n_actions", "device_name", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -461,6 +461,7 @@ class Agent(nn.Module):
     @staticmethod
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
+        raise NotImplementedError("jsave logic is outdated")
         attrs = ["args", "dim_other", "dim_hexes", "state", "device_name"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
@@ -936,11 +937,10 @@ def main(args):
             with timer_policy_distillation:
                 agent.NN_policy.zero_grad(True)  # don't clone gradients
 
-                # deepcopy vs load_tate_dict have basically the same performance
-                # For CUDA models, however, state_dict could be more efficient?
-                # old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
-                old_NN_policy = AgentNN(args.network, agent.dim_other, agent.dim_hexes, agent.n_actions, agent.NN_policy.device)
-                old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
+                old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
+                # old_NN_policy = AgentNN(args.network, agent.dim_other, agent.dim_hexes, agent.n_actions, agent.NN_policy.device)
+                # old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
+
 
                 old_NN_policy.eval()
                 for epoch in range(args.update_epochs_distill):

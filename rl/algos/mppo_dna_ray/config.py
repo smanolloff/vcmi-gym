@@ -17,10 +17,13 @@ config = dict(
     agent_load_file=None,
     # agent_load_file="data/mppo_dna_ray/hktcyplj-agent-1743934056.pt",
 
+    save_every=10,
+    max_old_saves=0,
+
     loglevel="DEBUG",
     run_name=None,
     trial_id=None,
-    wandb_project=None,
+    wandb_project="vcmi-gym",
     notes=None,
     vsteps_total=0,
     seconds_total=0,
@@ -29,9 +32,7 @@ config = dict(
     ep_rew_mean_target=None,
     quit_on_target=False,
     mapside="attacker",
-    save_every=10,
     permasave_every=int(2e9),  # disable with int(2e9), which is always > time.time()
-    max_old_saves=0,
     out_dir_template="data/{group_id}",
     opponent_load_file=None,
     opponent_sbm_probs=[1, 0, 0],

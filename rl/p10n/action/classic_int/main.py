@@ -907,6 +907,8 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     assert (train_env_config["num_workers"] * train_env_config["batch_size"]) % train_batch_size == 0
     assert (eval_env_config["num_workers"] * eval_env_config["batch_size"]) % eval_batch_size == 0
 
+    assert config["checkpoint_interval_s"] > config["eval"]["interval_s"]
+
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
     with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
@@ -1073,6 +1075,10 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     timer_train = Timer()
     timer_eval = Timer()
 
+    # Skip saving if eval_loss gets worse
+    eval_loss_best = 1e9
+    eval_loss = eval_loss_best
+
     while True:
         timer_all.reset()
         timer_sample.reset()
@@ -1168,19 +1174,23 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
         if now - last_checkpoint_at > config["checkpoint_interval_s"]:
             last_checkpoint_at = now
-            thread = threading.Thread(target=save_checkpoint, kwargs=dict(
-                logger=logger,
-                dry_run=dry_run,
-                model=model,
-                optimizer=optimizer,
-                scaler=scaler,
-                out_dir=config["run"]["out_dir"],
-                run_id=run_id,
-                optimize_local_storage=optimize_local_storage,
-                s3_config=config.get("s3", {}).get("checkpoint"),
-                uploading_event=uploading_event
-            ))
-            thread.start()
+            if eval_loss >= eval_loss_best:
+                logger.info("Skip checkpoint (eval_loss=%f, eval_loss_best=%f)" % (eval_loss, eval_loss_best))
+            else:
+                eval_loss_best = eval_loss
+                thread = threading.Thread(target=save_checkpoint, kwargs=dict(
+                    logger=logger,
+                    dry_run=dry_run,
+                    model=model,
+                    optimizer=optimizer,
+                    scaler=scaler,
+                    out_dir=config["run"]["out_dir"],
+                    run_id=run_id,
+                    optimize_local_storage=optimize_local_storage,
+                    s3_config=config.get("s3", {}).get("checkpoint"),
+                    uploading_event=uploading_event
+                ))
+                thread.start()
 
         # XXX: must log timers here (some may have been skipped)
 
