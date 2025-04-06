@@ -24,6 +24,7 @@ import importlib
 import pathlib
 import numpy as np
 import yaml
+import json
 from functools import partial
 
 import dataclasses
@@ -211,7 +212,7 @@ def create_venv(env_cls, args, seeds=None):
     return vec_env
 
 
-def maybe_save(t_save, t_permasave, args, agent, out_dir):
+def maybe_save(t_save, t_permasave, args, agent):
     now = time.time()
 
     # Used in cases of some sweeps with hundreds of short-lived agents
@@ -224,8 +225,21 @@ def maybe_save(t_save, t_permasave, args, agent, out_dir):
     if t_save + args.save_every > now:
         return t_save, t_permasave
 
-    os.makedirs(out_dir, exist_ok=True)
-    agent_file = os.path.join(out_dir, "agent-%d.pt" % now)
+    os.makedirs(args.out_dir_abs, exist_ok=True)
+
+    # save file retention (keep latest N saves)
+    pattern = "%s-agent-[0-9]*.pt" % args.run_id
+    files = sorted(
+        glob.glob(os.path.join(args.out_dir_abs, pattern)),
+        key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()),
+        reverse=True
+    )
+
+    for file in files[args.max_old_saves:]:
+        print("Deleting %s" % file)
+        os.remove(file)
+
+    agent_file = os.path.join(args.out_dir_abs, "%s-agent-%d.pt" % (args.run_id, now))
     agent.__class__.save(agent, agent_file)
     t_save = now
 
@@ -235,28 +249,15 @@ def maybe_save(t_save, t_permasave, args, agent, out_dir):
         wandb.run.log_model(agent_file, name="agent.pt")
 
     if t_permasave + args.permasave_every <= now:
-        permasave_file = os.path.join(out_dir, "agent-permasave-%d.pt" % now)
+        permasave_file = os.path.join(args.out_dir_abs, "%s-agent-permasave-%d.pt" % (args.run_id, now))
         agent.__class__.save(agent, permasave_file)
         t_permasave = now
-
-    # save file retention (keep latest N saves)
-    for pattern in ["agent-[0-9]*.pt", "nn-[0-9]*.pt"]:
-        files = sorted(
-            glob.glob(os.path.join(out_dir, pattern)),
-            key=lambda x: int(re.search(r'\d+', os.path.basename(x)).group()),
-            reverse=True
-        )
-
-        for file in files[args.max_saves:]:
-            print("Deleting %s" % file)
-            os.remove(file)
 
     return t_save, t_permasave
 
 
-def find_latest_save(group_id, run_id):
-    datadir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-    pattern = f"{datadir}/{group_id}/{run_id}/agent-[0-9]*.pt"
+def find_latest_save(args):
+    pattern = os.path.join(args.out_dir_abs, f"{args.run_id}-agent-[0-9]*.pt")
     files = glob.glob(pattern)
     assert len(files) > 0, f"No files found for: {pattern}"
     return max(files, key=os.path.getmtime)
@@ -304,12 +305,16 @@ def log_params(args, wandb_log):
 def maybe_resume(agent_cls, args, device_name="cpu"):
     if not args.resume:
         print("Starting new run %s/%s" % (args.group_id, args.run_id))
+        os.makedirs(args.out_dir_abs, exist_ok=True)
+        with open(os.path.join(args.out_dir_abs, f"{args.run_id}-config.json"), "w") as f:
+            print(f"Saving new config to: {f.name}")
+            json.dump(dataclasses.asdict(args), f, indent=4, sort_keys=False)
         return None, args
 
     print("Resuming run %s/%s" % (args.group_id, args.run_id))
 
     # XXX: resume will overwrite all input args except run_id & group_id
-    file = find_latest_save(args.group_id, args.run_id)
+    file = find_latest_save(args)
     agent = agent_cls.load(file, device_name=device_name)
 
     assert agent.args.group_id == args.group_id
@@ -361,6 +366,10 @@ def maybe_resume(agent_cls, args, device_name="cpu"):
     #     with open(backup, 'wb') as fdst:
     #         shutil.copyfileobj(fsrc, fdst)
     #         print("Wrote backup %s" % backup)
+
+    with open(os.path.join(args.out_dir_abs, f"{args.run_id}-config.json"), "w") as f:
+        print(f"Saving loaded config to: {f.name}")
+        json.dump(dataclasses.asdict(args), f, indent=4, sort_keys=False)
 
     return agent, args
 

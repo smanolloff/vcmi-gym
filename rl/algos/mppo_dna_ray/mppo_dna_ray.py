@@ -20,6 +20,10 @@ import sys
 import random
 import logging
 import time
+import json
+import string
+import argparse
+from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -53,12 +57,10 @@ class ScheduleArgs:
 
 @dataclass
 class EnvArgs:
-    encoding_type: str = ""  # DEPRECATED
     max_steps: int = 500
     vcmi_loglevel_global: str = "error"
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
-    consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
     user_timeout: int = 30
     vcmi_timeout: int = 30
     boot_timeout: int = 30
@@ -76,12 +78,7 @@ class EnvArgs:
     reward_dmg_mult: int = 1
     reward_term_mult: int = 1
     swap_sides: int = 0
-    true_rng: bool = True  # DEPRECATED
-    deprecated_args: list[dict] = field(default_factory=lambda: [
-        "encoding_type",
-        "consecutive_error_reward_factor",
-        "true_rng"
-    ])
+    deprecated_args: list[dict] = field(default_factory=lambda: [])
 
     def __post_init__(self):
         common.coerce_dataclass_ints(self)
@@ -130,13 +127,14 @@ class Args:
     run_id: str
     group_id: str
     run_name: Optional[str] = None
+    run_name_template: Optional[str] = None
     trial_id: Optional[str] = None
     wandb_project: Optional[str] = None
     resume: bool = False
     overwrite: list = field(default_factory=list)
     notes: Optional[str] = None
     tags: Optional[list] = field(default_factory=list)
-    loglevel: int = logging.DEBUG
+    loglevel: str = "DEBUG"
 
     agent_load_file: Optional[str] = None
     vsteps_total: int = 0
@@ -146,12 +144,12 @@ class Args:
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
     mapside: str = "both"
-    mapmask: str = ""  # DEPRECATED
-    randomize_maps: bool = False
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
-    max_saves: int = 3
+    max_old_saves: int = 1
     out_dir_template: str = "data/{group_id}/{run_id}"
+    out_dir: str = ""
+    out_dir_abs: str = ""  # auto-expanded on start
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
@@ -598,7 +596,7 @@ def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae
 
 def main(args):
     LOG = logging.getLogger("mppo_dna")
-    LOG.setLevel(args.loglevel)
+    LOG.setLevel(getattr(logging, args.loglevel))
 
     device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -632,9 +630,7 @@ def main(args):
         LOG.addHandler(loghandler)
 
     LOG.info("Args: %s" % printargs)
-
-    out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
-    LOG.info("Out dir: %s" % out_dir)
+    LOG.info("Out dir: %s" % args.out_dir)
 
     lr_schedule_fn_value = common.schedule_fn(args.lr_schedule_value)
     lr_schedule_fn_policy = common.schedule_fn(args.lr_schedule_policy)
@@ -717,13 +713,13 @@ def main(args):
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
             def wandb_log(data, commit=False):
-                loglevel = "info" if commit else "debug"
-                getattr(LOG, loglevel)(data)
+                logfn = getattr(LOG, "info" if commit else "debug")
+                logfn(data)
                 wandb.log(data, commit=commit)
         else:
             def wandb_log(data, commit=False):
-                loglevel = "info" if commit else "debug"
-                getattr(LOG, loglevel)(data)
+                logfn = getattr(LOG, "info" if commit else "debug")
+                logfn(data)
 
         common.log_params(args, wandb_log)
 
@@ -756,12 +752,12 @@ def main(args):
         sampler_device = "cpu"  # GPU would not have enough memory?
 
         def NN_creator(device):
-            return AgentNN(args.network, dim_other, dim_hexes, n_actions, device=device)
+            return AgentNN(args.network, agent.dim_other, agent.dim_hexes, agent.n_actions, device=sampler_device)
 
         def venv_creator():
             return common.create_venv(VcmiEnv, args)
 
-        def sampler_creator(sampler_id):
+        def remote_sampler_creator(sampler_id):
             return RemoteSampler.remote(
                 sampler_id,
                 NN_creator,
@@ -774,7 +770,7 @@ def main(args):
             )
 
         LOG.info("[main] init %d samplers" % args.num_samplers)
-        samplers = [sampler_creator(i) for i in range(args.num_samplers)]
+        samplers = [remote_sampler_creator(i) for i in range(args.num_samplers)]
 
         timer_all = common.Timer()
         timer_sample = common.Timer()
@@ -938,7 +934,7 @@ def main(args):
                 # deepcopy vs load_tate_dict have basically the same performance
                 # For CUDA models, however, state_dict could be more efficient?
                 # old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
-                old_NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, agent.NN_policy.device)
+                old_NN_policy = AgentNN(args.network, agent.dim_other, agent.dim_hexes, agent.n_actions, agent.NN_policy.device)
                 old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
 
                 old_NN_policy.eval()
@@ -1057,7 +1053,7 @@ def main(args):
             agent.state.current_rollout += 1
 
             with timer_save:
-                save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
+                save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent)
 
             timers = {
                 "sample": timer_sample.peek(),
@@ -1078,7 +1074,7 @@ def main(args):
             # print("TRAIN TIME: %.2f" % (time.time() - tstart))
 
     finally:
-        common.maybe_save(0, 10e9, args, agent, out_dir)
+        common.maybe_save(0, 10e9, args, agent)
         if "samplers" in locals():
             ray.get([s.shutdown.remote() for s in samplers])
 
@@ -1097,11 +1093,11 @@ def main(args):
     return (agent, ret_rew, ret_value)
 
 
-def debug_args():
-    return Args(
-        "mppo_dna_ray",
-        "MDR",
-        loglevel=logging.DEBUG,
+def debug_config():
+    return dict(
+        run_id="mppo-dna-debug",
+        group_id="mppo-dna-debug",
+        loglevel="DEBUG",
         run_name=None,
         trial_id=None,
         wandb_project=None,
@@ -1119,7 +1115,7 @@ def debug_args():
         mapside="attacker",
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
-        max_saves=0,
+        max_old_saves=0,
         out_dir_template="data/mppo_dna-test/mppo_dna-test",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
@@ -1195,6 +1191,27 @@ def debug_args():
 
 
 if __name__ == "__main__":
-    # To run from vcmi-gym root:
-    # $ python -m rl.algos.mppo
-    main(debug_args())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--resume", metavar="FILE", help="json file to resume")
+    parser.add_argument("--debug", metavar="FILE", help="use hardcoded debug args")
+    args = parser.parse_args()
+
+    if args.resume:
+        with open(args.resume, "r") as f:
+            print(f"Resuming from config: {f.name}")
+            config = json.load(f)
+            config["resume"] = True
+    else:
+        if args.debug:
+            config = debug_config()
+        else:
+            from .config import config
+            run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
+
+        config["run_id"] = run_id
+        config["run_name"] = config["run_name_template"].format(id=run_id, datetime=datetime.utcnow().strftime("%Y%m%d_%H%M%S"))
+        config["out_dir"] = config["out_dir_template"].format(seed=config["seed"], group_id=config["group_id"], run_id=config["run_id"])
+
+    config["out_dir_abs"] = os.path.abspath(config["out_dir"])
+
+    main(Args(**config))
