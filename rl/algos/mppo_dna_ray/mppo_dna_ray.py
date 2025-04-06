@@ -719,12 +719,13 @@ def main(args):
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
             def wandb_log(data, commit=False):
-                # LOG.info(data)
+                loglevel = "info" if commit else "debug"
+                getattr(LOG, loglevel)(data)
                 wandb.log(data, commit=commit)
         else:
             def wandb_log(data, commit=False):
-                # LOG.info(data)
-                pass
+                loglevel = "info" if commit else "debug"
+                getattr(LOG, loglevel)(data)
 
         common.log_params(args, wandb_log)
 
@@ -854,10 +855,10 @@ def main(args):
                     agent.state.current_second = int(time.time() - start_time)
                     agent.state.global_second = global_start_second + agent.state.current_second
 
-            # Policy network optimization
             b_inds = np.arange(batch_size_policy)
             clipfracs = []
 
+            # Policy network optimization
             with timer_train:
                 agent.train()
                 for epoch in range(args.update_epochs_policy):
@@ -919,10 +920,15 @@ def main(args):
                         nn.utils.clip_grad_norm_(agent.NN_value.parameters(), args.max_grad_norm)
                         agent.optimizer_value.step()
 
+            # Value network to policy network distillation
             with timer_policy_distillation:
-                # Value network to policy network distillation
                 agent.NN_policy.zero_grad(True)  # don't clone gradients
+
+                # deepcopy vs load_tate_dict have basically the same performance
                 old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
+                # old_NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, device)
+                # old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
+
                 old_NN_policy.eval()
                 for epoch in range(args.update_epochs_distill):
                     np.random.shuffle(b_inds)
@@ -969,40 +975,42 @@ def main(args):
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
-            wandb_log({"params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"]})
-            wandb_log({"params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"]})
-            wandb_log({"params/distill_learning_rate": agent.optimizer_distill.param_groups[0]["lr"]})
-            wandb_log({"losses/value_loss": v_loss.item()})
-            wandb_log({"losses/policy_loss": pg_loss.item()})
-            wandb_log({"losses/distill_loss": distill_loss.item()})
-            wandb_log({"losses/entropy": entropy_loss.item()})
-            wandb_log({"losses/old_approx_kl": old_approx_kl.item()})
-            wandb_log({"losses/approx_kl": approx_kl.item()})
-            wandb_log({"losses/clipfrac": np.mean(clipfracs)})
-            wandb_log({"losses/explained_variance": explained_var})
-            wandb_log({"rollout/ep_count": ep_count})
-            wandb_log({"rollout/ep_len_mean": ep_len_mean})
-            wandb_log({"rollout100/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_100)})
-            wandb_log({"rollout1000/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_1000)})
-            wandb_log({"rollout100/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_100)})
-            wandb_log({"rollout1000/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_1000)})
-            wandb_log({"rollout100/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_100)})
-            wandb_log({"rollout1000/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_1000)})
-            wandb_log({"global/num_rollouts": agent.state.current_rollout})
-            wandb_log({"global/num_timesteps": agent.state.current_timestep})
-            wandb_log({"global/num_seconds": agent.state.current_second})
-            wandb_log({"global/num_episode": agent.state.current_episode})
-
             tall = timer_all.peek()
 
-            wandb_log({"timer/sample": timer_sample.peek() / tall})
-            wandb_log({"timer/train": timer_train.peek() / tall})
-            wandb_log({"timer/value_optimization": timer_value_optimization.peek() / tall})
-            wandb_log({"timer/policy_distillation": timer_policy_distillation.peek() / tall})
-            wandb_log({"timer/other": tall - (timer_sample.peek() + timer_train.peek() + timer_value_optimization.peek() + timer_policy_distillation.peek())})
+            wlog = {
+                "params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"],
+                "params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"],
+                "params/distill_learning_rate": agent.optimizer_distill.param_groups[0]["lr"],
+                "losses/value_loss": v_loss.item(),
+                "losses/policy_loss": pg_loss.item(),
+                "losses/distill_loss": distill_loss.item(),
+                "losses/entropy": entropy_loss.item(),
+                "losses/old_approx_kl": old_approx_kl.item(),
+                "losses/approx_kl": approx_kl.item(),
+                "losses/clipfrac": np.mean(clipfracs),
+                "losses/explained_variance": explained_var,
+                "rollout/ep_count": ep_count,
+                "rollout/ep_len_mean": ep_len_mean,
+                "rollout100/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_100),
+                "rollout1000/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_1000),
+                "rollout100/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_100),
+                "rollout1000/ep_rew_mean": common.safe_mean(agent.state.rollout_rew_queue_1000),
+                "rollout100/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_100),
+                "rollout1000/ep_success_rate": common.safe_mean(agent.state.rollout_is_success_queue_1000),
+                "global/num_rollouts": agent.state.current_rollout,
+                "global/num_timesteps": agent.state.current_timestep,
+                "global/num_seconds": agent.state.current_second,
+                "global/num_episode": agent.state.current_episode,
+
+                "timer/sample": timer_sample.peek() / tall,
+                "timer/train": timer_train.peek() / tall,
+                "timer/value_optimization": timer_value_optimization.peek() / tall,
+                "timer/policy_distillation": timer_policy_distillation.peek() / tall,
+                "timer/other": tall - (timer_sample.peek() + timer_train.peek() + timer_value_optimization.peek() + timer_policy_distillation.peek()),
+            }
 
             if rollouts_total:
-                wandb_log({"global/progress": progress})
+                wlog["global/progress"] = progress
 
             # XXX: maybe use a less volatile metric here (eg. 100 or 1000-average)
             if args.success_rate_target and ep_is_success_mean >= args.success_rate_target:
@@ -1025,10 +1033,9 @@ def main(args):
                     raise Exception("Not implemented: map change on target")
 
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
-                wandb_log({
-                    "global/global_num_timesteps": agent.state.global_timestep,
-                    "global/global_num_seconds": agent.state.global_second
-                }, commit=True)  # commit on final log line
+                wlog["global/global_num_timesteps"] = agent.state.global_timestep
+                wlog["global/global_num_seconds"] = agent.state.global_second
+                wandb_log(wlog, commit=True)
 
                 LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f losses=%.1f|%.1f|%.1f" % (
                     agent.state.current_rollout,
@@ -1040,6 +1047,8 @@ def main(args):
                     policy_loss.item(),
                     distill_loss.item()
                 ))
+            else:
+                wandb_log(wlog, commit=False)
 
             agent.state.current_rollout += 1
             save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
@@ -1080,7 +1089,7 @@ def debug_args():
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
-        rollouts_per_log=50,
+        rollouts_per_log=1,
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
@@ -1103,10 +1112,10 @@ def debug_args():
         gae_lambda=0.9,
         gae_lambda_policy=0.95,
         gae_lambda_value=0.95,
-        num_minibatches=10,
-        num_minibatches_value=10,
-        num_minibatches_policy=10,
-        num_minibatches_distill=10,
+        num_minibatches=2,
+        num_minibatches_value=2,
+        num_minibatches_policy=2,
+        num_minibatches_distill=2,
         update_epochs=2,
         update_epochs_value=2,
         update_epochs_policy=2,

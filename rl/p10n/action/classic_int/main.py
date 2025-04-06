@@ -39,6 +39,8 @@ from ...constants_v10 import (
 
 from ..s3dataset_action import S3DatasetAction
 from ..vcmidataset_action import VCMIDatasetAction
+from ...util.timer import Timer
+
 
 DIM_OTHER = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
 DIM_HEXES = 165*STATE_SIZE_ONE_HEX
@@ -117,8 +119,8 @@ class Buffer:
         assert action > 0  # no retreats or resets
         # EOF: TEST
 
-        self.containers["obs"][self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        self.containers["action"][self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.containers["obs"][self.index] = obs
+        self.containers["action"][self.index] = action
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
@@ -149,8 +151,8 @@ class Buffer:
         assert all(action > 0)  # no retreats or resets
         # EOF: TEST
 
-        self.containers["obs"][start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        self.containers["action"][start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.containers["obs"][start:end] = obs
+        self.containers["action"][start:end] = action
 
         self.index = end
         if self.index == self.capacity:
@@ -1067,10 +1069,24 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     train_uploading_cond = threading.Condition()
     eval_uploading_cond = threading.Condition()
 
+    timer_all = Timer()
+    timer_sample = Timer()
+    timer_train = Timer()
+    timer_eval = Timer()
+
     while True:
+        timer_all.reset()
+        timer_sample.reset()
+        timer_train.reset()
+        timer_eval.reset()
+
+        timer_all.start()
+
         now = time.time()
         # logger.info("Loading samples...")
-        load_samples(logger=logger, dataloader=dataloader, buffer=buffer)
+        with timer_sample:
+            load_samples(logger=logger, dataloader=dataloader, buffer=buffer)
+
         logger.info("Samples loaded: %d" % buffer.capacity)
 
         assert buffer.full and not buffer.index
@@ -1090,27 +1106,30 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         if sample_only:
             continue
 
-        train_loss, train_wait = train_model(
-            logger=logger,
-            model=model,
-            optimizer=optimizer,
-            scaler=scaler,
-            buffer=buffer,
-            epochs=train_epochs,
-            batch_size=train_batch_size,
-        )
+        with timer_train:
+            train_loss, train_wait = train_model(
+                logger=logger,
+                model=model,
+                optimizer=optimizer,
+                scaler=scaler,
+                buffer=buffer,
+                epochs=train_epochs,
+                batch_size=train_batch_size,
+            )
 
         if now - last_evaluation_at > config["eval"]["interval_s"]:
             last_evaluation_at = now
 
-            load_samples(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
+            with timer_sample:
+                load_samples(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
 
-            eval_loss, eval_wait = eval_model(
-                logger=logger,
-                model=model,
-                buffer=eval_buffer,
-                batch_size=eval_batch_size,
-            )
+            with timer_eval:
+                eval_loss, eval_wait = eval_model(
+                    logger=logger,
+                    model=model,
+                    buffer=eval_buffer,
+                    batch_size=eval_batch_size,
+                )
 
             wlog = {
                 "iteration": iteration,
@@ -1163,6 +1182,8 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 uploading_event=uploading_event
             ))
             thread.start()
+
+        # XXX: must log timers here (some may have been skipped)
 
         iteration += 1
 
