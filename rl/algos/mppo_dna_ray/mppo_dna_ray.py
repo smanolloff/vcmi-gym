@@ -812,10 +812,11 @@ def main(args):
 
             # LOG.debug("Set weights...")
             with timer_set_weights:
-                ray.get([
-                    s.set_weights.remote(agent.NN_value.state_dict().to(sampler_device), agent.NN_policy.state_dict().to(sampler_device))
-                    for s in samplers
-                ])
+                vw = {k: v.to(sampler_device) for k, v in agent.NN_value.state_dict().items()}
+                pw = {k: v.to(sampler_device) for k, v in agent.NN_policy.state_dict().items()}
+                vwref = ray.put(vw)
+                pwref = ray.put(pw)
+                ray.get([s.set_weights.remote(vwref, pwref) for s in samplers])
 
             with timer_sample:
                 # LOG.debug("Call samplers...")

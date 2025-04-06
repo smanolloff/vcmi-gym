@@ -43,8 +43,8 @@ class Sampler:
         # 1 is num_envs
         # (everything must be batched, B=1 in this case)
         assert self.venv.num_envs == 1
-        self.obs_space = self.venv.call("observation_space")[0]
-        self.act_space = self.venv.call("action_space")[0]
+        self.obs_space = self.venv.unwrapped.call("observation_space")[0]
+        self.act_space = self.venv.unwrapped.call("action_space")[0]
         self.obs = torch.zeros((num_steps, 1) + self.obs_space.shape).to(self.device)
         self.actions = torch.zeros((num_steps, 1) + self.act_space.shape, dtype=torch.int64).to(self.device)
         self.logprobs = torch.zeros((num_steps, 1)).to(self.device)
