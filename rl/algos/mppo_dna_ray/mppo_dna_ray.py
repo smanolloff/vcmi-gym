@@ -695,12 +695,12 @@ def main(args):
     obs_space = VcmiEnv.OBSERVATION_SPACE
     act_space = VcmiEnv.ACTION_SPACE
 
+    dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
+    dim_hexes = VcmiEnv.STATE_SIZE_HEXES
+    n_actions = VcmiEnv.ACTION_SPACE.n
+    assert VcmiEnv.STATE_SIZE == dim_other + dim_hexes
+
     if agent is None:
-        # TODO: robust mechanism ensuring these don't get mixed up
-        dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
-        dim_hexes = VcmiEnv.STATE_SIZE_HEXES
-        n_actions = VcmiEnv.ACTION_SPACE.n
-        assert VcmiEnv.STATE_SIZE == dim_other + dim_hexes
         agent = Agent(args, dim_other, dim_hexes, n_actions, device_name=device_name)
 
     # TRY NOT TO MODIFY: seeding
@@ -751,13 +751,12 @@ def main(args):
         start_time = time.time()
         global_start_second = agent.state.global_second
 
-        # XXXXX:
-        # this is better achieved with Dataset and workers (also async)
+        ray.init(num_cpus=999)
         RemoteSampler = ray.remote(Sampler)
-        sampler_device = "cpu"  # GPU would not have enough memory?
+        sampler_device_name = "cpu"  # GPU would not have enough memory
 
         def NN_creator(device):
-            return AgentNN(args.network, agent.dim_other, agent.dim_hexes, agent.n_actions, device=sampler_device)
+            return AgentNN(args.network, dim_other, dim_hexes, n_actions, device=device)
 
         def venv_creator():
             return common.create_venv(VcmiEnv, args)
@@ -771,7 +770,7 @@ def main(args):
                 args.gamma,
                 args.gae_lambda_policy,
                 args.gae_lambda_value,
-                sampler_device
+                sampler_device_name
             )
 
         LOG.info("[main] init %d samplers" % args.num_samplers)

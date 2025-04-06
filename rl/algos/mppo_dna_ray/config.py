@@ -14,7 +14,8 @@ config = dict(
     run_name_template="{datetime}-{id}",
     group_id="mppo_dna_ray",
 
-    agent_load_file="data/mppo_dna_ray/hktcyplj-agent-1743934056.pt",
+    agent_load_file=None,
+    # agent_load_file="data/mppo_dna_ray/hktcyplj-agent-1743934056.pt",
 
     loglevel="DEBUG",
     run_name=None,
