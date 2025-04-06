@@ -754,6 +754,7 @@ def main(args):
         ray.init(num_cpus=999)
         RemoteSampler = ray.remote(Sampler)
         sampler_device_name = "cpu"  # GPU would not have enough memory
+        sampler_device = torch.device(sampler_device_name)
 
         def NN_creator(device):
             return AgentNN(args.network, dim_other, dim_hexes, n_actions, device=device)
