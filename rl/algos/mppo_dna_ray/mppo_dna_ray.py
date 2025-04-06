@@ -23,6 +23,7 @@ import time
 import json
 import string
 import argparse
+import copy
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Optional

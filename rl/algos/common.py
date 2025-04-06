@@ -426,7 +426,8 @@ def setup_wandb(args, agent, src_file, watch=True):
     #      => proper fix would be to accept a list of NNs and call wandb.watch
     #         on each of them
     if watch:
-        return wandb.watch(agent.NN, log="all", log_graph=True, log_freq=1000)
+        net = getattr(agent, "NN", getattr(agent, "NN_policy"))
+        return wandb.watch(net, log="all", log_graph=True, log_freq=1000)
     else:
         return None
 
