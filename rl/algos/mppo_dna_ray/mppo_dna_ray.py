@@ -639,6 +639,11 @@ def main(args):
     batch_size_policy = int(num_steps)
     batch_size_value = int(num_steps)
     batch_size_distill = int(num_steps)
+
+    assert batch_size_policy % args.num_minibatches_policy == 0, f"{batch_size_policy} % {args.num_minibatches_policy} == 0"
+    assert batch_size_value % args.num_minibatches_value == 0, f"{batch_size_value} % {args.num_minibatches_value} == 0"
+    assert batch_size_distill % args.num_minibatches_distill == 0, f"{batch_size_distill} % {args.num_minibatches_distill} == 0"
+
     minibatch_size_policy = int(batch_size_policy // args.num_minibatches_policy)
     minibatch_size_value = int(batch_size_value // args.num_minibatches_value)
     minibatch_size_distill = int(batch_size_distill // args.num_minibatches_distill)

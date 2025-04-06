@@ -39,7 +39,7 @@ config = dict(
     lr_schedule_value=dict(mode="const", start=0.0001),
     lr_schedule_policy=dict(mode="const", start=0.0001),
     lr_schedule_distill=dict(mode="const", start=0.0001),
-    num_steps_per_sampler=200,
+    num_steps_per_sampler=200,  # num_steps = num_steps_per_sampler * num_samplers
     num_samplers=1,
     gamma=0.85,
     gae_lambda=0.9,

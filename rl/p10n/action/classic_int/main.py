@@ -552,11 +552,10 @@ def collect_samples(logger, env, buffer, n, progress_report_steps=0):
 
 def train_model(logger, model, optimizer, scaler, buffer, epochs, batch_size):
     model.train()
+    losses = []
+    waits = []
 
     for epoch in range(epochs):
-        losses = []
-        waits = []
-
         last_sample_at = time.time()
         for batch in buffer.batched_iter(batch_size):
             waits.append(time.time() - last_sample_at)
@@ -583,9 +582,9 @@ def train_model(logger, model, optimizer, scaler, buffer, epochs, batch_size):
 
             last_sample_at = time.time()
 
-        loss = sum(losses) / len(losses)
-        wait = sum(waits)
-        return loss, wait
+    loss = sum(losses) / len(losses)
+    wait = sum(waits)
+    return loss, wait
 
 
 def eval_model(logger, model, buffer, batch_size):
