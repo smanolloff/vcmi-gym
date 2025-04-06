@@ -1072,9 +1072,11 @@ def main(args):
 
             t_all = timer_all.peek()
             for k, v in timers.items():
-                wlog[f"timer/{k}"] = v / t_all
+                wlog[f"timer/{k}"] = v
+                wlog[f"timer_frac/{k}"] = v / t_all
 
-            wlog["timer/other"] = (t_all - sum(timers.values())) / t_all
+            wlog["timer/other"] = t_all - sum(timers.values())
+            wlog["timer_frac/other"] = (t_all - sum(timers.values())) / t_all
 
             wandb_log(wlog, commit=wandb_commit)
             # print("TRAIN TIME: %.2f" % (time.time() - tstart))
