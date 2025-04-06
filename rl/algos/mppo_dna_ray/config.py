@@ -1,10 +1,10 @@
 # XXX:
-# To resume a run, either:
-# A/ start a new run and set `agent_load_file` here
-# B/ pass "--resume <json_file>" (`agent_load_file` will be overwritten)
+# A/ To RESUME a run, set `agent_load_file` here
 #
-# In the case of B/ config values can be changed by editing the JSON file
-# (make sure to include the changed arg names in `overwrite`)
+# B/ To LOAD a file into a NEW run, pass "--resume <json_file>"
+#   * `agent_load_file` will be overwritten
+#   * change config values by editing the JSON file
+#     NOTE: specify the changed arg NAMES in `overwrite`, e.g. ["env.max_steps"]
 
 config = dict(
     # run_id        # always auto
@@ -14,7 +14,7 @@ config = dict(
     run_name_template="{datetime}-{id}",
     group_id="mppo_dna_ray",
 
-    agent_load_file=None,
+    agent_load_file="data/mppo_dna_ray/hktcyplj-agent-1743934056.pt",
 
     loglevel="DEBUG",
     run_name=None,
@@ -29,7 +29,7 @@ config = dict(
     quit_on_target=False,
     mapside="attacker",
     save_every=10,
-    permasave_every=2000000000,  # greater than time.time() to disable
+    permasave_every=int(2e9),  # disable with int(2e9), which is always > time.time()
     max_old_saves=0,
     out_dir_template="data/{group_id}",
     opponent_load_file=None,

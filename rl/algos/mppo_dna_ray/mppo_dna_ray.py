@@ -1098,6 +1098,7 @@ def debug_config():
         run_id="mppo-dna-debug",
         group_id="mppo-dna-debug",
         loglevel="DEBUG",
+        run_name_template="{datetime}-{id}",
         run_name=None,
         trial_id=None,
         wandb_project=None,
@@ -1116,7 +1117,7 @@ def debug_config():
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_old_saves=0,
-        out_dir_template="data/mppo_dna-test/mppo_dna-test",
+        out_dir_template="data/{group_id}",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
@@ -1193,10 +1194,11 @@ def debug_config():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--resume", metavar="FILE", help="json file to resume")
-    parser.add_argument("--debug", metavar="FILE", help="use hardcoded debug args")
+    parser.add_argument("--debug", action="store_true", help="use hardcoded debug args")
     args = parser.parse_args()
 
     if args.resume:
+        assert not args.debug, "mutually exclusive: --debug and --resume"
         with open(args.resume, "r") as f:
             print(f"Resuming from config: {f.name}")
             config = json.load(f)
@@ -1204,6 +1206,7 @@ if __name__ == "__main__":
     else:
         if args.debug:
             config = debug_config()
+            run_id = config["run_id"]
         else:
             from .config import config
             run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
