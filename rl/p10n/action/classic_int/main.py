@@ -900,6 +900,11 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
     # Prevent guaranteed waiting time for each batch during training
     assert train_batch_size <= (train_env_config["num_workers"] * train_env_config["batch_size"])
+    assert eval_batch_size <= (eval_env_config["num_workers"] * eval_env_config["batch_size"])
+
+    # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
+    assert (train_env_config["num_workers"] * train_env_config["batch_size"]) % train_batch_size == 0
+    assert (eval_env_config["num_workers"] * eval_env_config["batch_size"]) % eval_batch_size == 0
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
@@ -1064,7 +1069,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
     while True:
         now = time.time()
-        logger.info("Loading samples...")
+        # logger.info("Loading samples...")
         load_samples(logger=logger, dataloader=dataloader, buffer=buffer)
         logger.info("Samples loaded: %d" % buffer.capacity)
 

@@ -1,0 +1,22 @@
+Core™ i5-14600KF
+20/20 CPU available, 64GB RAM available
+RTX5070 Ti (16G)
+
+=======================================
+training (p10n/action/classic_int):
+=======================================
+
+    train/batch_size=2000
+    env/train/batch_size=1000
+    env/train/num_workers=20
+    NN: 250 / 3000
+
+{"timestamp": "2025-04-05T23:57:18.801", "thread_id": "19a9popx4w", "run_id": "awtbmfkk", "message": {"iteration": 11, "train_loss/total": 9.096638679504395, "train_dataset/wait_time_s": 0.015970945358276367}}
+{"timestamp": "2025-04-05T23:57:21.467", "thread_id": "19a9popx4w", "run_id": "awtbmfkk", "message": {"iteration": 12, "train_loss/total": 7.563066482543945, "train_dataset/wait_time_s": 0.016073226928710938}}
+{"timestamp": "2025-04-05T23:57:24.155", "thread_id": "19a9popx4w", "run_id": "awtbmfkk", "message": {"iteration": 13, "train_loss/total": 7.594328880310059, "train_dataset/wait_time_s": 0.016402006149291992}}
+{"timestamp": "2025-04-05T23:57:26.681", "thread_id": "19a9popx4w", "run_id": "awtbmfkk", "message": {"iteration": 14, "train_loss/total": 6.872205018997192, "train_dataset/wait_time_s": 0.01603102684020996}}
+{"timestamp": "2025-04-05T23:57:29.458", "thread_id": "19a9popx4w", "run_id": "awtbmfkk", "message": {"iteration": 15, "train_loss/total": 6.137463092803955, "train_dataset/wait_time_s": 0.01629924774169922}}
+
+=> iteration_time_s = 2.5...3 (tiny bit faster than RTX3080, but w/ more memory)
+=> wait_time_s=0.06
+

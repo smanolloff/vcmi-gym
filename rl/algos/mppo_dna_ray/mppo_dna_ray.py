@@ -720,10 +720,12 @@ def main(args):
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
-            def wandb_log(*args, **kwargs):
-                wandb.log(*args, **dict({"commit": False}, **kwargs))
+            def wandb_log(data, commit=False):
+                # LOG.info(data)
+                wandb.log(data, commit=commit)
         else:
-            def wandb_log(*args, **kwargs):
+            def wandb_log(data, commit=False):
+                # LOG.info(data)
                 pass
 
         common.log_params(args, wandb_log)
@@ -767,7 +769,21 @@ def main(args):
         LOG.info("[main] init %d samplers" % args.num_samplers)
         samplers = [sampler_creator(i) for i in range(args.num_samplers)]
 
+        timer_all = common.Timer()
+        timer_sample = common.Timer()
+        timer_train = common.Timer()
+        timer_value_optimization = common.Timer()
+        timer_policy_distillation = common.Timer()
+
         while progress < 1:
+            timer_all.reset()
+            timer_sample.reset()
+            timer_train.reset()
+            timer_value_optimization.reset()
+            timer_policy_distillation.reset()
+
+            timer_all.start()
+
             if args.vsteps_total:
                 progress = agent.state.current_vstep / args.vsteps_total
             elif args.seconds_total:
@@ -787,149 +803,153 @@ def main(args):
             # LOG.debug("Call samplers...")
             futures = [s.sample.remote() for s in samplers]
 
-            # LOG.debug("Gather results...")
-            for i in range(len(futures)):
-                done, futures = ray.wait(futures, num_returns=1)
-                res, stats = ray.get(done[0])
+            with timer_sample:
+                # LOG.debug("Gather results...")
+                for i in range(len(futures)):
+                    done, futures = ray.wait(futures, num_returns=1)
+                    res, stats = ray.get(done[0])
 
-                # t = timesteps
-                (
-                    s_obs,          # => (t, STATE_SIZE)
-                    s_logprobs,     # => (t)
-                    s_actions,      # => (t)
-                    s_masks,        # => (t, N_ACTIONS)
-                    s_advantages,   # => (t)
-                    s_returns,      # => (t)
-                    s_values        # => (t)
-                ) = res
+                    # t = timesteps
+                    (
+                        s_obs,          # => (t, STATE_SIZE)
+                        s_logprobs,     # => (t)
+                        s_actions,      # => (t)
+                        s_masks,        # => (t, N_ACTIONS)
+                        s_advantages,   # => (t)
+                        s_returns,      # => (t)
+                        s_values        # => (t)
+                    ) = res
 
-                (
-                    s_seconds,
-                    s_episodes,
-                    s_ep_net_value,
-                    s_ep_is_success,
-                    s_ep_return,
-                    s_ep_length
-                ) = stats
+                    (
+                        s_seconds,
+                        s_episodes,
+                        s_ep_net_value,
+                        s_ep_is_success,
+                        s_ep_return,
+                        s_ep_length
+                    ) = stats
 
-                assert all(x.shape[0] == sampler_steps for x in res), [x.shape[0] for x in res]
+                    assert all(x.shape[0] == sampler_steps for x in res), [x.shape[0] for x in res]
 
-                start = sampler_steps * i
-                end = sampler_steps * i + sampler_steps
+                    start = sampler_steps * i
+                    end = sampler_steps * i + sampler_steps
 
-                b_obs[start:end] = s_obs
-                b_logprobs[start:end] = s_logprobs
-                b_actions[start:end] = s_actions
-                b_masks[start:end] = s_masks
-                b_advantages[start:end] = s_advantages
-                b_returns[start:end] = s_returns
-                b_values[start:end] = s_values
+                    b_obs[start:end] = s_obs
+                    b_logprobs[start:end] = s_logprobs
+                    b_actions[start:end] = s_actions
+                    b_masks[start:end] = s_masks
+                    b_advantages[start:end] = s_advantages
+                    b_returns[start:end] = s_returns
+                    b_values[start:end] = s_values
 
-                agent.state.ep_net_value_queue.append(s_ep_net_value)
-                agent.state.ep_is_success_queue.append(s_ep_is_success)
-                agent.state.ep_rew_queue.append(s_ep_return)
-                agent.state.ep_length_queue.append(s_ep_length)
-                agent.state.current_episode += s_episodes
-                agent.state.global_episode += s_episodes
-                ep_count += s_episodes
+                    agent.state.ep_net_value_queue.append(s_ep_net_value)
+                    agent.state.ep_is_success_queue.append(s_ep_is_success)
+                    agent.state.ep_rew_queue.append(s_ep_return)
+                    agent.state.ep_length_queue.append(s_ep_length)
+                    agent.state.current_episode += s_episodes
+                    agent.state.global_episode += s_episodes
+                    ep_count += s_episodes
 
-                agent.state.current_vstep += sampler_steps
-                agent.state.current_timestep += sampler_steps
-                agent.state.global_timestep += sampler_steps
-                agent.state.current_second = int(time.time() - start_time)
-                agent.state.global_second = global_start_second + agent.state.current_second
+                    agent.state.current_vstep += sampler_steps
+                    agent.state.current_timestep += sampler_steps
+                    agent.state.global_timestep += sampler_steps
+                    agent.state.current_second = int(time.time() - start_time)
+                    agent.state.global_second = global_start_second + agent.state.current_second
 
             # Policy network optimization
             b_inds = np.arange(batch_size_policy)
             clipfracs = []
 
-            agent.train()
-            for epoch in range(args.update_epochs_policy):
-                np.random.shuffle(b_inds)
-                for start in range(0, batch_size_policy, minibatch_size_policy):
-                    end = start + minibatch_size_policy
-                    mb_inds = b_inds[start:end]
+            with timer_train:
+                agent.train()
+                for epoch in range(args.update_epochs_policy):
+                    np.random.shuffle(b_inds)
+                    for start in range(0, batch_size_policy, minibatch_size_policy):
+                        end = start + minibatch_size_policy
+                        mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, _ = agent.NN_policy.get_action(
-                        b_obs[mb_inds],
-                        b_masks[mb_inds],
-                        action=b_actions[mb_inds],
-                    )
-                    logratio = newlogprob - b_logprobs[mb_inds]
-                    ratio = logratio.exp()
+                        _, newlogprob, entropy, _ = agent.NN_policy.get_action(
+                            b_obs[mb_inds],
+                            b_masks[mb_inds],
+                            action=b_actions[mb_inds],
+                        )
+                        logratio = newlogprob - b_logprobs[mb_inds]
+                        ratio = logratio.exp()
 
-                    with torch.no_grad():
-                        # calculate approx_kl http://joschu.net/blog/kl-approx.html
-                        old_approx_kl = (-logratio).mean()
-                        approx_kl = ((ratio - 1) - logratio).mean()
-                        clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
+                        with torch.no_grad():
+                            # calculate approx_kl http://joschu.net/blog/kl-approx.html
+                            old_approx_kl = (-logratio).mean()
+                            approx_kl = ((ratio - 1) - logratio).mean()
+                            clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean().item()]
 
-                    mb_advantages = b_advantages[mb_inds]
-                    if args.norm_adv:
-                        mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
+                        mb_advantages = b_advantages[mb_inds]
+                        if args.norm_adv:
+                            mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
-                    # Policy loss
-                    pg_loss1 = -mb_advantages * ratio
-                    pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
-                    pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+                        # Policy loss
+                        pg_loss1 = -mb_advantages * ratio
+                        pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
+                        pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
-                    entropy_loss = entropy.mean()
-                    policy_loss = pg_loss - args.ent_coef * entropy_loss
+                        entropy_loss = entropy.mean()
+                        policy_loss = pg_loss - args.ent_coef * entropy_loss
 
-                    agent.optimizer_policy.zero_grad()
-                    policy_loss.backward()
-                    nn.utils.clip_grad_norm_(agent.NN_policy.parameters(), args.max_grad_norm)
-                    agent.optimizer_policy.step()
+                        agent.optimizer_policy.zero_grad()
+                        policy_loss.backward()
+                        nn.utils.clip_grad_norm_(agent.NN_policy.parameters(), args.max_grad_norm)
+                        agent.optimizer_policy.step()
 
-                if args.target_kl is not None and approx_kl > args.target_kl:
-                    break
+                    if args.target_kl is not None and approx_kl > args.target_kl:
+                        break
 
             # Value network optimization
-            for epoch in range(args.update_epochs_value):
-                np.random.shuffle(b_inds)
-                for start in range(0, batch_size_value, minibatch_size_value):
-                    end = start + minibatch_size_value
-                    mb_inds = b_inds[start:end]
+            with timer_value_optimization:
+                for epoch in range(args.update_epochs_value):
+                    np.random.shuffle(b_inds)
+                    for start in range(0, batch_size_value, minibatch_size_value):
+                        end = start + minibatch_size_value
+                        mb_inds = b_inds[start:end]
 
-                    newvalue = agent.NN_value.get_value(b_obs[mb_inds])
-                    newvalue = newvalue.view(-1)
+                        newvalue = agent.NN_value.get_value(b_obs[mb_inds])
+                        newvalue = newvalue.view(-1)
 
-                    # Value loss
-                    v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                        # Value loss
+                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-                    agent.optimizer_value.zero_grad()
-                    v_loss.backward()
-                    nn.utils.clip_grad_norm_(agent.NN_value.parameters(), args.max_grad_norm)
-                    agent.optimizer_value.step()
+                        agent.optimizer_value.zero_grad()
+                        v_loss.backward()
+                        nn.utils.clip_grad_norm_(agent.NN_value.parameters(), args.max_grad_norm)
+                        agent.optimizer_value.step()
 
-            # Value network to policy network distillation
-            agent.NN_policy.zero_grad(True)  # don't clone gradients
-            old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
-            old_NN_policy.eval()
-            for epoch in range(args.update_epochs_distill):
-                np.random.shuffle(b_inds)
-                for start in range(0, batch_size_distill, minibatch_size_distill):
-                    end = start + minibatch_size_distill
-                    mb_inds = b_inds[start:end]
-                    # Compute policy and value targets
-                    with torch.no_grad():
-                        _, _, _, old_action_dist = old_NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds])
-                        value_target = agent.NN_value.get_value(b_obs[mb_inds])
+            with timer_policy_distillation:
+                # Value network to policy network distillation
+                agent.NN_policy.zero_grad(True)  # don't clone gradients
+                old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
+                old_NN_policy.eval()
+                for epoch in range(args.update_epochs_distill):
+                    np.random.shuffle(b_inds)
+                    for start in range(0, batch_size_distill, minibatch_size_distill):
+                        end = start + minibatch_size_distill
+                        mb_inds = b_inds[start:end]
+                        # Compute policy and value targets
+                        with torch.no_grad():
+                            _, _, _, old_action_dist = old_NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds])
+                            value_target = agent.NN_value.get_value(b_obs[mb_inds])
 
-                    _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(
-                        b_obs[mb_inds],
-                        b_masks[mb_inds],
-                    )
+                        _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(
+                            b_obs[mb_inds],
+                            b_masks[mb_inds],
+                        )
 
-                    # Distillation loss
-                    policy_kl_loss = torch.distributions.kl_divergence(old_action_dist, new_action_dist).mean()
-                    value_loss = 0.5 * (new_value.view(-1) - value_target).square().mean()
-                    distill_loss = value_loss + args.distill_beta * policy_kl_loss
+                        # Distillation loss
+                        policy_kl_loss = torch.distributions.kl_divergence(old_action_dist, new_action_dist).mean()
+                        value_loss = 0.5 * (new_value.view(-1) - value_target).square().mean()
+                        distill_loss = value_loss + args.distill_beta * policy_kl_loss
 
-                    agent.optimizer_distill.zero_grad()
-                    distill_loss.backward()
-                    nn.utils.clip_grad_norm_(agent.NN_policy.parameters(), args.max_grad_norm)
-                    agent.optimizer_distill.step()
+                        agent.optimizer_distill.zero_grad()
+                        distill_loss.backward()
+                        nn.utils.clip_grad_norm_(agent.NN_policy.parameters(), args.max_grad_norm)
+                        agent.optimizer_distill.step()
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
@@ -974,6 +994,14 @@ def main(args):
             wandb_log({"global/num_timesteps": agent.state.current_timestep})
             wandb_log({"global/num_seconds": agent.state.current_second})
             wandb_log({"global/num_episode": agent.state.current_episode})
+
+            tall = timer_all.peek()
+
+            wandb_log({"timer/sample": timer_sample.peek() / tall})
+            wandb_log({"timer/train": timer_train.peek() / tall})
+            wandb_log({"timer/value_optimization": timer_value_optimization.peek() / tall})
+            wandb_log({"timer/policy_distillation": timer_policy_distillation.peek() / tall})
+            wandb_log({"timer/other": tall - (timer_sample.peek() + timer_train.peek() + timer_value_optimization.peek() + timer_policy_distillation.peek())})
 
             if rollouts_total:
                 wandb_log({"global/progress": progress})

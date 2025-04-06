@@ -1,5 +1,14 @@
 AMD EPYC 7462 48-core CPU
 9.6/96 CPU available, 26GB RAM available
+
+-- training (p10n/action/classic_int)
+    train/batch_size=1000
+    env/train/batch_size=1000
+    env/train/num_workers=8
+    NN: 200 / 2000
+=> iteration_time_s = 5+s (super slow)
+
+
 ================================
 NUM_WORKERS=5
 {"timestamp": "2025-04-05T16:08:19.409", "thread_id": "1a1vnm2mf4", "run_id": "egekhxch", "message": {"train/learning_rate": 0.0001, "train/buffer_capacity": 10000, "train/epochs": 1, "train/batch_size": 1000, "eval/buffer_capacity": 10000, "eval/batch_size": 1000}}

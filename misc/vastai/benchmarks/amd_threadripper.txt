@@ -1,5 +1,26 @@
 AMD Ryzen Threadripper PRO 7975WX 32-Cores
 32/64 CPU available, 129GB RAM available
+RTX3090 (24G)
+
+=======================================
+training (p10n/action/classic_int):
+=======================================
+
+    train/batch_size=2000
+    env/train/batch_size=1000
+    env/train/num_workers=20
+    NN: 250 / 3000
+
+{"timestamp": "2025-04-05T22:54:47.553", "thread_id": "1beoiop728", "run_id": "cwfckykg", "message": {"iteration": 11, "train_loss/total": 2.077970588207245, "train_dataset/wait_time_s": 0.22838973999023438}}
+{"timestamp": "2025-04-05T22:54:51.117", "thread_id": "1beoiop728", "run_id": "cwfckykg", "message": {"iteration": 12, "train_loss/total": 1.861714518070221, "train_dataset/wait_time_s": 0.232835054397583}}
+{"timestamp": "2025-04-05T22:54:54.711", "thread_id": "1beoiop728", "run_id": "cwfckykg", "message": {"iteration": 13, "train_loss/total": 1.807132077217102, "train_dataset/wait_time_s": 0.22969603538513184}}
+=> iteration_time_s = 3.5+s (slower than intel)
+=> wait_time_s=0.22
+
+=======================================
+ sample collection:
+=======================================
+FULL 2x sampling cycles
 
 5 workers:
 {"timestamp": "2025-04-05T17:52:59.183", "thread_id": "1dr0dbme4g", "run_id": "oaawljoy", "message": {"config": {"name_template": "{datetime}-{id}", "env": {"train": {"num_workers": 5, "prefetch_factor": 1, "kwargs": {"opponent": "StupidAI", "max_steps": 1000, "random_heroes": 1, "random_obstacles": 1, "town_chance": 30, "warmachine_chance": 40, "random_terrain_chance": 100, "tight_formation_chance": 20, "allow_invalid_actions": true, "user_timeout": 3600, "vcmi_timeout": 3600, "boot_timeout": 300, "conntype": "thread", "vcmi_loglevel_global": "error", "vcmi_loglevel_ai": "error", "mapname": "gym/generated/4096/4x1024.vmap"}}, "eval": {"num_workers": 1, "prefetch_factor": 1, "kwargs": {"opponent": "StupidAI", "max_steps": 1000, "random_heroes": 1, "random_obstacles": 1, "town_chance": 30, "warmachine_chance": 40, "random_terrain_chance": 100, "tight_formation_chance": 20, "allow_invalid_actions": true, "user_timeout": 3600, "vcmi_timeout": 3600, "boot_timeout": 300, "conntype": "thread", "vcmi_loglevel_global": "error", "vcmi_loglevel_ai": "error", "mapname": "gym/generated/evaluation/8x512.vmap"}}}, "checkpoint_interval_s": 900, "s3": {"optimize_local_storage": true, "checkpoint": {"bucket_name": "vcmi-gym", "s3_dir": "models"}, "data": null}, "eval": {"interval_s": 60, "buffer_capacity": 10000, "batch_size": 1000}, "train": {"learning_rate": 0.0001, "buffer_capacity": 10000, "epochs": 1, "batch_size": 1000}, "run": {"id": "oaawljoy", "name": "20250405_175259-oaawljoy", "out_dir": "/workspace/vcmi-gym/data/t10n", "resumed_config": null}}}}

@@ -1,5 +1,25 @@
 Core™ i9-14900KF
 16/32 CPU available, 64GB RAM available
+RTX3080 (10G)
+
+=======================================
+training (p10n/action/classic_int):
+=======================================
+
+    train/batch_size=2000
+    env/train/batch_size=1000
+    env/train/num_workers=20
+    NN: 250 / 3000
+
+{"timestamp": "2025-04-05T22:59:03.112", "thread_id": "19yrqqc3r4", "run_id": "oxmouhnl", "message": {"iteration": 203, "train_loss/total": 0.8599741578102111, "train_dataset/wait_time_s": 0.06310749053955078}}
+{"timestamp": "2025-04-05T22:59:06.318", "thread_id": "19yrqqc3r4", "run_id": "oxmouhnl", "message": {"iteration": 204, "train_loss/total": 0.9183866262435914, "train_dataset/wait_time_s": 0.06215023994445801}}
+{"timestamp": "2025-04-05T22:59:09.179", "thread_id": "19yrqqc3r4", "run_id": "oxmouhnl", "message": {"iteration": 205, "train_loss/total": 0.8983109474182129, "train_dataset/wait_time_s": 0.062378644943237305}}
+=> iteration_time_s = 2.5...3.2 (faster than 3090)
+=> wait_time_s=0.06
+
+=======================================
+ sample collection:
+=======================================
 FULL 2x sampling cycles
 
 5 workers:
