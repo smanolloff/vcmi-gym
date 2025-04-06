@@ -142,9 +142,7 @@ class Args:
     agent_load_file: Optional[str] = None
     vsteps_total: int = 0
     seconds_total: int = 0
-    rollouts_per_mapchange: int = 0
     rollouts_per_log: int = 1
-    rollouts_per_table_log: int = 10
     success_rate_target: Optional[float] = None
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
@@ -1069,8 +1067,8 @@ def main(args):
 
 def debug_args():
     return Args(
-        "mppo_dna-test",
-        "mppo_dna-test",
+        "mppo_dna_ray",
+        "MDR",
         loglevel=logging.DEBUG,
         run_name=None,
         trial_id=None,
@@ -1082,44 +1080,42 @@ def debug_args():
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
-        rollouts_per_mapchange=0,
-        rollouts_per_log=1,
-        rollouts_per_table_log=100000,
+        rollouts_per_log=50,
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
-        mapside="defender",
+        mapside="attacker",
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=0,
         out_dir_template="data/mppo_dna-test/mppo_dna-test",
         opponent_load_file=None,
-        opponent_sbm_probs=[0, 1, 0],
+        opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
-        lr_schedule=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule=ScheduleArgs(mode="const", start=0.0001),
+        lr_schedule_value=ScheduleArgs(mode="const", start=0.0001),
+        lr_schedule_policy=ScheduleArgs(mode="const", start=0.0001),
+        lr_schedule_distill=ScheduleArgs(mode="const", start=0.0001),
         num_envs=1,  # always 1 (use num_samplers for parallel sampling)
         num_steps=1000,
-        num_samplers=5,
-        gamma=0.8,
+        num_samplers=5,  # (num_steps // num_samplers) timesteps per sampler
+        gamma=0.85,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,
         gae_lambda_value=0.95,
-        num_minibatches=4,
-        num_minibatches_value=4,
-        num_minibatches_policy=4,
-        num_minibatches_distill=4,
+        num_minibatches=10,
+        num_minibatches_value=10,
+        num_minibatches_policy=10,
+        num_minibatches_distill=10,
         update_epochs=2,
         update_epochs_value=2,
         update_epochs_policy=2,
         update_epochs_distill=2,
         norm_adv=True,
-        clip_coef=0.3,
+        clip_coef=0.5,
         clip_vloss=True,
-        ent_coef=0.01,
-        max_grad_norm=0.5,
+        ent_coef=0.05,
+        max_grad_norm=1,
         distill_beta=1.0,
         target_kl=None,
         logparams={},
@@ -1127,16 +1123,18 @@ def debug_args():
         seed=42,
         skip_wandb_init=False,
         skip_wandb_log_code=False,
-        envmaps=["gym/A1.vmap"],
+        envmaps=["gym/generated/4096/4x1024.vmap"],
         env=EnvArgs(
+            random_terrain_chance=100,
+            tight_formation_chance=0,
             max_steps=500,
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
             vcmienv_loglevel="WARN",
-            random_heroes=0,
-            random_obstacles=0,
-            town_chance=0,
-            warmachine_chance=0,
+            random_heroes=1,
+            random_obstacles=1,
+            town_chance=10,
+            warmachine_chance=40,
             mana_min=0,
             mana_max=0,
             reward_step_fixed=-1,
