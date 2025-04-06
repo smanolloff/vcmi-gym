@@ -17,6 +17,6 @@ training (p10n/action/classic_int):
 {"timestamp": "2025-04-05T23:57:26.681", "thread_id": "19a9popx4w", "run_id": "awtbmfkk", "message": {"iteration": 14, "train_loss/total": 6.872205018997192, "train_dataset/wait_time_s": 0.01603102684020996}}
 {"timestamp": "2025-04-05T23:57:29.458", "thread_id": "19a9popx4w", "run_id": "awtbmfkk", "message": {"iteration": 15, "train_loss/total": 6.137463092803955, "train_dataset/wait_time_s": 0.01629924774169922}}
 
-=> iteration_time_s = 2.5...3 (tiny bit faster than RTX3080, but w/ more memory)
+=> iteration_time_s = 2.5...3 (tiny bit faster than RTX3080 and has more memory)
 => wait_time_s=0.06
 

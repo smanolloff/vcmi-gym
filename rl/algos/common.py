@@ -246,7 +246,8 @@ def maybe_save(t_save, t_permasave, args, agent):
     if args.wandb_project:
         import wandb
         assert wandb.run, "expected initialized wandb run"
-        wandb.run.log_model(agent_file, name="agent.pt")
+        # XXX: disable saving models to wandb (too big now)
+        # wandb.run.log_model(agent_file, name="agent.pt")
 
     if t_permasave + args.permasave_every <= now:
         permasave_file = os.path.join(args.out_dir_abs, "%s-agent-permasave-%d.pt" % (args.run_id, now))

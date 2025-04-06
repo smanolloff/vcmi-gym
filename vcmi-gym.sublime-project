@@ -19,6 +19,8 @@
 
 				// This is a separate project
 				"//vcmi",
+
+				"vcmi_gym/connectors/pybind11"
 			],
 			"binary_file_patterns": [
 				"testing/maps/*.vmap",

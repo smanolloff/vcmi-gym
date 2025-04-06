@@ -17,9 +17,26 @@ config = dict(
     agent_load_file=None,
     # agent_load_file="data/mppo_dna_ray/hktcyplj-agent-1743934056.pt",
 
-    save_every=10,
+    save_every=600,
     max_old_saves=0,
 
+    num_samplers=1,
+    num_steps_per_sampler=200,  # num_steps = num_steps_per_sampler * num_samplers
+    num_minibatches=2,
+    update_epochs=2,
+
+    gamma=0.85,
+    gae_lambda=0.9,
+    ent_coef=0.05,
+    clip_coef=0.5,
+    lr_schedule=dict(mode="const", start=0.0001),
+    norm_adv=True,
+    clip_vloss=True,
+    max_grad_norm=1,
+    weight_decay=0.05,
+    distill_beta=1.0,
+
+    rollouts_per_log=10,
     loglevel="DEBUG",
     run_name=None,
     trial_id=None,
@@ -27,7 +44,6 @@ config = dict(
     notes=None,
     vsteps_total=0,
     seconds_total=0,
-    rollouts_per_log=1,
     success_rate_target=None,
     ep_rew_mean_target=None,
     quit_on_target=False,
@@ -36,31 +52,17 @@ config = dict(
     out_dir_template="data/{group_id}",
     opponent_load_file=None,
     opponent_sbm_probs=[1, 0, 0],
-    weight_decay=0.05,
-    lr_schedule=dict(mode="const", start=0.0001),
-    lr_schedule_value=dict(mode="const", start=0.0001),
-    lr_schedule_policy=dict(mode="const", start=0.0001),
-    lr_schedule_distill=dict(mode="const", start=0.0001),
-    num_steps_per_sampler=200,  # num_steps = num_steps_per_sampler * num_samplers
-    num_samplers=1,
-    gamma=0.85,
-    gae_lambda=0.9,
-    gae_lambda_policy=0.95,
-    gae_lambda_value=0.95,
-    num_minibatches=2,
-    num_minibatches_value=2,
-    num_minibatches_policy=2,
-    num_minibatches_distill=2,
-    update_epochs=2,
-    update_epochs_value=2,
-    update_epochs_policy=2,
-    update_epochs_distill=2,
-    norm_adv=True,
-    clip_coef=0.5,
-    clip_vloss=True,
-    ent_coef=0.05,
-    max_grad_norm=1,
-    distill_beta=1.0,
+    lr_schedule_value=dict(mode="const", start=0),  # use lr_schedule
+    lr_schedule_policy=dict(mode="const", start=0),  # use lr_schedule
+    lr_schedule_distill=dict(mode="const", start=0),  # use lr_schedule
+    gae_lambda_policy=0.95,  # use gae_lambda
+    gae_lambda_value=0.95,  # use gae_lambda
+    num_minibatches_value=0,  # use num_minibatches
+    num_minibatches_policy=0,  # use num_minibatches
+    num_minibatches_distill=0,  # use num_minibatches
+    update_epochs_value=0,  # use update_epochs
+    update_epochs_policy=0,  # use update_epochs
+    update_epochs_distill=0,  # use update_epochs
     target_kl=None,
     logparams={},
     cfg_file=None,
@@ -85,9 +87,9 @@ config = dict(
         reward_dmg_mult=1,
         reward_term_mult=1,
         swap_sides=0,
-        user_timeout=0,
-        vcmi_timeout=0,
-        boot_timeout=0,
+        user_timeout=600,
+        vcmi_timeout=600,
+        boot_timeout=300,
         conntype="thread"
     ),
     # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],

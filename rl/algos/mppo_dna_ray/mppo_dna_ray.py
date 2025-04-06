@@ -790,9 +790,11 @@ def main(args):
         while progress < 1:
             timer_all.reset()
             timer_sample.reset()
+            timer_set_weights.reset()
             timer_train.reset()
             timer_value_optimization.reset()
             timer_policy_distillation.reset()
+            timer_save.reset()
 
             timer_all.start()
 
@@ -811,10 +813,8 @@ def main(args):
 
             # LOG.debug("Set weights...")
             with timer_set_weights:
-                vw = {k: v.to(sampler_device) for k, v in agent.NN_value.state_dict().items()}
-                pw = {k: v.to(sampler_device) for k, v in agent.NN_policy.state_dict().items()}
-                vwref = ray.put(vw)
-                pwref = ray.put(pw)
+                vwref = ray.put({k: v.to(sampler_device) for k, v in agent.NN_value.state_dict().items()})
+                pwref = ray.put({k: v.to(sampler_device) for k, v in agent.NN_policy.state_dict().items()})
                 ray.get([s.set_weights.remote(vwref, pwref) for s in samplers])
 
             with timer_sample:
