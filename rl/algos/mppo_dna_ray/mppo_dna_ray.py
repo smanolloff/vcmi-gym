@@ -370,7 +370,7 @@ class AgentNN(nn.Module):
 
         # Init lazy layers
         with torch.no_grad():
-            self.get_action_and_value(torch.randn([2, self.dims["obs"]]), torch.ones([2, n_actions], dtype=torch.bool))
+            self.get_action_and_value(torch.randn([2, self.dims["obs"]]), torch.ones([2, n_actions], dtype=torch.bool, device=device))
 
         common.layer_init(self.actor, gain=0.01)
         common.layer_init(self.critic, gain=1.0)
@@ -925,9 +925,10 @@ def main(args):
                 agent.NN_policy.zero_grad(True)  # don't clone gradients
 
                 # deepcopy vs load_tate_dict have basically the same performance
-                old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
-                # old_NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, device)
-                # old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
+                # For CUDA models, however, state_dict could be more efficient?
+                # old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
+                old_NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, device)
+                old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
 
                 old_NN_policy.eval()
                 for epoch in range(args.update_epochs_distill):
