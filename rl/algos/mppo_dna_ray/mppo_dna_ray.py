@@ -757,25 +757,36 @@ def main(args):
         # this is better achieved with Dataset and workers (also async)
         RemoteSampler = ray.remote(Sampler)
         sampler_steps = args.num_steps // args.num_samplers
+        sampler_device = "cpu"  # GPU would not have enough memory?
 
         def NN_creator(device):
-            # samplers always use CPU (GPU would not have enough memory?)
             return AgentNN(args.network, dim_other, dim_hexes, n_actions, device=device)
 
         def venv_creator():
             return common.create_venv(VcmiEnv, args)
 
         def sampler_creator(sampler_id):
-            return RemoteSampler.remote(0, NN_creator, venv_creator, sampler_steps, args.gamma, args.gae_lambda_policy, args.gae_lambda_value, "cpu")
+            return RemoteSampler.remote(
+                sampler_id,
+                NN_creator,
+                venv_creator,
+                sampler_steps,
+                args.gamma,
+                args.gae_lambda_policy,
+                args.gae_lambda_value,
+                sampler_device
+            )
 
         LOG.info("[main] init %d samplers" % args.num_samplers)
         samplers = [sampler_creator(i) for i in range(args.num_samplers)]
 
         timer_all = common.Timer()
         timer_sample = common.Timer()
+        timer_set_weights = common.Timer()
         timer_train = common.Timer()
         timer_value_optimization = common.Timer()
         timer_policy_distillation = common.Timer()
+        timer_save = common.Timer()
 
         while progress < 1:
             timer_all.reset()
@@ -800,12 +811,16 @@ def main(args):
             ep_count = 0
 
             # LOG.debug("Set weights...")
-            ray.get([s.set_weights.remote(agent.NN_value.state_dict(), agent.NN_policy.state_dict()) for s in samplers])
-
-            # LOG.debug("Call samplers...")
-            futures = [s.sample.remote() for s in samplers]
+            with timer_set_weights:
+                ray.get([
+                    s.set_weights.remote(agent.NN_value.state_dict().to(sampler_device), agent.NN_policy.state_dict().to(sampler_device))
+                    for s in samplers
+                ])
 
             with timer_sample:
+                # LOG.debug("Call samplers...")
+                futures = [s.sample.remote() for s in samplers]
+
                 # LOG.debug("Gather results...")
                 for i in range(len(futures)):
                     done, futures = ray.wait(futures, num_returns=1)
@@ -979,7 +994,6 @@ def main(args):
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
-            tall = timer_all.peek()
 
             wlog = {
                 "params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"],
@@ -1005,12 +1019,6 @@ def main(args):
                 "global/num_timesteps": agent.state.current_timestep,
                 "global/num_seconds": agent.state.current_second,
                 "global/num_episode": agent.state.current_episode,
-
-                "timer/sample": timer_sample.peek() / tall,
-                "timer/train": timer_train.peek() / tall,
-                "timer/value_optimization": timer_value_optimization.peek() / tall,
-                "timer/policy_distillation": timer_policy_distillation.peek() / tall,
-                "timer/other": tall - (timer_sample.peek() + timer_train.peek() + timer_value_optimization.peek() + timer_policy_distillation.peek()),
             }
 
             if rollouts_total:
@@ -1036,10 +1044,11 @@ def main(args):
                 else:
                     raise Exception("Not implemented: map change on target")
 
+            wandb_commit = False
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
+                wandb_commit = True
                 wlog["global/global_num_timesteps"] = agent.state.global_timestep
                 wlog["global/global_num_seconds"] = agent.state.global_second
-                wandb_log(wlog, commit=True)
 
                 LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f losses=%.1f|%.1f|%.1f" % (
                     agent.state.current_rollout,
@@ -1051,11 +1060,28 @@ def main(args):
                     policy_loss.item(),
                     distill_loss.item()
                 ))
-            else:
-                wandb_log(wlog, commit=False)
 
             agent.state.current_rollout += 1
-            save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
+
+            with timer_save:
+                save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
+
+            timers = {
+                "sample": timer_sample.peek(),
+                "set_weights": timer_set_weights.peek(),
+                "train": timer_train.peek(),
+                "value_optimization": timer_value_optimization.peek(),
+                "policy_distillation": timer_policy_distillation.peek(),
+                "save": timer_save.peek(),
+            }
+
+            t_all = timer_all.peek()
+            for k, v in timers.items():
+                wlog[f"timer/{k}"] = v / t_all
+
+            wlog["timer/other"] = (t_all - sum(timers.values())) / t_all
+
+            wandb_log(wlog, commit=wandb_commit)
             # print("TRAIN TIME: %.2f" % (time.time() - tstart))
 
     finally:
@@ -1110,8 +1136,8 @@ def debug_args():
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.0001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.0001),
         num_envs=1,  # always 1 (use num_samplers for parallel sampling)
-        num_steps=1000,
-        num_samplers=5,  # (num_steps // num_samplers) timesteps per sampler
+        num_steps=200,
+        num_samplers=1,  # (num_steps // num_samplers) timesteps per sampler
         gamma=0.85,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,

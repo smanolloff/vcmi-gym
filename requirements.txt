@@ -6,11 +6,12 @@
 numpy
 pyyaml
 wandb
-gymnasium
+gymnasium==0.29.1
 #onnx-pytorch
 pygit2
 boto3
 
+ray
 #ray[tune]
 #ray[rllib]==2.38.0
 #ray[default]==2.38.0
