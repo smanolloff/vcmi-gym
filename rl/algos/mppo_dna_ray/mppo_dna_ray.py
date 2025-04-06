@@ -370,7 +370,7 @@ class AgentNN(nn.Module):
 
         # Init lazy layers
         with torch.no_grad():
-            self.get_action_and_value(torch.randn([2, self.dims["obs"]]), torch.ones([2, n_actions], dtype=torch.bool, device=device))
+            self.get_action_and_value(torch.randn([2, self.dims["obs"]], device=device), torch.ones([2, n_actions], dtype=torch.bool, device=device))
 
         common.layer_init(self.actor, gain=0.01)
         common.layer_init(self.critic, gain=1.0)
@@ -465,7 +465,7 @@ class Agent(nn.Module):
     @staticmethod
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
-        attrs = ["args", "dim_other", "dim_hexes", "state"]
+        attrs = ["args", "dim_other", "dim_hexes", "state", "device_name"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -490,11 +490,11 @@ class Agent(nn.Module):
         jagent_optimized._save_for_lite_interpreter(jagent_file)
 
     @staticmethod
-    def load(agent_file, device="cpu"):
-        print("Loading agent from %s (device: %s)" % (agent_file, device))
-        return torch.load(agent_file, map_location=device, weights_only=False)
+    def load(agent_file, device_name="cpu"):
+        print("Loading agent from %s (device_name: %s)" % (agent_file, device_name))
+        return torch.load(agent_file, map_location=torch.device(device_name), weights_only=False)
 
-    def __init__(self, args, dim_other, dim_hexes, n_actions, state=None, device="cpu"):
+    def __init__(self, args, dim_other, dim_hexes, n_actions, state=None, device_name="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
@@ -502,8 +502,9 @@ class Agent(nn.Module):
         self.dim_other = dim_other  # needed for save/load
         self.dim_hexes = dim_hexes  # needed for save/load
         self.n_actions = n_actions  # needed for save/load
-        self.NN_value = AgentNN(args.network, dim_other, dim_hexes, n_actions, device)
-        self.NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, device)
+        self.device_name = device_name
+        self.NN_value = AgentNN(args.network, dim_other, dim_hexes, n_actions, torch.device(device_name))
+        self.NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, torch.device(device_name))
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
         self.optimizer_policy = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
         self.optimizer_distill = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
@@ -601,11 +602,11 @@ def main(args):
     LOG = logging.getLogger("mppo_dna")
     LOG.setLevel(args.loglevel)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     assert isinstance(args, Args)
 
-    agent, args = common.maybe_resume(Agent, args, device=device)
+    agent, args = common.maybe_resume(Agent, args, device_name=device_name)
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
@@ -654,7 +655,7 @@ def main(args):
 
     if args.agent_load_file and not agent:
         f = args.agent_load_file
-        agent = Agent.load(f, device=device)
+        agent = Agent.load(f, device_name=device_name)
         agent.args = args
         agent.state.current_timestep = 0
         agent.state.current_vstep = 0
@@ -702,7 +703,7 @@ def main(args):
         dim_hexes = VcmiEnv.STATE_SIZE_HEXES
         n_actions = VcmiEnv.ACTION_SPACE.n
         assert VcmiEnv.STATE_SIZE == dim_other + dim_hexes
-        agent = Agent(args, dim_other, dim_hexes, n_actions, device=device)
+        agent = Agent(args, dim_other, dim_hexes, n_actions, device_name=device_name)
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -738,6 +739,7 @@ def main(args):
         assert act_space.shape == ()
 
         # ALGO Logic: Storage setup
+        device = torch.device(device_name)
         b_obs = torch.zeros((args.num_steps,) + obs_space["observation"].shape).to(device)
         b_logprobs = torch.zeros(args.num_steps).to(device)
         b_actions = torch.zeros((args.num_steps,) + act_space.shape).to(device)
@@ -756,14 +758,15 @@ def main(args):
         RemoteSampler = ray.remote(Sampler)
         sampler_steps = args.num_steps // args.num_samplers
 
-        def NN_creator():
-            return AgentNN(args.network, dim_other, dim_hexes, n_actions, device=torch.device("cpu"))
+        def NN_creator(device):
+            # samplers always use CPU (GPU would not have enough memory?)
+            return AgentNN(args.network, dim_other, dim_hexes, n_actions, device=device)
 
         def venv_creator():
             return common.create_venv(VcmiEnv, args)
 
         def sampler_creator(sampler_id):
-            return RemoteSampler.remote(0, NN_creator, venv_creator, sampler_steps, args.gamma, args.gae_lambda_policy, args.gae_lambda_value, torch.device("cpu"))
+            return RemoteSampler.remote(0, NN_creator, venv_creator, sampler_steps, args.gamma, args.gae_lambda_policy, args.gae_lambda_value, "cpu")
 
         LOG.info("[main] init %d samplers" % args.num_samplers)
         samplers = [sampler_creator(i) for i in range(args.num_samplers)]
@@ -927,7 +930,7 @@ def main(args):
                 # deepcopy vs load_tate_dict have basically the same performance
                 # For CUDA models, however, state_dict could be more efficient?
                 # old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
-                old_NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, device)
+                old_NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, agent.NN_policy.device)
                 old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
 
                 old_NN_policy.eval()

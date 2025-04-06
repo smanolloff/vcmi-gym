@@ -26,37 +26,37 @@ def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae
 
 
 class Sampler:
-    def __init__(self, sampler_id, NN_creator, venv_creator, num_steps, gamma, gae_lambda_policy, gae_lambda_value, device):
+    def __init__(self, sampler_id, NN_creator, venv_creator, num_steps, gamma, gae_lambda_policy, gae_lambda_value, device_name):
         print("[sampler.%d] Initializing ..." % sampler_id)
         self.sampler_id = sampler_id
-        self.NN_value = NN_creator()
+        self.device = torch.device(device_name)
+        self.NN_value = NN_creator(self.device)
         self.NN_value.eval()
-        self.NN_policy = NN_creator()
+        self.NN_policy = NN_creator(self.device)
         self.NN_policy.eval()
         self.venv = venv_creator()
         self.num_steps = num_steps
         self.gamma = gamma
         self.gae_lambda_policy = gae_lambda_policy
         self.gae_lambda_value = gae_lambda_value
-        self.device = device
 
         # 1 is num_envs
         # (everything must be batched, B=1 in this case)
         assert self.venv.num_envs == 1
         self.obs_space = self.venv.call("observation_space")[0]
         self.act_space = self.venv.call("action_space")[0]
-        self.obs = torch.zeros((num_steps, 1) + self.obs_space.shape).to(device)
-        self.actions = torch.zeros((num_steps, 1) + self.act_space.shape, dtype=torch.int64).to(device)
-        self.logprobs = torch.zeros((num_steps, 1)).to(device)
-        self.rewards = torch.zeros((num_steps, 1)).to(device)
-        self.dones = torch.zeros((num_steps, 1)).to(device)
-        self.values = torch.zeros((num_steps, 1)).to(device)
-        self.masks = torch.zeros((num_steps, 1, self.act_space.n), dtype=torch.bool).to(device)
+        self.obs = torch.zeros((num_steps, 1) + self.obs_space.shape).to(self.device)
+        self.actions = torch.zeros((num_steps, 1) + self.act_space.shape, dtype=torch.int64).to(self.device)
+        self.logprobs = torch.zeros((num_steps, 1)).to(self.device)
+        self.rewards = torch.zeros((num_steps, 1)).to(self.device)
+        self.dones = torch.zeros((num_steps, 1)).to(self.device)
+        self.values = torch.zeros((num_steps, 1)).to(self.device)
+        self.masks = torch.zeros((num_steps, 1, self.act_space.n), dtype=torch.bool).to(self.device)
 
         next_obs, _ = self.venv.reset()
-        self.next_obs = torch.as_tensor(next_obs, device=device)
-        self.next_done = torch.zeros(1, device=device)
-        self.next_mask = torch.as_tensor(np.array(self.venv.unwrapped.call("action_mask")), device=device)
+        self.next_obs = torch.as_tensor(next_obs, device=self.device)
+        self.next_done = torch.zeros(1, device=self.device)
+        self.next_mask = torch.as_tensor(np.array(self.venv.unwrapped.call("action_mask")), device=self.device)
 
     def set_weights(self, value_state_dict, policy_state_dict):
         self.NN_value.load_state_dict(value_state_dict, strict=True)

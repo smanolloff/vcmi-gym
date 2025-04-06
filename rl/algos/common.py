@@ -301,7 +301,7 @@ def log_params(args, wandb_log):
     print("Params: %s" % logged)
 
 
-def maybe_resume(agent_cls, args, device="cpu"):
+def maybe_resume(agent_cls, args, device_name="cpu"):
     if not args.resume:
         print("Starting new run %s/%s" % (args.group_id, args.run_id))
         return None, args
@@ -310,7 +310,7 @@ def maybe_resume(agent_cls, args, device="cpu"):
 
     # XXX: resume will overwrite all input args except run_id & group_id
     file = find_latest_save(args.group_id, args.run_id)
-    agent = agent_cls.load(file, device=device)
+    agent = agent_cls.load(file, device_name=device_name)
 
     assert agent.args.group_id == args.group_id
     assert agent.args.run_id == args.run_id
