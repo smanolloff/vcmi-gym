@@ -199,12 +199,12 @@ def create_venv(env_cls, args, seeds=None):
 
         return res
 
-    funcs = [partial(env_creator, i) for i in range(args.num_envs)]
-
-    if args.num_envs > 1:
-        vec_env = gym.vector.AsyncVectorEnv(funcs)
-    else:
-        vec_env = gym.vector.SyncVectorEnv(funcs)
+    # funcs = [partial(env_creator, i) for i in range(args.num_envs)]
+    # if args.num_envs > 1:
+    #     vec_env = gym.vector.AsyncVectorEnv(funcs)
+    # else:
+    funcs = [partial(env_creator, 0)]
+    vec_env = gym.vector.SyncVectorEnv(funcs)
 
     vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env, deque_size=args.stats_buffer_size)
 

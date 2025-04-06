@@ -20,7 +20,6 @@ import sys
 import random
 import logging
 import time
-import copy
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -172,14 +171,14 @@ class Args:
     gamma: float = 0.99
     max_grad_norm: float = 0.5
     norm_adv: bool = True
-    num_envs: int = 1
     envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4x1024.vmap"])
 
     num_minibatches: int = 4  # used if nn-specific num_minibatches is 0
     num_minibatches_distill: int = 0
     num_minibatches_policy: int = 0
     num_minibatches_value: int = 0
-    num_steps: int = 128
+    num_steps_per_sampler: int = 128
+    num_samplers: int = 1
     stats_buffer_size: int = 100
 
     update_epochs: int = 4   # used if nn-specific update_epochs is 0
@@ -192,7 +191,6 @@ class Args:
     logparams: dict = field(default_factory=dict)
     cfg_file: Optional[str] = None
     seed: int = 42
-    num_samplers: int = 1
     skip_wandb_init: bool = False
     skip_wandb_log_code: bool = False
 
@@ -607,12 +605,13 @@ def main(args):
     assert isinstance(args, Args)
 
     agent, args = common.maybe_resume(Agent, args, device_name=device_name)
+    num_steps = args.num_steps_per_sampler * args.num_samplers
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
         rollouts_total = 0
     else:
-        rollouts_total = args.vsteps_total // args.num_steps
+        rollouts_total = args.vsteps_total // num_steps
 
     # Re-initialize to prevent errors from newly introduced args when loading/resuming
     # TODO: handle removed args
@@ -637,15 +636,13 @@ def main(args):
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     LOG.info("Out dir: %s" % out_dir)
 
-    num_envs = args.num_envs
-
     lr_schedule_fn_value = common.schedule_fn(args.lr_schedule_value)
     lr_schedule_fn_policy = common.schedule_fn(args.lr_schedule_policy)
     lr_schedule_fn_distill = common.schedule_fn(args.lr_schedule_distill)
 
-    batch_size_policy = int(num_envs * args.num_steps)
-    batch_size_value = int(num_envs * args.num_steps)
-    batch_size_distill = int(num_envs * args.num_steps)
+    batch_size_policy = int(num_steps)
+    batch_size_value = int(num_steps)
+    batch_size_distill = int(num_steps)
     minibatch_size_policy = int(batch_size_policy // args.num_minibatches_policy)
     minibatch_size_value = int(batch_size_value // args.num_minibatches_value)
     minibatch_size_distill = int(batch_size_distill // args.num_minibatches_distill)
@@ -740,13 +737,13 @@ def main(args):
 
         # ALGO Logic: Storage setup
         device = torch.device(device_name)
-        b_obs = torch.zeros((args.num_steps,) + obs_space["observation"].shape).to(device)
-        b_logprobs = torch.zeros(args.num_steps).to(device)
-        b_actions = torch.zeros((args.num_steps,) + act_space.shape).to(device)
-        b_masks = torch.zeros((args.num_steps, act_space.n), dtype=torch.bool).to(device)
-        b_advantages = torch.zeros(args.num_steps).to(device)
-        b_returns = torch.zeros(args.num_steps).to(device)
-        b_values = torch.zeros(args.num_steps).to(device)
+        obs = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + obs_space["observation"].shape).to(device)
+        logprobs = torch.zeros(args.num_samplers, args.num_steps_per_sampler).to(device)
+        actions = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + act_space.shape).to(device)
+        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), dtype=torch.bool).to(device)
+        advantages = torch.zeros(args.num_samplers, args.num_steps_per_sampler).to(device)
+        returns = torch.zeros(args.num_samplers, args.num_steps_per_sampler).to(device)
+        values = torch.zeros(args.num_samplers, args.num_steps_per_sampler).to(device)
 
         progress = 0
         map_rollouts = 0
@@ -756,7 +753,6 @@ def main(args):
         # XXXXX:
         # this is better achieved with Dataset and workers (also async)
         RemoteSampler = ray.remote(Sampler)
-        sampler_steps = args.num_steps // args.num_samplers
         sampler_device = "cpu"  # GPU would not have enough memory?
 
         def NN_creator(device):
@@ -770,7 +766,7 @@ def main(args):
                 sampler_id,
                 NN_creator,
                 venv_creator,
-                sampler_steps,
+                args.num_steps_per_sampler,
                 args.gamma,
                 args.gae_lambda_policy,
                 args.gae_lambda_value,
@@ -827,15 +823,15 @@ def main(args):
                     done, futures = ray.wait(futures, num_returns=1)
                     res, stats = ray.get(done[0])
 
-                    # t = timesteps
+                    # tw = timesteps per worker
                     (
-                        s_obs,          # => (t, STATE_SIZE)
-                        s_logprobs,     # => (t)
-                        s_actions,      # => (t)
-                        s_masks,        # => (t, N_ACTIONS)
-                        s_advantages,   # => (t)
-                        s_returns,      # => (t)
-                        s_values        # => (t)
+                        obs[i],          # => (tw, STATE_SIZE)
+                        logprobs[i],     # => (tw)
+                        actions[i],      # => (tw)
+                        masks[i],        # => (tw, N_ACTIONS)
+                        advantages[i],   # => (tw)
+                        returns[i],      # => (tw)
+                        values[i]        # => (tw)
                     ) = res
 
                     (
@@ -847,19 +843,6 @@ def main(args):
                         s_ep_length
                     ) = stats
 
-                    assert all(x.shape[0] == sampler_steps for x in res), [x.shape[0] for x in res]
-
-                    start = sampler_steps * i
-                    end = sampler_steps * i + sampler_steps
-
-                    b_obs[start:end] = s_obs
-                    b_logprobs[start:end] = s_logprobs
-                    b_actions[start:end] = s_actions
-                    b_masks[start:end] = s_masks
-                    b_advantages[start:end] = s_advantages
-                    b_returns[start:end] = s_returns
-                    b_values[start:end] = s_values
-
                     agent.state.ep_net_value_queue.append(s_ep_net_value)
                     agent.state.ep_is_success_queue.append(s_ep_is_success)
                     agent.state.ep_rew_queue.append(s_ep_return)
@@ -868,11 +851,20 @@ def main(args):
                     agent.state.global_episode += s_episodes
                     ep_count += s_episodes
 
-                    agent.state.current_vstep += sampler_steps
-                    agent.state.current_timestep += sampler_steps
-                    agent.state.global_timestep += sampler_steps
+                    agent.state.current_vstep += args.num_steps_per_sampler
+                    agent.state.current_timestep += args.num_steps_per_sampler
+                    agent.state.global_timestep += args.num_steps_per_sampler
                     agent.state.current_second = int(time.time() - start_time)
                     agent.state.global_second = global_start_second + agent.state.current_second
+
+            # flatten the batch (workers, worker_samples, *) => (num_steps, *)
+            b_obs = obs.flatten(end_dim=1)
+            b_logprobs = logprobs.flatten(end_dim=1)
+            b_actions = actions.flatten(end_dim=1)
+            b_masks = masks.flatten(end_dim=1)
+            b_advantages = advantages.flatten(end_dim=1)
+            b_returns = returns.flatten(end_dim=1)
+            b_values = values.flatten(end_dim=1)
 
             b_inds = np.arange(batch_size_policy)
             clipfracs = []
@@ -1136,9 +1128,8 @@ def debug_args():
         lr_schedule_value=ScheduleArgs(mode="const", start=0.0001),
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.0001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.0001),
-        num_envs=1,  # always 1 (use num_samplers for parallel sampling)
-        num_steps=200,
-        num_samplers=1,  # (num_steps // num_samplers) timesteps per sampler
+        num_steps_per_sampler=200,
+        num_samplers=1,
         gamma=0.85,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,

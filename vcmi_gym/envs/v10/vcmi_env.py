@@ -145,7 +145,7 @@ class VcmiEnv(gym.Env):
         reward_step_fixed: float = -1,
         reward_dmg_mult: float = 1,
         reward_term_mult: float = 1,
-        conntype: str = "proc",
+        conntype: str = "thread",
         other_env: Optional["VcmiEnv"] = None,
         nostart: bool = False
     ):
