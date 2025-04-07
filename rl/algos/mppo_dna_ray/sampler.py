@@ -8,61 +8,36 @@ def safe_mean(array_like) -> float:
     return np.nan if len(array_like) == 0 else float(np.mean(array_like))
 
 
-def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda):
-    total_steps = len(rewards)
-    advantages = torch.zeros_like(rewards)
-    lastgaelam = 0
-    for t in reversed(range(total_steps)):
-        if t == total_steps - 1:
-            nextnonterminal = 1.0 - next_done
-            nextvalues = next_value
-        else:
-            nextnonterminal = 1.0 - dones[t + 1]
-            nextvalues = values[t + 1]
-        delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
-        advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-    returns = advantages + values
-    return advantages, returns
-
-
 class Sampler:
-    def __init__(self, sampler_id, NN_creator, venv_creator, num_steps, gamma, gae_lambda_policy, gae_lambda_value, device_name):
+    def __init__(self, sampler_id, NN_creator, venv_creator, num_steps, device_name):
         print("[sampler.%d] Initializing ..." % sampler_id)
         self.sampler_id = sampler_id
         self.device = torch.device(device_name)
-        self.NN_value = NN_creator(self.device)
-        self.NN_value.eval()
-        self.NN_policy = NN_creator(self.device)
-        self.NN_policy.eval()
+        self.model = NN_creator(self.device)
+        self.model.eval()
         self.venv = venv_creator()
         self.num_steps = num_steps
-        self.gamma = gamma
-        self.gae_lambda_policy = gae_lambda_policy
-        self.gae_lambda_value = gae_lambda_value
 
         # 1 is num_envs
         # (everything must be batched, B=1 in this case)
         assert self.venv.num_envs == 1
         self.obs_space = self.venv.unwrapped.call("observation_space")[0]
         self.act_space = self.venv.unwrapped.call("action_space")[0]
-        self.obs = torch.zeros((num_steps, 1) + self.obs_space.shape).to(self.device)
-        self.actions = torch.zeros((num_steps, 1) + self.act_space.shape, dtype=torch.int64).to(self.device)
-        self.logprobs = torch.zeros((num_steps, 1)).to(self.device)
-        self.rewards = torch.zeros((num_steps, 1)).to(self.device)
-        self.dones = torch.zeros((num_steps, 1)).to(self.device)
-        self.values = torch.zeros((num_steps, 1)).to(self.device)
-        self.masks = torch.zeros((num_steps, 1, self.act_space.n), dtype=torch.bool).to(self.device)
+        self.obs = torch.zeros((num_steps,) + self.obs_space.shape, device=self.device)
+        self.actions = torch.zeros((num_steps,) + self.act_space.shape, dtype=torch.int64, device=self.device)
+        self.logprobs = torch.zeros(num_steps, device=self.device)
+        self.rewards = torch.zeros(num_steps, device=self.device)
+        self.dones = torch.zeros(num_steps, device=self.device)
+        self.masks = torch.zeros((num_steps, self.act_space.n), dtype=torch.bool, device=self.device)
 
         next_obs, _ = self.venv.reset()
         self.next_obs = torch.as_tensor(next_obs, device=self.device)
         self.next_done = torch.zeros(1, device=self.device)
         self.next_mask = torch.as_tensor(np.array(self.venv.unwrapped.call("action_mask")), device=self.device)
 
-    def set_weights(self, value_state_dict, policy_state_dict):
-        self.NN_value.load_state_dict(value_state_dict, strict=True)
-        self.NN_policy.load_state_dict(policy_state_dict, strict=True)
-        self.NN_value.eval()
-        self.NN_policy.eval()
+    def set_weights(self, state_dict):
+        self.model.load_state_dict(state_dict, strict=True)
+        self.model.eval()
 
     def sample(self):
         # print("[sampler.%d] Sampling ..." % self.sampler_id)
@@ -78,9 +53,7 @@ class Sampler:
             self.masks[step] = self.next_mask
 
             with torch.no_grad():
-                action, logprob, _, _ = self.NN_policy.get_action(self.next_obs, self.next_mask)
-                value = self.NN_value.get_value(self.next_obs)
-                self.values[step] = value.flatten()
+                action, logprob, _, _ = self.model.get_action(self.next_obs, self.next_mask)
             self.actions[step] = action
             self.logprobs[step] = logprob
 
@@ -105,37 +78,16 @@ class Sampler:
 
         seconds = int(started_at - time.time())
 
-        # bootstrap value if not done
-        with torch.no_grad():
-            self.next_value = self.NN_value.get_value(self.next_obs).reshape(1, -1)
-            advantages, _ = compute_advantages(
-                self.rewards,
-                self.dones,
-                self.values,
-                self.next_done,
-                self.next_value,
-                self.gamma,
-                self.gae_lambda_policy
-            )
-            _, returns = compute_advantages(
-                self.rewards,
-                self.dones,
-                self.values,
-                self.next_done,
-                self.next_value,
-                self.gamma,
-                self.gae_lambda_value
-            )
-
         # flatten the batch
         res = (
-            self.obs.flatten(end_dim=1),
-            self.logprobs.flatten(end_dim=1),
-            self.actions.flatten(end_dim=1),
-            self.masks.flatten(end_dim=1),
-            advantages.flatten(end_dim=1),
-            returns.flatten(end_dim=1),
-            self.values.flatten(end_dim=1),
+            self.obs,
+            self.logprobs,
+            self.actions,
+            self.masks,
+            self.rewards,
+            self.dones,
+            self.next_obs,
+            self.next_done,
         )
 
         stats = (

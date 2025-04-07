@@ -579,10 +579,23 @@ class JitAgent(nn.Module):
         return samples_2d.reshape(batch_shape)
 
 
-def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda):
+def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda_policy, gae_lambda_value):
+    # Must be time-major
+    # (num_workers, num_wsteps) => (num_wsteps, num_workers)
+    rewards = rewards.swapaxes(0, 1)
+    dones = dones.swapaxes(0, 1)
+    values = values.swapaxes(0, 1)
+
     total_steps = len(rewards)
-    advantages = torch.zeros_like(rewards)
-    lastgaelam = 0
+
+    # XXX: zeros_like keeps the memory layout of `rewards`
+    #      `rewards` is currently non-contigouos due to the swapaxes opereation
+    #      `advantages` has the same mem layout and is also non-contiguous now
+    #      ...but the returned value (after one more swap) is contiguous :)
+    advantages_policy = torch.zeros_like(rewards)
+    advantages_value = torch.zeros_like(rewards)
+    lastgaelam_policy = 0
+    lastgaelam_value = 0
     for t in reversed(range(total_steps)):
         if t == total_steps - 1:
             nextnonterminal = 1.0 - next_done
@@ -591,16 +604,17 @@ def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae
             nextnonterminal = 1.0 - dones[t + 1]
             nextvalues = values[t + 1]
         delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
-        advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
-    returns = advantages + values
-    return advantages, returns
+        advantages_policy[t] = lastgaelam_policy = delta + gamma * gae_lambda_policy * nextnonterminal * lastgaelam_policy
+        advantages_value[t] = lastgaelam_value = delta + gamma * gae_lambda_value * nextnonterminal * lastgaelam_value
+    returns_value = advantages_value + values
+    return advantages_policy.swapaxes(0, 1), returns_value.swapaxes(0, 1)
 
 
 def main(args):
     LOG = logging.getLogger("mppo_dna")
     LOG.setLevel(getattr(logging, args.loglevel))
 
-    device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device_name = "cuda" if torch.cuda.is_available() else "cpu"
 
     assert isinstance(args, Args)
 
@@ -740,23 +754,33 @@ def main(args):
 
         # ALGO Logic: Storage setup
         device = torch.device(device_name)
-        obs = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + obs_space["observation"].shape).to(device)
-        logprobs = torch.zeros(args.num_samplers, args.num_steps_per_sampler).to(device)
-        actions = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + act_space.shape).to(device)
-        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), dtype=torch.bool).to(device)
-        advantages = torch.zeros(args.num_samplers, args.num_steps_per_sampler).to(device)
-        returns = torch.zeros(args.num_samplers, args.num_steps_per_sampler).to(device)
-        values = torch.zeros(args.num_samplers, args.num_steps_per_sampler).to(device)
+        obs = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + obs_space["observation"].shape, device=device)
+        logprobs = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
+        actions = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + act_space.shape, device=device)
+        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), dtype=torch.bool, device=device)
+        advantages = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
+        returns = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
+
+        rewards = torch.zeros((args.num_samplers, args.num_steps_per_sampler), device=device)
+        dones = torch.zeros((args.num_samplers, args.num_steps_per_sampler), device=device)
+        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), dtype=torch.bool, device=device)
+        next_obs = torch.zeros((args.num_samplers,) + obs_space["observation"].shape, device=device)
+        next_done = torch.zeros(args.num_samplers, device=device)
 
         progress = 0
         map_rollouts = 0
         start_time = time.time()
         global_start_second = agent.state.global_second
 
-        ray.init(num_cpus=999)
-        RemoteSampler = ray.remote(Sampler)
-        sampler_device_name = "cpu"  # GPU would not have enough memory
+        sampler_device_name = device_name
         sampler_device = torch.device(sampler_device_name)
+
+        ray.init(num_cpus=1)
+
+        if sampler_device_name == "cuda":
+            RemoteSampler = ray.remote(num_cpus=0.01, num_gpus=0.01)(Sampler)
+        else:
+            RemoteSampler = ray.remote(num_cpus=0.01)(Sampler)
 
         def NN_creator(device):
             return AgentNN(args.network, dim_other, dim_hexes, n_actions, device=device)
@@ -770,11 +794,22 @@ def main(args):
                 NN_creator,
                 venv_creator,
                 args.num_steps_per_sampler,
-                args.gamma,
-                args.gae_lambda_policy,
-                args.gae_lambda_value,
                 sampler_device_name
             )
+
+        # s = Sampler(
+        #     0,
+        #     NN_creator,
+        #     venv_creator,
+        #     args.num_steps_per_sampler,
+        #     args.gamma,
+        #     args.gae_lambda_policy,
+        #     args.gae_lambda_value,
+        #     sampler_device_name
+        # )
+
+        # s.sample()
+        # import ipdb; ipdb.set_trace()  # noqa
 
         LOG.info("[main] init %d samplers" % args.num_samplers)
         samplers = [remote_sampler_creator(i) for i in range(args.num_samplers)]
@@ -809,9 +844,8 @@ def main(args):
 
             # LOG.debug("Set weights...")
             with timers["set_weights"]:
-                vwref = ray.put({k: v.to(sampler_device) for k, v in agent.NN_value.state_dict().items()})
-                pwref = ray.put({k: v.to(sampler_device) for k, v in agent.NN_policy.state_dict().items()})
-                ray.get([s.set_weights.remote(vwref, pwref) for s in samplers])
+                ref = ray.put({k: v.to(sampler_device) for k, v in agent.NN_policy.state_dict().items()})
+                ray.get([s.set_weights.remote(ref) for s in samplers])
 
             with timers["sample"]:
                 # LOG.debug("Call samplers...")
@@ -828,9 +862,10 @@ def main(args):
                         logprobs[i],     # => (tw)
                         actions[i],      # => (tw)
                         masks[i],        # => (tw, N_ACTIONS)
-                        advantages[i],   # => (tw)
-                        returns[i],      # => (tw)
-                        values[i]        # => (tw)
+                        rewards[i],      # => (tw)
+                        dones[i],        # => (tw)
+                        next_obs[i],     # => (STATE_SIZE)
+                        next_done[i],    # => (1)
                     ) = res
 
                     (
@@ -855,6 +890,23 @@ def main(args):
                     agent.state.global_timestep += args.num_steps_per_sampler
                     agent.state.current_second = int(time.time() - start_time)
                     agent.state.global_second = global_start_second + agent.state.current_second
+
+            with torch.no_grad():
+                agent.eval()
+                values = agent.NN_value.get_value(obs.flatten(end_dim=1)).reshape(args.num_samplers, -1)
+                # bootstrap value if not done
+                next_value = agent.NN_value.get_value(next_obs).flatten()
+
+                advantages, returns = compute_advantages(
+                    rewards,
+                    dones,
+                    values,
+                    next_done,
+                    next_value,
+                    args.gamma,
+                    args.gae_lambda_policy,
+                    args.gae_lambda_value,
+                )
 
             # flatten the batch (workers, worker_samples, *) => (num_steps, *)
             b_obs = obs.flatten(end_dim=1)
@@ -974,6 +1026,8 @@ def main(args):
             ep_value_mean = common.safe_mean(agent.state.ep_net_value_queue)
             ep_is_success_mean = common.safe_mean(agent.state.ep_is_success_queue)
 
+            wlog = {}
+
             if ep_count > 0:
                 assert ep_rew_mean is not np.nan
                 assert ep_value_mean is not np.nan
@@ -984,9 +1038,11 @@ def main(args):
                 agent.state.rollout_net_value_queue_1000.append(ep_value_mean)
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
+                wlog["rollout/ep_rew_mean"] = ep_rew_mean
+                wlog["rollout/ep_value_mean"] = ep_value_mean
+                wlog["rollout/ep_success_rate"] = ep_is_success_mean
 
-
-            wlog = {
+            wlog = dict(wlog, **{
                 "params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"],
                 "params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"],
                 "params/distill_learning_rate": agent.optimizer_distill.param_groups[0]["lr"],
@@ -996,8 +1052,8 @@ def main(args):
                 "losses/entropy": entropy_loss.item(),
                 "losses/old_approx_kl": old_approx_kl.item(),
                 "losses/approx_kl": approx_kl.item(),
-                "losses/clipfrac": np.mean(clipfracs),
-                "losses/explained_variance": explained_var,
+                "losses/clipfrac": float(np.mean(clipfracs)),
+                "losses/explained_variance": float(explained_var),
                 "rollout/ep_count": ep_count,
                 "rollout/ep_len_mean": ep_len_mean,
                 "rollout100/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_100),
@@ -1010,7 +1066,7 @@ def main(args):
                 "global/num_timesteps": agent.state.current_timestep,
                 "global/num_seconds": agent.state.current_second,
                 "global/num_episode": agent.state.current_episode,
-            }
+            })
 
             if rollouts_total:
                 wlog["global/progress"] = progress

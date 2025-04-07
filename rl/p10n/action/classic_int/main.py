@@ -1175,8 +1175,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         if now - last_checkpoint_at > config["checkpoint_interval_s"]:
             last_checkpoint_at = now
             if eval_loss >= eval_loss_best:
-                logger.info("Skip checkpoint (eval_loss=%f, eval_loss_best=%f)" % (eval_loss, eval_loss_best))
+                logger.info("Bad checkpoint (eval_loss=%f, eval_loss_best=%f), will skip it" % (eval_loss, eval_loss_best))
             else:
+                logger.info("Good checkpoint (eval_loss=%f, eval_loss_best=%f), will save it" % (eval_loss, eval_loss_best))
                 eval_loss_best = eval_loss
                 thread = threading.Thread(target=save_checkpoint, kwargs=dict(
                     logger=logger,
