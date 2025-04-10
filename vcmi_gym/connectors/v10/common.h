@@ -60,16 +60,12 @@ namespace Connector::V10 {
     public:
         P_State(
             MMAI::Schema::V10::ISupplementaryData::Type type_,
-            P_BattlefieldState state_,
-            P_ActionMask actmask_,
             P_IntermediateStates intstates_,
             P_IntermediateActionMasks intmasks_,
             P_IntermediateActions intactions_,
             const MMAI::Schema::V10::ErrorCode errcode_,
             const std::string ansiRender_
         ) : type(type_)
-          , state(state_)
-          , actmask(actmask_)
           , intstates(intstates_)
           , intmasks(intmasks_)
           , intactions(intactions_)
@@ -85,8 +81,6 @@ namespace Connector::V10 {
         const int errcode;
         const std::string ansiRender;
 
-        const P_BattlefieldState get_state() const { return state; }
-        const P_ActionMask get_actmask() const { return actmask; }
         const P_IntermediateStates get_intermediate_states() const { return intstates; }
         const P_IntermediateActionMasks get_intermediate_action_masks() const { return intmasks; }
         const P_IntermediateActions get_intermediate_actions() const { return intactions; }

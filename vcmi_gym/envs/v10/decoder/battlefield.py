@@ -26,13 +26,12 @@ class Battlefield():
     def __repr__(self):
         return "Battlefield(11x15)"
 
-    def __init__(self, last_action, envstate):
+    def __init__(self, envstate):
         self.hexes = []
         self.global_stats = None
         self.left_stats = None
         self.right_stats = None
         self.stacks = [[], []]  # left, right stacks
-        self.last_action = last_action
         self.envstate = envstate
 
     def get_hex(self, y_or_n, x=None):
@@ -223,7 +222,7 @@ class Battlefield():
 
         return lines, aside, tablestartrow
 
-    def render_side_stats(self, lines, aside, tablestartrow):
+    def render_side_stats(self, last_action, lines, aside, tablestartrow):
         nocol = "\033[0m"
         redcol = "\033[31m"  # red
         bluecol = "\033[34m"  # blue
@@ -258,14 +257,14 @@ class Battlefield():
                         value = (bluecol + "BLUE" + nocol) if aside else (redcol + "RED" + nocol)
                 case 2:
                     name = "Action"
-                    if self.last_action:
+                    if last_action:
                         assert N_NONHEX_ACTIONS == 2
-                        value = "%d: " % self.last_action
-                        if self.last_action < 2:
-                            value += "Wait" if self.last_action else "Retreat"
+                        value = "%d: " % last_action
+                        if last_action < 2:
+                            value += "Wait" if last_action else "Retreat"
                         else:
-                            hex = self.get_hex((self.last_action - 2) // len(HEX_ACT_MAP))
-                            act = list(HEX_ACT_MAP)[(self.last_action - 2) % len(HEX_ACT_MAP)]
+                            hex = self.get_hex((last_action - 2) // len(HEX_ACT_MAP))
+                            act = list(HEX_ACT_MAP)[(last_action - 2) % len(HEX_ACT_MAP)]
                             value += "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
                 case 3:
                     name = "DMG dealt"
@@ -287,13 +286,13 @@ class Battlefield():
 
                 case 8:
                     name = "Army value (L)"
-                    value = "%d (%.0f%% of current BF value)" % (lpstats.ARMY_VALUE_NOW_ABS.v, lpstats.ARMY_VALUE_NOW_REL.v)
+                    value = "%d (%.0f‰ of current BF value)" % (lpstats.ARMY_VALUE_NOW_ABS.v, lpstats.ARMY_VALUE_NOW_REL.v)
                 case 9:
                     name = "Army value (R)"
-                    value = "%d (%.0f%% of current BF value)" % (rpstats.ARMY_VALUE_NOW_ABS.v, rpstats.ARMY_VALUE_NOW_REL.v)
+                    value = "%d (%.0f‰ of current BF value)" % (rpstats.ARMY_VALUE_NOW_ABS.v, rpstats.ARMY_VALUE_NOW_REL.v)
                 case 10:
                     name = "Current BF value"
-                    value = "%d (%.0f%% of starting BF value)" % (gstats.BFIELD_VALUE_NOW_ABS.v, gstats.BFIELD_VALUE_NOW_REL0.v)
+                    value = "%d (%.0f‰ of starting BF value)" % (gstats.BFIELD_VALUE_NOW_ABS.v, gstats.BFIELD_VALUE_NOW_REL0.v)
                 case _:
                     continue
 
@@ -399,9 +398,21 @@ class Battlefield():
                 row[i] = (nocol, colwidths[i], "|")
 
             # Stack cols
+            num_stacks = 10
             for side in [0, 1]:
-                for i in range(10):
-                    stack = self.stacks[side][i] if i < len(self.stacks[side]) else None
+                self.stacks[side].sort(key=lambda s: s.alias())
+                slotstacks = [None] * num_stacks
+                specialslot = 7
+                for s in self.stacks[side]:
+                    if s.alias() in [str(slot) for slot in range(7)]:
+                        slotstacks[int(s.alias())] = s
+                    elif specialslot < num_stacks:
+                        assert s.alias() in ["M", "S"], s.alias()
+                        slotstacks[specialslot] = s
+                        specialslot += 1
+
+                for i in range(num_stacks):
+                    stack = slotstacks[i]
                     color = nocol
                     value = ""
 
@@ -469,7 +480,7 @@ class Battlefield():
                         if stack.QUEUE.v[0] == 1 and self.global_stats.BATTLE_WINNER.v is None:
                             color += activemod
 
-                    colid = 2 + i + side + (10*side)
+                    colid = 2 + i + side + (num_stacks*side)
                     row[colid] = (color, colwidths[colid], value)
 
             if a == "Y_COORD":
@@ -484,8 +495,8 @@ class Battlefield():
 
             lines.append(line)
 
-    def render(self):
+    def render(self, last_action):
         lines, aside, tablestartrow = self.render_battlefield()
-        self.render_side_stats(lines, aside, tablestartrow)
+        self.render_side_stats(last_action, lines, aside, tablestartrow)
         self.render_stacks_table(lines)
         return "\n".join(lines)

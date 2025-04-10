@@ -74,11 +74,9 @@ def tracelog(func, maxlen=MAXLEN):
 # TODO: this class is redundant, return original result to VcmiEnv instead
 class PyResult():
     def __init__(self, result):
-        self.state = result.get_state()
         self.intstates = result.get_intermediate_states()
         self.intmasks = result.get_intermediate_action_masks()
         self.intactions = result.get_intermediate_actions()
-        self.actmask = result.get_actmask()
         self.errcode = result.get_errcode()
 
 

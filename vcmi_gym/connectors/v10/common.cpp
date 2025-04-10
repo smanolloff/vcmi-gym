@@ -23,8 +23,8 @@ namespace Connector::V10 {
         auto validActions = std::vector<MMAI::Schema::Action>{};
         auto mask = s->getActionMask();
 
-        for (int j = 1; j < mask.size(); j++) {
-            if (mask[j])
+        for (int j = 1; j < mask->size(); j++) {
+            if ((*mask)[j])
                 validActions.push_back(j);
         }
 

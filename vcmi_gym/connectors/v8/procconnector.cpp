@@ -152,18 +152,18 @@ namespace Connector::V8::Proc {
         //      array of float32 floats in pyconnector.set_v_result_act()
         //      (which copies the data anyway and is ultimately slower).
 
-        auto &bs = s->getBattlefieldState();
-        P_BattlefieldState pbs(bs.size());
+        auto bs = s->getBattlefieldState();
+        P_BattlefieldState pbs(bs->size());
         auto pbsmd = pbs.mutable_data();
-        for (int i=0; i<bs.size(); i++)
-            pbsmd[i] = bs[i];
+        for (int i=0; i<bs->size(); i++)
+            pbsmd[i] = (*bs)[i];
 
-        auto &actmask = s->getActionMask();
+        auto actmask = s->getActionMask();
 
-        auto pam = P_ActionMask(actmask.size());
+        auto pam = P_ActionMask(actmask->size());
         auto pammd = pam.mutable_data();
-        for (int i=0; i < actmask.size(); i++)
-            pammd[i] = actmask[i];
+        for (int i=0; i < actmask->size(); i++)
+            pammd[i] = (*actmask)[i];
 
         auto res = P_State(
              sup->getType(),

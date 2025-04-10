@@ -11,6 +11,7 @@ import logging
 import shutil
 import tempfile
 import argparse
+import math
 import time
 import numpy as np
 import pathlib
@@ -197,156 +198,166 @@ class TransitionModel(nn.Module):
         self._build_indices()
 
         #
-        # Global
+        # ChatGPT notes regarding encoders:
+        #
+        # Continuous ([0,1]):
+        # Keep as-is (no normalization needed).
+        # No linear layer or activation required.
+        #
+        # Binary (0/1):
+        # Apply a linear layer to project to a small vector (e.g., Linear(1, d)).
+        # No activation needed before concatenation.
+        #
+        # Categorical:
+        # Use nn.Embedding(num_classes, d) for each feature.
+        #
+        # Concatenate all per-element features → final vector of shape (model_dim,).
+        #
+        # Pass to Transformer:
+        # Optionally use a linear layer after concatenation to unify dimensions
+        # (Linear(total_dim, model_dim)), especially if feature-specific dimensions vary.
         #
 
-        if self.obs_index["global"]["continuous"].numel():
-            self.encoder_global_continuous = nn.Sequential(
-                # (B, C)
-                # nn.LazyBatchNorm1d(),  # XXX: also uncomment running_mean calc in Stats
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_global_continuous = nn.Identity()
+        #
+        # Further details:
+        #
+        # Continuous data:
+        # If your continuous inputs are already scaled to [0, 1], and you
+        # cannot compute global normalization, it is acceptable to use them
+        # without further normalization.
+        #
+        # Binary data:
+        # To process binary inputs, apply nn.Linear(1, d) to each feature if
+        # treating them separately, or nn.Linear(n, d) to the whole binary
+        # vector if treating them jointly.
+        #   binary_input = torch.tensor([[0., 1., 0., ..., 1.]])  # shape: (B, 30)
+        #   linear = nn.Linear(30, d)  # d = desired output dimension
+        #   output = linear(binary_input)  # shape: (B, d)
 
+        emb_calc = lambda n: math.ceil(math.sqrt(n))
+
+        self.encoder_action = nn.Embedding(N_ACTIONS, emb_calc(N_ACTIONS))
+
+        #
+        # Global encoders
+        #
+
+        # Continuous:
+        # (B, n)
+        self.encoder_global_continuous = nn.Identity()
+
+        # Binaries:
+        # (B, n)
+        self.encoder_global_binary = nn.Identity()
         if self.obs_index["global"]["binary"].numel():
-            self.encoder_global_binary = nn.Sequential(
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_global_binary = nn.Identity()
+            n_binary_features = len(self.obs_index["global"]["binary"])
+            self.encoder_global_binary = nn.LazyLinear(n_binary_features)
+            # No nonlinearity needed
 
-        if self.obs_index["global"]["categorical"].numel():
-            self.encoder_global_categorical = nn.Sequential(
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_global_categorical = nn.Identity()
+        # Categoricals:
+        # [(B, C1), (B, C2), ...]
+        self.encoders_global_categoricals = nn.ModuleList([])
+        for ind in self.global_index["categoricals"]:
+            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_global_categoricals.append(cat_emb_size)
+
+        # Merge
+        z_size_global = 128
+        self.encoder_merged_global = nn.Sequential(
+            # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            nn.LazyLinear(z_size_global),
+            nn.LeakyReLU(),
+        )
+        # => (B, Z_GLOBAL)
 
         #
-        # Player
+        # Player encoders
         #
 
-        if self.obs_index["player"]["continuous"].numel():
-            self.encoder_player_continuous = nn.Sequential(
-                # Swap(1, 2),  # (B, 2, C) -> (B, C, 2)
-                # nn.LazyBatchNorm1d(),
-                # Swap(1, 2),  # (B, C, 2) -> (B, 2, C)
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_player_continuous = nn.Identity()
+        # Continuous per player:
+        # (B, n)
+        self.encoder_global_continuous = nn.Identity()
 
+        # Binaries per player:
+        # (B, n)
+        self.encoder_player_binary = nn.Identity()
         if self.obs_index["player"]["binary"].numel():
-            self.encoder_player_binary = nn.Sequential(
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_player_binary = nn.Identity()
+            n_binary_features = len(self.obs_index["player"]["binary"][0])
+            self.encoder_player_binary = nn.LazyLinear(n_binary_features)
 
-        if self.obs_index["player"]["categorical"].numel():
-            self.encoder_player_categorical = nn.Sequential(
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_player_categorical = nn.Identity()
+        # Categoricals per player:
+        # [(B, C1), (B, C2), ...]
+        self.encoder_player_categoricals = nn.ModuleList([])
+        for ind in self.player_index["categoricals"]:
+            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_player_categoricals.append(cat_emb_size)
+
+        # Merge per player
+        z_size_player = 128
+        self.encoder_merged_player = nn.Sequential(
+            # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            nn.LazyLinear(z_size_player),
+            nn.LeakyReLU(),
+        )
+        # => (B, 2, Z_PLAYER)
 
         #
-        # Hex
+        # Hex encoders
         #
 
-        if self.hex_index["continuous"].numel():
-            self.encoder_hex_continuous = nn.Sequential(
-                # Swap(1, 2),  # (B, 165, C) -> (B, C, 165)
-                # nn.LazyBatchNorm1d(),
-                # Swap(1, 2),  # (B, C, 165) -> (B, 165, C)
-                nn.LazyLinear(128),
-                nn.LeakyReLU(),
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_hex_continuous = nn.Identity()
+        # Continuous per hex:
+        # (B, n)
+        self.encoder_hex_continuous = nn.Identity()
 
+        # Binaries per hex:
+        # (B, n)
         if self.obs_index["hex"]["binary"].numel():
-            self.encoder_hex_binary = nn.Sequential(
-                nn.LazyLinear(128),
-                nn.LeakyReLU(),
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_hex_binary = nn.Identity()
+            n_binary_features = len(self.obs_index["hex"]["binary"][0])
+            self.encoder_hex_binary = nn.LazyLinear(n_binary_features)
 
-        if self.obs_index["hex"]["categorical"].numel():
-            self.encoder_hex_categorical = nn.Sequential(
-                nn.LazyLinear(128),
-                nn.LeakyReLU(),
-                nn.LazyLinear(32),
-                nn.LeakyReLU(),
-            )
-        else:
-            self.encoder_hex_categorical = nn.Identity()
+        # Categoricals per hex:
+        # [(B, C1), (B, C2), ...]
+        self.encoder_hex_categoricals = nn.ModuleList([])
+        for ind in self.hex_index["categoricals"]:
+            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_hex_categoricals.append(cat_emb_size)
 
-        self.encoder_merged_continuous = nn.Sequential(
-            # => (B, N_ACTIONS + 32 + 2*32 + 165*64)
-            nn.LazyLinear(1024),
+        # Merge per hex
+        z_size_hex = 512
+        self.encoder_merged_hex = nn.Sequential(
+            # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            nn.LazyLinear(z_size_hex),
             nn.LeakyReLU(),
-            nn.LazyLinear(1024),
         )
+        # => (B, 165, Z_HEX)
 
-        self.encoder_merged_binary = nn.Sequential(
-            # => (B, N_ACTIONS + 32 + 2*32 + 165*64)
-            nn.LazyLinear(1024),
-            nn.LeakyReLU(),
-            nn.LazyLinear(1024),
+        # Transformer (hexes only)
+        self.transformer_hex = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=z_size_hex, nhead=4, batch_first=True),
+            num_layers=3
         )
+        # => (B, 165, Z_HEX)
 
-        self.encoder_merged_categorical = nn.Sequential(
-            # => (B, N_ACTIONS + 32 + 2*32 + 165*64)
-            nn.LazyLinear(1024),
-            nn.LeakyReLU(),
-            nn.LazyLinear(1024),
-        )
+        #
+        # Aggregator
+        #
 
-        # Global heads
+        # (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
+        self.aggregator = nn.Linear(512)
+        # => (B, Z_AGG)
 
-        if self.obs_index["global"]["continuous"].numel():
-            self.global_continuous_head = nn.LazyLinear(len(self.global_index["continuous"]))
+        #
+        # Heads
+        #
 
-        if self.global_index["binary"].numel():
-            self.global_binary_head = nn.LazyLinear(len(self.global_index["binary"]))
+        # => (B, Z_AGG)
+        self.head_global = nn.Linear(STATE_SIZE_GLOBAL)
 
-        if self.global_index["categoricals"]:
-            self.global_categorical_heads = nn.ModuleList([nn.LazyLinear(len(ind)) for ind in self.global_index["categoricals"]])
+        # => (B, 2, Z_AGG + Z_PLAYER)
+        self.head_player = nn.Linear(STATE_SIZE_ONE_PLAYER)
 
-        # Player heads
-
-        if self.player_index["continuous"].numel():
-            self.player_continuous_head = nn.LazyLinear(len(self.player_index["continuous"]))
-
-        if self.player_index["binary"].numel():
-            self.player_binary_head = nn.LazyLinear(len(self.player_index["binary"]))
-
-        if self.player_index["categoricals"]:
-            self.player_categorical_heads = nn.ModuleList([nn.LazyLinear(len(ind)) for ind in self.player_index["categoricals"]])
-
-        # Hex heads
-
-        if self.hex_index["continuous"].numel():
-            self.hex_continuous_head = nn.LazyLinear(len(self.hex_index["continuous"]))
-
-        if self.hex_index["binary"].numel():
-            self.hex_binary_head = nn.LazyLinear(len(self.hex_index["binary"]))
-
-        if self.hex_index["categoricals"]:
-            self.hex_categorical_heads = nn.ModuleList([nn.LazyLinear(len(ind)) for ind in self.hex_index["categoricals"]])
+        # => (B, 165, Z_AGG + Z_HEX)
+        self.head_hex = nn.Linear(STATE_SIZE_ONE_HEX)
 
         self.to(device)
 
@@ -357,124 +368,62 @@ class TransitionModel(nn.Module):
         layer_init(self)
 
     def forward(self, obs, action):
-        action_in = one_hot(torch.as_tensor(action), num_classes=N_ACTIONS).to(self.device)
-
         assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
+
+        action_z = self.encoder_action(action)
 
         global_continuous_in = obs[:, self.obs_index["global"]["continuous"]]
         global_binary_in = obs[:, self.obs_index["global"]["binary"]]
-        global_categorical_in = obs[:, self.obs_index["global"]["categorical"]]
-        player_continuous_in = obs[:, self.obs_index["player"]["continuous"]]
-        player_binary_in = obs[:, self.obs_index["player"]["binary"]]
-        player_categorical_in = obs[:, self.obs_index["player"]["categorical"]]
-        hex_continuous_in = obs[:, self.obs_index["hex"]["continuous"]]
-        hex_binary_in = obs[:, self.obs_index["hex"]["binary"]]
-        hex_categorical_in = obs[:, self.obs_index["hex"]["categorical"]]
-
+        global_categorical_ins = [obs[:, ind] for ind in self.obs_index["global"]["categoricals"]]
         global_continuous_z = self.encoder_global_continuous(global_continuous_in)
         global_binary_z = self.encoder_global_binary(global_binary_in)
-        global_categorical_z = self.encoder_global_categorical(global_categorical_in)
+        global_categorical_z = torch.cat([enc(x) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)])
+        global_merged = torch.cat((action_z, global_continuous_z, global_binary_z, global_categorical_z), dim=-1)
+        z_global = self.encoder_merged_global(global_merged)
+        # => (B, Z_GLOBAL)
+
+        player_continuous_in = obs[:, self.obs_index["player"]["continuous"]]
+        player_binary_in = obs[:, self.obs_index["player"]["binary"]]
+        player_categorical_ins = [obs[:, ind] for ind in self.obs_index["player"]["categoricals"]]
         player_continuous_z = self.encoder_player_continuous(player_continuous_in)
         player_binary_z = self.encoder_player_binary(player_binary_in)
-        player_categorical_z = self.encoder_player_categorical(player_categorical_in)
+        player_categorical_z = torch.cat([enc(x) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)])
+        player_merged = torch.cat((action_z.unsqueeze(1).expand(-1, 2, -1), player_continuous_z, player_binary_z, player_categorical_z), dim=-1)
+        z_player = self.encoder_merged_player(player_merged)
+        # => (B, 2, Z_PLAYER)
+
+        hex_continuous_in = obs[:, self.obs_index["hex"]["continuous"]]
+        hex_binary_in = obs[:, self.obs_index["hex"]["binary"]]
+        hex_categorical_ins = [obs[:, ind] for ind in self.obs_index["hex"]["categorical"]]
         hex_continuous_z = self.encoder_hex_continuous(hex_continuous_in)
         hex_binary_z = self.encoder_hex_binary(hex_binary_in)
-        hex_categorical_z = self.encoder_hex_categorical(hex_categorical_in)
+        hex_categorical_z = torch.cat([enc(x) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)])
+        hex_merged = torch.cat((action_z.unsqueeze(1).expand(-1, 165, -1), hex_continuous_z, hex_binary_z, hex_categorical_z), dim=-1)
+        z_hex = self.encoder_merged_hex(hex_merged)
+        z_hex = self.transformer_hex(z_hex)
+        # => (B, 165, Z_HEX)
 
-        continuous_z_merged = torch.cat((action_in, global_continuous_z, player_continuous_z.flatten(1), hex_continuous_z.flatten(1)), dim=-1)
-        binary_z_merged = torch.cat((action_in, global_binary_z, player_binary_z.flatten(1), hex_binary_z.flatten(1)), dim=-1)
-        categorical_z_merged = torch.cat((action_in, global_categorical_z, player_categorical_z.flatten(1), hex_categorical_z.flatten(1)), dim=-1)
-
-        continuous_z = self.encoder_merged_continuous(continuous_z_merged)
-        # => (B, Zcont)
-
-        binary_z = self.encoder_merged_binary(binary_z_merged)
-        # => (B, Zbin)
-
-        categorical_z = self.encoder_merged_categorical(categorical_z_merged)
-        # => (B, Zcat)
-
-        b = obs.shape[0]
-        global_continuous_out = torch.zeros([b, 0], device=self.device)
-        global_binary_out = torch.zeros([b, 0], device=self.device)
-        global_categorical_outs = []
-        player_continuous_out = torch.zeros([b, 0], device=self.device)
-        player_binary_out = torch.zeros([b, 0], device=self.device)
-        player_categorical_outs = []
-        hex_continuous_out = torch.zeros([b, 0], device=self.device)
-        hex_binary_out = torch.zeros([b, 0], device=self.device)
-        hex_categorical_outs = []
+        mean_z_player = z_player.mean(dim=1)
+        mean_z_hex = z_hex.mean(dim=1)
+        z_agg = self.aggregator(z_global + mean_z_player + mean_z_hex)
+        # => (B, Z_AGG)
 
         #
-        # Global
+        # Outputs
         #
 
-        if self.global_index["continuous"].numel():
-            global_continuous_out = self.global_continuous_head(continuous_z)
+        global_out = self.head_global(z_agg)
+        # => (B, STATE_SIZE_GLOBAL)
 
-        if self.global_index["binary"].numel():
-            global_binary_out = self.global_binary_head(binary_z)
+        player_out = self.head_player(z_agg.unsqueeze(-1).expand(-1, 2, -1), z_player)
+        # => (B, 2, STATE_SIZE_ONE_PLAYER)
 
-        if self.global_index["categoricals"]:
-            global_categorical_outs = [head(categorical_z) for head in self.global_categorical_heads]
+        hex_out = self.head_hex(z_agg.unsqueeze(-1).expand(-1, 165, -1), z_hex)
+        # => (B, 165, STATE_SIZE_ONE_HEX)
 
-        #
-        # Player
-        #
+        obs_out = torch.cat((global_out, player_out.flatten(start_dim=1), hex_out.flatten(start_dim=1)), dim=1)
 
-        if self.player_index["continuous"].numel():
-            # Expand "z" for the two players
-            continuous_z_for_players = continuous_z.unsqueeze(1).expand(continuous_z.shape[0], 2, continuous_z.shape[1])
-            # => (B, 2, Zcont)
-            player_continuous_out = self.player_continuous_head(continuous_z_for_players)
-            # => (B, 2, PCAT)
-
-        if self.player_index["binary"].numel():
-            binary_z_for_players = binary_z.unsqueeze(1).expand(binary_z.shape[0], 2, binary_z.shape[1])
-            # => (B, 2, Zbin)
-            player_binary_out = self.player_binary_head(binary_z_for_players)
-            # => (B, 2, PBIN)
-
-        if self.player_index["categoricals"]:
-            categorical_z_for_players = categorical_z.unsqueeze(1).expand(categorical_z.shape[0], 2, categorical_z.shape[1])
-            # => (B, 2, Zcat)
-            player_categorical_outs = [head(categorical_z_for_players) for head in self.player_categorical_heads]
-            # => [N, (B, 2, *)]
-
-        #
-        # Hex
-        #
-
-        if self.hex_index["continuous"].numel():
-            # Expand "z" for the 165 hexes
-            continuous_z_for_hexes = continuous_z.unsqueeze(1).expand(continuous_z.shape[0], 165, continuous_z.shape[1])
-            # => (B, 165, Zcont)
-            hex_continuous_out = self.hex_continuous_head(continuous_z_for_hexes)
-            # => (B, 165, HCAT)
-
-        if self.hex_index["binary"].numel():
-            binary_z_for_hexes = binary_z.unsqueeze(1).expand(binary_z.shape[0], 165, binary_z.shape[1])
-            # => (B, 165, Zbin)
-            hex_binary_out = self.hex_binary_head(binary_z_for_hexes)
-            # => (B, 165, HBIN)
-
-        if self.hex_index["categoricals"]:
-            categorical_z_for_hexes = categorical_z.unsqueeze(1).expand(categorical_z.shape[0], 165, categorical_z.shape[1])
-            # => (B, 165, Zcat)
-            hex_categorical_outs = [head(categorical_z_for_hexes) for head in self.hex_categorical_heads]
-            # => [N, (B, 165, C*)] where C* is num_classes (may differ)
-
-        return (
-            global_continuous_out,
-            global_binary_out,
-            global_categorical_outs,
-            player_continuous_out,
-            player_binary_out,
-            player_categorical_outs,
-            hex_continuous_out,
-            hex_binary_out,
-            hex_categorical_outs,
-        )
+        return obs_out
 
     # Predict next obs
     def predict(self, obs, action):
@@ -896,18 +845,16 @@ class Stats:
             stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
 
 
-def compute_losses(logger, obs_index, loss_weights, obs, logits):
-    (
-        logits_global_continuous,
-        logits_global_binary,
-        logits_global_categoricals,
-        logits_player_continuous,
-        logits_player_binary,
-        logits_player_categoricals,
-        logits_hex_continuous,
-        logits_hex_binary,
-        logits_hex_categoricals,
-    ) = logits
+def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
+    logits_global_continuous = pred_obs[:, obs_index["global"]["continuous"]]
+    logits_global_binary = pred_obs[:, obs_index["global"]["binary"]]
+    logits_global_categoricals = pred_obs[:, obs_index["global"]["categorical"]]
+    logits_player_continuous = pred_obs[:, obs_index["player"]["continuous"]]
+    logits_player_binary = pred_obs[:, obs_index["player"]["binary"]]
+    logits_player_categoricals = pred_obs[:, obs_index["player"]["categorical"]]
+    logits_hex_continuous = pred_obs[:, obs_index["hex"]["continuous"]]
+    logits_hex_binary = pred_obs[:, obs_index["hex"]["binary"]]
+    logits_hex_categoricals = pred_obs[:, obs_index["hex"]["categorical"]]
 
     loss_continuous = 0
     loss_binary = 0
@@ -916,33 +863,33 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
     # Global
 
     if logits_global_continuous.numel():
-        target_global_continuous = obs[:, obs_index["global"]["continuous"]]
+        target_global_continuous = next_obs[:, obs_index["global"]["continuous"]]
         loss_continuous += mse_loss(logits_global_continuous, target_global_continuous)
 
     if logits_global_binary.numel():
-        target_global_binary = obs[:, obs_index["global"]["binary"]]
-        weight_global_binary = loss_weights["binary"]["global"]
-        loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
+        target_global_binary = next_obs[:, obs_index["global"]["binary"]]
+        # weight_global_binary = loss_weights["binary"]["global"]
+        # loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
         loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
 
     if logits_global_categoricals:
-        target_global_categoricals = [obs[:, index] for index in obs_index["global"]["categoricals"]]
-        weight_global_categoricals = loss_weights["categoricals"]["global"]
-        for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
-            loss_categorical += cross_entropy(logits, target, weight=weight)
+        target_global_categoricals = [next_obs[:, index] for index in obs_index["global"]["categoricals"]]
+        # weight_global_categoricals = loss_weights["categoricals"]["global"]
+        # for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
+        #     loss_categorical += cross_entropy(logits, target, weight=weight)
         for logits, target in zip(logits_global_categoricals, target_global_categoricals):
             loss_categorical += cross_entropy(logits, target)
 
     # Player (2x)
 
     if logits_player_continuous.numel():
-        target_player_continuous = obs[:, obs_index["player"]["continuous"]]
+        target_player_continuous = next_obs[:, obs_index["player"]["continuous"]]
         loss_continuous += mse_loss(logits_player_continuous, target_player_continuous)
 
     if logits_player_binary.numel():
-        target_player_binary = obs[:, obs_index["player"]["binary"]]
-        weight_player_binary = loss_weights["binary"]["player"]
-        loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
+        target_player_binary = next_obs[:, obs_index["player"]["binary"]]
+        # weight_player_binary = loss_weights["binary"]["player"]
+        # loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
         loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
 
     # XXX: CrossEntropyLoss expects (B, C, *) input where C=num_classes
@@ -952,30 +899,30 @@ def compute_losses(logger, obs_index, loss_weights, obs, logits):
     # [cross_entropy(logits, target).item(), cross_entropy(logits.flatten(start_dim=0, end_dim=1), target.flatten(start_dim=0, end_dim=1)).item(), cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2)).item()]
 
     if logits_player_categoricals:
-        target_player_categoricals = [obs[:, index] for index in obs_index["player"]["categoricals"]]
-        weight_player_categoricals = loss_weights["categoricals"]["player"]
-        for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        target_player_categoricals = [next_obs[:, index] for index in obs_index["player"]["categoricals"]]
+        # weight_player_categoricals = loss_weights["categoricals"]["player"]
+        # for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
+        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
         for logits, target in zip(logits_player_categoricals, target_player_categoricals):
             loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
 
     # Hex (165x)
 
     if logits_hex_continuous.numel():
-        target_hex_continuous = obs[:, obs_index["hex"]["continuous"]]
+        target_hex_continuous = next_obs[:, obs_index["hex"]["continuous"]]
         loss_continuous += mse_loss(logits_hex_continuous, target_hex_continuous)
 
     if logits_hex_binary.numel():
-        target_hex_binary = obs[:, obs_index["hex"]["binary"]]
-        weight_hex_binary = loss_weights["binary"]["hex"]
-        loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
+        target_hex_binary = next_obs[:, obs_index["hex"]["binary"]]
+        # weight_hex_binary = loss_weights["binary"]["hex"]
+        # loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
         loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary)
 
     if logits_hex_categoricals:
-        target_hex_categoricals = [obs[:, index] for index in obs_index["hex"]["categoricals"]]
-        weight_hex_categoricals = loss_weights["categoricals"]["hex"]
-        for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        target_hex_categoricals = [next_obs[:, index] for index in obs_index["hex"]["categoricals"]]
+        # weight_hex_categoricals = loss_weights["categoricals"]["hex"]
+        # for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
+        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
         for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
             loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
 
@@ -1046,13 +993,13 @@ def train_model(
 
             if scaler:
                 with torch.amp.autocast(model.device.type):
-                    logits = model(obs, action)
-                    loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, logits)
+                    pred_obs = model(obs, action)
+                    loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
                     loss_tot = loss_cont + loss_bin + loss_cat
 
             else:
-                logits = model(obs, action)
-                loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, logits)
+                pred_obs = model(obs, action)
+                loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
                 loss_tot = loss_cont + loss_bin + loss_cat
 
             continuous_losses.append(loss_cont.item())
@@ -1103,9 +1050,9 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
         # obs, action, next_rew, next_obs, next_mask, next_done = batch
         obs, action, next_obs = batch
         with torch.no_grad():
-            logits = model(obs, action)
+            pred_obs = model(obs, action)
 
-        loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, logits)
+        loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
         loss_tot = loss_cont + loss_bin + loss_cat
 
         continuous_losses.append(loss_cont.item())

@@ -141,50 +141,71 @@ namespace Connector::V10::Proc {
         auto sup = extractSupplementaryData(s);
         assert(sup->getType() == MMAI::Schema::V10::ISupplementaryData::Type::REGULAR);
 
-        auto &bs = s->getBattlefieldState();
-        P_BattlefieldState pbs(bs.size());
-        auto pbsmd = pbs.mutable_data();
-        for (int i=0; i<bs.size(); i++)
-            pbsmd[i] = bs[i];
+        // XXX: these do not improve performance, better avoid the const_cast
+        // auto pbs = P_BattlefieldState(bs.size(), const_cast<float*>(bs.data()));
+        // auto patm = P_AttentionMask(attnmask.size(), const_cast<float*>(attnmask.data()));
 
-        auto &actmask = s->getActionMask();
+        // XXX: manually copying the state into py::array_t<float> is
+        //      ~10% faster than storing the BattlefieldState& reference in
+        //      P_State as pybind's STL automatically converts it to a python
+        //      list of python floats, which needs to be converted to a numpy
+        //      array of float32 floats in pyconnector.set_v_result_act()
+        //      (which copies the data anyway and is ultimately slower).
 
-        auto pam = P_ActionMask(actmask.size());
-        auto pammd = pam.mutable_data();
-        for (int i=0; i < actmask.size(); i++)
-            pammd[i] = actmask[i];
+        auto transitions = sup->getStateTransitions();
+        auto curstate = s->getBattlefieldState();
+        auto curmask = s->getActionMask();
+        ssize_t d0 = transitions.size() + 1;  // will also add the current state
 
-        auto st = sup->getStateTransitions();
-        ssize_t d0 = st.size();
         constexpr ssize_t dstate = MMAI::Schema::V10::BATTLEFIELD_STATE_SIZE;
         constexpr ssize_t dmask = MMAI::Schema::V10::N_ACTIONS;
-        auto midstates = P_IntermediateStates({d0, dstate});  // np.ndarray((d0, dstate), dtype=np.float32)
-        auto midmasks = P_IntermediateActionMasks({d0, dmask});  // np.ndarray((d0, dmask), dtype=np.bool)
-        auto midactions = P_IntermediateActions(d0);
+        auto intstates = P_IntermediateStates({d0, dstate});  // np.ndarray((d0, dstate), dtype=np.float32)
+        auto intmasks = P_IntermediateActionMasks({d0, dmask});  // np.ndarray((d0, dmask), dtype=np.bool)
+        auto intactions = P_IntermediateActions(d0);
 
-        for (int i = 0; i < d0; ++i) {
-            auto [act, mask, state] = st.at(i);
-            midactions.mutable_at(i) = act;
-
-            static_assert(dmask < dstate);
-
-            for (int j = 0; j < dmask; ++j) {
-                midmasks.mutable_at(i, j) = mask->at(j);
-                midstates.mutable_at(i, j) = state->at(j);
-            }
-
-            for (int j = dmask; j < dstate; ++j) {
-                midstates.mutable_at(i, j) = state->at(j);
-            }
+        for (int i = 0; i < static_cast<int>(transitions.size()); ++i) {
+            auto [a, m, s] = transitions.at(i);
+            LOG("TREHADCONNECTOR[%d]: m.size=" + std::to_string(m->size()) + ", s.size()=" + std::to_string(s->size()));
         }
+
+        LOG("Dims: b=" + std::to_string(d0) +", dstate=" + std::to_string(dstate) + ", dmask=" + std::to_string(dmask));
+        int i = 0;
+        int j = 0;
+        try {
+            for (i = 0; i < d0; ++i) {
+                auto [act, mask, state] = (i < d0 - 1)
+                    ? transitions.at(i)
+                    : std::tuple{-1, curmask, curstate};
+
+                intactions.mutable_at(i) = act;
+
+                static_assert(dmask < dstate);
+
+                LOG("Mutating masks AND states shared...");
+                LOG("(mask.size()=" + std::to_string(mask->size()) + ", state.size()=" + std::to_string(state->size()));
+                for (j = 0; j < dmask; ++j) {
+                    intmasks.mutable_at(i, j) = mask->at(j);
+                    intstates.mutable_at(i, j) = state->at(j);
+                }
+
+                LOG("Mutating states only...");
+                for (j = dmask; j < dstate; ++j) {
+                    intstates.mutable_at(i, j) = state->at(j);
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cout << "FATAL ERROR: " << e.what() << "\n";
+            std::cout << "i=" << i << ", j=" << j << "\n";
+            throw;
+        }
+
+        LOG("Creating P_State...");
 
         auto res = P_State(
              sup->getType(),
-             pbs,
-             pam,
-             midstates,
-             midmasks,
-             midactions,
+             intstates,
+             intmasks,
+             intactions,
              sup->getErrorCode(),
              sup->getAnsiRender()
         );

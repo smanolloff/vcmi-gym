@@ -36,26 +36,6 @@ endif()
 include_directories(SYSTEM ${Boost_INCLUDE_DIR})
 
 #
-# V7
-#
-set(CONNECTOR_V7_FILES v7/common.h v7/common.cpp v7/connector.cpp v7/threadconnector.h v7/threadconnector.cpp v7/procconnector.h v7/procconnector.cpp)
-set(EXPORTER_V7_FILES v7/exporter.h v7/exporter.cpp)
-pybind11_add_module(connector_v7 ${CONNECTOR_V7_FILES})
-pybind11_add_module(exporter_v7 ${EXPORTER_V7_FILES})
-target_include_directories(connector_v7 PUBLIC "${VCMI_DIR}")
-target_include_directories(connector_v7 PUBLIC "${VCMI_DIR}/AI/MMAI")
-target_include_directories(exporter_v7 PUBLIC "${VCMI_DIR}")
-target_include_directories(exporter_v7 PUBLIC "${VCMI_DIR}/AI/MMAI")
-target_link_libraries(connector_v7 PRIVATE "${Boost_LIBRARIES}")
-target_link_libraries(connector_v7 PUBLIC ${LIBMLCLIENT})
-set_property(TARGET exporter_v7 PROPERTY SUFFIX)
-set_property(TARGET connector_v7 PROPERTY SUFFIX)
-if(DEBUG_BUILD)
-    target_compile_definitions(connector_v7 PRIVATE DEBUG_BUILD)
-    target_compile_definitions(exporter_v7 PRIVATE DEBUG_BUILD)
-endif()
-
-#
 # V8
 #
 set(CONNECTOR_V8_FILES v8/common.h v8/common.cpp v8/connector.cpp v8/threadconnector.h v8/threadconnector.cpp v8/procconnector.h v8/procconnector.cpp)

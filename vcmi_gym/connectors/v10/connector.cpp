@@ -10,8 +10,6 @@ namespace Connector::V10 {
 
     PYBIND11_MODULE(connector_v10, m) {
         py::class_<P_State>(m, "P_State")
-            .def("get_state", &P_State::get_state)
-            .def("get_actmask", &P_State::get_actmask)
             .def("get_intermediate_states", &P_State::get_intermediate_states)
             .def("get_intermediate_action_masks", &P_State::get_intermediate_action_masks)
             .def("get_intermediate_actions", &P_State::get_intermediate_actions)
