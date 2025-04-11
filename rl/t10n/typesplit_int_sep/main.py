@@ -96,8 +96,8 @@ class Buffer:
 
         self.containers = {
             "obs": torch.empty((capacity, dim_obs), dtype=torch.float32, device=device),
-            # "mask": torch.empty((capacity, n_actions), dtype=torch.float32, device=device),
-            # "reward": torch.empty((capacity,), dtype=torch.float32, device=device),
+            "mask": torch.empty((capacity, n_actions), dtype=torch.float32, device=device),
+            "reward": torch.empty((capacity,), dtype=torch.float32, device=device),
             "done": torch.empty((capacity,), dtype=torch.float32, device=device),
             "action": torch.empty((capacity,), dtype=torch.int64, device=device)
         }
@@ -106,10 +106,10 @@ class Buffer:
         self.full = False
 
     # Using compact version with single obs and mask buffers
-    def add(self, obs, _action_mask, _reward, done, action):
+    def add(self, obs, mask, reward, done, action):
         self.containers["obs"][self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        # self.containers["mask"][self.index] = torch.as_tensor(action_mask, dtype=torch.float32, device=self.device)
-        # self.containers["reward"][self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+        self.containers["mask"][self.index] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
+        self.containers["reward"][self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
         self.containers["done"][self.index] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.containers["action"][self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
 
@@ -117,8 +117,7 @@ class Buffer:
         if self.index == 0:
             self.full = True
 
-    # def add_batch(self, obs, mask, done, action, reward):
-    def add_batch(self, obs, _action_mask, _reward, done, action):
+    def add_batch(self, obs, mask, reward, done, action):
         batch_size = obs.shape[0]
         start = self.index
         end = self.index + batch_size
@@ -128,8 +127,8 @@ class Buffer:
         assert self.capacity % batch_size == 0, f"{self.capacity} % {batch_size} == 0"
 
         self.containers["obs"][start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        # self.containers["mask"][start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
-        # self.containers["reward"][start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
+        self.containers["mask"][start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
+        self.containers["reward"][start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
         self.containers["done"][start:end] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
         self.containers["action"][start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
 
@@ -1171,9 +1170,6 @@ def _save_buffer(
     s3_dir = s3_config["s3_dir"]
     bucket = s3_config["bucket_name"]
 
-    # [(local_path, s3_path), ...)]
-    paths = []
-
     # No need to store temp files if we can bail early
     if allow_skip and uploading_event.is_set():
         logger.warn("Still uploading previous buffer, will not upload this one to S3")
@@ -1184,37 +1180,35 @@ def _save_buffer(
         return
 
     now = time.time_ns() / 1000
-    for type, container in buffer.containers.items():
-        fname = f"{type}-{now:.0f}.npz"
-        s3_path = f"{s3_dir}/{fname}"
-        local_path = f"{cache_dir}/{s3_path}"
-        msg = f"Saving buffer to {local_path}"
-        if dry_run:
-            logger.info(f"{msg} (--dry-run)")
-        else:
-            logger.info(msg)
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            np.savez_compressed(local_path, container.cpu().numpy())
-        paths.append((local_path, s3_path))
+    fname = f"transitions-{buffer.containers['obs'].shape[0]}-{now:.0f}.npz"
+    s3_path = f"{s3_dir}/{fname}"
+    local_path = f"{cache_dir}/{s3_path}"
+    msg = f"Saving buffer to {local_path}"
+    if dry_run:
+        logger.info(f"{msg} (--dry-run)")
+    else:
+        logger.info(msg)
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        np.savez_compressed(local_path, **{k: v.cpu().numpy() for k, v in buffer.containers.items()})
+
+    import ipdb; ipdb.set_trace()  # noqa
 
     def do_upload():
         s3 = init_s3_client()
+        msg = f"Uploading to s3://{bucket}/{s3_path} ..."
 
-        for local_path, s3_path in paths:
-            msg = f"Uploading to s3://{bucket}/{s3_path} ..."
+        if dry_run:
+            logger.info(f"{msg} (--dry-run + sleep(10))")
+            time.sleep(10)
+        else:
+            logger.info(msg)
+            s3.upload_file(local_path, bucket, s3_path)
 
-            if dry_run:
-                logger.info(f"{msg} (--dry-run + sleep(10))")
-                time.sleep(10)
-            else:
-                logger.info(msg)
-                s3.upload_file(local_path, bucket, s3_path)
+        logger.info(f"Uploaded: s3://{bucket}/{s3_path}")
 
-            logger.info(f"Uploaded: s3://{bucket}/{s3_path}")
-
-            if optimize_local_storage and os.path.exists(local_path):
-                logger.info(f"Remove {local_path}")
-                os.unlink(local_path)
+        if optimize_local_storage and os.path.exists(local_path):
+            logger.info(f"Remove {local_path}")
+            os.unlink(local_path)
 
     # Buffer saved to local disk =>
     # Notify parent thread so it can now proceed with collecting new obs in it
