@@ -1194,9 +1194,7 @@ def _save_buffer(
         else:
             logger.info(msg)
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            # XXX: can't use .tmp suffix, as numpy will add .npz after it...
-            np.savez_compressed(f"tmp-{local_path}", container.cpu().numpy())
-            shutil.move(f"tmp-{local_path}", local_path)
+            np.savez_compressed(local_path, container.cpu().numpy())
         paths.append((local_path, s3_path))
 
     def do_upload():

@@ -31,7 +31,7 @@ env_kwargs = dict(
 )
 
 config = dict(
-    name_template="{datetime}-{id}",
+    name_template="{datetime}-{id}-transformer",
 
     env=dict(
         train=dict(
