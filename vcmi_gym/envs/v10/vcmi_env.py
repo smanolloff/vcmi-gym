@@ -17,7 +17,6 @@
 import numpy as np
 import gymnasium as gym
 import os
-import math
 from typing import Optional, NamedTuple
 
 from ..util import log

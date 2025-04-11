@@ -936,13 +936,12 @@ def train_model(
     binary_losses = []
     categorical_losses = []
     total_losses = []
-    waits = []
+    timer = Timer()
 
     for epoch in range(epochs):
-        last_sample_at = time.time()
-
+        timer.start()
         for batch in buffer.sample_iter(batch_size):
-            waits.append(time.time() - last_sample_at)
+            timer.stop()
             obs, action, next_obs = batch
 
             if scaler:
@@ -975,14 +974,14 @@ def train_model(
                 # max_norm = 1.0  # Adjust as needed
                 # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
                 optimizer.step()
-
-            last_sample_at = time.time()
+            timer.start()
+        timer.stop()
 
         continuous_loss = sum(continuous_losses) / len(continuous_losses)
         binary_loss = sum(binary_losses) / len(binary_losses)
         categorical_loss = sum(categorical_losses) / len(categorical_losses)
         total_loss = sum(total_losses) / len(total_losses)
-        total_wait = sum(waits)
+        total_wait = timer.peek()
 
         return continuous_loss, binary_loss, categorical_loss, total_loss, total_wait
 
@@ -994,11 +993,11 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     binary_losses = []
     categorical_losses = []
     total_losses = []
-    waits = []
+    timer = Timer()
 
-    last_sample_at = time.time()
+    timer.start()
     for batch in buffer.sample_iter(batch_size):
-        waits.append(time.time() - last_sample_at)
+        timer.stop()
         obs, action, next_obs = batch
         with torch.no_grad():
             pred_obs = model(obs, action)
@@ -1010,13 +1009,14 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
         binary_losses.append(loss_bin.item())
         categorical_losses.append(loss_cat.item())
         total_losses.append(loss_tot.item())
-        last_sample_at = time.time()
+        timer.start()
+    timer.stop()
 
     continuous_loss = sum(continuous_losses) / len(continuous_losses)
     binary_loss = sum(binary_losses) / len(binary_losses)
     categorical_loss = sum(categorical_losses) / len(categorical_losses)
     total_loss = sum(total_losses) / len(total_losses)
-    total_wait = sum(waits)
+    total_wait = timer.peek()
 
     return continuous_loss, binary_loss, categorical_loss, total_loss, total_wait
 
@@ -1296,6 +1296,19 @@ def aggregate_metrics(queue):
     return total / count if count else None
 
 
+def timer_stats(timers):
+    res = {}
+    t_all = timers["all"].peek()
+    for k, v in timers.items():
+        res[f"timer/{k}"] = v.peek()
+        if k != "all":
+            res[f"timer_rel/{k}"] = v.peek() / t_all
+
+    res["timer/other"] = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
+    res["timer_rel/other"] = res["timer/other"] / t_all
+    return res
+
+
 def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     if resume_config:
         with open(resume_config, "r") as f:
@@ -1504,25 +1517,29 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     train_uploading_cond = threading.Condition()
     eval_uploading_cond = threading.Condition()
 
-    timer_all = Timer()
-    timer_sample = Timer()
-    timer_train = Timer()
-    timer_eval = Timer()
+    timers = {
+        "all": Timer(),
+        "sample": Timer(),
+        "train": Timer(),
+        "eval": Timer(),
+    }
+
+    should_log_timers = False
 
     # Skip saving if eval_loss gets worse
     eval_loss_best = 1e9
     eval_loss = eval_loss_best
 
     while True:
-        timer_all.reset()
-        timer_sample.reset()
-        timer_train.reset()
-        timer_eval.reset()
+        timers["sample"].reset()
+        timers["train"].reset()
+        timers["eval"].reset()
 
-        timer_all.start()
+        timers["all"].reset()
+        timers["all"].start()
 
         now = time.time()
-        with timer_sample:
+        with timers["sample"]:
             load_samples(logger=logger, dataloader=dataloader, buffer=buffer)
 
         logger.info("Samples loaded: %d" % buffer.capacity)
@@ -1548,7 +1565,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
         loss_weights = compute_loss_weights(stats, device=device)
 
-        with timer_train:
+        with timers["train"]:
             train_continuous_loss, train_binary_loss, train_categorical_loss, train_total_loss, train_wait = train_model(
                 logger=logger,
                 model=model,
@@ -1564,10 +1581,10 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         if now - last_evaluation_at > config["eval"]["interval_s"]:
             last_evaluation_at = now
 
-            with timer_sample:
+            with timers["sample"]:
                 load_samples(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
 
-            with timer_eval:
+            with timers["eval"]:
                 eval_continuous_loss, eval_binary_loss, eval_categorical_loss, eval_total_loss, eval_wait = eval_model(
                     logger=logger,
                     model=model,
@@ -1576,6 +1593,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     batch_size=eval_batch_size,
                 )
 
+            should_log_to_wandb = True
             wlog = {
                 "iteration": stats.iteration,
                 "train_loss/continuous": train_continuous_loss,
@@ -1596,8 +1614,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             eval_dataset_metrics = aggregate_metrics(eval_metric_queue)
             if eval_dataset_metrics:
                 wlog["eval_dataset/avg_worker_utilization"] = eval_dataset_metrics
-
-            wandb_log(wlog, commit=True)
 
             if eval_save_samples:
                 save_buffer_async(
@@ -1641,6 +1657,11 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     uploading_event=uploading_event
                 ))
                 thread.start()
+
+        if should_log_to_wandb:
+            should_log_to_wandb = False
+            wlog = dict(wlog, **timer_stats(timers))
+            wandb_log(wlog, commit=True)
 
         # XXX: must log timers here (some may have been skipped)
         stats.iteration += 1
