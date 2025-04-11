@@ -1185,7 +1185,7 @@ def _save_buffer(
 
     now = time.time_ns() / 1000
     for type, container in buffer.containers.items():
-        fname = f"{type}-{run_id}-{now:.0f}.npz"
+        fname = f"{type}-{now:.0f}.npz"
         s3_path = f"{s3_dir}/{fname}"
         local_path = f"{cache_dir}/{s3_path}"
         msg = f"Saving buffer to {local_path}"
@@ -1194,7 +1194,7 @@ def _save_buffer(
         else:
             logger.info(msg)
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            np.savez_compressed(f"{local_path}.tmp", container)
+            np.savez_compressed(f"{local_path}.tmp", container.cpu().numpy())
             shutil.move(f"{local_path}.tmp", local_path)
         paths.append((local_path, s3_path))
 

@@ -35,14 +35,14 @@ config = dict(
 
     env=dict(
         train=dict(
-            num_workers=2,
-            batch_size=100,  # buffer capacity = num_workers * batch_size
+            num_workers=5,
+            batch_size=2000,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         eval=dict(
             num_workers=1,
-            batch_size=100,  # buffer capacity = num_workers * batch_size
+            batch_size=2000,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
         ),
@@ -86,12 +86,11 @@ config = dict(
     ),
 
     eval={
-        "interval_s": 10,           # wandb_log will also be called here
-        "batch_size": 100,
+        "interval_s": 60,           # wandb_log will also be called here
+        "batch_size": 500,
     },
     train={
-        # TODO: consider torch.optim.lr_scheduler.StepLR
-        "batch_size": 100,
+        "batch_size": 500,
         "learning_rate": 1e-4,
         "epochs": 1,
     }
