@@ -1566,7 +1566,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         loss_weights = compute_loss_weights(stats, device=device)
 
         with timers["train"]:
-            train_continuous_loss, train_binary_loss, train_categorical_loss, train_total_loss, train_wait = train_model(
+            train_continuous_loss, train_binary_loss, train_categorical_loss, train_loss, train_wait = train_model(
                 logger=logger,
                 model=model,
                 optimizer=optimizer,
@@ -1585,7 +1585,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 load_samples(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
 
             with timers["eval"]:
-                eval_continuous_loss, eval_binary_loss, eval_categorical_loss, eval_total_loss, eval_wait = eval_model(
+                eval_continuous_loss, eval_binary_loss, eval_categorical_loss, eval_loss, eval_wait = eval_model(
                     logger=logger,
                     model=model,
                     loss_weights=loss_weights,
@@ -1599,11 +1599,11 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "train_loss/continuous": train_continuous_loss,
                 "train_loss/binary": train_binary_loss,
                 "train_loss/categorical": train_categorical_loss,
-                "train_loss/total": train_total_loss,
+                "train_loss/total": train_loss,
                 "eval_loss/continuous": eval_continuous_loss,
                 "eval_loss/binary": eval_binary_loss,
                 "eval_loss/categorical": eval_categorical_loss,
-                "eval_loss/total": eval_total_loss,
+                "eval_loss/total": eval_loss,
                 "eval_dataset/wait_time_s": eval_wait,
             }
 
@@ -1633,7 +1633,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "train_loss/continuous": train_continuous_loss,
                 "train_loss/binary": train_binary_loss,
                 "train_loss/categorical": train_categorical_loss,
-                "train_loss/total": train_total_loss,
+                "train_loss/total": train_loss,
                 "train_dataset/wait_time_s": train_wait,
             })
 
