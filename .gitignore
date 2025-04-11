@@ -21,3 +21,4 @@ test.out
 tmp/
 rl/models/
 rl/stats/
+.cache
