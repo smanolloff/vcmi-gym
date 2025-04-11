@@ -1191,8 +1191,6 @@ def _save_buffer(
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
         np.savez_compressed(local_path, **{k: v.cpu().numpy() for k, v in buffer.containers.items()})
 
-    import ipdb; ipdb.set_trace()  # noqa
-
     def do_upload():
         s3 = init_s3_client()
         msg = f"Uploading to s3://{bucket}/{s3_path} ..."

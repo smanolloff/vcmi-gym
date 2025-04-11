@@ -51,7 +51,7 @@ config = dict(
     checkpoint_interval_s=900,
 
     s3=dict(
-        optimize_local_storage=True,
+        optimize_local_storage=False,
 
         # checkpoint=None,
         checkpoint=dict(
