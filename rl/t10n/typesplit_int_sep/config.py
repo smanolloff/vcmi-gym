@@ -12,67 +12,87 @@ import os
 #       Files are saved to local disk only (see `bufdir`)
 #       and can be later uploaded via s3uploader.py
 #
+env_kwargs = dict(
+    opponent="StupidAI",
+    max_steps=1000,
+    random_heroes=1,
+    random_obstacles=1,
+    town_chance=30,
+    warmachine_chance=40,
+    random_terrain_chance=100,
+    tight_formation_chance=20,
+    allow_invalid_actions=True,
+    user_timeout=3600,
+    vcmi_timeout=3600,
+    boot_timeout=300,
+    conntype="thread",
+    vcmi_loglevel_global="error",
+    vcmi_loglevel_ai="error",
+)
+
 config = dict(
-    # env=None,
+    name_template="{datetime}-{id}",
+
     env=dict(
-        # opponent="BattleAI",
-        opponent="StupidAI",
-        mapname="gym/generated/4096/4x1024.vmap",
-        # mapname="gym/A1.vmap",
-        max_steps=1000,
-        random_heroes=1,
-        random_obstacles=1,
-        town_chance=30,
-        warmachine_chance=40,
-        random_terrain_chance=100,
-        tight_formation_chance=20,
-        allow_invalid_actions=True,
-        user_timeout=3600,
-        vcmi_timeout=3600,
-        boot_timeout=300,
-        conntype="thread",
-        # vcmi_loglevel_global="trace",
-        # vcmi_loglevel_ai="trace",
+        train=dict(
+            num_workers=2,
+            batch_size=100,  # buffer capacity = num_workers * batch_size
+            prefetch_factor=1,
+            kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
+        ),
+        eval=dict(
+            num_workers=1,
+            batch_size=100,  # buffer capacity = num_workers * batch_size
+            prefetch_factor=1,
+            kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
+        ),
     ),
 
-    # s3=None,
+    checkpoint_interval_s=900,
+
     s3=dict(
+        optimize_local_storage=True,
+
+        # checkpoint=None,
         checkpoint=dict(
-            interval_s=3600,
             bucket_name="vcmi-gym",
             s3_dir="models",
         ),
+
         data=dict(
-            bucket_name="vcmi-gym",
-            s3_dir="v10",
-            cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
-            cached_files_max=None,
-            num_workers=1,
-            prefetch_factor=1,
-            pin_memory=False,       # causes hangs when enabled
-            shuffle=True,
+            train=dict(
+                bucket_name="vcmi-gym",
+                s3_dir="v10/4x1024",
+                cache_dir=os.path.abspath("data/.s3_cache"),
+                cached_files_max=None,
+                num_workers=8,
+                batch_size=1250,  # buffer capacity = num_workers * batch_size
+                prefetch_factor=1,
+                pin_memory=False,       # causes hangs when enabled
+                shuffle=False,
+            ),
+            test=dict(
+                bucket_name="vcmi-gym",
+                s3_dir="v10/8x512",
+                cache_dir=os.path.abspath("data/.s3_cache"),
+                cached_files_max=None,
+                num_workers=1,
+                batch_size=10000,  # buffer capacity = num_workers * batch_size
+                prefetch_factor=1,
+                pin_memory=False,       # causes hangs when enabled
+                shuffle=False,
+            )
         ),
     ),
 
     eval={
-        "interval_s": 60,           # wandb_log will also be called here
-        "buffer_capacity": 10_000,  # eval_model() does a full pass of this buffer
-        "batch_size": 1000,
+        "interval_s": 10,           # wandb_log will also be called here
+        "batch_size": 100,
     },
     train={
         # TODO: consider torch.optim.lr_scheduler.StepLR
-        "lr_start": 1e-2,
-        "lr_min": 1e-3,
-        "lr_step_size": 60,  # 1step ~= 1min if epochs=3 and buf=10K
-        "lr_gamma": 0.75,
-
-        "buffer_capacity": 10_000,
+        "batch_size": 100,
+        "learning_rate": 1e-4,
         "epochs": 1,
-        "batch_size": 2000,
-
-        # !!! DEBUG (linter warning is OK) !!!
-        # "buffer_capacity": 1000,
-        # "epochs": 10,
-        # "batch_size": 100,
     }
 )

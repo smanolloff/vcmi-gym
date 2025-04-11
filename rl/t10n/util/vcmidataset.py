@@ -46,8 +46,8 @@ class VCMIDataset(IterableDataset):
                     obs["transitions"]["observations"],
                     obs["transitions"]["action_masks"],
                     obs["transitions"]["rewards"],
-                    obs["transitions"]["actions"],
                     dones,
+                    obs["transitions"]["actions"],
                 )
 
                 # =============================================================
@@ -122,7 +122,7 @@ class VCMIDataset(IterableDataset):
 
                 final_t = len(obs["transitions"]["observations"]) - 1
 
-                for t, (t_obs, t_mask, t_reward, t_action, t_done) in enumerate(zipped):
+                for t, (t_obs, t_mask, t_reward, t_done, t_action) in enumerate(zipped):
                     if t == final_t:
                         reward_carry = t_reward
                         if not t_done:
@@ -132,7 +132,7 @@ class VCMIDataset(IterableDataset):
                         t_reward = reward_carry
 
                     with self.timer_idle:
-                        yield t_obs, t_mask, t_reward, t_action, t_done
+                        yield t_obs, t_mask, t_reward, t_done, t_action
 
                     if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:
                         self.metric_reported_at = time.time()
