@@ -168,7 +168,6 @@ class Buffer:
         ok_samples[self.worker_cutoffs] = False
         valid_indices = torch.nonzero(ok_samples, as_tuple=True)[0]
         shuffled_indices = valid_indices[torch.randperm(len(valid_indices), device=self.device)]
-        import ipdb; ipdb.set_trace()  # noqa
 
         # The valid indices are < than all indices by `short`
         short = self.capacity - len(shuffled_indices)
