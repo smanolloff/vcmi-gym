@@ -90,16 +90,17 @@ def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
 
 
 class Buffer:
-    def __init__(self, capacity, dim_obs, n_actions, device=torch.device("cpu")):
+    def __init__(self, capacity, dim_obs, n_actions, worker_cutoffs=[], device=torch.device("cpu")):
         self.capacity = capacity
         self.device = device
+        self.worker_cutoffs = worker_cutoffs
 
         self.containers = {
-            "obs": torch.empty((capacity, dim_obs), dtype=torch.float32, device=device),
-            "mask": torch.empty((capacity, n_actions), dtype=torch.float32, device=device),
-            "reward": torch.empty((capacity,), dtype=torch.float32, device=device),
-            "done": torch.empty((capacity,), dtype=torch.float32, device=device),
-            "action": torch.empty((capacity,), dtype=torch.int64, device=device)
+            "obs": torch.zeros((capacity, dim_obs), dtype=torch.float32, device=device),
+            "mask": torch.zeros((capacity, n_actions), dtype=torch.float32, device=device),
+            "reward": torch.zeros((capacity,), dtype=torch.float32, device=device),
+            "done": torch.zeros((capacity,), dtype=torch.float32, device=device),
+            "action": torch.zeros((capacity,), dtype=torch.int64, device=device)
         }
 
         self.index = 0
@@ -140,9 +141,12 @@ class Buffer:
     def sample(self, batch_size):
         max_index = self.capacity if self.full else self.index
 
-        # Get valid indices where done=False (episode not ended)
+        # Valid are indices of samples where done=False and cutoff=False
+        # (i.e. to ensure obs,next_obs is valid)
         # XXX: float->bool conversion is OK given floats are exactly 1 or 0
-        valid_indices = torch.nonzero(~self.containers["done"][:max_index - 1].bool(), as_tuple=True)[0]
+        ok_samples = ~self.containers["done"][:max_index - 1].bool()
+        ok_samples[self.worker_cutoffs] = False
+        valid_indices = torch.nonzero(ok_samples, as_tuple=True)[0]
         sampled_indices = valid_indices[torch.randint(len(valid_indices), (batch_size,), device=self.device)]
 
         obs = self.containers["obs"][sampled_indices]
@@ -159,12 +163,14 @@ class Buffer:
     def sample_iter(self, batch_size):
         max_index = self.capacity if self.full else self.index
 
-        # Get valid indices where done=False
-        # XXX: float->bool conversion is OK given floats are exactly 1 or 0
-        valid_indices = torch.nonzero(~self.containers["done"][:max_index - 1].bool(), as_tuple=True)[0]
+        # See note in .sample()
+        ok_samples = ~self.containers["done"][:max_index - 1].bool()
+        ok_samples[self.worker_cutoffs] = False
+        valid_indices = torch.nonzero(ok_samples, as_tuple=True)[0]
         shuffled_indices = valid_indices[torch.randperm(len(valid_indices), device=self.device)]
+        import ipdb; ipdb.set_trace()  # noqa
 
-        # The valid indices are than all indices
+        # The valid indices are < than all indices by `short`
         short = self.capacity - len(shuffled_indices)
         if short:
             shuffled_indices = torch.cat((shuffled_indices, valid_indices[torch.randperm(len(valid_indices), device=self.device)][:short]))
@@ -645,7 +651,7 @@ class TransitionModel(nn.Module):
 
 
 class StructuredLogger:
-    def __init__(self, level, filename, context={}):
+    def __init__(self, level, filename=None, context={}):
         self.level = level
         self.filename = filename
         self.context = context
@@ -1146,6 +1152,7 @@ def _save_buffer(
     dry_run,
     buffer,
     run_id,
+    env_config,
     s3_config,
     uploading_cond,
     uploading_event,
@@ -1184,12 +1191,15 @@ def _save_buffer(
     s3_path = f"{s3_dir}/{fname}"
     local_path = f"{cache_dir}/{s3_path}"
     msg = f"Saving buffer to {local_path}"
+    to_save = {k: v.cpu().numpy() for k, v in buffer.containers.items()}
+    to_save["md"] = {"env_config": env_config, "s3_config": s3_config}
+
     if dry_run:
         logger.info(f"{msg} (--dry-run)")
     else:
         logger.info(msg)
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        np.savez_compressed(local_path, **{k: v.cpu().numpy() for k, v in buffer.containers.items()})
+        np.savez_compressed(local_path, **to_save)
 
     def do_upload():
         s3 = init_s3_client()
@@ -1243,6 +1253,7 @@ def save_buffer_async(
     logger,
     dry_run,
     buffer,
+    env_config,
     s3_config,
     allow_skip,
     uploading_cond,
@@ -1260,6 +1271,7 @@ def save_buffer_async(
             buffer=buffer,
             # out_dir=config["run"]["out_dir"],
             run_id=run_id,
+            env_config=env_config,
             s3_config=s3_config,
             uploading_cond=uploading_cond,
             uploading_event=uploading_event_buf,
@@ -1414,26 +1426,31 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     eval_metric_queue = torch.multiprocessing.Queue()
 
     if train_sample_from_env:
-        dataloader = make_vcmi_dataloader(train_env_config, train_metric_queue)
+        dataloader_obj = make_vcmi_dataloader(train_env_config, train_metric_queue)
     if eval_sample_from_env:
-        eval_dataloader = make_vcmi_dataloader(eval_env_config, eval_metric_queue)
+        eval_dataloader_obj = make_vcmi_dataloader(eval_env_config, eval_metric_queue)
     if train_sample_from_s3:
-        dataloader = make_s3_dataloader(train_s3_config, train_metric_queue)
+        dataloader_obj = make_s3_dataloader(train_s3_config, train_metric_queue)
     if eval_sample_from_s3:
-        eval_dataloader = make_s3_dataloader(eval_s3_config, eval_metric_queue)
+        eval_dataloader_obj = make_s3_dataloader(eval_s3_config, eval_metric_queue)
 
     def make_buffer(dloader):
         return Buffer(
             capacity=dloader.num_workers * dloader.batch_size,
+            # XXX: dirty hack to prevents (obs, obs_next) from different workers
+            #       1. assumes dataloader fetches `batch_size` samples from 1 worker
+            #           (instead of e.g. round robin worker for each sample)
+            #       2. assumes buffer.capacity % dataloader.batch_size == 0
+            worker_cutoffs=[i * dloader.batch_size - 1 for i in range(1, dloader.num_workers)],
             dim_obs=DIM_OBS,
             n_actions=N_ACTIONS,
             device=device
         )
 
-    buffer = make_buffer(dataloader)
-    dataloader = iter(dataloader)
-    eval_buffer = make_buffer(eval_dataloader)
-    eval_dataloader = iter(eval_dataloader)
+    buffer = make_buffer(dataloader_obj)
+    dataloader = iter(dataloader_obj)
+    eval_buffer = make_buffer(eval_dataloader_obj)
+    eval_dataloader = iter(eval_dataloader_obj)
     stats = Stats(model, device=device)
 
     if resume_config:
@@ -1552,6 +1569,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 logger=logger,
                 dry_run=dry_run,
                 buffer=buffer,
+                env_config=train_env_config,
                 s3_config=train_s3_config,
                 allow_skip=not sample_only,
                 uploading_cond=train_uploading_cond,
@@ -1621,6 +1639,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     logger=logger,
                     dry_run=dry_run,
                     buffer=eval_buffer,
+                    env_config=eval_env_config,
                     s3_config=eval_s3_config,
                     allow_skip=not sample_only,
                     uploading_cond=eval_uploading_cond,
@@ -1674,6 +1693,52 @@ def test(cfg_file):
     weights_file = f"data/t10n/{run_id}-model.pt"
 
     model = load_for_test(weights_file)
+
+    # XXX: test code
+    #
+    # import ipdb; ipdb.set_trace()  # noqa
+    #
+    # from vcmi_gym.envs.v10.vcmi_env import VcmiEnv
+    # from vcmi_gym.envs.v10.decoder.decoder import Decoder
+
+    # def prepare(obs, action, reward, headline):
+    #     import re
+    #     bf = Decoder.decode(obs)
+    #     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    #     rewtxt = "" if reward is None else "Reward: %s" % round(reward, 2)
+    #     render = {}
+    #     render["bf_lines"] = bf.render_battlefield()[0][:-1]
+    #     render["bf_len"] = [len(l) for l in render["bf_lines"]]
+    #     render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
+    #     render["bf_maxlen"] = max(render["bf_len"])
+    #     render["bf_maxprintlen"] = max(render["bf_printlen"])
+    #     render["bf_lines"].insert(0, rewtxt.ljust(render["bf_maxprintlen"]))
+    #     render["bf_lines"].insert(0, headline)
+    #     render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+    #     render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
+    #     render["bf_lines"].append(VcmiEnv.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
+    #     return render["bf_lines"]
+
+    # logger = StructuredLogger(level=10, filename=None)
+    # dataset = VCMIDataset(logger=logger, env_kwargs=dict(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1))
+    # dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=10, num_workers=2))
+    # buffer = Buffer(capacity=20, dim_obs=DIM_OBS, n_actions=N_ACTIONS)
+    # load_samples(logger, dataloader, buffer)
+    # it = buffer.sample_iter(1)
+
+    # for i in range(20):
+    #     print("=" * 100)
+    #     obs_prev, action, obs_next = next(it)
+    #     obs_prev = obs_prev[0].numpy()
+    #     obs_next = obs_next[0].numpy()
+    #     action = action[0].item()
+    #     lines_prev = prepare(obs_prev, action, None, "Start:")
+    #     lines_real = prepare(obs_next, -1, None, "Real:")
+    #     print("")
+    #     print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real)]))
+    #     print("")
+    # EOF: test code
+
     env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread")
     do_test(model, env)
 
@@ -1692,13 +1757,42 @@ def load_for_test(file):
 def do_test(model, env):
     from vcmi_gym.envs.v10.decoder.decoder import Decoder
 
-    while len(env.result.intstates) < 2:
+    while True:
         action = env.random_action()
-        env.step(action)
+        obs, *_ = env.step(action)
+        if len(env.result.intstates) == 2:
+            break
 
-    obs = env.result.intstates[1]
-    action = env.result.intactions[1]
-    action_pred, confidence = model.predict(obs)
+    obs_prev = obs["transitions"]["observations"][0]
+    obs_next = obs["transitions"]["observations"][1]
+    obs_pred = model.predict(obs["observation"], action)
+
+    def prepare(obs, action, reward, headline):
+        import re
+        bf = Decoder.decode(obs)
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        rewtxt = "" if reward is None else "Reward: %s" % round(reward, 2)
+        render = {}
+        render["bf_lines"] = bf.render_battlefield()[0][:-1]
+        render["bf_len"] = [len(l) for l in render["bf_lines"]]
+        render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
+        render["bf_maxlen"] = max(render["bf_len"])
+        render["bf_maxprintlen"] = max(render["bf_printlen"])
+        render["bf_lines"].insert(0, rewtxt.ljust(render["bf_maxprintlen"]))
+        render["bf_lines"].insert(0, headline)
+        render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+        render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
+        render["bf_lines"].append(env.__class__.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
+        return render["bf_lines"]
+
+    lines_prev = prepare(obs_prev, action, None, "Start:")
+    lines_real = prepare(obs_next, -1, None, "Real:")
+    lines_pred = prepare(obs_pred, -1, None, "Predicted:")
+
+    # for i in range(len(bfields)):
+    print("")
+    print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real, lines_pred)]))
+    print("")
 
     def action_str(obs, a):
         if a > 1:
@@ -1710,9 +1804,12 @@ def do_test(model, env):
             assert a == 1
             return "Wait"
 
-    print("Pred: %d: %s, confidence: %.2f" % (action_pred, action_str(obs, action_pred), confidence))
-    print("Real: %d: %s" % (action, action_str(obs, action)))
-    env.render_transitions()
+    # print(env.render_transitions())
+
+    # print("Pred:")
+    # print(Decoder.decode(obs_pred))
+    # print("Real:")
+    # print(Decoder.decode(obs_real))
 
 
 if __name__ == "__main__":

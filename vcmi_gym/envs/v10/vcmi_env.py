@@ -390,7 +390,7 @@ class VcmiEnv(gym.Env):
             res += "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
         return res
 
-    def render_transitions(self):
+    def render_transitions(self, add_regular_render=True):
         def prepare(obs, action, reward):
             import re
             bf = Decoder.decode(obs)
@@ -416,7 +416,9 @@ class VcmiEnv(gym.Env):
         print("")
         print("\n".join([(" → ".join(rowlines)) for rowlines in zip(*bfields)]))
         print("")
-        print(self.render())
+
+        if add_regular_render:
+            print(self.render())
 
     def __del__(self):
         self.close()
