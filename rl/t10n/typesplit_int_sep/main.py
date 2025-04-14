@@ -9,12 +9,12 @@ import botocore.exceptions
 import threading
 import logging
 import shutil
-import tempfile
 import argparse
 import math
 import time
 import numpy as np
 import pathlib
+import enum
 from datetime import datetime
 from functools import partial
 from boto3.s3.transfer import TransferConfig
@@ -27,11 +27,13 @@ from ..constants_v10 import (
     GLOBAL_ATTR_MAP,
     PLAYER_ATTR_MAP,
     HEX_ATTR_MAP,
-    HEX_ACT_MAP,
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
+    STATE_HEXES_INDEX_START,
+    HEX_MASK_INDEX_START,
+    HEX_MASK_INDEX_END,
 )
 
 from ..util.vcmidataset import VCMIDataset
@@ -41,6 +43,13 @@ from ..util.timer import Timer
 DIM_OTHER = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
 DIM_HEXES = 165*STATE_SIZE_ONE_HEX
 DIM_OBS = DIM_OTHER + DIM_HEXES
+
+
+class Other(enum.IntEnum):
+    CAN_WAIT = enum.auto()
+    REWARD = 0
+    DONE = enum.auto()
+    _count = enum.auto()
 
 
 def wandb_log(*args, **kwargs):
@@ -151,14 +160,14 @@ class Buffer:
 
         obs = self.containers["obs"][sampled_indices]
         # action_mask = self.containers["mask"][sampled_indices]
-        # reward = self.containers["reward"][sampled_indices]
         action = self.containers["action"][sampled_indices]
         next_obs = self.containers["obs"][sampled_indices + 1]
-        # next_action_mask = self.containers["mask"][sampled_indices + 1]
-        # next_done = self.containers["done"][sampled_indices + 1]
+        next_mask = self.containers["mask"][sampled_indices + 1]
+        next_reward = self.containers["reward"][sampled_indices + 1]
+        next_done = self.containers["done"][sampled_indices + 1]
 
         # return obs, action, reward, next_obs, next_action_mask, next_done
-        return obs, action, next_obs
+        return obs, action, next_obs, next_mask, next_reward, next_done
 
     def sample_iter(self, batch_size):
         max_index = self.capacity if self.full else self.index
@@ -181,10 +190,10 @@ class Buffer:
             yield (
                 self.containers["obs"][batch_indices],
                 self.containers["action"][batch_indices],
-                # self.containers["reward"][batch_indices],
                 self.containers["obs"][batch_indices + 1],
-                # self.containers["mask"][batch_indices + 1],
-                # self.containers["done"][batch_indices + 1]
+                self.containers["mask"][batch_indices + 1],
+                self.containers["reward"][batch_indices + 1],
+                self.containers["done"][batch_indices + 1]
             )
 
 
@@ -341,8 +350,8 @@ class TransitionModel(nn.Module):
 
         # Transformer (hexes only)
         self.transformer_hex = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=z_size_hex, nhead=4, batch_first=True),
-            num_layers=3
+            nn.TransformerEncoderLayer(d_model=z_size_hex, nhead=8, batch_first=True),
+            num_layers=6
         )
         # => (B, 165, Z_HEX)
 
@@ -351,7 +360,7 @@ class TransitionModel(nn.Module):
         #
 
         # (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
-        self.aggregator = nn.LazyLinear(512)
+        self.aggregator = nn.LazyLinear(2048)
         # => (B, Z_AGG)
 
         #
@@ -366,6 +375,9 @@ class TransitionModel(nn.Module):
 
         # => (B, 165, Z_AGG + Z_HEX)
         self.head_hex = nn.LazyLinear(STATE_SIZE_ONE_HEX)
+
+        # => (B, Z_AGG)
+        self.head_other = nn.LazyLinear(Other._count)
 
         self.to(device)
 
@@ -436,7 +448,11 @@ class TransitionModel(nn.Module):
 
         obs_out = torch.cat((global_out, player_out.flatten(start_dim=1), hex_out.flatten(start_dim=1)), dim=1)
 
-        return obs_out
+        other_out = self.head_other(z_agg)
+        # => (B, Other._count)
+
+        # obs, rew, can_wait
+        return obs_out, other_out
 
     def reconstruct(self, obs_out):
         global_continuous_out = obs_out[:, self.obs_index["global"]["continuous"]]
@@ -478,7 +494,23 @@ class TransitionModel(nn.Module):
         with torch.no_grad():
             obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             action = torch.tensor(action, dtype=torch.int64, device=self.device).unsqueeze(0)
-            return self.reconstruct(self.forward(obs, action))[0].numpy()
+
+            was_training = self.training
+            self.eval()
+            try:
+                obs_pred_logits, other_pred_logits = self.forward(obs, action)
+                obs_pred = self.reconstruct(obs_pred_logits)[0].numpy()
+            finally:
+                self.train(was_training)
+
+            mask_pred = torch.zeros(N_ACTIONS, dtype=bool)
+            mask_pred[1] = torch.sigmoid(other_pred_logits[0][Other.CAN_WAIT])
+            mask_pred[2:] = obs_pred[STATE_HEXES_INDEX_START:].reshape(165, STATE_SIZE_ONE_HEX)[:, HEX_MASK_INDEX_START:HEX_MASK_INDEX_END]
+
+            rew_pred = other_pred_logits[0][Other.REWARD].item()
+            done_pred = torch.sigmoid(other_pred_logits[0][Other.DONE]).item()
+
+            return obs_pred, mask_pred, rew_pred, done_pred
 
     def _build_indices(self):
         self.global_index = {"continuous": [], "binary": [], "categoricals": []}
@@ -802,6 +834,14 @@ class Stats:
             stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
 
 
+def compute_other_losses(canwait_pred, canwait_target, rew_pred, rew_target, done_pred, done_target):
+    return (
+        binary_cross_entropy_with_logits(canwait_pred, canwait_target),
+        mse_loss(rew_pred, rew_target),
+        binary_cross_entropy_with_logits(done_pred, done_target),
+    )
+
+
 def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
     logits_global_continuous = pred_obs[:, obs_index["global"]["continuous"]]
     logits_global_binary = pred_obs[:, obs_index["global"]["binary"]]
@@ -940,6 +980,9 @@ def train_model(
     continuous_losses = []
     binary_losses = []
     categorical_losses = []
+    canwait_losses = []
+    rew_losses = []
+    done_losses = []
     total_losses = []
     timer = Timer()
 
@@ -947,22 +990,27 @@ def train_model(
         timer.start()
         for batch in buffer.sample_iter(batch_size):
             timer.stop()
-            obs, action, next_obs = batch
+            obs, action, next_obs, next_mask, next_rew, next_done = batch
 
             if scaler:
                 with torch.amp.autocast(model.device.type):
-                    pred_obs = model(obs, action)
+                    pred_obs, pred_other = model(obs, action)
                     loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
-                    loss_tot = loss_cont + loss_bin + loss_cat
+                    loss_canwait, loss_rew, loss_done = compute_other_losses(pred_other[:, Other.CAN_WAIT], next_obs[:, 1], pred_other[:, Other.REWARD], next_rew, next_obs[:, Other.DONE], next_done)
+                    loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_rew + loss_done
 
             else:
-                pred_obs = model(obs, action)
+                pred_obs, pred_other = model(obs, action)
                 loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
-                loss_tot = loss_cont + loss_bin + loss_cat
+                loss_canwait, loss_rew, loss_done = compute_other_losses(pred_other[:, Other.CAN_WAIT], next_obs[:, 1], pred_other[:, Other.REWARD], next_rew, next_obs[:, Other.DONE], next_done)
+                loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_rew + loss_done
 
             continuous_losses.append(loss_cont.item())
             binary_losses.append(loss_bin.item())
             categorical_losses.append(loss_cat.item())
+            canwait_losses.append(loss_canwait.item())
+            rew_losses.append(loss_rew.item())
+            done_losses.append(loss_done.item())
             total_losses.append(loss_tot.item())
 
             optimizer.zero_grad()
@@ -985,10 +1033,22 @@ def train_model(
         continuous_loss = sum(continuous_losses) / len(continuous_losses)
         binary_loss = sum(binary_losses) / len(binary_losses)
         categorical_loss = sum(categorical_losses) / len(categorical_losses)
+        canwait_loss = sum(canwait_losses) / len(canwait_losses)
+        rew_loss = sum(rew_losses) / len(rew_losses)
+        done_loss = sum(done_losses) / len(done_losses)
         total_loss = sum(total_losses) / len(total_losses)
         total_wait = timer.peek()
 
-        return continuous_loss, binary_loss, categorical_loss, total_loss, total_wait
+        return (
+            continuous_loss,
+            binary_loss,
+            categorical_loss,
+            canwait_loss,
+            rew_loss,
+            done_loss,
+            total_loss,
+            total_wait
+        )
 
 
 def eval_model(logger, model, loss_weights, buffer, batch_size):
@@ -997,22 +1057,30 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     continuous_losses = []
     binary_losses = []
     categorical_losses = []
+    canwait_losses = []
+    rew_losses = []
+    done_losses = []
     total_losses = []
     timer = Timer()
 
     timer.start()
     for batch in buffer.sample_iter(batch_size):
         timer.stop()
-        obs, action, next_obs = batch
+        obs, action, next_obs, next_mask, next_rew, next_done = batch
         with torch.no_grad():
-            pred_obs = model(obs, action)
+            pred_obs, pred_other = model(obs, action)
 
         loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
-        loss_tot = loss_cont + loss_bin + loss_cat
+        loss_canwait, loss_rew, loss_done = compute_other_losses(pred_other[:, Other.CAN_WAIT], next_obs[:, 1], pred_other[:, Other.REWARD], next_rew, next_obs[:, Other.DONE], next_done)
+
+        loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_rew + loss_done
 
         continuous_losses.append(loss_cont.item())
         binary_losses.append(loss_bin.item())
         categorical_losses.append(loss_cat.item())
+        canwait_losses.append(loss_canwait.item())
+        rew_losses.append(loss_rew.item())
+        done_losses.append(loss_done.item())
         total_losses.append(loss_tot.item())
         timer.start()
     timer.stop()
@@ -1021,9 +1089,21 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     binary_loss = sum(binary_losses) / len(binary_losses)
     categorical_loss = sum(categorical_losses) / len(categorical_losses)
     total_loss = sum(total_losses) / len(total_losses)
+    canwait_losses = sum(canwait_losses) / len(canwait_losses)
+    rew_losses = sum(rew_losses) / len(rew_losses)
+    done_losses = sum(done_losses) / len(done_losses)
     total_wait = timer.peek()
 
-    return continuous_loss, binary_loss, categorical_loss, total_loss, total_wait
+    return (
+        continuous_loss,
+        binary_loss,
+        categorical_loss,
+        canwait_losses,
+        rew_losses,
+        done_losses,
+        total_loss,
+        total_wait
+    )
 
 
 def init_s3_client():
@@ -1540,8 +1620,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         "eval": Timer(),
     }
 
-    should_log_timers = False
-
     # Skip saving if eval_loss gets worse
     eval_loss_best = 1e9
     eval_loss = eval_loss_best
@@ -1583,7 +1661,16 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         loss_weights = compute_loss_weights(stats, device=device)
 
         with timers["train"]:
-            train_continuous_loss, train_binary_loss, train_categorical_loss, train_loss, train_wait = train_model(
+            (
+                train_continuous_loss,
+                train_binary_loss,
+                train_categorical_loss,
+                train_canwait_loss,
+                train_rew_loss,
+                train_done_loss,
+                train_loss,
+                train_wait
+            ) = train_model(
                 logger=logger,
                 model=model,
                 optimizer=optimizer,
@@ -1602,7 +1689,16 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 load_samples(logger=logger, dataloader=eval_dataloader, buffer=eval_buffer)
 
             with timers["eval"]:
-                eval_continuous_loss, eval_binary_loss, eval_categorical_loss, eval_loss, eval_wait = eval_model(
+                (
+                    eval_continuous_loss,
+                    eval_binary_loss,
+                    eval_categorical_loss,
+                    eval_canwait_loss,
+                    eval_rew_loss,
+                    eval_done_loss,
+                    eval_loss,
+                    eval_wait
+                ) = eval_model(
                     logger=logger,
                     model=model,
                     loss_weights=loss_weights,
@@ -1616,10 +1712,17 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "train_loss/continuous": train_continuous_loss,
                 "train_loss/binary": train_binary_loss,
                 "train_loss/categorical": train_categorical_loss,
+                "train_loss/canwait": train_canwait_loss,
+                "train_loss/rew": train_rew_loss,
+                "train_loss/done": train_done_loss,
                 "train_loss/total": train_loss,
+                "train_dataset/wait_time_s": train_wait,
                 "eval_loss/continuous": eval_continuous_loss,
                 "eval_loss/binary": eval_binary_loss,
                 "eval_loss/categorical": eval_categorical_loss,
+                "eval_loss/canwait": eval_canwait_loss,
+                "eval_loss/rew": eval_rew_loss,
+                "eval_loss/done": eval_done_loss,
                 "eval_loss/total": eval_loss,
                 "eval_dataset/wait_time_s": eval_wait,
             }
@@ -1645,36 +1748,39 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     uploading_event_buf=eval_uploading_event_buf,
                     optimize_local_storage=optimize_local_storage
                 )
+
+            if now - last_checkpoint_at > config["checkpoint_interval_s"]:
+                last_checkpoint_at = now
+                if eval_loss >= eval_loss_best:
+                    logger.info("Bad checkpoint (eval_loss=%f, eval_loss_best=%f), will skip it" % (eval_loss, eval_loss_best))
+                else:
+                    logger.info("Good checkpoint (eval_loss=%f, eval_loss_best=%f), will save it" % (eval_loss, eval_loss_best))
+                    eval_loss_best = eval_loss
+                    thread = threading.Thread(target=save_checkpoint, kwargs=dict(
+                        logger=logger,
+                        dry_run=dry_run,
+                        model=model,
+                        optimizer=optimizer,
+                        scaler=scaler,
+                        out_dir=config["run"]["out_dir"],
+                        run_id=run_id,
+                        optimize_local_storage=optimize_local_storage,
+                        s3_config=config.get("s3", {}).get("checkpoint"),
+                        uploading_event=uploading_event
+                    ))
+                    thread.start()
         else:
             logger.info({
                 "iteration": stats.iteration,
                 "train_loss/continuous": train_continuous_loss,
                 "train_loss/binary": train_binary_loss,
                 "train_loss/categorical": train_categorical_loss,
+                "train_loss/canwait": train_canwait_loss,
+                "train_loss/rew": train_rew_loss,
+                "train_loss/done": train_done_loss,
                 "train_loss/total": train_loss,
                 "train_dataset/wait_time_s": train_wait,
             })
-
-        if now - last_checkpoint_at > config["checkpoint_interval_s"]:
-            last_checkpoint_at = now
-            if eval_loss >= eval_loss_best:
-                logger.info("Bad checkpoint (eval_loss=%f, eval_loss_best=%f), will skip it" % (eval_loss, eval_loss_best))
-            else:
-                logger.info("Good checkpoint (eval_loss=%f, eval_loss_best=%f), will save it" % (eval_loss, eval_loss_best))
-                eval_loss_best = eval_loss
-                thread = threading.Thread(target=save_checkpoint, kwargs=dict(
-                    logger=logger,
-                    dry_run=dry_run,
-                    model=model,
-                    optimizer=optimizer,
-                    scaler=scaler,
-                    out_dir=config["run"]["out_dir"],
-                    run_id=run_id,
-                    optimize_local_storage=optimize_local_storage,
-                    s3_config=config.get("s3", {}).get("checkpoint"),
-                    uploading_event=uploading_event
-                ))
-                thread.start()
 
         if should_log_to_wandb:
             should_log_to_wandb = False
@@ -1690,62 +1796,13 @@ def test(cfg_file):
 
     run_id = os.path.basename(cfg_file).removesuffix("-config.json")
     weights_file = f"data/t10n/{run_id}-model.pt"
-
     model = load_for_test(weights_file)
-
-    # XXX: test code
-    #
-    # import ipdb; ipdb.set_trace()  # noqa
-    #
-    # from vcmi_gym.envs.v10.vcmi_env import VcmiEnv
-    # from vcmi_gym.envs.v10.decoder.decoder import Decoder
-
-    # def prepare(obs, action, reward, headline):
-    #     import re
-    #     bf = Decoder.decode(obs)
-    #     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    #     rewtxt = "" if reward is None else "Reward: %s" % round(reward, 2)
-    #     render = {}
-    #     render["bf_lines"] = bf.render_battlefield()[0][:-1]
-    #     render["bf_len"] = [len(l) for l in render["bf_lines"]]
-    #     render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
-    #     render["bf_maxlen"] = max(render["bf_len"])
-    #     render["bf_maxprintlen"] = max(render["bf_printlen"])
-    #     render["bf_lines"].insert(0, rewtxt.ljust(render["bf_maxprintlen"]))
-    #     render["bf_lines"].insert(0, headline)
-    #     render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
-    #     render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
-    #     render["bf_lines"].append(VcmiEnv.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
-    #     return render["bf_lines"]
-
-    # logger = StructuredLogger(level=10, filename=None)
-    # dataset = VCMIDataset(logger=logger, env_kwargs=dict(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1))
-    # dataloader = iter(torch.utils.data.DataLoader(dataset, batch_size=10, num_workers=2))
-    # buffer = Buffer(capacity=20, dim_obs=DIM_OBS, n_actions=N_ACTIONS)
-    # load_samples(logger, dataloader, buffer)
-    # it = buffer.sample_iter(1)
-
-    # for i in range(20):
-    #     print("=" * 100)
-    #     obs_prev, action, obs_next = next(it)
-    #     obs_prev = obs_prev[0].numpy()
-    #     obs_next = obs_next[0].numpy()
-    #     action = action[0].item()
-    #     lines_prev = prepare(obs_prev, action, None, "Start:")
-    #     lines_real = prepare(obs_next, -1, None, "Real:")
-    #     print("")
-    #     print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real)]))
-    #     print("")
-    # EOF: test code
-
-    env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread")
+    env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1, swap_sides=1)
     do_test(model, env)
 
 
 def load_for_test(file):
-    dim_other = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
-    dim_hexes = 165*STATE_SIZE_ONE_HEX
-    model = TransitionModel(dim_other, dim_hexes, N_ACTIONS)
+    model = TransitionModel()
     model.eval()
     print(f"Loading {file}")
     weights = torch.load(file, weights_only=True, map_location=torch.device("cpu"))
@@ -1756,52 +1813,82 @@ def load_for_test(file):
 def do_test(model, env):
     from vcmi_gym.envs.v10.decoder.decoder import Decoder
 
-    while True:
+    for _ in range(10):
+        print("=" * 100)
+        if env.terminated or env.truncated:
+            env.reset()
         action = env.random_action()
-        obs, *_ = env.step(action)
-        if len(env.result.intstates) == 2:
-            break
+        obs, rew, term, trunc, _info = env.step(action)
 
-    obs_prev = obs["transitions"]["observations"][0]
-    obs_next = obs["transitions"]["observations"][1]
-    obs_pred = model.predict(obs["observation"], action)
+        for i in range(1, len(obs["transitions"]["observations"])):
+            obs_prev = obs["transitions"]["observations"][i-1]
+            obs_next = obs["transitions"]["observations"][i]
+            mask_next = obs["transitions"]["action_masks"][i]
+            rew_next = obs["transitions"]["rewards"][i]
+            done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
-    def prepare(obs, action, reward, headline):
-        import re
-        bf = Decoder.decode(obs)
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        rewtxt = "" if reward is None else "Reward: %s" % round(reward, 2)
-        render = {}
-        render["bf_lines"] = bf.render_battlefield()[0][:-1]
-        render["bf_len"] = [len(l) for l in render["bf_lines"]]
-        render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
-        render["bf_maxlen"] = max(render["bf_len"])
-        render["bf_maxprintlen"] = max(render["bf_printlen"])
-        render["bf_lines"].insert(0, rewtxt.ljust(render["bf_maxprintlen"]))
-        render["bf_lines"].insert(0, headline)
-        render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
-        render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
-        render["bf_lines"].append(env.__class__.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
-        return render["bf_lines"]
+            obs_pred_raw, other_pred_raw = model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(action).unsqueeze(0))
+            obs_pred_raw = obs_pred_raw[0]
+            other_pred_raw = other_pred_raw[0]
+            obs_pred, canwait_pred, rew_pred, done_pred = model.predict(obs_prev, action)
+            canwait_pred_raw, rew_pred_raw, done_pred_raw = other_pred_raw
 
-    lines_prev = prepare(obs_prev, action, None, "Start:")
-    lines_real = prepare(obs_next, -1, None, "Real:")
-    lines_pred = prepare(obs_pred, -1, None, "Predicted:")
+            def prepare(state, action, reward, headline):
+                import re
+                bf = Decoder.decode(state)
+                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+                rewtxt = "" if reward is None else "Reward: %s" % round(reward, 2)
+                render = {}
+                render["bf_lines"] = bf.render_battlefield()[0][:-1]
+                render["bf_len"] = [len(l) for l in render["bf_lines"]]
+                render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
+                render["bf_maxlen"] = max(render["bf_len"])
+                render["bf_maxprintlen"] = max(render["bf_printlen"])
+                render["bf_lines"].insert(0, rewtxt.ljust(render["bf_maxprintlen"]))
+                render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+                render["bf_lines"].insert(0, headline)
+                render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+                render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
+                render["bf_lines"].append(env.__class__.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
+                return render["bf_lines"]
 
-    # for i in range(len(bfields)):
-    print("")
-    print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real, lines_pred)]))
-    print("")
+            lines_prev = prepare(obs_prev, action, None, "Start:")
+            lines_real = prepare(obs_next, -1, None, "Real:")
+            lines_pred = prepare(obs_pred, -1, None, "Predicted:")
 
-    def action_str(obs, a):
-        if a > 1:
-            bf = Decoder.decode(obs)
-            hex = bf.get_hex((a - 2) // len(HEX_ACT_MAP))
-            act = list(HEX_ACT_MAP)[(a - 2) % len(HEX_ACT_MAP)]
-            return "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
-        else:
-            assert a == 1
-            return "Wait"
+            losses = compute_losses(None, model.obs_index, None, torch.as_tensor(obs_next).unsqueeze(0), obs_pred_raw.unsqueeze(0))
+            other_losses = compute_other_losses(canwait_pred_raw, mask_next[1], rew_pred_raw, rew_next, done_pred_raw, done_next)
+            losses += other_losses
+
+            print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f | CanWait: %.4f | Rew: %.4f | Done: %.4f" % losses)
+
+            # print(Decoder.decode(obs_prev).render(0))
+            # for i in range(len(bfields)):
+            print("")
+            print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real, lines_pred)]))
+            print("")
+            import ipdb; ipdb.set_trace()  # noqa
+
+            # bf_next = Decoder.decode(obs_next)
+            # bf_pred = Decoder.decode(obs_pred)
+
+            # print(env.render_transitions())
+            # print("Predicted:")
+            # print(bf_pred.render(0))
+            # print("Real:")
+            # print(bf_next.render(0))
+
+            # hex20_pred.stack.QUEUE.raw
+
+            # def action_str(obs, a):
+            #     if a > 1:
+            #         bf = Decoder.decode(obs)
+            #         hex = bf.get_hex((a - 2) // len(HEX_ACT_MAP))
+            #         act = list(HEX_ACT_MAP)[(a - 2) % len(HEX_ACT_MAP)]
+            #         return "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
+            #     else:
+            #         assert a == 1
+            #         return "Wait"
 
     # print(env.render_transitions())
 
