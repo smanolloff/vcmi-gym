@@ -64,7 +64,7 @@ def setup_wandb(config, model, src_file):
     wandb.init(
         project="vcmi-gym",
         group="transition-model",
-        name="%s-%s" % (datetime.now().strftime("%Y%m%d_%H%M%S"), config["run"]["id"]),
+        name=config["run"]["name"],
         id=config["run"]["id"],
         resume="must" if resumed else "never",
         # resume="allow",  # XXX: reuse id for insta-failed runs
