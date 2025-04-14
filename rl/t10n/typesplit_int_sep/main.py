@@ -1436,13 +1436,22 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     train_batch_size = config["train"]["batch_size"]
     eval_batch_size = config["eval"]["batch_size"]
 
-    # Prevent guaranteed waiting time for each batch during training
-    assert train_batch_size <= (train_env_config["num_workers"] * train_env_config["batch_size"])
-    assert eval_batch_size <= (eval_env_config["num_workers"] * eval_env_config["batch_size"])
+    if train_env_config:
+        # Prevent guaranteed waiting time for each batch during training
+        assert train_batch_size <= (train_env_config["num_workers"] * train_env_config["batch_size"])
+        # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
+        assert (train_env_config["num_workers"] * train_env_config["batch_size"]) % train_batch_size == 0
+    else:
+        assert train_batch_size <= (train_s3_config["num_workers"] * train_s3_config["batch_size"])
+        assert (train_s3_config["num_workers"] * train_s3_config["batch_size"]) % train_batch_size == 0
 
-    # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
-    assert (train_env_config["num_workers"] * train_env_config["batch_size"]) % train_batch_size == 0
-    assert (eval_env_config["num_workers"] * eval_env_config["batch_size"]) % eval_batch_size == 0
+    if eval_env_config:
+        # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
+        assert eval_batch_size <= (eval_env_config["num_workers"] * eval_env_config["batch_size"])
+        assert (eval_env_config["num_workers"] * eval_env_config["batch_size"]) % eval_batch_size == 0
+    else:
+        assert eval_batch_size <= (eval_s3_config["num_workers"] * eval_s3_config["batch_size"])
+        assert (eval_s3_config["num_workers"] * eval_s3_config["batch_size"]) % eval_batch_size == 0
 
     assert config["checkpoint_interval_s"] > config["eval"]["interval_s"]
 
@@ -1482,7 +1491,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             # persistent_workers=True,  # no effect here
         )
 
-    def make_s3_dataloader(cfg, mq):
+    def make_s3_dataloader(cfg, mq, split_ratio=None, split_side=None):
         return torch.utils.data.DataLoader(
             S3Dataset(
                 logger=logger,
@@ -1491,6 +1500,8 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 cache_dir=cfg["cache_dir"],
                 cached_files_max=cfg["cached_files_max"],
                 shuffle=cfg["shuffle"],
+                split_ratio=split_ratio,
+                split_side=split_side,
                 aws_access_key=os.environ["AWS_ACCESS_KEY"],
                 aws_secret_key=os.environ["AWS_SECRET_KEY"],
                 metric_queue=mq,
@@ -1509,9 +1520,10 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
     if eval_sample_from_env:
         eval_dataloader_obj = make_vcmi_dataloader(eval_env_config, eval_metric_queue)
     if train_sample_from_s3:
-        dataloader_obj = make_s3_dataloader(train_s3_config, train_metric_queue)
+        dataloader_obj = make_s3_dataloader(train_s3_config, train_metric_queue, 0.98, 0)
     if eval_sample_from_s3:
-        eval_dataloader_obj = make_s3_dataloader(eval_s3_config, eval_metric_queue)
+        # eval_dataloader_obj = make_s3_dataloader(eval_s3_config, eval_metric_queue)
+        eval_dataloader_obj = make_s3_dataloader(dict(eval_s3_config, s3_dir=train_s3_config["s3_dir"]), eval_metric_queue, 0.98, 1)
 
     def make_buffer(dloader):
         return Buffer(

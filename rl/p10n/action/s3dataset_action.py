@@ -139,7 +139,7 @@ class S3DatasetAction(IterableDataset):
             self.prefixes = prefixes[:split_idx] if self.split_side == 0 else prefixes[split_idx:]
             self.logger.info("Sample packs after split: %d" % len(self.prefixes))
         else:
-            assert self.split_size == 0, "split side is %d, but split_ratio is %f" % (self.split_side, self.split_ratio)
+            assert self.split_side == 0, "split side is %d, but split_ratio is %f" % (self.split_side, self.split_ratio)
             self.prefixes = prefixes
 
         self.types = types
@@ -220,7 +220,6 @@ class S3DatasetAction(IterableDataset):
                 self.logger.info(f"Epoch {self.epoch_count} completed. Restarting dataset.")
 
     def __iter__(self):
-        """ Creates an iterable dataset that streams from S3 """
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:  # Single-process
