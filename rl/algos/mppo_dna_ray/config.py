@@ -96,11 +96,9 @@ config = dict(
     env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
     env_version=10,
     network={
-        "encoders": {
-            "other": {"blocks": 3, "size": 10},
-            "hex": {"blocks": 3, "size": 10},
-            "merged": {"blocks": 3, "size": 10},
-        },
+        "z_size_global": 128,
+        "z_size_player": 128,
+        "z_size_hex": 512,
         "heads": {
             "actor": {"size": 2312},
             "critic": {"size": 1}

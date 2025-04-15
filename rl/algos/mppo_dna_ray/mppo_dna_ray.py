@@ -24,6 +24,9 @@ import json
 import string
 import argparse
 import copy
+import math
+from collections import OrderedDict
+from functools import partial
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -87,7 +90,9 @@ class EnvArgs:
 
 @dataclass
 class NetworkArgs:
-    encoders: dict = field(default_factory=dict)
+    z_size_global: int = 0
+    z_size_player: int = 0
+    z_size_hex: int = 0
     heads: dict = field(default_factory=dict)
 
 
@@ -329,37 +334,137 @@ class AgentNN(nn.Module):
         layer_cls = getattr(torch.nn, t, None) or globals()[t]
         return layer_cls(**kwargs)
 
-    def __init__(self, network, dim_other, dim_hexes, n_actions, device=torch.device("cpu")):
+    def __init__(self, network, dim_global, dim_players, dim_hexes, n_actions, device=torch.device("cpu")):
         super().__init__()
 
+
         self.dims = {
-            "other": dim_other,
+            "global": dim_global,
+            "players": dim_players,
             "hexes": dim_hexes,
-            "obs": dim_other + dim_hexes,
+            "obs": dim_global + dim_players + dim_hexes,
+            "player": dim_players // 2,
             "hex": dim_hexes // 165,
-            "merged": network.encoders["merged"]["size"]
         }
 
         self.n_actions = n_actions
         self.device = device
+        self._build_indices()
 
-        self.encoders_other = nn.Sequential()
-        self.encoders_hex = nn.Sequential()
-        self.encoders_merged = nn.Sequential()
+        emb_calc = lambda n: math.ceil(math.sqrt(n))
 
-        for k in ["other", "hex", "merged"]:
-            blocks = network.encoders[k]["blocks"]
-            size = network.encoders[k]["size"]
+        #
+        # Global encoders
+        #
 
-            for _ in range(blocks):
-                getattr(self, f"encoders_{k}").append(nn.Sequential(
-                    nn.LazyLinear(size),
-                    nn.LazyBatchNorm1d(),
-                    nn.LeakyReLU(),
-                    nn.LazyLinear(self.dims[k]),
-                ))
+        # Continuous:
+        # (B, n)
+        self.encoder_global_continuous = nn.Identity()
 
-        self.encoder_premerge = nn.LazyLinear(network.encoders["merged"]["size"])
+        # Binaries:
+        # (B, n)
+        self.encoder_global_binary = nn.Identity()
+        if self.obs_index["global"]["binary"].numel():
+            n_binary_features = len(self.obs_index["global"]["binary"])
+            self.encoder_global_binary = nn.LazyLinear(n_binary_features)
+            # No nonlinearity needed
+
+        # Categoricals:
+        # [(B, C1), (B, C2), ...]
+        self.encoders_global_categoricals = nn.ModuleList([])
+        for ind in self.global_index["categoricals"]:
+            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_global_categoricals.append(cat_emb_size)
+
+        # Merge
+        self.encoder_merged_global = nn.Sequential(
+            # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            nn.LazyLinear(network.z_size_global),
+            nn.LeakyReLU(),
+        )
+        # => (B, Z_GLOBAL)
+
+        #
+        # Player encoders
+        #
+
+        # Continuous per player:
+        # (B, n)
+        self.encoder_player_continuous = nn.Identity()
+
+        # Binaries per player:
+        # (B, n)
+        self.encoder_player_binary = nn.Identity()
+        if self.obs_index["player"]["binary"].numel():
+            n_binary_features = len(self.obs_index["player"]["binary"][0])
+            self.encoder_player_binary = nn.LazyLinear(n_binary_features)
+
+        # Categoricals per player:
+        # [(B, C1), (B, C2), ...]
+        self.encoders_player_categoricals = nn.ModuleList([])
+        for ind in self.player_index["categoricals"]:
+            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_player_categoricals.append(cat_emb_size)
+
+        # Merge per player
+        self.encoder_merged_player = nn.Sequential(
+            # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            nn.LazyLinear(network.z_size_player),
+            nn.LeakyReLU(),
+        )
+        # => (B, 2, Z_PLAYER)
+
+        #
+        # Hex encoders
+        #
+
+        # Continuous per hex:
+        # (B, n)
+        self.encoder_hex_continuous = nn.Identity()
+
+        # Binaries per hex:
+        # (B, n)
+        if self.obs_index["hex"]["binary"].numel():
+            n_binary_features = len(self.obs_index["hex"]["binary"][0])
+            self.encoder_hex_binary = nn.LazyLinear(n_binary_features)
+
+        # Categoricals per hex:
+        # [(B, C1), (B, C2), ...]
+        self.encoders_hex_categoricals = nn.ModuleList([])
+        for ind in self.hex_index["categoricals"]:
+            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_hex_categoricals.append(cat_emb_size)
+
+        # Merge per hex
+        self.encoder_merged_hex = nn.Sequential(
+            # => (B, 165, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            nn.LazyLinear(network.z_size_hex),
+            nn.LeakyReLU(),
+        )
+        # => (B, 165, Z_HEX)
+
+        # Transformer (hexes only)
+        self.transformer_hex = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=network.z_size_hex, nhead=8, batch_first=True),
+            num_layers=6
+        )
+        # => (B, 165, Z_HEX)
+
+        #
+        # Aggregator
+        #
+
+        # (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
+        self.aggregator = nn.LazyLinear(2048)
+        # => (B, Z_AGG)
+
+        #
+        # Heads
+        #
+
+        # => (B, 165, Z_AGG + Z_HEX)
+        self.head_global = nn.LazyLinear(self.dims["hex"])
+
         self.actor = nn.LazyLinear(network.heads["actor"]["size"])
         self.critic = nn.LazyLinear(network.heads["critic"]["size"])
 
@@ -367,28 +472,293 @@ class AgentNN(nn.Module):
 
         # Init lazy layers
         with torch.no_grad():
-            self.get_action_and_value(torch.randn([2, self.dims["obs"]], device=device), torch.ones([2, n_actions], dtype=torch.bool, device=device))
+            self.get_action_and_value(torch.randn([2, self.dims["obs"]], device=device), torch.ones([2, n_actions], device=device))
 
         common.layer_init(self.actor, gain=0.01)
         common.layer_init(self.critic, gain=1.0)
 
-    def encode(self, x):
-        other, hexes = torch.split(x, [self.dims["other"], self.dims["hexes"]], dim=1)
+    def _build_indices(self):
+        self.global_index = {"continuous": [], "binary": [], "categoricals": []}
+        self.player_index = {"continuous": [], "binary": [], "categoricals": []}
+        self.hex_index = {"continuous": [], "binary": [], "categoricals": []}
 
-        z_other = other
-        for block in self.encoders_other:
-            z_other = block(z_other) + z_other
+        GLOBAL_ATTR_MAP = OrderedDict([
+            ('BATTLE_SIDE', ('CATEGORICAL_STRICT_NULL', 0, 2, 1)),
+            ('BATTLE_WINNER', ('CATEGORICAL_EXPLICIT_NULL', 2, 3, 1)),
+            ('BFIELD_VALUE_START_ABS', ('EXPNORM_STRICT_NULL', 5, 1, 10000000)),
+            ('BFIELD_VALUE_NOW_ABS', ('EXPNORM_STRICT_NULL', 6, 1, 10000000)),
+            ('BFIELD_VALUE_NOW_REL0', ('LINNORM_STRICT_NULL', 7, 1, 1000)),
+            ('BFIELD_HP_START_ABS', ('EXPNORM_STRICT_NULL', 8, 1, 200000)),
+            ('BFIELD_HP_NOW_ABS', ('EXPNORM_STRICT_NULL', 9, 1, 200000)),
+            ('BFIELD_HP_NOW_REL0', ('LINNORM_STRICT_NULL', 10, 1, 1000))
+        ])
 
-        z_hexes = hexes.unflatten(dim=1, sizes=[165, self.dims["hex"]])
-        for block in self.encoders_hex:
-            z_hexes = block(z_hexes) + z_hexes
+        PLAYER_ATTR_MAP = OrderedDict([
+            ('BATTLE_SIDE', ('CATEGORICAL_STRICT_NULL', 0, 2, 1)),
+            ('ARMY_VALUE_NOW_ABS', ('EXPNORM_STRICT_NULL', 2, 1, 5000000)),
+            ('ARMY_VALUE_NOW_REL', ('LINNORM_STRICT_NULL', 3, 1, 1000)),
+            ('ARMY_VALUE_NOW_REL0', ('LINNORM_STRICT_NULL', 4, 1, 1000)),
+            ('ARMY_HP_NOW_ABS', ('EXPNORM_STRICT_NULL', 5, 1, 100000)),
+            ('ARMY_HP_NOW_REL', ('LINNORM_STRICT_NULL', 6, 1, 1000)),
+            ('ARMY_HP_NOW_REL0', ('LINNORM_STRICT_NULL', 7, 1, 1000)),
+            ('VALUE_KILLED_NOW_ABS', ('EXPNORM_STRICT_NULL', 8, 1, 5000000)),
+            ('VALUE_KILLED_NOW_REL', ('LINNORM_STRICT_NULL', 9, 1, 1000)),
+            ('VALUE_KILLED_ACC_ABS', ('EXPNORM_STRICT_NULL', 10, 1, 5000000)),
+            ('VALUE_KILLED_ACC_REL0', ('LINNORM_STRICT_NULL', 11, 1, 1000)),
+            ('VALUE_LOST_NOW_ABS', ('EXPNORM_STRICT_NULL', 12, 1, 5000000)),
+            ('VALUE_LOST_NOW_REL', ('LINNORM_STRICT_NULL', 13, 1, 1000)),
+            ('VALUE_LOST_ACC_ABS', ('EXPNORM_STRICT_NULL', 14, 1, 5000000)),
+            ('VALUE_LOST_ACC_REL0', ('LINNORM_STRICT_NULL', 15, 1, 1000)),
+            ('DMG_DEALT_NOW_ABS', ('EXPNORM_STRICT_NULL', 16, 1, 10000)),
+            ('DMG_DEALT_NOW_REL', ('LINNORM_STRICT_NULL', 17, 1, 1000)),
+            ('DMG_DEALT_ACC_ABS', ('EXPNORM_STRICT_NULL', 18, 1, 100000)),
+            ('DMG_DEALT_ACC_REL0', ('LINNORM_STRICT_NULL', 19, 1, 1000)),
+            ('DMG_RECEIVED_NOW_ABS', ('EXPNORM_STRICT_NULL', 20, 1, 10000)),
+            ('DMG_RECEIVED_NOW_REL', ('LINNORM_STRICT_NULL', 21, 1, 1000)),
+            ('DMG_RECEIVED_ACC_ABS', ('EXPNORM_STRICT_NULL', 22, 1, 100000)),
+            ('DMG_RECEIVED_ACC_REL0', ('LINNORM_STRICT_NULL', 23, 1, 1000))
+        ])
 
-        z_merged = torch.cat((z_other, z_hexes.flatten(start_dim=1)), dim=-1)
-        z_merged = self.encoder_premerge(z_merged)
-        for block in self.encoders_merged:
-            z_merged = block(z_merged) + z_merged
+        HEX_ATTR_MAP = OrderedDict([
+            ('Y_COORD', ('CATEGORICAL_STRICT_NULL', 0, 11, 10)),
+            ('X_COORD', ('CATEGORICAL_STRICT_NULL', 11, 15, 14)),
+            ('STATE_MASK', ('BINARY_STRICT_NULL', 26, 4, 15)),
+            ('ACTION_MASK', ('BINARY_ZERO_NULL', 30, 14, 16383)),
+            ('IS_REAR', ('CATEGORICAL_EXPLICIT_NULL', 44, 3, 1)),
+            ('STACK_SIDE', ('CATEGORICAL_EXPLICIT_NULL', 47, 3, 1)),
+            ('STACK_SLOT', ('CATEGORICAL_EXPLICIT_NULL', 50, 10, 8)),
+            ('STACK_QUANTITY', ('EXPNORM_EXPLICIT_NULL', 60, 2, 1500)),
+            ('STACK_ATTACK', ('EXPNORM_ZERO_NULL', 62, 1, 80)),
+            ('STACK_DEFENSE', ('EXPNORM_ZERO_NULL', 63, 1, 80)),
+            ('STACK_SHOTS', ('EXPNORM_ZERO_NULL', 64, 1, 32)),
+            ('STACK_DMG_MIN', ('EXPNORM_ZERO_NULL', 65, 1, 100)),
+            ('STACK_DMG_MAX', ('EXPNORM_ZERO_NULL', 66, 1, 100)),
+            ('STACK_HP', ('EXPNORM_ZERO_NULL', 67, 1, 1300)),
+            ('STACK_HP_LEFT', ('EXPNORM_ZERO_NULL', 68, 1, 1300)),
+            ('STACK_SPEED', ('EXPNORM_ZERO_NULL', 69, 1, 30)),
+            ('STACK_QUEUE', ('BINARY_ZERO_NULL', 70, 30, 1073741823)),
+            ('STACK_VALUE_ONE', ('EXPNORM_EXPLICIT_NULL', 100, 2, 180000)),
+            ('STACK_FLAGS1', ('BINARY_EXPLICIT_NULL', 102, 26, 33554431)),
+            ('STACK_FLAGS2', ('BINARY_EXPLICIT_NULL', 128, 16, 32767)),
+            ('STACK_VALUE_REL', ('LINNORM_EXPLICIT_NULL', 144, 2, 1000)),
+            ('STACK_VALUE_REL0', ('LINNORM_EXPLICIT_NULL', 146, 2, 1000)),
+            ('STACK_VALUE_KILLED_REL', ('LINNORM_EXPLICIT_NULL', 148, 2, 1000)),
+            ('STACK_VALUE_KILLED_ACC_REL0', ('LINNORM_EXPLICIT_NULL', 150, 2, 1000)),
+            ('STACK_VALUE_LOST_REL', ('LINNORM_EXPLICIT_NULL', 152, 2, 1000)),
+            ('STACK_VALUE_LOST_ACC_REL0', ('LINNORM_EXPLICIT_NULL', 154, 2, 1000)),
+            ('STACK_DMG_DEALT_REL', ('LINNORM_EXPLICIT_NULL', 156, 2, 1000)),
+            ('STACK_DMG_DEALT_ACC_REL0', ('LINNORM_EXPLICIT_NULL', 158, 2, 1000)),
+            ('STACK_DMG_RECEIVED_REL', ('LINNORM_EXPLICIT_NULL', 160, 2, 1000)),
+            ('STACK_DMG_RECEIVED_ACC_REL0', ('LINNORM_EXPLICIT_NULL', 162, 2, 1000))
+        ])
 
-        return z_merged
+        self._add_indices(GLOBAL_ATTR_MAP, self.global_index)
+        self._add_indices(PLAYER_ATTR_MAP, self.player_index)
+        self._add_indices(HEX_ATTR_MAP, self.hex_index)
+
+        for index in [self.global_index, self.player_index, self.hex_index]:
+            for type in ["continuous", "binary"]:
+                index[type] = torch.tensor(index[type], device=self.device)
+
+            index["categoricals"] = [torch.tensor(ind, device=self.device) for ind in index["categoricals"]]
+
+        self._build_obs_indices()
+
+    def _add_indices(self, attr_map, index):
+        i = 0
+
+        for attr, (enctype, offset, n, vmax) in attr_map.items():
+            length = n
+            if enctype.endswith("EXPLICIT_NULL"):
+                if not enctype.startswith("CATEGORICAL"):
+                    index["binary"].append(i)
+                    i += 1
+                    length -= 1
+            elif enctype.endswith("IMPLICIT_NULL"):
+                raise Exception("IMPLICIT_NULL is not supported")
+            elif enctype.endswith("MASKING_NULL"):
+                raise Exception("MASKING_NULL is not supported")
+            elif enctype.endswith("STRICT_NULL"):
+                pass
+            elif enctype.endswith("ZERO_NULL"):
+                pass
+            else:
+                raise Exception("Unexpected enctype: %s" % enctype)
+
+            t = None
+            if enctype.startswith("ACCUMULATING"):
+                t = "binary"
+            elif enctype.startswith("BINARY"):
+                t = "binary"
+            elif enctype.startswith("CATEGORICAL"):
+                t = "categorical"
+            elif enctype.startswith("EXPNORM"):
+                t = "continuous"
+            elif enctype.startswith("LINNORM"):
+                t = "continuous"
+            else:
+                raise Exception("Unexpected enctype: %s" % enctype)
+
+            if t == "categorical":
+                ind = []
+                index["categoricals"].append(ind)
+                for _ in range(length):
+                    ind.append(i)
+                    i += 1
+            else:
+                for _ in range(length):
+                    index[t].append(i)
+                    i += 1
+
+    # Index for extracting values from (batched) observation
+    # This is different than the other indexes:
+    # - self.hex_index contains *relative* indexes for 1 hex
+    # - self.obs_index["hex"] contains *absolute* indexes for all 165 hexes
+    def _build_obs_indices(self):
+        t = lambda ary: torch.tensor(ary, dtype=torch.int64, device=self.device)
+
+        # XXX: Discrete (or "noncontinuous") is a combination of binary + categoricals
+        #      where for direct extraction from obs
+        self.obs_index = {
+            "global": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
+            "player": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
+            "hex": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
+        }
+
+        # Global
+
+        if self.global_index["continuous"].numel():
+            self.obs_index["global"]["continuous"] = self.global_index["continuous"]
+
+        if self.global_index["binary"].numel():
+            self.obs_index["global"]["binary"] = self.global_index["binary"]
+
+        if self.global_index["categoricals"]:
+            self.obs_index["global"]["categoricals"] = self.global_index["categoricals"]
+
+        self.obs_index["global"]["categorical"] = torch.cat(tuple(self.obs_index["global"]["categoricals"]), dim=0)
+
+        global_discrete = torch.zeros(0, dtype=torch.int64, device=self.device)
+        global_discrete = torch.cat((global_discrete, self.obs_index["global"]["binary"]), dim=0)
+        global_discrete = torch.cat((global_discrete, *self.obs_index["global"]["categoricals"]), dim=0)
+        self.obs_index["global"]["discrete"] = global_discrete
+
+        # Helper function to reduce code duplication
+        # Essentially replaces this:
+        # if len(model.player_index["binary"]):
+        #     ind = torch.zeros([2, len(model.player_index["binary"])], dtype=torch.int64)
+        #     for i in range(2):
+        #         offset = STATE_SIZE_GLOBAL + i*STATE_SIZE_ONE_PLAYER
+        #         ind[i, :] = model.player_index["binary"] + offset
+        #     obs_index["player"]["binary"] = ind
+        # if len(model.player_index["continuous"]):
+        #     ind = torch.zeros([2, len(model.player_index["continuous"])], dtype=torch.int64)
+        #     for i in range(2):
+        #         offset = STATE_SIZE_GLOBAL + i*STATE_SIZE_ONE_PLAYER
+        #         ind[i, :] = model.player_index["continuous"] + offset
+        #     obs_index["player"]["continuous"] = ind
+        # if len(model.player_index["categoricals"]):
+        #     for cat_ind in model.player_index["categoricals"]:
+        #         ind = torch.zeros([2, len(cat_ind)], dtype=torch.int64)
+        #         for i in range(2):
+        #             offset = STATE_SIZE_GLOBAL + i*STATE_SIZE_ONE_PLAYER
+        #             ind[i, :] = cat_ind + offset
+        #         obs_index["player"]["categoricals"].append(cat_ind)
+        # ...
+        # - `indexes` is an array of *relative* indexes for 1 element (e.g. hex)
+        def repeating_index(n, base_offset, repeating_offset, indexes):
+            if indexes.numel() == 0:
+                return torch.zeros([n, 0], dtype=torch.int64, device=self.device)
+            ind = torch.zeros([n, len(indexes)], dtype=torch.int64, device=self.device)
+            for i in range(n):
+                offset = base_offset + i*repeating_offset
+                ind[i, :] = indexes + offset
+
+            return ind
+
+        # Players (2)
+        repind_players = partial(
+            repeating_index,
+            2,
+            self.dims["global"],
+            self.dims["player"]
+        )
+
+        self.obs_index["player"]["continuous"] = repind_players(self.player_index["continuous"])
+        self.obs_index["player"]["binary"] = repind_players(self.player_index["binary"])
+        for cat_ind in self.player_index["categoricals"]:
+            self.obs_index["player"]["categoricals"].append(repind_players(cat_ind))
+
+        self.obs_index["player"]["categorical"] = torch.cat(tuple(self.obs_index["player"]["categoricals"]), dim=1)
+
+        player_discrete = torch.zeros([2, 0], dtype=torch.int64, device=self.device)
+        player_discrete = torch.cat((player_discrete, self.obs_index["player"]["binary"]), dim=1)
+        player_discrete = torch.cat((player_discrete, *self.obs_index["player"]["categoricals"]), dim=1)
+        self.obs_index["player"]["discrete"] = player_discrete
+
+        # Hexes (165)
+        repind_hexes = partial(
+            repeating_index,
+            165,
+            self.dims["global"] + self.dims["players"],
+            self.dims["hex"]
+        )
+
+        self.obs_index["hex"]["continuous"] = repind_hexes(self.hex_index["continuous"])
+        self.obs_index["hex"]["binary"] = repind_hexes(self.hex_index["binary"])
+        for cat_ind in self.hex_index["categoricals"]:
+            self.obs_index["hex"]["categoricals"].append(repind_hexes(cat_ind))
+        self.obs_index["hex"]["categorical"] = torch.cat(tuple(self.obs_index["hex"]["categoricals"]), dim=1)
+
+        hex_discrete = torch.zeros([165, 0], dtype=torch.int64, device=self.device)
+        hex_discrete = torch.cat((hex_discrete, self.obs_index["hex"]["binary"]), dim=1)
+        hex_discrete = torch.cat((hex_discrete, *self.obs_index["hex"]["categoricals"]), dim=1)
+        self.obs_index["hex"]["discrete"] = hex_discrete
+
+
+    def encode(self, obs):
+        assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
+
+        global_continuous_in = obs[:, self.obs_index["global"]["continuous"]]
+        global_binary_in = obs[:, self.obs_index["global"]["binary"]]
+        global_categorical_ins = [obs[:, ind] for ind in self.obs_index["global"]["categoricals"]]
+        global_continuous_z = self.encoder_global_continuous(global_continuous_in)
+        global_binary_z = self.encoder_global_binary(global_binary_in)
+
+        # XXX: Embedding layers expect single-integer inputs
+        #      e.g. for input with num_classes=4, instead of `[0,0,1,0]` it expects just `2`
+        global_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
+        global_merged = torch.cat((global_continuous_z, global_binary_z, global_categorical_z), dim=-1)
+        z_global = self.encoder_merged_global(global_merged)
+        # => (B, Z_GLOBAL)
+
+        player_continuous_in = obs[:, self.obs_index["player"]["continuous"]]
+        player_binary_in = obs[:, self.obs_index["player"]["binary"]]
+        player_categorical_ins = [obs[:, ind] for ind in self.obs_index["player"]["categoricals"]]
+        player_continuous_z = self.encoder_player_continuous(player_continuous_in)
+        player_binary_z = self.encoder_player_binary(player_binary_in)
+        player_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
+        player_merged = torch.cat((player_continuous_z, player_binary_z, player_categorical_z), dim=-1)
+        z_player = self.encoder_merged_player(player_merged)
+        # => (B, 2, Z_PLAYER)
+
+        hex_continuous_in = obs[:, self.obs_index["hex"]["continuous"]]
+        hex_binary_in = obs[:, self.obs_index["hex"]["binary"]]
+        hex_categorical_ins = [obs[:, ind] for ind in self.obs_index["hex"]["categoricals"]]
+        hex_continuous_z = self.encoder_hex_continuous(hex_continuous_in)
+        hex_binary_z = self.encoder_hex_binary(hex_binary_in)
+        hex_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
+        hex_merged = torch.cat((hex_continuous_z, hex_binary_z, hex_categorical_z), dim=-1)
+        z_hex = self.encoder_merged_hex(hex_merged)
+        z_hex = self.transformer_hex(z_hex)
+        # => (B, 165, Z_HEX)
+
+        mean_z_player = z_player.mean(dim=1)
+        mean_z_hex = z_hex.mean(dim=1)
+        z_agg = self.aggregator(torch.cat([z_global, mean_z_player, mean_z_hex], dim=-1))
+        # => (B, Z_AGG)
+
+        return z_agg
 
     def get_value(self, x, attn_mask=None):
         return self.critic(self.encode(x))
@@ -408,7 +778,7 @@ class AgentNN(nn.Module):
         encoded = self.encode(x)
         value = self.critic(encoded)
         action_logits = self.actor(encoded)
-        dist = common.CategoricalMasked(logits=action_logits, mask=mask)
+        dist = common.CategoricalMasked(logits=action_logits, mask=mask.bool())
         if action is None:
             if deterministic:
                 action = torch.argmax(dist.probs, dim=1)
@@ -492,17 +862,18 @@ class Agent(nn.Module):
         print("Loading agent from %s (device_name: %s)" % (agent_file, device_name))
         return torch.load(agent_file, map_location=torch.device(device_name), weights_only=False)
 
-    def __init__(self, args, dim_other, dim_hexes, n_actions, state=None, device_name="cpu"):
+    def __init__(self, args, dim_other, dim_players, dim_hexes, n_actions, state=None, device_name="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
         self._optimizer_state = None  # needed for save/load
         self.dim_other = dim_other  # needed for save/load
+        self.dim_players = dim_players  # needed for save/load
         self.dim_hexes = dim_hexes  # needed for save/load
         self.n_actions = n_actions  # needed for save/load
         self.device_name = device_name
-        self.NN_value = AgentNN(args.network, dim_other, dim_hexes, n_actions, torch.device(device_name))
-        self.NN_policy = AgentNN(args.network, dim_other, dim_hexes, n_actions, torch.device(device_name))
+        self.NN_value = AgentNN(args.network, dim_other, dim_players, dim_hexes, n_actions, torch.device(device_name))
+        self.NN_policy = AgentNN(args.network, dim_other, dim_players, dim_hexes, n_actions, torch.device(device_name))
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
         self.optimizer_policy = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
         self.optimizer_distill = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
@@ -711,13 +1082,14 @@ def main(args):
     obs_space = VcmiEnv.OBSERVATION_SPACE
     act_space = VcmiEnv.ACTION_SPACE
 
-    dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
+    dim_other = VcmiEnv.STATE_SIZE_GLOBAL
+    dim_players = 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
     dim_hexes = VcmiEnv.STATE_SIZE_HEXES
     n_actions = VcmiEnv.ACTION_SPACE.n
-    assert VcmiEnv.STATE_SIZE == dim_other + dim_hexes
+    assert VcmiEnv.STATE_SIZE == dim_other + dim_players + dim_hexes
 
     if agent is None:
-        agent = Agent(args, dim_other, dim_hexes, n_actions, device_name=device_name)
+        agent = Agent(args, dim_other, dim_players, dim_hexes, n_actions, device_name=device_name)
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -742,6 +1114,20 @@ def main(args):
                 logfn = getattr(LOG, "info" if commit else "debug")
                 logfn(data)
 
+        if not args.logparams:
+            args.logparams = {
+                "params/gamma": "gamma",
+                "params/gae_lambda": "gae_lambda",
+                "params/ent_coef": "ent_coef",
+                "params/clip_coef": "clip_coef",
+                # "params/lr_schedule": "lr_schedule",
+                "params/norm_adv": "norm_adv",
+                "params/clip_vloss": "clip_vloss",
+                "params/max_grad_norm": "max_grad_norm",
+                "params/weight_decay": "weight_decay",
+                "params/distill_beta": "distill_beta",
+            }
+
         common.log_params(args, wandb_log)
 
         if args.resume:
@@ -757,13 +1143,12 @@ def main(args):
         obs = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + obs_space["observation"].shape, device=device)
         logprobs = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
         actions = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + act_space.shape, device=device)
-        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), dtype=torch.bool, device=device)
+        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), device=device)  # XXX: don't use torch.bool
         advantages = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
         returns = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
 
         rewards = torch.zeros((args.num_samplers, args.num_steps_per_sampler), device=device)
         dones = torch.zeros((args.num_samplers, args.num_steps_per_sampler), device=device)
-        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), dtype=torch.bool, device=device)
         next_obs = torch.zeros((args.num_samplers,) + obs_space["observation"].shape, device=device)
         next_done = torch.zeros(args.num_samplers, device=device)
 
@@ -783,7 +1168,7 @@ def main(args):
             RemoteSampler = ray.remote(num_cpus=0.01)(Sampler)
 
         def NN_creator(device):
-            return AgentNN(args.network, dim_other, dim_hexes, n_actions, device=device)
+            return AgentNN(args.network, dim_other, dim_players, dim_hexes, n_actions, device=device)
 
         def venv_creator():
             return common.create_venv(VcmiEnv, args)
@@ -989,7 +1374,6 @@ def main(args):
                 old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
                 # old_NN_policy = AgentNN(args.network, agent.dim_other, agent.dim_hexes, agent.n_actions, agent.NN_policy.device)
                 # old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
-
 
                 old_NN_policy.eval()
                 for epoch in range(args.update_epochs_distill):
@@ -1230,11 +1614,9 @@ def debug_config():
         env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
         env_version=10,
         network={
-            "encoders": {
-                "other": {"blocks": 3, "size": 10},
-                "hex": {"blocks": 3, "size": 10},
-                "merged": {"blocks": 3, "size": 10},
-            },
+            "z_size_global": 128,
+            "z_size_player": 128,
+            "z_size_hex": 512,
             "heads": {
                 "actor": {"size": 2312},
                 "critic": {"size": 1}
