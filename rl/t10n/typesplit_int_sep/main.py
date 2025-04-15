@@ -833,10 +833,10 @@ class Stats:
             stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
 
 
-def compute_other_losses(canwait_pred, canwait_target, done_pred, done_target):
+def compute_other_losses(canwait_pred, canwait_target, canwait_pos_weight, done_pred, done_target, done_pos_weight):
     return (
-        binary_cross_entropy_with_logits(canwait_pred, canwait_target),
-        binary_cross_entropy_with_logits(done_pred, done_target),
+        binary_cross_entropy_with_logits(canwait_pred, canwait_target, pos_weight=canwait_pos_weight),
+        binary_cross_entropy_with_logits(done_pred, done_target, pos_weight=done_pos_weight),
     )
 
 
@@ -982,6 +982,9 @@ def train_model(
     done_losses = []
     total_losses = []
     timer = Timer()
+    num_samples = 0
+    num_canwaits = 0
+    num_dones = 0
 
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
@@ -991,12 +994,20 @@ def train_model(
             timer.stop()
             obs, action, next_obs, next_mask, next_rew, next_done = batch
 
+            num_samples += next_done.numel()
+            num_canwaits += (next_mask[:, 1] == 1).sum()
+            num_dones += (next_done == 1).sum()
+
+            # pos_weight = num_neg / num_pos
+            pos_weight_canwait = (num_samples - num_canwaits) / (num_canwaits or 1)
+            pos_weight_done = (num_samples - num_dones) / (num_dones or 1)
+
             with maybe_autocast:
                 pred_obs, pred_other = model(obs, action)
                 loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
                 loss_canwait, loss_done = compute_other_losses(
-                    pred_other[:, Other.CAN_WAIT], next_mask[:, 1],
-                    pred_other[:, Other.DONE], next_done
+                    pred_other[:, Other.CAN_WAIT], next_mask[:, 1], pos_weight_canwait,
+                    pred_other[:, Other.DONE], next_done, pos_weight_done
                 )
                 loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_done
 
@@ -1039,7 +1050,7 @@ def train_model(
             canwait_loss,
             done_loss,
             total_loss,
-            total_wait
+            total_wait,
         )
 
 
@@ -1053,18 +1064,30 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     done_losses = []
     total_losses = []
     timer = Timer()
+    num_samples = 0
+    num_canwaits = 0
+    num_dones = 0
 
     timer.start()
     for batch in buffer.sample_iter(batch_size):
         timer.stop()
         obs, action, next_obs, next_mask, next_rew, next_done = batch
+
+        num_samples += next_done.numel()
+        num_canwaits += (next_mask[:, 1] == 1).sum()
+        num_dones += (next_done == 1).sum()
+
+        # pos_weight = num_neg / num_pos
+        pos_weight_canwait = (num_samples - num_canwaits) / (num_canwaits or 1)
+        pos_weight_done = (num_samples - num_dones) / (num_dones or 1)
+
         with torch.no_grad():
             pred_obs, pred_other = model(obs, action)
 
         loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
         loss_canwait, loss_done = compute_other_losses(
-            pred_other[:, Other.CAN_WAIT], next_mask[:, 1],
-            pred_other[:, Other.DONE], next_done
+            pred_other[:, Other.CAN_WAIT], next_mask[:, 1], pos_weight_canwait,
+            pred_other[:, Other.DONE], next_done, pos_weight_done
         )
 
         loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_done
@@ -1671,7 +1694,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 train_canwait_loss,
                 train_done_loss,
                 train_loss,
-                train_wait
+                train_wait,
             ) = train_model(
                 logger=logger,
                 model=model,
