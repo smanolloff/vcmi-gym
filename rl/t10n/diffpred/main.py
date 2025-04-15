@@ -1004,7 +1004,6 @@ def train_model(
 
             with maybe_autocast:
                 pred_obs, pred_other = model(obs, action)
-                import ipdb; ipdb.set_trace()  # noqa
                 loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs - obs, pred_obs)
                 loss_canwait, loss_done = compute_other_losses(
                     pred_other[:, Other.CAN_WAIT], next_mask[:, 1], pos_weight_canwait,
