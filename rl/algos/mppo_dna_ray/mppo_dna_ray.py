@@ -819,7 +819,7 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "dim_other", "dim_hexes", "n_actions", "device_name", "state"]
+        attrs = ["args", "dim_global", "dim_players" "dim_hexes", "n_actions", "device_name", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -833,7 +833,7 @@ class Agent(nn.Module):
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
         raise NotImplementedError("jsave logic is outdated")
-        attrs = ["args", "dim_other", "dim_hexes", "state", "device_name"]
+        attrs = ["args", "dim_global", "dim_players", "dim_hexes", "state", "device_name"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -843,7 +843,8 @@ class Agent(nn.Module):
         clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
         jagent = JitAgent()
         jagent.env_version = clean_agent.env_version
-        jagent.dim_other = clean_agent.dim_other
+        jagent.dim_global = clean_agent.dim_global
+        jagent.dim_players = clean_agent.dim_players
         jagent.dim_hexes = clean_agent.dim_hexes
 
         # v3+
@@ -862,18 +863,18 @@ class Agent(nn.Module):
         print("Loading agent from %s (device_name: %s)" % (agent_file, device_name))
         return torch.load(agent_file, map_location=torch.device(device_name), weights_only=False)
 
-    def __init__(self, args, dim_other, dim_players, dim_hexes, n_actions, state=None, device_name="cpu"):
+    def __init__(self, args, dim_global, dim_players, dim_hexes, n_actions, state=None, device_name="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
         self._optimizer_state = None  # needed for save/load
-        self.dim_other = dim_other  # needed for save/load
+        self.dim_global = dim_global  # needed for save/load
         self.dim_players = dim_players  # needed for save/load
         self.dim_hexes = dim_hexes  # needed for save/load
         self.n_actions = n_actions  # needed for save/load
         self.device_name = device_name
-        self.NN_value = AgentNN(args.network, dim_other, dim_players, dim_hexes, n_actions, torch.device(device_name))
-        self.NN_policy = AgentNN(args.network, dim_other, dim_players, dim_hexes, n_actions, torch.device(device_name))
+        self.NN_value = AgentNN(args.network, dim_global, dim_players, dim_hexes, n_actions, torch.device(device_name))
+        self.NN_policy = AgentNN(args.network, dim_global, dim_players, dim_hexes, n_actions, torch.device(device_name))
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
         self.optimizer_policy = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
         self.optimizer_distill = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
@@ -1082,14 +1083,14 @@ def main(args):
     obs_space = VcmiEnv.OBSERVATION_SPACE
     act_space = VcmiEnv.ACTION_SPACE
 
-    dim_other = VcmiEnv.STATE_SIZE_GLOBAL
+    dim_global = VcmiEnv.STATE_SIZE_GLOBAL
     dim_players = 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
     dim_hexes = VcmiEnv.STATE_SIZE_HEXES
     n_actions = VcmiEnv.ACTION_SPACE.n
-    assert VcmiEnv.STATE_SIZE == dim_other + dim_players + dim_hexes
+    assert VcmiEnv.STATE_SIZE == dim_global + dim_players + dim_hexes
 
     if agent is None:
-        agent = Agent(args, dim_other, dim_players, dim_hexes, n_actions, device_name=device_name)
+        agent = Agent(args, dim_global, dim_players, dim_hexes, n_actions, device_name=device_name)
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -1168,7 +1169,7 @@ def main(args):
             RemoteSampler = ray.remote(num_cpus=0.01)(Sampler)
 
         def NN_creator(device):
-            return AgentNN(args.network, dim_other, dim_players, dim_hexes, n_actions, device=device)
+            return AgentNN(args.network, dim_global, dim_players, dim_hexes, n_actions, device=device)
 
         def venv_creator():
             return common.create_venv(VcmiEnv, args)
