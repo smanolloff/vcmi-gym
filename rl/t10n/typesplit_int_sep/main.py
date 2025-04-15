@@ -15,6 +15,7 @@ import time
 import numpy as np
 import pathlib
 import enum
+import contextlib
 from datetime import datetime
 from functools import partial
 from boto3.s3.transfer import TransferConfig
@@ -46,9 +47,9 @@ DIM_OBS = DIM_OTHER + DIM_HEXES
 
 
 class Other(enum.IntEnum):
-    CAN_WAIT = enum.auto()
-    REWARD = 0
+    CAN_WAIT = 0
     DONE = enum.auto()
+
     _count = enum.auto()
 
 
@@ -166,7 +167,6 @@ class Buffer:
         next_reward = self.containers["reward"][sampled_indices + 1]
         next_done = self.containers["done"][sampled_indices + 1]
 
-        # return obs, action, reward, next_obs, next_action_mask, next_done
         return obs, action, next_obs, next_mask, next_reward, next_done
 
     def sample_iter(self, batch_size):
@@ -504,13 +504,12 @@ class TransitionModel(nn.Module):
                 self.train(was_training)
 
             mask_pred = torch.zeros(N_ACTIONS, dtype=bool)
-            mask_pred[1] = torch.sigmoid(other_pred_logits[0][Other.CAN_WAIT])
-            mask_pred[2:] = obs_pred[STATE_HEXES_INDEX_START:].reshape(165, STATE_SIZE_ONE_HEX)[:, HEX_MASK_INDEX_START:HEX_MASK_INDEX_END]
+            mask_pred[1] = torch.sigmoid(other_pred_logits[0, Other.CAN_WAIT])
+            mask_pred[2:] = torch.as_tensor(obs_pred[STATE_HEXES_INDEX_START:].reshape(165, STATE_SIZE_ONE_HEX)[:, HEX_MASK_INDEX_START:HEX_MASK_INDEX_END].flatten())
 
-            rew_pred = other_pred_logits[0][Other.REWARD].item()
-            done_pred = torch.sigmoid(other_pred_logits[0][Other.DONE]).item()
+            done_pred = torch.sigmoid(other_pred_logits[0, Other.DONE]).item()
 
-            return obs_pred, mask_pred, rew_pred, done_pred
+            return obs_pred, mask_pred, done_pred
 
     def _build_indices(self):
         self.global_index = {"continuous": [], "binary": [], "categoricals": []}
@@ -834,10 +833,9 @@ class Stats:
             stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
 
 
-def compute_other_losses(canwait_pred, canwait_target, rew_pred, rew_target, done_pred, done_target):
+def compute_other_losses(canwait_pred, canwait_target, done_pred, done_target):
     return (
         binary_cross_entropy_with_logits(canwait_pred, canwait_target),
-        mse_loss(rew_pred, rew_target),
         binary_cross_entropy_with_logits(done_pred, done_target),
     )
 
@@ -981,10 +979,11 @@ def train_model(
     binary_losses = []
     categorical_losses = []
     canwait_losses = []
-    rew_losses = []
     done_losses = []
     total_losses = []
     timer = Timer()
+
+    maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
     for epoch in range(epochs):
         timer.start()
@@ -992,24 +991,19 @@ def train_model(
             timer.stop()
             obs, action, next_obs, next_mask, next_rew, next_done = batch
 
-            if scaler:
-                with torch.amp.autocast(model.device.type):
-                    pred_obs, pred_other = model(obs, action)
-                    loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
-                    loss_canwait, loss_rew, loss_done = compute_other_losses(pred_other[:, Other.CAN_WAIT], next_obs[:, 1], pred_other[:, Other.REWARD], next_rew, next_obs[:, Other.DONE], next_done)
-                    loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_rew + loss_done
-
-            else:
+            with maybe_autocast:
                 pred_obs, pred_other = model(obs, action)
                 loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
-                loss_canwait, loss_rew, loss_done = compute_other_losses(pred_other[:, Other.CAN_WAIT], next_obs[:, 1], pred_other[:, Other.REWARD], next_rew, next_obs[:, Other.DONE], next_done)
-                loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_rew + loss_done
+                loss_canwait, loss_done = compute_other_losses(
+                    pred_other[:, Other.CAN_WAIT], next_mask[:, 1],
+                    pred_other[:, Other.DONE], next_done
+                )
+                loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_done
 
             continuous_losses.append(loss_cont.item())
             binary_losses.append(loss_bin.item())
             categorical_losses.append(loss_cat.item())
             canwait_losses.append(loss_canwait.item())
-            rew_losses.append(loss_rew.item())
             done_losses.append(loss_done.item())
             total_losses.append(loss_tot.item())
 
@@ -1034,7 +1028,6 @@ def train_model(
         binary_loss = sum(binary_losses) / len(binary_losses)
         categorical_loss = sum(categorical_losses) / len(categorical_losses)
         canwait_loss = sum(canwait_losses) / len(canwait_losses)
-        rew_loss = sum(rew_losses) / len(rew_losses)
         done_loss = sum(done_losses) / len(done_losses)
         total_loss = sum(total_losses) / len(total_losses)
         total_wait = timer.peek()
@@ -1044,7 +1037,6 @@ def train_model(
             binary_loss,
             categorical_loss,
             canwait_loss,
-            rew_loss,
             done_loss,
             total_loss,
             total_wait
@@ -1058,7 +1050,6 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     binary_losses = []
     categorical_losses = []
     canwait_losses = []
-    rew_losses = []
     done_losses = []
     total_losses = []
     timer = Timer()
@@ -1071,15 +1062,17 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
             pred_obs, pred_other = model(obs, action)
 
         loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs)
-        loss_canwait, loss_rew, loss_done = compute_other_losses(pred_other[:, Other.CAN_WAIT], next_obs[:, 1], pred_other[:, Other.REWARD], next_rew, next_obs[:, Other.DONE], next_done)
+        loss_canwait, loss_done = compute_other_losses(
+            pred_other[:, Other.CAN_WAIT], next_mask[:, 1],
+            pred_other[:, Other.DONE], next_done
+        )
 
-        loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_rew + loss_done
+        loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_done
 
         continuous_losses.append(loss_cont.item())
         binary_losses.append(loss_bin.item())
         categorical_losses.append(loss_cat.item())
         canwait_losses.append(loss_canwait.item())
-        rew_losses.append(loss_rew.item())
         done_losses.append(loss_done.item())
         total_losses.append(loss_tot.item())
         timer.start()
@@ -1090,7 +1083,6 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     categorical_loss = sum(categorical_losses) / len(categorical_losses)
     total_loss = sum(total_losses) / len(total_losses)
     canwait_losses = sum(canwait_losses) / len(canwait_losses)
-    rew_losses = sum(rew_losses) / len(rew_losses)
     done_losses = sum(done_losses) / len(done_losses)
     total_wait = timer.peek()
 
@@ -1099,7 +1091,6 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
         binary_loss,
         categorical_loss,
         canwait_losses,
-        rew_losses,
         done_losses,
         total_loss,
         total_wait
@@ -1678,7 +1669,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 train_binary_loss,
                 train_categorical_loss,
                 train_canwait_loss,
-                train_rew_loss,
                 train_done_loss,
                 train_loss,
                 train_wait
@@ -1706,7 +1696,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     eval_binary_loss,
                     eval_categorical_loss,
                     eval_canwait_loss,
-                    eval_rew_loss,
                     eval_done_loss,
                     eval_loss,
                     eval_wait
@@ -1725,7 +1714,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "train_loss/binary": train_binary_loss,
                 "train_loss/categorical": train_categorical_loss,
                 "train_loss/canwait": train_canwait_loss,
-                "train_loss/rew": train_rew_loss,
                 "train_loss/done": train_done_loss,
                 "train_loss/total": train_loss,
                 "train_dataset/wait_time_s": train_wait,
@@ -1733,7 +1721,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "eval_loss/binary": eval_binary_loss,
                 "eval_loss/categorical": eval_categorical_loss,
                 "eval_loss/canwait": eval_canwait_loss,
-                "eval_loss/rew": eval_rew_loss,
                 "eval_loss/done": eval_done_loss,
                 "eval_loss/total": eval_loss,
                 "eval_dataset/wait_time_s": eval_wait,
@@ -1788,7 +1775,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "train_loss/binary": train_binary_loss,
                 "train_loss/categorical": train_categorical_loss,
                 "train_loss/canwait": train_canwait_loss,
-                "train_loss/rew": train_rew_loss,
                 "train_loss/done": train_done_loss,
                 "train_loss/total": train_loss,
                 "train_dataset/wait_time_s": train_wait,
@@ -1836,14 +1822,15 @@ def do_test(model, env):
             obs_prev = obs["transitions"]["observations"][i-1]
             obs_next = obs["transitions"]["observations"][i]
             mask_next = obs["transitions"]["action_masks"][i]
-            rew_next = obs["transitions"]["rewards"][i]
+            # rew_next = obs["transitions"]["rewards"][i]
             done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
             obs_pred_raw, other_pred_raw = model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(action).unsqueeze(0))
             obs_pred_raw = obs_pred_raw[0]
             other_pred_raw = other_pred_raw[0]
-            obs_pred, canwait_pred, rew_pred, done_pred = model.predict(obs_prev, action)
-            canwait_pred_raw, rew_pred_raw, done_pred_raw = other_pred_raw
+            obs_pred, canwait_pred, done_pred = model.predict(obs_prev, action)
+            canwait_pred_raw = other_pred_raw[Other.CAN_WAIT]
+            done_pred_raw = other_pred_raw[Other.DONE]
 
             def prepare(state, action, reward, headline):
                 import re
@@ -1869,17 +1856,17 @@ def do_test(model, env):
             lines_pred = prepare(obs_pred, -1, None, "Predicted:")
 
             losses = compute_losses(None, model.obs_index, None, torch.as_tensor(obs_next).unsqueeze(0), obs_pred_raw.unsqueeze(0))
-            other_losses = compute_other_losses(canwait_pred_raw, mask_next[1], rew_pred_raw, rew_next, done_pred_raw, done_next)
+            other_losses = compute_other_losses(canwait_pred_raw, torch.as_tensor(mask_next[1], dtype=torch.float32), done_pred_raw, torch.as_tensor(done_next, dtype=torch.float32))
             losses += other_losses
 
-            print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f | CanWait: %.4f | Rew: %.4f | Done: %.4f" % losses)
+            print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f | CanWait: %.4f | Done: %.4f" % losses)
 
             # print(Decoder.decode(obs_prev).render(0))
             # for i in range(len(bfields)):
             print("")
             print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real, lines_pred)]))
             print("")
-            import ipdb; ipdb.set_trace()  # noqa
+            # import ipdb; ipdb.set_trace()  # noqa
 
             # bf_next = Decoder.decode(obs_next)
             # bf_pred = Decoder.decode(obs_pred)
