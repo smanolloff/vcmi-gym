@@ -1140,7 +1140,7 @@ def main(args):
         obs = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + obs_space["observation"].shape, device=device)
         logprobs = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
         actions = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + act_space.shape, device=device)
-        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), device=device)  # XXX: don't use torch.bool
+        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), dtype=torch.bool, device=device)  # XXX: must use torch.bool (for CategoricalMasked)
         advantages = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
         returns = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
 
