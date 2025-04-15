@@ -462,9 +462,6 @@ class AgentNN(nn.Module):
         # Heads
         #
 
-        # => (B, 165, Z_AGG + Z_HEX)
-        self.head_global = nn.LazyLinear(self.dims["hex"])
-
         self.actor = nn.LazyLinear(network.heads["actor"]["size"])
         self.critic = nn.LazyLinear(network.heads["critic"]["size"])
 
@@ -715,7 +712,6 @@ class AgentNN(nn.Module):
         hex_discrete = torch.cat((hex_discrete, *self.obs_index["hex"]["categoricals"]), dim=1)
         self.obs_index["hex"]["discrete"] = hex_discrete
 
-
     def encode(self, obs):
         assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
 
@@ -819,7 +815,7 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "dim_global", "dim_players" "dim_hexes", "n_actions", "device_name", "state"]
+        attrs = ["args", "dim_global", "dim_players", "dim_hexes", "n_actions", "device_name", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
