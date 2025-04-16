@@ -17,6 +17,7 @@ env_kwargs = dict(
     max_steps=1000,
     random_heroes=1,
     random_obstacles=1,
+    swap_sides=1,
     town_chance=30,
     warmachine_chance=40,
     random_terrain_chance=100,
@@ -31,22 +32,22 @@ env_kwargs = dict(
 )
 
 config = dict(
-    name_template="{datetime}-{id}-transformer",
+    name_template="{datetime}-{id}-swap-T-E512_H8_L6-B300-RTX3080",
 
-    # env=dict(
-    #     train=dict(
-    #         num_workers=3,
-    #         batch_size=1000,  # buffer capacity = num_workers * batch_size
-    #         prefetch_factor=1,
-    #         kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
-    #     ),
-    #     eval=dict(
-    #         num_workers=1,
-    #         batch_size=200,  # buffer capacity = num_workers * batch_size
-    #         prefetch_factor=1,
-    #         kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
-    #     ),
-    # ),
+    env=dict(
+        train=dict(
+            num_workers=3,
+            batch_size=1000,  # buffer capacity = num_workers * batch_size
+            prefetch_factor=1,
+            kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
+        ),
+        eval=dict(
+            num_workers=1,
+            batch_size=200,  # buffer capacity = num_workers * batch_size
+            prefetch_factor=1,
+            kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
+        ),
+    ),
 
     checkpoint_interval_s=900,  # NOTE: checked only after eval
 
@@ -59,30 +60,30 @@ config = dict(
             s3_dir="models",
         ),
 
-        data=dict(
-            train=dict(
-                bucket_name="vcmi-gym",
-                s3_dir="v10/4x1024",
-                cache_dir=os.path.abspath("data/.s3_cache"),
-                cached_files_max=None,
-                num_workers=5,
-                batch_size=3000,  # buffer capacity = num_workers * batch_size
-                prefetch_factor=1,
-                pin_memory=False,       # causes hangs when enabled
-                shuffle=False,
-            ),
-            eval=dict(
-                bucket_name="vcmi-gym",
-                s3_dir="v10/8x512",
-                cache_dir=os.path.abspath("data/.s3_cache"),
-                cached_files_max=None,
-                num_workers=1,
-                batch_size=3000,  # buffer capacity = num_workers * batch_size
-                prefetch_factor=1,
-                pin_memory=False,       # causes hangs when enabled
-                shuffle=False,
-            )
-        ),
+        #data=dict(
+        #    train=dict(
+        #        bucket_name="vcmi-gym",
+        #        s3_dir="v10/4x1024",
+        #        cache_dir=os.path.abspath("data/.s3_cache"),
+        #        cached_files_max=None,
+        #        num_workers=1,
+        #        batch_size=1000,  # buffer capacity = num_workers * batch_size
+        #        prefetch_factor=1,
+        #        pin_memory=False,       # causes hangs when enabled
+        #        shuffle=False,
+        #    ),
+        #    eval=dict(
+        #        bucket_name="vcmi-gym",
+        #        s3_dir="v10/8x512",
+        #        cache_dir=os.path.abspath("data/.s3_cache"),
+        #        cached_files_max=None,
+        #        num_workers=1,
+        #        batch_size=1000,  # buffer capacity = num_workers * batch_size
+        #        prefetch_factor=1,
+        #        pin_memory=False,       # causes hangs when enabled
+        #        shuffle=False,
+        #    )
+        #),
     ),
 
     eval={
@@ -90,7 +91,7 @@ config = dict(
         "batch_size": 200,
     },
     train={
-        "batch_size": 300,
+        "batch_size": 250,
         "learning_rate": 1e-4,
         "epochs": 1,
     }
