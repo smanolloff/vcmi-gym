@@ -854,7 +854,7 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs, diff_mas
         loss_binary += (loss_per_element * mask).sum() / (mask.sum() + 1e-8)
 
     if logits_global_categoricals:
-        masks = [diff_mask[:, ind] for ind in obs_index["global"]["categoricals"]]
+        masks = [diff_mask[:, ind].any(dim=-1) for ind in obs_index["global"]["categoricals"]]
         target_global_categoricals = [next_obs[:, index] for index in obs_index["global"]["categoricals"]]
         # weight_global_categoricals = loss_weights["categoricals"]["global"]
         # for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
@@ -863,8 +863,8 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs, diff_mas
         #     loss_categorical += cross_entropy(logits, target)
         for logits, target, mask in zip(logits_global_categoricals, target_global_categoricals, masks):
             ce_loss = cross_entropy(logits, target, reduction="none")
-            mask = mask.any(dim=1)
-            loss_categorical += (ce_loss * mask).sum() / (mask.sum() + 1e-8)
+            new_loss = (ce_loss * mask).sum() / (mask.sum() + 1e-8)
+            loss_categorical += new_loss
 
     # Player (2x)
 
@@ -889,7 +889,7 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs, diff_mas
     # [cross_entropy(logits, target).item(), cross_entropy(logits.flatten(start_dim=0, end_dim=1), target.flatten(start_dim=0, end_dim=1)).item(), cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2)).item()]
 
     if logits_player_categoricals:
-        masks = [diff_mask[:, ind] for ind in obs_index["player"]["categoricals"]]
+        masks = [diff_mask[:, ind].any(dim=-1) for ind in obs_index["player"]["categoricals"]]
         target_player_categoricals = [next_obs[:, index] for index in obs_index["player"]["categoricals"]]
         # weight_player_categoricals = loss_weights["categoricals"]["player"]
         # for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
@@ -897,9 +897,9 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs, diff_mas
         # for logits, target in zip(logits_player_categoricals, target_player_categoricals):
         #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
         for logits, target, mask in zip(logits_player_categoricals, target_player_categoricals, masks):
-            ce_loss = cross_entropy(logits, target, reduction="none")
-            mask = mask.any(dim=-1)
-            loss_categorical += (ce_loss * mask).sum() / (mask.sum() + 1e-8)
+            ce_loss = cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), reduction="none")
+            new_loss = (ce_loss * mask).sum() / (mask.sum() + 1e-8)
+            loss_categorical += new_loss
 
     # Hex (165x)
 
@@ -918,7 +918,7 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs, diff_mas
         loss_binary += (loss_per_element * mask).sum() / (mask.sum() + 1e-8)
 
     if logits_hex_categoricals:
-        masks = [diff_mask[:, ind].any(dim=1) for ind in obs_index["hex"]["categoricals"]]
+        masks = [diff_mask[:, ind].any(dim=-1) for ind in obs_index["hex"]["categoricals"]]
         target_hex_categoricals = [next_obs[:, index] for index in obs_index["hex"]["categoricals"]]
         # weight_hex_categoricals = loss_weights["categoricals"]["hex"]
         # for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
@@ -926,8 +926,9 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs, diff_mas
         # for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
         #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
         for logits, target, mask in zip(logits_hex_categoricals, target_hex_categoricals, masks):
-            ce_loss = cross_entropy(logits, target, reduction="none")
-            loss_categorical += (ce_loss * mask).sum() / (mask.sum() + 1e-8)
+            ce_loss = cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), reduction="none")
+            new_loss = (ce_loss * mask).sum() / (mask.sum() + 1e-8)
+            loss_categorical += new_loss
 
     return loss_binary, loss_continuous, loss_categorical
 
