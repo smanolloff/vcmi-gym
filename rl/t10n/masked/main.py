@@ -1740,11 +1740,11 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 batch_size=train_batch_size,
             )
 
-        wlog["train_loss/continuous"] = eval_continuous_loss
-        wlog["train_loss/binary"] = eval_binary_loss
-        wlog["train_loss/categorical"] = eval_categorical_loss
-        wlog["train_loss/total"] = eval_loss
-        wlog["train_dataset/wait_time_s"] = eval_wait
+        wlog["train_loss/continuous"] = train_continuous_loss
+        wlog["train_loss/binary"] = train_binary_loss
+        wlog["train_loss/categorical"] = train_categorical_loss
+        wlog["train_loss/total"] = train_loss
+        wlog["train_dataset/wait_time_s"] = train_wait
 
         if "eval_loss/total" in wlog:
             wlog = dict(wlog, **timer_stats(timers))
