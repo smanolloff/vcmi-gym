@@ -376,9 +376,6 @@ class TransitionModel(nn.Module):
         # => (B, 165, Z_AGG + Z_HEX)
         self.head_hex = nn.LazyLinear(STATE_SIZE_ONE_HEX)
 
-        # => (B, Z_AGG)
-        self.head_other = nn.LazyLinear(Other._count)
-
         self.to(device)
 
         # Init lazy layers
@@ -446,13 +443,10 @@ class TransitionModel(nn.Module):
         hex_out = self.head_hex(torch.cat([z_agg.unsqueeze(1).expand(-1, 165, -1), z_hex], dim=-1))
         # => (B, 165, STATE_SIZE_ONE_HEX)
 
-        obs_diff_out = torch.cat((global_out, player_out.flatten(start_dim=1), hex_out.flatten(start_dim=1)), dim=1)
-
-        other_out = self.head_other(z_agg)
-        # => (B, Other._count)
+        obs_out = torch.cat((global_out, player_out.flatten(start_dim=1), hex_out.flatten(start_dim=1)), dim=1)
 
         # obs, rew, can_wait
-        return obs_diff_out, other_out
+        return obs_out
 
     def reconstruct(self, obs_out):
         global_continuous_out = obs_out[:, self.obs_index["global"]["continuous"]]
@@ -498,18 +492,12 @@ class TransitionModel(nn.Module):
             was_training = self.training
             self.eval()
             try:
-                obs_diff_pred_logits, other_pred_logits = self.forward(obs, action)
-                obs_pred = self.reconstruct(obs + obs_diff_pred_logits)[0].numpy()
+                obs_pred_logits = self.forward(obs, action)
+                obs_pred = self.reconstruct(obs_pred_logits)[0].numpy()
             finally:
                 self.train(was_training)
 
-            mask_pred = torch.zeros(N_ACTIONS, dtype=bool)
-            mask_pred[1] = torch.sigmoid(other_pred_logits[0, Other.CAN_WAIT])
-            mask_pred[2:] = torch.as_tensor(obs_pred[STATE_HEXES_INDEX_START:].reshape(165, STATE_SIZE_ONE_HEX)[:, HEX_MASK_INDEX_START:HEX_MASK_INDEX_END].flatten())
-
-            done_pred = torch.sigmoid(other_pred_logits[0, Other.DONE]).item()
-
-            return obs_pred, mask_pred, done_pred
+            return obs_pred
 
     def _build_indices(self):
         self.global_index = {"continuous": [], "binary": [], "categoricals": []}
@@ -833,14 +821,7 @@ class Stats:
             stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
 
 
-def compute_other_losses(canwait_pred, canwait_target, canwait_pos_weight, done_pred, done_target, done_pos_weight):
-    return (
-        binary_cross_entropy_with_logits(canwait_pred, canwait_target, pos_weight=canwait_pos_weight),
-        binary_cross_entropy_with_logits(done_pred, done_target, pos_weight=done_pos_weight),
-    )
-
-
-def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
+def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs, diff_mask):
     logits_global_continuous = pred_obs[:, obs_index["global"]["continuous"]]
     logits_global_binary = pred_obs[:, obs_index["global"]["binary"]]
     logits_global_categoricals = [pred_obs[:, ind] for ind in obs_index["global"]["categoricals"]]
@@ -858,34 +839,48 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
     # Global
 
     if logits_global_continuous.numel():
+        mask = diff_mask[:, obs_index["global"]["continuous"]]
         target_global_continuous = next_obs[:, obs_index["global"]["continuous"]]
-        loss_continuous += mse_loss(logits_global_continuous, target_global_continuous)
+        # loss_continuous += mse_loss(logits_global_continuous, target_global_continuous)
+        loss_continuous += ((logits_global_continuous - target_global_continuous)**2 * mask).sum() / (mask.sum() + 1e-8)
 
     if logits_global_binary.numel():
+        mask = diff_mask[:, obs_index["global"]["binary"]]
         target_global_binary = next_obs[:, obs_index["global"]["binary"]]
         # weight_global_binary = loss_weights["binary"]["global"]
         # loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
-        loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
+        # loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
+        loss_per_element = binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, reduction="none")
+        loss_binary += (loss_per_element * mask).sum() / (mask.sum() + 1e-8)
 
     if logits_global_categoricals:
+        masks = [diff_mask[:, ind] for ind in obs_index["global"]["categoricals"]]
         target_global_categoricals = [next_obs[:, index] for index in obs_index["global"]["categoricals"]]
         # weight_global_categoricals = loss_weights["categoricals"]["global"]
         # for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
         #     loss_categorical += cross_entropy(logits, target, weight=weight)
-        for logits, target in zip(logits_global_categoricals, target_global_categoricals):
-            loss_categorical += cross_entropy(logits, target)
+        # for logits, target in zip(logits_global_categoricals, target_global_categoricals):
+        #     loss_categorical += cross_entropy(logits, target)
+        for logits, target, mask in zip(logits_global_categoricals, target_global_categoricals, masks):
+            ce_loss = cross_entropy(logits, target, reduction="none")
+            mask = mask.any(dim=1)
+            loss_categorical += (ce_loss * mask).sum() / (mask.sum() + 1e-8)
 
     # Player (2x)
 
     if logits_player_continuous.numel():
+        mask = diff_mask[:, obs_index["player"]["continuous"]]
         target_player_continuous = next_obs[:, obs_index["player"]["continuous"]]
-        loss_continuous += mse_loss(logits_player_continuous, target_player_continuous)
+        loss_continuous += ((logits_player_continuous - target_player_continuous)**2 * mask).sum() / (mask.sum() + 1e-8)
 
     if logits_player_binary.numel():
+        mask = diff_mask[:, obs_index["player"]["binary"]]
         target_player_binary = next_obs[:, obs_index["player"]["binary"]]
         # weight_player_binary = loss_weights["binary"]["player"]
         # loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
-        loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
+        # loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
+        loss_per_element = binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, reduction="none")
+        loss_binary += (loss_per_element * mask).sum() / (mask.sum() + 1e-8)
 
     # XXX: CrossEntropyLoss expects (B, C, *) input where C=num_classes
     #      => transpose (B, 2, C) => (B, C, 2)
@@ -894,32 +889,45 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
     # [cross_entropy(logits, target).item(), cross_entropy(logits.flatten(start_dim=0, end_dim=1), target.flatten(start_dim=0, end_dim=1)).item(), cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2)).item()]
 
     if logits_player_categoricals:
+        masks = [diff_mask[:, ind] for ind in obs_index["player"]["categoricals"]]
         target_player_categoricals = [next_obs[:, index] for index in obs_index["player"]["categoricals"]]
         # weight_player_categoricals = loss_weights["categoricals"]["player"]
         # for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
         #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
-        for logits, target in zip(logits_player_categoricals, target_player_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+        # for logits, target in zip(logits_player_categoricals, target_player_categoricals):
+        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+        for logits, target, mask in zip(logits_player_categoricals, target_player_categoricals, masks):
+            ce_loss = cross_entropy(logits, target, reduction="none")
+            mask = mask.any(dim=-1)
+            loss_categorical += (ce_loss * mask).sum() / (mask.sum() + 1e-8)
 
     # Hex (165x)
 
     if logits_hex_continuous.numel():
+        mask = diff_mask[:, obs_index["hex"]["continuous"]]
         target_hex_continuous = next_obs[:, obs_index["hex"]["continuous"]]
-        loss_continuous += mse_loss(logits_hex_continuous, target_hex_continuous)
+        loss_continuous += ((logits_hex_continuous - target_hex_continuous)**2 * mask).sum() / (mask.sum() + 1e-8)
 
     if logits_hex_binary.numel():
+        mask = diff_mask[:, obs_index["hex"]["binary"]]
         target_hex_binary = next_obs[:, obs_index["hex"]["binary"]]
         # weight_hex_binary = loss_weights["binary"]["hex"]
         # loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
-        loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary)
+        # loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary)
+        loss_per_element = binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, reduction="none")
+        loss_binary += (loss_per_element * mask).sum() / (mask.sum() + 1e-8)
 
     if logits_hex_categoricals:
+        masks = [diff_mask[:, ind].any(dim=1) for ind in obs_index["hex"]["categoricals"]]
         target_hex_categoricals = [next_obs[:, index] for index in obs_index["hex"]["categoricals"]]
         # weight_hex_categoricals = loss_weights["categoricals"]["hex"]
         # for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
         #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
-        for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+        # for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
+        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+        for logits, target, mask in zip(logits_hex_categoricals, target_hex_categoricals, masks):
+            ce_loss = cross_entropy(logits, target, reduction="none")
+            loss_categorical += (ce_loss * mask).sum() / (mask.sum() + 1e-8)
 
     return loss_binary, loss_continuous, loss_categorical
 
@@ -978,13 +986,8 @@ def train_model(
     continuous_losses = []
     binary_losses = []
     categorical_losses = []
-    canwait_losses = []
-    done_losses = []
     total_losses = []
     timer = Timer()
-    num_samples = 0
-    num_canwaits = 0
-    num_dones = 0
 
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
@@ -994,28 +997,14 @@ def train_model(
             timer.stop()
             obs, action, next_obs, next_mask, next_rew, next_done = batch
 
-            num_samples += next_done.numel()
-            num_canwaits += (next_mask[:, 1] == 1).sum()
-            num_dones += (next_done == 1).sum()
-
-            # pos_weight = num_neg / num_pos
-            pos_weight_canwait = (num_samples - num_canwaits) / (num_canwaits or 1)
-            pos_weight_done = (num_samples - num_dones) / (num_dones or 1)
-
             with maybe_autocast:
-                pred_obs, pred_other = model(obs, action)
-                loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs - obs, pred_obs)
-                loss_canwait, loss_done = compute_other_losses(
-                    pred_other[:, Other.CAN_WAIT], next_mask[:, 1], pos_weight_canwait,
-                    pred_other[:, Other.DONE], next_done, pos_weight_done
-                )
-                loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_done
+                pred_obs = model(obs, action)
+                loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs, next_obs != obs)
+                loss_tot = loss_cont + loss_bin + loss_cat
 
             continuous_losses.append(loss_cont.item())
             binary_losses.append(loss_bin.item())
             categorical_losses.append(loss_cat.item())
-            canwait_losses.append(loss_canwait.item())
-            done_losses.append(loss_done.item())
             total_losses.append(loss_tot.item())
 
             optimizer.zero_grad()
@@ -1038,8 +1027,6 @@ def train_model(
         continuous_loss = sum(continuous_losses) / len(continuous_losses)
         binary_loss = sum(binary_losses) / len(binary_losses)
         categorical_loss = sum(categorical_losses) / len(categorical_losses)
-        canwait_loss = sum(canwait_losses) / len(canwait_losses)
-        done_loss = sum(done_losses) / len(done_losses)
         total_loss = sum(total_losses) / len(total_losses)
         total_wait = timer.peek()
 
@@ -1047,8 +1034,6 @@ def train_model(
             continuous_loss,
             binary_loss,
             categorical_loss,
-            canwait_loss,
-            done_loss,
             total_loss,
             total_wait,
         )
@@ -1060,43 +1045,23 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     continuous_losses = []
     binary_losses = []
     categorical_losses = []
-    canwait_losses = []
-    done_losses = []
     total_losses = []
     timer = Timer()
-    num_samples = 0
-    num_canwaits = 0
-    num_dones = 0
 
     timer.start()
     for batch in buffer.sample_iter(batch_size):
         timer.stop()
         obs, action, next_obs, next_mask, next_rew, next_done = batch
 
-        num_samples += next_done.numel()
-        num_canwaits += (next_mask[:, 1] == 1).sum()
-        num_dones += (next_done == 1).sum()
-
-        # pos_weight = num_neg / num_pos
-        pos_weight_canwait = (num_samples - num_canwaits) / (num_canwaits or 1)
-        pos_weight_done = (num_samples - num_dones) / (num_dones or 1)
-
         with torch.no_grad():
-            pred_obs, pred_other = model(obs, action)
+            pred_obs = model(obs, action)
 
-        loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs - obs, pred_obs)
-        loss_canwait, loss_done = compute_other_losses(
-            pred_other[:, Other.CAN_WAIT], next_mask[:, 1], pos_weight_canwait,
-            pred_other[:, Other.DONE], next_done, pos_weight_done
-        )
-
-        loss_tot = loss_cont + loss_bin + loss_cat + loss_canwait + loss_done
+        loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs, next_obs != obs)
+        loss_tot = loss_cont + loss_bin + loss_cat
 
         continuous_losses.append(loss_cont.item())
         binary_losses.append(loss_bin.item())
         categorical_losses.append(loss_cat.item())
-        canwait_losses.append(loss_canwait.item())
-        done_losses.append(loss_done.item())
         total_losses.append(loss_tot.item())
         timer.start()
     timer.stop()
@@ -1105,16 +1070,12 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     binary_loss = sum(binary_losses) / len(binary_losses)
     categorical_loss = sum(categorical_losses) / len(categorical_losses)
     total_loss = sum(total_losses) / len(total_losses)
-    canwait_losses = sum(canwait_losses) / len(canwait_losses)
-    done_losses = sum(done_losses) / len(done_losses)
     total_wait = timer.peek()
 
     return (
         continuous_loss,
         binary_loss,
         categorical_loss,
-        canwait_losses,
-        done_losses,
         total_loss,
         total_wait
     )
@@ -1691,8 +1652,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 train_continuous_loss,
                 train_binary_loss,
                 train_categorical_loss,
-                train_canwait_loss,
-                train_done_loss,
                 train_loss,
                 train_wait,
             ) = train_model(
@@ -1718,8 +1677,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     eval_continuous_loss,
                     eval_binary_loss,
                     eval_categorical_loss,
-                    eval_canwait_loss,
-                    eval_done_loss,
                     eval_loss,
                     eval_wait
                 ) = eval_model(
@@ -1736,15 +1693,11 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "train_loss/continuous": train_continuous_loss,
                 "train_loss/binary": train_binary_loss,
                 "train_loss/categorical": train_categorical_loss,
-                "train_loss/canwait": train_canwait_loss,
-                "train_loss/done": train_done_loss,
                 "train_loss/total": train_loss,
                 "train_dataset/wait_time_s": train_wait,
                 "eval_loss/continuous": eval_continuous_loss,
                 "eval_loss/binary": eval_binary_loss,
                 "eval_loss/categorical": eval_categorical_loss,
-                "eval_loss/canwait": eval_canwait_loss,
-                "eval_loss/done": eval_done_loss,
                 "eval_loss/total": eval_loss,
                 "eval_dataset/wait_time_s": eval_wait,
             }
@@ -1797,8 +1750,6 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 "train_loss/continuous": train_continuous_loss,
                 "train_loss/binary": train_binary_loss,
                 "train_loss/categorical": train_categorical_loss,
-                "train_loss/canwait": train_canwait_loss,
-                "train_loss/done": train_done_loss,
                 "train_loss/total": train_loss,
                 "train_dataset/wait_time_s": train_wait,
             })
@@ -1844,16 +1795,13 @@ def do_test(model, env):
         for i in range(1, len(obs["transitions"]["observations"])):
             obs_prev = obs["transitions"]["observations"][i-1]
             obs_next = obs["transitions"]["observations"][i]
-            mask_next = obs["transitions"]["action_masks"][i]
+            # mask_next = obs["transitions"]["action_masks"][i]
             # rew_next = obs["transitions"]["rewards"][i]
-            done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
+            # done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
-            obs_pred_raw, other_pred_raw = model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(action).unsqueeze(0))
+            obs_pred_raw = model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(action).unsqueeze(0))
             obs_pred_raw = obs_pred_raw[0]
-            other_pred_raw = other_pred_raw[0]
-            obs_pred, canwait_pred, done_pred = model.predict(obs_prev, action)
-            canwait_pred_raw = other_pred_raw[Other.CAN_WAIT]
-            done_pred_raw = other_pred_raw[Other.DONE]
+            obs_pred = model.predict(obs_prev, action)
 
             def prepare(state, action, reward, headline):
                 import re
@@ -1878,11 +1826,16 @@ def do_test(model, env):
             lines_real = prepare(obs_next, -1, None, "Real:")
             lines_pred = prepare(obs_pred, -1, None, "Predicted:")
 
-            losses = compute_losses(None, model.obs_index, None, torch.as_tensor(obs_next).unsqueeze(0), obs_pred_raw.unsqueeze(0))
-            other_losses = compute_other_losses(canwait_pred_raw, torch.as_tensor(mask_next[1], dtype=torch.float32), done_pred_raw, torch.as_tensor(done_next, dtype=torch.float32))
-            losses += other_losses
+            losses = compute_losses(
+                logger=None,
+                obs_index=model.obs_index,
+                loss_weights=None,
+                next_obs=torch.as_tensor(obs_next).unsqueeze(0),
+                pred_obs=obs_pred_raw.unsqueeze(0),
+                diff_mask=(torch.as_tensor(obs_next).unsqueeze(0) != torch.as_tensor(obs_prev).unsqueeze(0))
+            )
 
-            print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f | CanWait: %.4f | Done: %.4f" % losses)
+            print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f" % losses)
 
             # print(Decoder.decode(obs_prev).render(0))
             # for i in range(len(bfields)):
