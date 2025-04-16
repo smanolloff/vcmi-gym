@@ -382,10 +382,10 @@ class VcmiEnv(gym.Env):
         else:
             hex = bf.get_hex((action - 2) // len(HEX_ACT_MAP))
 
-            if hex.stack and hex.stack.QUEUE.v[0] == 1 and not hex.IS_REAR.v:
+            act = list(HEX_ACT_MAP)[(action - 2) % len(HEX_ACT_MAP)]
+
+            if hex.stack and hex.stack.QUEUE.v[0] == 1 and act == "MOVE" and not hex.IS_REAR.v:
                 act = "Defend"
-            else:
-                act = list(HEX_ACT_MAP)[(action - 2) % len(HEX_ACT_MAP)]
 
             res += "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
         return res

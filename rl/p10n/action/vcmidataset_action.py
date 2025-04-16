@@ -27,20 +27,112 @@ class VCMIDatasetAction(IterableDataset):
         # worker_id = torch.utils.data.get_worker_info().id
         # i = 0
 
-        if self.env is None:
-            from vcmi_gym import VcmiEnv_v10 as VcmiEnv
-            self.env = VcmiEnv(**self.env_kwargs)
-            self.env.reset()
+        assert self.env is None, "multiple calls to __iter__ not supported"
+
+        from vcmi_gym import VcmiEnv_v10 as VcmiEnv
+        self.env = VcmiEnv(**self.env_kwargs)
+
+        obs = self.env.reset()[0]
+        term = False
+        trunc = False
+        ep_steps = 0
 
         with self.timer_all:
             while True:
-                for obs, action in zip(self.env.result.intstates[1:], self.env.result.intactions[1:]):
-                    # if i % 1000 == 0:
-                    #     print("[%d] %d" % (worker_id, i))
-                    # i += 1
+                dones = [False] * len(obs["transitions"]["observations"])
+                dones[-1] = term or trunc
+
+                zipped = zip(
+                    obs["transitions"]["observations"],
+                    obs["transitions"]["action_masks"],
+                    obs["transitions"]["rewards"],
+                    dones,
+                    obs["transitions"]["actions"],
+                )
+
+                # =============================================================
+                # Example for episode with 4 steps, 3 transitions each:
+                #
+                # Legend:
+                #       O(s0t0) = observation at step0, transition0
+                #       R(s0t0) = observation at step1, transition1
+                #       A(s0t0) = action in O(s0t0) leading to O(s0t1)
+                #                 NOTE: A(*t0) is always our action
+                #                 NOTE: A(*t2) is always -1 (assuming 3 transitions)
+                #
+                #
+                # t=0           | t=1          | t=2               |
+                # --------------|--------------|-------------------|
+                #        A(s0t0)|       A(s0t1)|       A(s0t2)=-1  |
+                #       /       \      /       \      /            |  s=0 (ep start)
+                # O(s0t0)       |O(s0t1)       |O(s0t2)            |
+                # R(s0t0)=NaN   |R(s0t1)       |R(s0t2)            |
+                #               |              |                   |
+                # --------------|--------------|-------------------|
+                #        A(s1t0)|       A(s1t1)|       A(s1t2)=-1  |
+                #       /       \      /       \      /            |  s=1
+                # O(s1t0)       |O(s1t1)       |O(s1t2)            |
+                # R(s1t0)=NaN   |R(s1t1)       |R(s1t2)            |
+                #               |              |                   |
+                # --------------|--------------|-------------------|
+                # ...           |              |                   |  s=2
+                # --------------|--------------|-------------------|
+                #        A(s3t0)|       A(s3t1)|       A(s3t2)=-1  |
+                #       /       \      /       \      /            |  s=3 (ep end)
+                # O(s3t0)       |O(s3t1)       |O(s3t2)            |
+                # R(s3t0)=NaN   |R(s3t1)       |R(s3t2)            |
+                #
+                # =============================================================
+                # IMPORTANT: duplicate observations at the edges:
+                #   O(s0t2) == O(s1t0)
+                #   O(s1t2) == O(s2t0)
+                #   ... etc
+                #
+                # R(s0t0)=NaN is OK (episode start => no prev step, no reward)
+                # R(s1t0)=NaN is NOT OK => use R(s0t2) from prev step
+                # A(s0t2)=-1  is NOT OK => use A(s1t0) from next step
+                # A(s3t2)=-1  is OK (this is the terminal obs => no aciton)
+                #
+                # We `yield` a total of 9 samples:
+                #
+                #  | obs            | reward         | action         |
+                # -|----------------|----------------|----------------|
+                #  | O(s0t0)        | R(s0t0)=NaN    | A(s0t0)        | t=0 s=0
+                #  | O(s0t1)        | R(s0t1)        | A(s0t1)        | t=1
+                #  |                |                |                | t=2
+                # -|----------------|----------------|----------------|
+                #  | O(s1t0)        | R(s0t2) <- !!! | A(s1t0)        | t=0 s=1
+                #  | O(s1t1)        | R(s1t1)        | A(s1t1)        | t=1
+                #  |                |                |                | t=2
+                # -|----------------|----------------|----------------|
+                #  | O(s2t0)        | R(s1t2) <- !!! | A(s2t0)        | t=0 s=2
+                #  | O(s2t1)        | R(s2t1)        | A(s2t1)        | t=1
+                #  |                |                |                | t=2
+                # -|----------------|----------------|----------------|
+                #  | O(s3t0)        | R(s2t2) <- !!! | A(s3t0)        | t=0 s=3
+                #  | O(s3t1)        | R(s3t1)        | A(s3t1)        | t=1
+                #  | O(s3t2)        | R(s3t2)        | A(s1t0)=-1     | t=2 !!!
+                #
+                # =============================================================
+                #
+                # => for t=2 (the final transition):
+                #   - we carry its reward to next step's t=0
+                #   - we `yield` it only if s=3 (last step)
+                #
+
+                final_t = len(obs["transitions"]["observations"]) - 1
+
+                for t, (t_obs, t_mask, t_reward, t_done, t_action) in enumerate(zipped):
+                    if t == final_t:
+                        reward_carry = t_reward
+                        if not t_done:
+                            continue
+
+                    if t == 0 and ep_steps > 0:
+                        t_reward = reward_carry
 
                     with self.timer_idle:
-                        yield obs, action
+                        yield t_obs, t_mask, t_reward, t_done, t_action
 
                     if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:
                         self.metric_reported_at = time.time()
@@ -49,10 +141,14 @@ class VCMIDatasetAction(IterableDataset):
                         except queue.Full:
                             logger.warn("Failed to report metric (queue full)")
 
-                if self.env.terminated or self.env.truncated:
-                    self.env.reset()
+                if term or trunc:
+                    obs = self.env.reset()[0]
+                    term = False
+                    trunc = False
+                    ep_steps = 0
                 else:
-                    self.env.step(self.env.random_action())
+                    obs, _rew, term, trunc, _info = self.env.step(self.env.random_action())
+                    ep_steps += 1
 
     def utilization(self):
         if self.timer_all.peek() == 0:
@@ -71,6 +167,7 @@ if __name__ == "__main__":
     dataset = VCMIDatasetAction(
         logger=logger,
         env_kwargs=dict(
+            mapname="gym/generated/4096/4x1024.vmap",
             max_steps=500,
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
@@ -92,9 +189,9 @@ if __name__ == "__main__":
         )
     )
 
-    # XXX: prefetch_factor=N means:
-    #      always keep N*num_workers*batch_size records preloaded
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=10_000, num_workers=5, prefetch_factor=1)
+    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=100, num_workers=5, prefetch_factor=1)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=500, num_workers=0)
+
     for x in dataloader:
         import ipdb; ipdb.set_trace()  # noqa
         print("yee")

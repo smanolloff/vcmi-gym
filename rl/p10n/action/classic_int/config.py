@@ -31,27 +31,27 @@ env_kwargs = dict(
 )
 
 config = dict(
-    name_template="{datetime}-{id}",
+    name_template="{datetime}-{id}-pred-transformer",
 
     env=dict(
         train=dict(
-            num_workers=2,
-            batch_size=2000,  # buffer capacity = num_workers * batch_size
+            num_workers=3,
+            batch_size=100,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         eval=dict(
             num_workers=1,
-            batch_size=2000,  # buffer capacity = num_workers * batch_size
+            batch_size=100,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
         ),
     ),
 
-    checkpoint_interval_s=900,
+    checkpoint_interval_s=900,  # NOTE: checked only after eval
 
     s3=dict(
-        optimize_local_storage=True,
+        optimize_local_storage=False,
 
         # checkpoint=None,
         checkpoint=dict(
@@ -62,22 +62,22 @@ config = dict(
         # data=dict(
         #     train=dict(
         #         bucket_name="vcmi-gym",
-        #         s3_dir="v10",
-        #         cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
+        #         s3_dir="v10/4x1024",
+        #         cache_dir=os.path.abspath("data/.s3_cache"),
         #         cached_files_max=None,
-        #         num_workers=8,
-        #         batch_size=1250,  # buffer capacity = num_workers * batch_size
+        #         num_workers=1,
+        #         batch_size=100,  # buffer capacity = num_workers * batch_size
         #         prefetch_factor=1,
         #         pin_memory=False,       # causes hangs when enabled
         #         shuffle=False,
         #     ),
-        #     test=dict(
+        #     eval=dict(
         #         bucket_name="vcmi-gym",
-        #         s3_dir="v10",
-        #         cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
+        #         s3_dir="v10/8x512",
+        #         cache_dir=os.path.abspath("data/.s3_cache"),
         #         cached_files_max=None,
         #         num_workers=1,
-        #         batch_size=10000,  # buffer capacity = num_workers * batch_size
+        #         batch_size=100,  # buffer capacity = num_workers * batch_size
         #         prefetch_factor=1,
         #         pin_memory=False,       # causes hangs when enabled
         #         shuffle=False,
@@ -86,12 +86,11 @@ config = dict(
     ),
 
     eval={
-        "interval_s": 10,           # wandb_log will also be called here
-        "batch_size": 1000,
+        "interval_s": 60,           # wandb_log will also be called here
+        "batch_size": 10,
     },
     train={
-        # TODO: consider torch.optim.lr_scheduler.StepLR
-        "batch_size": 4000,
+        "batch_size": 10,
         "learning_rate": 1e-4,
         "epochs": 1,
     }

@@ -1750,23 +1750,29 @@ def load_for_test(file):
 def do_test(model, env):
     from vcmi_gym.envs.v10.decoder.decoder import Decoder
 
+    env.reset()
     for _ in range(10):
         print("=" * 100)
         if env.terminated or env.truncated:
             env.reset()
-        action = env.random_action()
-        obs, rew, term, trunc, _info = env.step(action)
+        act = env.random_action()
+        obs, rew, term, trunc, _info = env.step(act)
+
+        # [(obs, act, real_obs), (obs, act, real_obs), ...]
+        dream = [(obs["transitions"]["observations"][0], obs["transitions"]["actions"][0], None)]
 
         for i in range(1, len(obs["transitions"]["observations"])):
             obs_prev = obs["transitions"]["observations"][i-1]
+            act_prev = obs["transitions"]["actions"][i-1]
             obs_next = obs["transitions"]["observations"][i]
             # mask_next = obs["transitions"]["action_masks"][i]
             # rew_next = obs["transitions"]["rewards"][i]
             # done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
-            obs_pred_raw = model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(action).unsqueeze(0))
+            obs_pred_raw = model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
             obs_pred_raw = obs_pred_raw[0]
-            obs_pred = model.predict(obs_prev, action)
+            obs_pred = model.predict(obs_prev, act_prev)
+            dream.append((model.predict(*dream[i-1][:2]), obs["transitions"]["actions"][i], obs_next))
 
             def prepare(state, action, reward, headline):
                 import re
@@ -1787,7 +1793,7 @@ def do_test(model, env):
                 render["bf_lines"].append(env.__class__.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
                 return render["bf_lines"]
 
-            lines_prev = prepare(obs_prev, action, None, "Start:")
+            lines_prev = prepare(obs_prev, act_prev, None, "Start:")
             lines_real = prepare(obs_next, -1, None, "Real:")
             lines_pred = prepare(obs_pred, -1, None, "Predicted:")
 
@@ -1806,7 +1812,6 @@ def do_test(model, env):
             print("")
             print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real, lines_pred)]))
             print("")
-            # import ipdb; ipdb.set_trace()  # noqa
 
             # bf_next = Decoder.decode(obs_next)
             # bf_pred = Decoder.decode(obs_pred)
@@ -1828,6 +1833,27 @@ def do_test(model, env):
             #     else:
             #         assert a == 1
             #         return "Wait"
+
+        if len(dream) > 2:
+            print(" ******** SEQUENCE: ********** ")
+            print(env.render_transitions())
+            print(" ******** DREAM: ********** ")
+            rcfg = env.reward_cfg._replace(step_fixed=0)
+            for i, (obs, act, obs_real) in enumerate(dream):
+                print("*" * 10)
+                if i == 0:
+                    print("Start:")
+                    print(Decoder.decode(obs).render(act))
+                else:
+                    bf_real = Decoder.decode(obs_real)
+                    bf = Decoder.decode(obs)
+                    print(f"Real step #{i}:")
+                    print(bf_real.render(act))
+                    print("")
+                    print(f"Dream step #{i}:")
+                    print(bf.render(act))
+                    print(f"Real / Dream rewards: {env.calc_reward(0, bf_real, rcfg)} / {env.calc_reward(0, bf, rcfg)}:")
+
 
     # print(env.render_transitions())
 
