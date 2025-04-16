@@ -1057,7 +1057,7 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
         with torch.no_grad():
             pred_obs = model(obs, action)
 
-        loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs, next_obs != obs)
+        loss_cont, loss_bin, loss_cat = compute_losses(logger, model.obs_index, loss_weights, next_obs, pred_obs, torch.ones_like(obs, dtype=torch.bool))
         loss_tot = loss_cont + loss_bin + loss_cat
 
         continuous_losses.append(loss_cont.item())
