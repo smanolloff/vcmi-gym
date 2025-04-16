@@ -1648,25 +1648,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
         loss_weights = compute_loss_weights(stats, device=device)
 
-        with timers["train"]:
-            (
-                train_continuous_loss,
-                train_binary_loss,
-                train_categorical_loss,
-                train_loss,
-                train_wait,
-            ) = train_model(
-                logger=logger,
-                model=model,
-                optimizer=optimizer,
-                scaler=scaler,
-                buffer=buffer,
-                stats=stats,
-                loss_weights=loss_weights,
-                epochs=train_epochs,
-                batch_size=train_batch_size,
-            )
+        wlog = {"iteration": stats.iteration}
 
+        # Evaluate first (for a baseline when resuming with modified params)
         if now - last_evaluation_at > config["eval"]["interval_s"]:
             last_evaluation_at = now
 
@@ -1688,20 +1672,11 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     batch_size=eval_batch_size,
                 )
 
-            should_log_to_wandb = True
-            wlog = {
-                "iteration": stats.iteration,
-                "train_loss/continuous": train_continuous_loss,
-                "train_loss/binary": train_binary_loss,
-                "train_loss/categorical": train_categorical_loss,
-                "train_loss/total": train_loss,
-                "train_dataset/wait_time_s": train_wait,
-                "eval_loss/continuous": eval_continuous_loss,
-                "eval_loss/binary": eval_binary_loss,
-                "eval_loss/categorical": eval_categorical_loss,
-                "eval_loss/total": eval_loss,
-                "eval_dataset/wait_time_s": eval_wait,
-            }
+            wlog["eval_loss/continuous"] = eval_continuous_loss
+            wlog["eval_loss/binary"] = eval_binary_loss
+            wlog["eval_loss/categorical"] = eval_categorical_loss
+            wlog["eval_loss/total"] = eval_loss
+            wlog["eval_dataset/wait_time_s"] = eval_wait
 
             train_dataset_metrics = aggregate_metrics(train_metric_queue)
             if train_dataset_metrics:
@@ -1745,20 +1720,37 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                         uploading_event=uploading_event
                     ))
                     thread.start()
-        else:
-            logger.info({
-                "iteration": stats.iteration,
-                "train_loss/continuous": train_continuous_loss,
-                "train_loss/binary": train_binary_loss,
-                "train_loss/categorical": train_categorical_loss,
-                "train_loss/total": train_loss,
-                "train_dataset/wait_time_s": train_wait,
-            })
 
-        if should_log_to_wandb:
-            should_log_to_wandb = False
+        with timers["train"]:
+            (
+                train_continuous_loss,
+                train_binary_loss,
+                train_categorical_loss,
+                train_loss,
+                train_wait,
+            ) = train_model(
+                logger=logger,
+                model=model,
+                optimizer=optimizer,
+                scaler=scaler,
+                buffer=buffer,
+                stats=stats,
+                loss_weights=loss_weights,
+                epochs=train_epochs,
+                batch_size=train_batch_size,
+            )
+
+        wlog["train_loss/continuous"] = eval_continuous_loss
+        wlog["train_loss/binary"] = eval_binary_loss
+        wlog["train_loss/categorical"] = eval_categorical_loss
+        wlog["train_loss/total"] = eval_loss
+        wlog["train_dataset/wait_time_s"] = eval_wait
+
+        if "eval_loss/total" in wlog:
             wlog = dict(wlog, **timer_stats(timers))
             wandb_log(wlog, commit=True)
+        else:
+            logger.info(wlog)
 
         # XXX: must log timers here (some may have been skipped)
         stats.iteration += 1
