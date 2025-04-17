@@ -18,13 +18,14 @@ import gymnasium
 from .envs.v8.vcmi_env import VcmiEnv as VcmiEnv_v8
 from .envs.v9.vcmi_env import VcmiEnv as VcmiEnv_v9
 from .envs.v10.vcmi_env import VcmiEnv as VcmiEnv_v10
+from .envs.v11.vcmi_env import VcmiEnv as VcmiEnv_v11
 
 from .envs.util.dual_env import DualEnvController, DualEnvClient
 
 
 def register_envs():
     common_opts = dict(disable_env_checker=True, order_enforce=False)
-    for v in [8, 9, 10]:
+    for v in [8, 9, 10, 11]:
         env_id = f"VCMI-v{v}"
         entry_point = f"vcmi_gym:VcmiEnv_v{v}"
         if env_id not in gymnasium.envs.registration.registry:
@@ -36,6 +37,7 @@ all = [
     VcmiEnv_v8,
     VcmiEnv_v9,
     VcmiEnv_v10,
+    VcmiEnv_v11,
     DualEnvController,
     DualEnvClient,
 ]
