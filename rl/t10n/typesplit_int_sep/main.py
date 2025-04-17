@@ -964,6 +964,11 @@ def train_model(
 
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
+    assert buffer.capacity % batch_size == 0, f"{buffer.capacity} % {batch_size} == 0"
+    grad_steps = buffer.capacity // batch_size
+    # grad_step = 0
+    assert grad_steps > 0
+
     for epoch in range(epochs):
         timer.start()
         for batch in buffer.sample_iter(batch_size):
@@ -980,22 +985,30 @@ def train_model(
             categorical_losses.append(loss_cat.item())
             total_losses.append(loss_tot.item())
 
-            optimizer.zero_grad()
             if scaler:
-                scaler.scale(loss_tot).backward()
-                # total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))  # No clipping, just measuring
-                # max_norm = 1.0  # Adjust as needed
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-                scaler.step(optimizer)
-                scaler.update()
+                scaler.scale(loss_tot / grad_steps).backward()
             else:
-                loss_tot.backward()
-                # total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))  # No clipping, just measuring
-                # max_norm = 1.0  # Adjust as needed
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-                optimizer.step()
+                (loss_tot / grad_steps).backward()
+
+            # grad_step += 1
+            # if grad_step % grad_steps == 0:
+            #     if scaler:
+            #         scaler.step(optimizer)
+            #         scaler.update()
+            #     else:
+            #         optimizer.step()
+            #     optimizer.zero_grad()
             timer.start()
         timer.stop()
+
+        # assert grad_step == 0, "Sample waste: %d sample batches"
+        # Update once after the entire buffer is exhausted
+        if scaler:
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            optimizer.step()
+        optimizer.zero_grad()
 
         continuous_loss = sum(continuous_losses) / len(continuous_losses)
         binary_loss = sum(binary_losses) / len(binary_losses)
