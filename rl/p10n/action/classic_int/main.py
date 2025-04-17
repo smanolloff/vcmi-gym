@@ -410,30 +410,40 @@ class ActionPredictionModel(nn.Module):
 
         return main_out, hex_out
 
-    # Predict next obs
+    def predict_(self, obs, logits=None):
+        was_training = self.training
+        self.eval()
+        if logits is None:
+            main_logits, hex_logits = self.forward(obs)
+        else:
+            main_logits, hex_logits = logits
+
+        self.train(was_training)
+
+        action_main = main_logits.argmax(dim=1)
+        # => (B) of MainAction values
+
+        hex_id = hex_logits[:, :, 0].argmax(dim=1)
+        # => (B) of Hex ids
+
+        # arange as the B index since hex_id contains B values (ranging 0..164)
+        hex_action = hex_logits[torch.arange(hex_id.shape[0]), hex_id, 1:].argmax(dim=1)
+        # => (B) of hex actions for the predicted hex ids
+
+        # Action = 2 + hex_id * N_ACTIONS + hex_action
+        action_calc = 2 + hex_id * len(HEX_ACT_MAP) + hex_action
+
+        return (
+            action_main
+            .where(action_main != MainAction.RESET, -1)         # RESET => -1 (e.g. done=True)
+            .where(action_main != MainAction.WAIT, 1)           # WAIT => 1
+            .where(action_main != MainAction.HEX, action_calc)  # HEX => calc
+        )
+
     def predict(self, obs):
         with torch.no_grad():
             obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
-
-            was_training = self.training
-            self.eval()
-            try:
-                main_logits, hex_logits = self.forward(obs)
-            finally:
-                self.train(was_training)
-
-            main_action = main_logits[0].argmax()
-
-            if main_action == MainAction.RESET:
-                return 0
-            elif main_action == MainAction.WAIT:
-                return 1
-            elif main_action == MainAction.HEX:
-                hex_id = hex_logits[0, :, 0].flatten().argmax()
-                hex_action = hex_logits[0, hex_id, 1:].argmax()
-                return 2 + hex_id*len(HEX_ACT_MAP) + hex_action
-            else:
-                assert 0, "shouldn't be here"
+            return self.predict_(obs)[0].item()
 
     def _build_indices(self):
         self.global_index = {"continuous": [], "binary": [], "categoricals": []}
@@ -913,6 +923,7 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     hex_losses = []
     hexaction_losses = []
     total_losses = []
+    match_ratios = []
     timer = Timer()
 
     timer.start()
@@ -922,6 +933,8 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
 
         with torch.no_grad():
             pred_logits_main, pred_logits_hex = model(obs)
+            pred_action = model.predict_(obs, (pred_logits_main, pred_logits_hex))
+            match_ratios.append((pred_action == action).float().mean().item())
 
         loss_main, loss_hex, loss_hexaction = compute_loss(action, pred_logits_main, pred_logits_hex)
         loss_tot = loss_main + loss_hex + loss_hexaction
@@ -939,6 +952,7 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     hexaction_loss = sum(hexaction_losses) / len(hexaction_losses)
     total_loss = sum(total_losses) / len(total_losses)
     total_wait = timer.peek()
+    match_ratio = sum(match_ratios) / len(match_ratios)
 
     return (
         main_loss,
@@ -946,6 +960,7 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
         hexaction_loss,
         total_loss,
         total_wait,
+        match_ratio
     )
 
 
@@ -1529,6 +1544,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     eval_hexaction_loss,
                     eval_loss,
                     eval_wait,
+                    match_ratio,
                 ) = eval_model(
                     logger=logger,
                     model=model,
@@ -1541,6 +1557,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
             wlog["eval_loss/hex"] = eval_hex_loss
             wlog["eval_loss/hexaction"] = eval_hexaction_loss
             wlog["eval_loss/total"] = eval_loss
+            wlog["eval/greedy_match_ratio"] = match_ratio
             wlog["eval_dataset/wait_time_s"] = eval_wait
 
             train_dataset_metrics = aggregate_metrics(train_metric_queue)
@@ -1695,7 +1712,10 @@ def do_test(model, env):
             hexactnames = list(HEX_ACT_MAP.keys())
 
             print("Real action: %d (%s)" % (act, env.action_text(act, bf=bf)))
-            print("Pred action: %d (%s)" % (act_pred, env.action_text(act_pred, bf=bf)))
+            print("Pred action: %d (%s) %s" % (act_pred, env.action_text(act_pred, bf=bf), "✅" if act == act_pred else "❌"))
+
+            losses = compute_loss(t(act), logits_main, logits_hex)
+            print("Total loss: %.3f (%.2f + %.2f + %.2f)" % (sum(losses), *losses))
             print("Probs:")
 
             assert MainAction.HEX == len(MainAction) - 1
@@ -1705,8 +1725,12 @@ def do_test(model, env):
             for i in range(k):
                 hex = bf.get_hex(topk_hexes.indices[i].item())
                 hex_desc = "Hex(y=%s x=%s)/%.2f" % (hex.Y_COORD.v, hex.X_COORD.v, topk_hexes.values[i])
-                hex_actions = "".join([f"{hexactnames[ind.item()]}/{prob.item():.2f}".ljust(15) for ind, prob in zip(topk_hexes_topk_actions.indices[i], topk_hexes_topk_actions.values[i])])
-                print("    - k=%d: %-18s => %s" % (i, hex_desc, hex_actions))
+                hexact_desc = []
+                for ind, prob in zip(topk_hexes_topk_actions.indices[i], topk_hexes_topk_actions.values[i]):
+                    actcalc = 2 + topk_hexes.indices[i]*len(HEX_ACT_MAP) + ind
+                    text = "%d: %s/%.2f" % (actcalc, hexactnames[ind.item()], prob.item())
+                    hexact_desc.append(text.ljust(23))
+                print("    - [k=%d] %-18s => %s" % (i, hex_desc, " ".join(hexact_desc)))
 
             import ipdb; ipdb.set_trace()  # noqa
             print("==========================================================")
