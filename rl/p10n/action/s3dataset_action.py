@@ -10,7 +10,7 @@ import glob
 import logging
 import numpy as np
 from torch.utils.data import IterableDataset
-from .timer import Timer
+from ..util.timer import Timer
 
 
 from ..constants_v10 import (
