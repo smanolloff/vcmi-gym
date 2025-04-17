@@ -1593,9 +1593,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
         "eval": Timer(),
     }
 
-    # Skip saving if eval_loss gets worse
-    eval_loss_best = 1e9
-    eval_loss = eval_loss_best
+    eval_loss_best = None
 
     while True:
         timers["sample"].reset()
@@ -1687,7 +1685,12 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
             if now - last_checkpoint_at > config["checkpoint_interval_s"]:
                 last_checkpoint_at = now
-                if eval_loss >= eval_loss_best:
+
+                if eval_loss_best is None:
+                    # Initial baseline
+                    eval_loss_best = eval_loss
+                    logger.info("No baseline for checkpoint yet (eval_loss=%f, eval_loss_best=None), setting it now" % (eval_loss))
+                elif eval_loss >= eval_loss_best:
                     logger.info("Bad checkpoint (eval_loss=%f, eval_loss_best=%f), will skip it" % (eval_loss, eval_loss_best))
                 else:
                     logger.info("Good checkpoint (eval_loss=%f, eval_loss_best=%f), will save it" % (eval_loss, eval_loss_best))
