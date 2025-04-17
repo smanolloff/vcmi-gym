@@ -37,13 +37,13 @@ config = dict(
     env=dict(
         train=dict(
             num_workers=3,
-            batch_size=100,  # buffer capacity = num_workers * batch_size
+            batch_size=1000,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         eval=dict(
             num_workers=1,
-            batch_size=20,  # buffer capacity = num_workers * batch_size
+            batch_size=200,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
         ),
@@ -60,38 +60,38 @@ config = dict(
             s3_dir="models",
         ),
 
-        #data=dict(
-        #    train=dict(
-        #        bucket_name="vcmi-gym",
-        #        s3_dir="v10/4x1024",
-        #        cache_dir=os.path.abspath("data/.s3_cache"),
-        #        cached_files_max=None,
-        #        num_workers=1,
-        #        batch_size=100,  # buffer capacity = num_workers * batch_size
-        #        prefetch_factor=1,
-        #        pin_memory=False,       # causes hangs when enabled
-        #        shuffle=False,
-        #    ),
-        #    eval=dict(
-        #        bucket_name="vcmi-gym",
-        #        s3_dir="v10/8x512",
-        #        cache_dir=os.path.abspath("data/.s3_cache"),
-        #        cached_files_max=None,
-        #        num_workers=1,
-        #        batch_size=100,  # buffer capacity = num_workers * batch_size
-        #        prefetch_factor=1,
-        #        pin_memory=False,       # causes hangs when enabled
-        #        shuffle=False,
-        #    )
-        #),
+        # data=dict(
+        #     train=dict(
+        #         bucket_name="vcmi-gym",
+        #         s3_dir="v11/4x1024",
+        #         cache_dir=os.path.abspath("data/.s3_cache"),
+        #         cached_files_max=None,
+        #         num_workers=1,
+        #         batch_size=1000,  # buffer capacity = num_workers * batch_size
+        #         prefetch_factor=1,
+        #         pin_memory=False,       # causes hangs when enabled
+        #         shuffle=False,
+        #     ),
+        #     eval=dict(
+        #         bucket_name="vcmi-gym",
+        #         s3_dir="v11/8x512",
+        #         cache_dir=os.path.abspath("data/.s3_cache"),
+        #         cached_files_max=None,
+        #         num_workers=1,
+        #         batch_size=1000,  # buffer capacity = num_workers * batch_size
+        #         prefetch_factor=1,
+        #         pin_memory=False,       # causes hangs when enabled
+        #         shuffle=False,
+        #     )
+        # ),
     ),
 
     eval=dict(
         interval_s=60,           # wandb_log will also be called here
-        batch_size=20,
+        batch_size=200,
     ),
     train=dict(
-        batch_size=25,
+        batch_size=250,
         learning_rate=1e-4,
         epochs=1,
     )
