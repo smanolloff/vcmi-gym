@@ -91,6 +91,7 @@ config = dict(
         batch_size=200,
     ),
     train=dict(
+        accumulate_grad=False,
         batch_size=250,
         learning_rate=1e-4,
         epochs=1,

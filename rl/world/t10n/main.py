@@ -681,7 +681,8 @@ def train_model(
     stats,
     loss_weights,
     epochs,
-    batch_size
+    batch_size,
+    accumulate_grad,
 ):
     model.train()
     continuous_losses = []
@@ -713,30 +714,33 @@ def train_model(
             categorical_losses.append(loss_cat.item())
             total_losses.append(loss_tot.item())
 
-            if scaler:
-                scaler.scale(loss_tot / grad_steps).backward()
+            if accumulate_grad:
+                if scaler:
+                    scaler.scale(loss_tot / grad_steps).backward()
+                else:
+                    (loss_tot / grad_steps).backward()
             else:
-                (loss_tot / grad_steps).backward()
+                if scaler:
+                    scaler.scale(loss_tot).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss_tot.backward()
+                    optimizer.step()
+                optimizer.zero_grad()
 
-            # grad_step += 1
-            # if grad_step % grad_steps == 0:
-            #     if scaler:
-            #         scaler.step(optimizer)
-            #         scaler.update()
-            #     else:
-            #         optimizer.step()
-            #     optimizer.zero_grad()
             timer.start()
         timer.stop()
 
-        # assert grad_step == 0, "Sample waste: %d sample batches"
-        # Update once after the entire buffer is exhausted
-        if scaler:
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            optimizer.step()
-        optimizer.zero_grad()
+        if accumulate_grad:
+            # assert grad_step == 0, "Sample waste: %d sample batches"
+            # Update once after the entire buffer is exhausted
+            if scaler:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad()
 
         continuous_loss = sum(continuous_losses) / len(continuous_losses)
         binary_loss = sum(binary_losses) / len(binary_losses)
@@ -1161,6 +1165,7 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 loss_weights=loss_weights,
                 epochs=train_epochs,
                 batch_size=train_batch_size,
+                accumulate_grad=config["train"]["accumulate_grad"],
             )
 
         wlog["train_loss/continuous"] = train_continuous_loss
