@@ -35,24 +35,24 @@ class BufferBase:
 
         self.full = False
         while not self.full:
-            self.add_batch(*next(dataloader))
+            self.add_batch(next(dataloader))
 
         assert self.index == 0, f"{self.index} == 0"
         self.logger.debug(f"Loaded {self.capacity} observations")
 
-    def add(self, obs, mask, reward, done, action):
-        self.containers["obs"][self.index] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        self.containers["mask"][self.index] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
-        self.containers["reward"][self.index] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
-        self.containers["done"][self.index] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
-        self.containers["action"][self.index] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+    def add(self, data):
+        self.containers["obs"][self.index] = torch.as_tensor(data.obs, dtype=torch.float32, device=self.device)
+        self.containers["mask"][self.index] = torch.as_tensor(data.mask, dtype=torch.float32, device=self.device)
+        self.containers["reward"][self.index] = torch.as_tensor(data.reward, dtype=torch.float32, device=self.device)
+        self.containers["done"][self.index] = torch.as_tensor(data.done, dtype=torch.float32, device=self.device)
+        self.containers["action"][self.index] = torch.as_tensor(data.action, dtype=torch.int64, device=self.device)
 
         self.index = (self.index + 1) % self.capacity
         if self.index == 0:
             self.full = True
 
-    def add_batch(self, obs, mask, reward, done, action):
-        batch_size = obs.shape[0]
+    def add_batch(self, data):
+        batch_size = data.obs.shape[0]
         start = self.index
         end = self.index + batch_size
 
@@ -60,11 +60,11 @@ class BufferBase:
         assert self.index % batch_size == 0, f"{self.index} % {batch_size} == 0"
         assert self.capacity % batch_size == 0, f"{self.capacity} % {batch_size} == 0"
 
-        self.containers["obs"][start:end] = torch.as_tensor(obs, dtype=torch.float32, device=self.device)
-        self.containers["mask"][start:end] = torch.as_tensor(mask, dtype=torch.float32, device=self.device)
-        self.containers["reward"][start:end] = torch.as_tensor(reward, dtype=torch.float32, device=self.device)
-        self.containers["done"][start:end] = torch.as_tensor(done, dtype=torch.float32, device=self.device)
-        self.containers["action"][start:end] = torch.as_tensor(action, dtype=torch.int64, device=self.device)
+        self.containers["obs"][start:end] = torch.as_tensor(data.obs, dtype=torch.float32, device=self.device)
+        self.containers["mask"][start:end] = torch.as_tensor(data.mask, dtype=torch.float32, device=self.device)
+        self.containers["reward"][start:end] = torch.as_tensor(data.reward, dtype=torch.float32, device=self.device)
+        self.containers["done"][start:end] = torch.as_tensor(data.done, dtype=torch.float32, device=self.device)
+        self.containers["action"][start:end] = torch.as_tensor(data.action, dtype=torch.int64, device=self.device)
 
         self.index = end
         if self.index == self.capacity:

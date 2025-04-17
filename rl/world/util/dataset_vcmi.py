@@ -130,7 +130,6 @@ class DatasetVCMI(IterableDataset):
 
                     if data is not None:
                         with self.timer_idle:
-                            # yield data.obs, data.mask, data.reward, data.done, data.action
                             yield data
 
                     if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:

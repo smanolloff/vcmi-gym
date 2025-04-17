@@ -12,7 +12,11 @@ import numpy as np
 from torch.utils.data import IterableDataset
 
 from .timer import Timer
-from .dataset_vcmi import Data, noop_functor
+from .dataset_vcmi import Data
+
+
+def noop_functor():
+    return lambda data: data
 
 
 class DatasetS3(IterableDataset):
