@@ -793,6 +793,10 @@ def compute_loss(action, logits_main, logits_hex):
     actions_on_hex = torch.where(action >= 2)[0]
     # => (B') of indexes
 
+    # Guard against NaN losses
+    if actions_on_hex.numel() == 0:
+        return loss_main, torch.tensor(0.), torch.tensor(0.)
+
     # logits_hex is (B, 165, 1 + N_HEX_ACTIONS)
     # The CE logits will be the score logit (1st logit) of each hex
     # The CE target will be the real, numeric hex id
