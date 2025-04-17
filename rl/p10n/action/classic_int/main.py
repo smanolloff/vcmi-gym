@@ -775,7 +775,7 @@ def compute_loss(action, logits_main, logits_hex):
     # Loss for MAIN action
     #
 
-    loss0 = cross_entropy(logits_main, target_main)
+    loss_main = cross_entropy(logits_main, target_main)
 
     #
     # Loss for HEX actions (if any)
@@ -795,7 +795,7 @@ def compute_loss(action, logits_main, logits_hex):
     # => (B', 165) of score logits
     target_hex_id = (action[hex_action_inds] - 2) // 165
     # (B') of hex_ids
-    loss1 = cross_entropy(logits_hex_score, target_hex_id)
+    loss_hex = cross_entropy(logits_hex_score, target_hex_id)
 
     # logits_hex is (B, 165, 1 + N_HEX_ACTIONS)
     # The CE logits will be the hexaction logits (>1st logit) of the target hex
@@ -804,9 +804,9 @@ def compute_loss(action, logits_main, logits_hex):
     # => (B', N_HEX_ACTIONS) of hexaction logits for the target hex
     target_hex_action = (action[hex_action_inds] - 2) % len(HEX_ACT_MAP)
     # (B') of hex_actions
-    loss2 = cross_entropy(logits_hex_action, target_hex_action)
+    loss_hexaction = cross_entropy(logits_hex_action, target_hex_action)
 
-    return loss0 + loss1 + loss2
+    return loss_main, loss_hex, loss_hexaction
 
 
 def compute_loss_weights(stats, device):
@@ -860,7 +860,10 @@ def train_model(
     batch_size
 ):
     model.train()
-    losses = []
+    main_losses = []
+    hex_losses = []
+    hexaction_losses = []
+    total_losses = []
     timer = Timer()
 
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
@@ -873,36 +876,46 @@ def train_model(
 
             with maybe_autocast:
                 pred_logits_main, pred_logits_hex = model(obs)
-                loss = compute_loss(action, pred_logits_main, pred_logits_hex)
+                loss_main, loss_hex, loss_hexaction = compute_loss(action, pred_logits_main, pred_logits_hex)
+                loss_tot = loss_main + loss_hex + loss_hexaction
 
-            losses.append(loss.item())
+            main_losses.append(loss_main.item())
+            hex_losses.append(loss_hex.item())
+            hexaction_losses.append(loss_hexaction.item())
+            total_losses.append(loss_tot.item())
 
             optimizer.zero_grad()
             if scaler:
-                scaler.scale(loss).backward()
-                # norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))  # No clipping, just measuring
-                # max_norm = 1.0  # Adjust as needed
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                scaler.scale(loss_tot).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                loss.backward()
-                # norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))  # No clipping, just measuring
-                # max_norm = 1.0  # Adjust as needed
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                loss_tot.backward()
                 optimizer.step()
             timer.start()
         timer.stop()
 
-        loss = sum(losses) / len(losses)
-        total_wait = timer.peek()
+    main_loss = sum(main_losses) / len(main_losses)
+    hex_loss = sum(hex_losses) / len(hex_losses)
+    hexaction_loss = sum(hexaction_losses) / len(hexaction_losses)
+    total_loss = sum(total_losses) / len(total_losses)
+    total_wait = timer.peek()
 
-        return loss, total_wait
+    return (
+        main_loss,
+        hex_loss,
+        hexaction_loss,
+        total_loss,
+        total_wait,
+    )
 
 
 def eval_model(logger, model, loss_weights, buffer, batch_size):
     model.eval()
-    losses = []
+    main_losses = []
+    hex_losses = []
+    hexaction_losses = []
+    total_losses = []
     timer = Timer()
 
     timer.start()
@@ -913,15 +926,30 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
         with torch.no_grad():
             pred_logits_main, pred_logits_hex = model(obs)
 
-        loss = compute_loss(action, pred_logits_main, pred_logits_hex)
-        losses.append(loss.item())
+        loss_main, loss_hex, loss_hexaction = compute_loss(action, pred_logits_main, pred_logits_hex)
+        loss_tot = loss_main + loss_hex + loss_hexaction
+
+        main_losses.append(loss_main.item())
+        hex_losses.append(loss_hex.item())
+        hexaction_losses.append(loss_hexaction.item())
+        total_losses.append(loss_tot.item())
+
         timer.start()
     timer.stop()
 
-    loss = sum(losses) / len(losses)
+    main_loss = sum(main_losses) / len(main_losses)
+    hex_loss = sum(hex_losses) / len(hex_losses)
+    hexaction_loss = sum(hexaction_losses) / len(hexaction_losses)
+    total_loss = sum(total_losses) / len(total_losses)
     total_wait = timer.peek()
 
-    return loss, total_wait
+    return (
+        main_loss,
+        hex_loss,
+        hexaction_loss,
+        total_loss,
+        total_wait,
+    )
 
 
 def init_s3_client():
@@ -1501,8 +1529,11 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
             with timers["eval"]:
                 (
+                    eval_main_loss,
+                    eval_hex_loss,
+                    eval_hexaction_loss,
                     eval_loss,
-                    eval_wait
+                    eval_wait,
                 ) = eval_model(
                     logger=logger,
                     model=model,
@@ -1511,6 +1542,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                     batch_size=eval_batch_size,
                 )
 
+            wlog["eval_loss/main"] = eval_main_loss
+            wlog["eval_loss/hex"] = eval_hex_loss
+            wlog["eval_loss/hexaction"] = eval_hexaction_loss
             wlog["eval_loss/total"] = eval_loss
             wlog["eval_dataset/wait_time_s"] = eval_wait
 
@@ -1559,6 +1593,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
 
         with timers["train"]:
             (
+                train_main_loss,
+                train_hex_loss,
+                train_hexaction_loss,
                 train_loss,
                 train_wait,
             ) = train_model(
@@ -1573,6 +1610,9 @@ def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
                 batch_size=train_batch_size,
             )
 
+        wlog["train_loss/main"] = train_main_loss
+        wlog["train_loss/hex"] = train_hex_loss
+        wlog["train_loss/hexaction"] = train_hexaction_loss
         wlog["train_loss/total"] = train_loss
         wlog["train_dataset/wait_time_s"] = train_wait
 

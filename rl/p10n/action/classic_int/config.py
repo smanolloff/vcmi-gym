@@ -37,13 +37,13 @@ config = dict(
     env=dict(
         train=dict(
             num_workers=3,
-            batch_size=1000,  # buffer capacity = num_workers * batch_size
+            batch_size=100,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         eval=dict(
             num_workers=1,
-            batch_size=200,  # buffer capacity = num_workers * batch_size
+            batch_size=20,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
         ),
@@ -67,7 +67,7 @@ config = dict(
         #        cache_dir=os.path.abspath("data/.s3_cache"),
         #        cached_files_max=None,
         #        num_workers=1,
-        #        batch_size=1000,  # buffer capacity = num_workers * batch_size
+        #        batch_size=100,  # buffer capacity = num_workers * batch_size
         #        prefetch_factor=1,
         #        pin_memory=False,       # causes hangs when enabled
         #        shuffle=False,
@@ -78,7 +78,7 @@ config = dict(
         #        cache_dir=os.path.abspath("data/.s3_cache"),
         #        cached_files_max=None,
         #        num_workers=1,
-        #        batch_size=1000,  # buffer capacity = num_workers * batch_size
+        #        batch_size=100,  # buffer capacity = num_workers * batch_size
         #        prefetch_factor=1,
         #        pin_memory=False,       # causes hangs when enabled
         #        shuffle=False,
@@ -86,13 +86,13 @@ config = dict(
         #),
     ),
 
-    eval={
-        "interval_s": 60,           # wandb_log will also be called here
-        "batch_size": 200,
-    },
-    train={
-        "batch_size": 250,
-        "learning_rate": 1e-4,
-        "epochs": 1,
-    }
+    eval=dict(
+        interval_s=60,           # wandb_log will also be called here
+        batch_size=20,
+    ),
+    train=dict(
+        batch_size=25,
+        learning_rate=1e-4,
+        epochs=1,
+    )
 )

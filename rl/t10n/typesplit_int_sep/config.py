@@ -86,13 +86,13 @@ config = dict(
         #),
     ),
 
-    eval={
-        "interval_s": 60,           # wandb_log will also be called here
-        "batch_size": 200,
-    },
-    train={
-        "batch_size": 250,
-        "learning_rate": 1e-4,
-        "epochs": 1,
-    }
+    eval=dict(
+        interval_s=60,           # wandb_log will also be called here
+        batch_size=200,
+    ),
+    train=dict(
+        batch_size=250,
+        learning_rate=1e-4,
+        epochs=1,
+    )
 )
