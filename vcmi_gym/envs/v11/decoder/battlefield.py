@@ -116,7 +116,6 @@ class Battlefield():
         #   ▕¹▕²▕³▕⁴▕⁵▕⁶▕⁷▕⁸▕⁹▕⁰▕¹▕²▕³▕⁴▕⁵▕
         #
 
-        aside = None
         tablestartrow = len(lines)
 
         lines.append("    ₀▏₁▏₂▏₃▏₄▏₅▏₆▏₇▏₈▏₉▏₀▏₁▏₂▏₃▏₄")

@@ -10,10 +10,12 @@ import glob
 import logging
 import numpy as np
 from torch.utils.data import IterableDataset
+
 from .timer import Timer
+from .dataset_vcmi import Data, noop_functor
 
 
-class S3Dataset(IterableDataset):
+class DatasetS3(IterableDataset):
     def __init__(
         self,
         logger,
@@ -28,7 +30,8 @@ class S3Dataset(IterableDataset):
         split_ratio=1.0,
         split_side=0,
         metric_queue=None,
-        metric_report_interval=5
+        metric_report_interval=5,
+        mw_functor=noop_functor
     ):
         """
         Args:
@@ -52,6 +55,7 @@ class S3Dataset(IterableDataset):
 
         self.timer_all = Timer()
         self.timer_idle = Timer()
+        self.mw_functor = mw_functor
 
         assert split_ratio >= 0 and split_ratio <= 1, split_ratio
         assert split_side in [0, 1], split_side
@@ -143,6 +147,8 @@ class S3Dataset(IterableDataset):
         return local_path
 
     def _stream_samples(self, worker_keys):
+        middleware = self.mw_functor()
+
         with self.timer_all:
             while True:
                 if self.shuffle:
@@ -151,9 +157,13 @@ class S3Dataset(IterableDataset):
                 for s3_key in worker_keys:
                     samples = dict(np.load(self._download_file(s3_key)))
 
-                    for sample in zip(samples["obs"], samples["mask"], samples["reward"], samples["done"], samples["action"]):
+                    for (o, m, r, d, a) in zip(samples["obs"], samples["mask"], samples["reward"], samples["done"], samples["action"]):
                         with self.timer_idle:
-                            yield sample
+                            data = middleware(Data(obs=o, mask=m, reward=r, done=d, action=a))
+
+                        if data is not None:
+                            with self.timer_idle:
+                                yield data
 
                         if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:
                             self.metric_reported_at = time.time()
@@ -189,10 +199,10 @@ if __name__ == "__main__":
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    dataset = S3Dataset(
+    dataset = DatasetS3(
         logger=logger,
         bucket_name="vcmi-gym",
-        s3_dir="v10/4x1024",
+        s3_dir="v11/4x1024",
         shuffle=False,
         cache_dir=os.path.abspath("data/.s3_cache"),
         aws_access_key=os.environ["AWS_ACCESS_KEY"],

@@ -2,13 +2,42 @@ import time
 import torch
 import logging
 import queue
+import numpy as np
 from torch.utils.data import IterableDataset
+from typing import NamedTuple
 
 from .timer import Timer
 
 
-class VCMIDataset(IterableDataset):
-    def __init__(self, logger, env_kwargs, metric_queue=None, metric_report_interval=5):
+# Need a functor instead of simple function each sub-process
+# will need to use one copy of this function
+def noop_functor():
+    return lambda data, ctx: data
+
+
+class Data(NamedTuple):
+    obs: np.ndarray
+    mask: np.ndarray
+    reward: float
+    done: bool
+    action: int
+
+
+class Context(NamedTuple):
+    ep_steps: int
+    transition_id: int
+    num_transitions: int
+
+
+class DatasetVCMI(IterableDataset):
+    def __init__(
+        self,
+        logger,
+        env_kwargs,
+        metric_queue=None,
+        metric_report_interval=5,
+        mw_functor=noop_functor
+    ):
         self.logger = logger
         self.env_kwargs = env_kwargs
         self.metric_queue = metric_queue
@@ -16,6 +45,7 @@ class VCMIDataset(IterableDataset):
         self.metric_reported_at = time.time()
         self.timer_all = Timer()
         self.timer_idle = Timer()
+        self.mw_functor = mw_functor
 
         print("Env kwargs: %s" % self.env_kwargs)
         self.env = None
@@ -29,13 +59,14 @@ class VCMIDataset(IterableDataset):
 
         assert self.env is None, "multiple calls to __iter__ not supported"
 
-        from vcmi_gym import VcmiEnv_v10 as VcmiEnv
+        from vcmi_gym import VcmiEnv_v11 as VcmiEnv
         self.env = VcmiEnv(**self.env_kwargs)
 
         obs = self.env.reset()[0]
         term = False
         trunc = False
         ep_steps = 0
+        middleware = self.mw_functor()
 
         with self.timer_all:
             while True:
@@ -88,51 +119,19 @@ class VCMIDataset(IterableDataset):
                 #   O(s1t2) == O(s2t0)
                 #   ... etc
                 #
-                # R(s0t0)=NaN is OK (episode start => no prev step, no reward)
-                # R(s1t0)=NaN is NOT OK => use R(s0t2) from prev step
-                # A(s0t2)=-1  is NOT OK => use A(s1t0) from next step
-                # A(s3t2)=-1  is OK (this is the terminal obs => no aciton)
-                #
-                # We `yield` a total of 9 samples:
-                #
-                #  | obs            | reward         | action         |
-                # -|----------------|----------------|----------------|
-                #  | O(s0t0)        | R(s0t0)=NaN    | A(s0t0)        | t=0 s=0
-                #  | O(s0t1)        | R(s0t1)        | A(s0t1)        | t=1
-                #  |                |                |                | t=2
-                # -|----------------|----------------|----------------|
-                #  | O(s1t0)        | R(s0t2) <- !!! | A(s1t0)        | t=0 s=1
-                #  | O(s1t1)        | R(s1t1)        | A(s1t1)        | t=1
-                #  |                |                |                | t=2
-                # -|----------------|----------------|----------------|
-                #  | O(s2t0)        | R(s1t2) <- !!! | A(s2t0)        | t=0 s=2
-                #  | O(s2t1)        | R(s2t1)        | A(s2t1)        | t=1
-                #  |                |                |                | t=2
-                # -|----------------|----------------|----------------|
-                #  | O(s3t0)        | R(s2t2) <- !!! | A(s3t0)        | t=0 s=3
-                #  | O(s3t1)        | R(s3t1)        | A(s3t1)        | t=1
-                #  | O(s3t2)        | R(s3t2)        | A(s1t0)=-1     | t=2 !!!
-                #
-                # =============================================================
-                #
-                # => for t=2 (the final transition):
-                #   - we carry its reward to next step's t=0
-                #   - we `yield` it only if s=3 (last step)
-                #
 
-                final_t = len(obs["transitions"]["observations"]) - 1
+                num_transitions = len(obs["transitions"]["observations"])
 
                 for t, (t_obs, t_mask, t_reward, t_done, t_action) in enumerate(zipped):
-                    if t == final_t:
-                        reward_carry = t_reward
-                        if not t_done:
-                            continue
+                    data = middleware(
+                        Data(obs=t_obs, mask=t_mask, reward=t_reward, done=t_done, action=t_action),
+                        Context(ep_steps=0, transition_id=t, num_transitions=num_transitions)
+                    )
 
-                    if t == 0 and ep_steps > 0:
-                        t_reward = reward_carry
-
-                    with self.timer_idle:
-                        yield t_obs, t_mask, t_reward, t_done, t_action
+                    if data is not None:
+                        with self.timer_idle:
+                            # yield data.obs, data.mask, data.reward, data.done, data.action
+                            yield data
 
                     if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:
                         self.metric_reported_at = time.time()
@@ -164,7 +163,7 @@ if __name__ == "__main__":
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    dataset = VCMIDataset(
+    dataset = DatasetVCMI(
         logger=logger,
         env_kwargs=dict(
             mapname="gym/generated/4096/4x1024.vmap",
