@@ -1,15 +1,17 @@
-import time
-import queue
 import botocore.config
 import boto3
 import torch
-import numpy as np
+import time
+import queue
 import os
 import re
 import random
 import glob
 import logging
+import numpy as np
 from torch.utils.data import IterableDataset
+from .timer import Timer
+
 
 from ..constants_v10 import (
     HEX_ATTR_MAP,
@@ -17,8 +19,6 @@ from ..constants_v10 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
 )
-
-from ..util.timer import Timer
 
 
 class S3DatasetAction(IterableDataset):
@@ -94,66 +94,43 @@ class S3DatasetAction(IterableDataset):
 
         # XXX: dont set self.s3_client here (forking fails later)
         s3_client = self._init_s3_client()
-
-        types = ["obs", "action"]
-        prefix_counters = {}
-        regex = re.compile(fr"{self.s3_dir}/({'|'.join(types)})-(.*)\.npz")
+        regex = re.compile(fr"{self.s3_dir}/transitions-(.*)\.npz")
         request = {"Bucket": self.bucket_name, "Prefix": f"{self.s3_dir}/"}
+        all_keys = []
 
         while True:
             response = s3_client.list_objects_v2(**request)
-            all_files = [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].endswith('.npz')]
-
-            for f in sorted(all_files):
-                m = regex.match(f)
-                if not m:
-                    #assert m, f"Unexpected filename in S3: {f}"
-                    continue
-                prefix = m[2]
-
-                if prefix not in prefix_counters:
-                    prefix_counters[prefix] = 1
-                else:
-                    prefix_counters[prefix] += 1
+            all_keys.extend([obj['Key'] for obj in response.get('Contents', []) if regex.match(obj['Key'])])
 
             if "NextContinuationToken" in response:
                 request["ContinuationToken"] = response["NextContinuationToken"]
             else:
                 break
 
-        prefixes = list(sorted(prefix for prefix, counter in prefix_counters.items() if counter == len(types)))
-
-        dropped = [prefix for prefix in prefix_counters.keys() if prefix not in prefixes]
-        if dropped:
-            self.logger.info("WARNING: dropped %d incomplete prefixes: %s" % (len(dropped), dropped))
-
         if os.getenv("S3_DEBUG"):
             self.logger.info("XXXXXXX: USING JUST 3 PREFIXES (DEBUG)")
-            prefixes = prefixes[:3]
+            all_keys = all_keys[:3]
 
-        self.logger.info("Found %d sample packs" % len(prefixes))
+        self.logger.info("Found %d sample packs" % len(all_keys))
 
         if self.split_ratio < 1:
             self.logger.info("will split using ratio %.2f" % self.split_ratio)
-            split_idx = int(len(prefixes) * self.split_ratio)
-            self.prefixes = prefixes[:split_idx] if self.split_side == 0 else prefixes[split_idx:]
-            self.logger.info("Sample packs after split: %d" % len(self.prefixes))
+            split_idx = int(len(all_keys) * self.split_ratio)
+            self.all_keys = all_keys[:split_idx] if self.split_side == 0 else all_keys[split_idx:]
+            self.logger.info("Sample packs after split: %d" % len(self.all_keys))
         else:
             assert self.split_side == 0, "split side is %d, but split_ratio is %f" % (self.split_side, self.split_ratio)
-            self.prefixes = prefixes
+            self.all_keys = all_keys
 
-        self.types = types
-
-    def _get_worker_prefixes(self, worker_id, num_workers):
-        """ Assigns distinct file chunks to each worker """
-        return self.prefixes[worker_id::num_workers]
+    def _get_worker_keys(self, worker_id, num_workers):
+        return self.all_keys[worker_id::num_workers]
 
     def _download_file(self, file_key):
         """ Downloads an .npz file from S3 to the cache directory if not already present """
         if not self.s3_client:
             self.s3_client = self._init_s3_client()
 
-        local_path = os.path.join(self.cache_dir, os.path.basename(file_key))
+        local_path = os.path.join(self.cache_dir, file_key)
         if os.path.exists(local_path):
             self.logger.debug("Using cached file %s" % local_path)
         else:
@@ -173,27 +150,27 @@ class S3DatasetAction(IterableDataset):
 
         return local_path
 
-    def _stream_samples(self, worker_prefixes):
-        samples = {}
+    def _stream_samples(self, worker_keys):
+        side_inds = np.arange(HEX_ATTR_MAP["STACK_SIDE"][1], HEX_ATTR_MAP["STACK_SIDE"][1] + HEX_ATTR_MAP["STACK_SIDE"][2])
+        is_active_ind = HEX_ATTR_MAP["STACK_QUEUE"][1]
 
         with self.timer_all:
             while True:
                 if self.shuffle:
-                    random.shuffle(worker_prefixes)
+                    random.shuffle(worker_keys)
 
-                for prefix in worker_prefixes:
-                    for t in self.types:
-                        s3_path = f"{self.s3_dir}/{t}-{prefix}.npz"
-                        local_path = self._download_file(s3_path)
-                        samples[t] = np.load(local_path)['arr_0']
+                for s3_key in worker_keys:
+                    samples = dict(np.load(self._download_file(s3_key)))
 
-                    lengths = [len(s) for s in samples.values()]
-                    assert all(lengths[0] == l for l in lengths[1:]), lengths
+                    for obs, mask, reward, done, action in zip(samples["obs"], samples["mask"], samples["reward"], samples["done"], samples["action"]):
 
-                    for obs, action in zip(samples["obs"], samples["action"]):
+                        # XXX:Not implemented
+                        raise NotImplementedError()
+
+
                         hexes = obs[STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(165, -1)
                         index_is_active = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1 if first in queue (zero null => index=offset)
-                        index_is_blue = HEX_ATTR_MAP["STACK_SIDE"][1] + 2  # 1 if blue ([null, red, blue] => index=offset+2)
+                        # index_is_blue = np.arange(HEX_ATTR_MAP["STACK_SIDE"][1] + HEX_ATTR_MAP["STACK_SIDE"][2]] + 2  # 1 if blue ([null, red, blue] => index=offset+2)
                         extracted = hexes[:, [index_is_active, index_is_blue]]
                         # => (165, 2), where 2 = [is_active, is_blue]
                         mask = extracted[..., 0] != 0
@@ -216,6 +193,18 @@ class S3DatasetAction(IterableDataset):
                             else:
                                 assert obs[index_battle_in_progress] == 0, obs[index_battle_in_progress]
 
+
+
+                        with self.timer_idle:
+                            yield sample
+
+                        if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:
+                            self.metric_reported_at = time.time()
+                            try:
+                                self.metric_queue.put(self.utilization(), block=False)
+                            except queue.Full:
+                                logger.warn("Failed to report metric (queue full)")
+
                 self.epoch_count += 1  # Track how many times we’ve exhausted S3 files
                 self.logger.info(f"Epoch {self.epoch_count} completed. Restarting dataset.")
 
@@ -223,11 +212,16 @@ class S3DatasetAction(IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:  # Single-process
-            worker_prefixes = self.prefixes
+            worker_keys = self.all_keys
         else:  # Multi-worker: Assign distinct files
-            worker_prefixes = self._get_worker_prefixes(worker_info.id, worker_info.num_workers)
+            worker_keys = self._get_worker_keys(worker_info.id, worker_info.num_workers)
 
-        return self._stream_samples(worker_prefixes)
+        return self._stream_samples(worker_keys)
+
+    def utilization(self):
+        if self.timer_all.peek() == 0:
+            return 0
+        return 1 - (self.timer_idle.peek() / self.timer_all.peek())
 
 
 if __name__ == "__main__":
@@ -241,8 +235,9 @@ if __name__ == "__main__":
     dataset = S3DatasetAction(
         logger=logger,
         bucket_name="vcmi-gym",
-        s3_dir="v8",
-        cache_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".cache")),
+        s3_dir="v10/4x1024",
+        shuffle=False,
+        cache_dir=os.path.abspath("data/.s3_cache"),
         aws_access_key=os.environ["AWS_ACCESS_KEY"],
         aws_secret_key=os.environ["AWS_SECRET_KEY"],
         region_name="eu-north-1"
