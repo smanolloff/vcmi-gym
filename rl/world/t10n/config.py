@@ -34,6 +34,7 @@ env_kwargs = dict(
 config = dict(
     name_template="{datetime}-{id}-swap-T-E512_H8_L6-B300-RTX3080",
     out_dir_template="data/world/t10n",
+    wandb_group="transition-model",
 
     env=dict(
         train=dict(

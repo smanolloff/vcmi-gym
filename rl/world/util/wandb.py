@@ -8,7 +8,7 @@ def setup_wandb(config, model, src_file):
 
     wandb.init(
         project="vcmi-gym",
-        group="transition-model",
+        group=config["wandb_group"],
         name=config["run"]["name"],
         id=config["run"]["id"],
         resume="must" if resumed else "never",

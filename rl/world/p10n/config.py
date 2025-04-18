@@ -34,6 +34,7 @@ env_kwargs = dict(
 config = dict(
     name_template="{datetime}-{id}-noswap-BattleAI",
     out_dir_template="data/world/p10n",
+    wandb_group="action-prediction-model",
 
     env=dict(
         train=dict(
