@@ -338,7 +338,7 @@ class ActionPredictionModel(nn.Module):
 
     def predict(self, obs):
         with torch.no_grad():
-            obs = torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+            obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             return self.predict_(obs)[0].item()
 
 
@@ -565,7 +565,19 @@ def do_test(model, env):
     t = lambda x: torch.as_tensor(x).unsqueeze(0)
 
     env.reset()
-    for _ in range(100):
+    print("Testing accuracy for 1000 steps...")
+
+    matches = []
+    losses = []
+    verbose = False
+
+    def _print(txt):
+        if verbose:
+            print(txt)
+
+    total_steps = 1000
+
+    for step in range(total_steps):
         if env.terminated or env.truncated:
             env.reset()
         act = env.random_action()
@@ -585,10 +597,16 @@ def do_test(model, env):
                     continue
 
             logits_main, logits_hex = model(t(obs))
-            act_pred = model.predict(obs)
+            act_pred = model.predict_(t(obs), logits=(logits_main, logits_hex))[0].item()
+
+            losses.append(compute_loss(t(act), logits_main, logits_hex))
+            matches.append(act == act_pred)
+
+            if not verbose:
+                continue
 
             bf = Decoder.decode(obs)
-            print(bf.render(0))
+            _print(bf.render(0))
 
             probs_main = logits_main[0].softmax(0)
             probs_hex = logits_hex[0, :, 0].softmax(0)
@@ -607,16 +625,16 @@ def do_test(model, env):
 
             hexactnames = list(HEX_ACT_MAP.keys())
 
-            print("Real action: %d (%s)" % (act, env.action_text(act, bf=bf)))
-            print("Pred action: %d (%s) %s" % (act_pred, env.action_text(act_pred, bf=bf), "✅" if act == act_pred else "❌"))
+            _print("Real action: %d (%s)" % (act, env.action_text(act, bf=bf)))
+            _print("Pred action: %d (%s) %s" % (act_pred, env.action_text(act_pred, bf=bf), "✅" if act == act_pred else "❌"))
 
             losses = compute_loss(t(act), logits_main, logits_hex)
-            print("Total loss: %.3f (%.2f + %.2f + %.2f)" % (sum(losses), *losses))
-            print("Probs:")
+            _print("Total loss: %.3f (%.2f + %.2f + %.2f)" % (sum(losses), *losses))
+            _print("Probs:")
 
             assert MainAction.HEX == len(MainAction) - 1
             for ma in MainAction:
-                print(" * %s: %.2f" % (ma.name, probs_main[ma.value]))
+                _print(" * %s: %.2f" % (ma.name, probs_main[ma.value]))
 
             for i in range(k):
                 hex = bf.get_hex(topk_hexes.indices[i].item())
@@ -626,10 +644,15 @@ def do_test(model, env):
                     actcalc = 2 + topk_hexes.indices[i]*len(HEX_ACT_MAP) + ind
                     text = "%d: %s/%.2f" % (actcalc, hexactnames[ind.item()], prob.item())
                     hexact_desc.append(text.ljust(23))
-                print("    - [k=%d] %-18s => %s" % (i, hex_desc, " ".join(hexact_desc)))
+                _print("    - [k=%d] %-18s => %s" % (i, hex_desc, " ".join(hexact_desc)))
 
-            import ipdb; ipdb.set_trace()  # noqa
-            print("==========================================================")
+            # import ipdb; ipdb.set_trace()  # noqa
+            _print("==========================================================")
+
+        if step % (total_steps // 10) == 0:
+            print("(progress: %.0f%%)" % (100 * (step / total_steps)))
+
+    print("Accuracy: %.2f%%" % (100 * (sum(matches) / len(matches))))
 
 
 if __name__ == "__main__":

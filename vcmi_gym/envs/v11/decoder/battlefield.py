@@ -194,7 +194,8 @@ class Battlefield():
                         col += "\033[1;47"
                     elif hex.stack.QUEUE.v[0] == 1:
                         col += activemod
-                        assert hex.stack.SIDE.v == self.global_stats.BATTLE_SIDE_ACTIVE_PLAYER.v
+                        # There may be an active stack at battle end, but the active player is null
+                        # assert hex.stack.SIDE.v == self.global_stats.BATTLE_SIDE_ACTIVE_PLAYER.v
 
                     if hex.stack.FLAGS1.v is not None and hex.stack.FLAGS1.struct.IS_WIDE:
                         if hex.stack.SIDE.v == 0 and hex.IS_REAR.v:

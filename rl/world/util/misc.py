@@ -36,10 +36,14 @@ def timer_stats(timers):
     res = {}
     t_all = timers["all"].peek()
     for k, v in timers.items():
-        res[f"timer/{k}"] = v.peek()
+        # res[f"timer/{k}"] = v.peek()
         if k != "all":
             res[f"timer_rel/{k}"] = v.peek() / t_all
 
-    res["timer/other"] = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
-    res["timer_rel/other"] = res["timer/other"] / t_all
+    t_other = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
+    res["timer_rel/other"] = t_other / t_all
     return res
+
+
+def safe_mean(array_like) -> float:
+    return np.nan if len(array_like) == 0 else float(np.mean(array_like))

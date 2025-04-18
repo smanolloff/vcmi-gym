@@ -66,7 +66,7 @@ config = dict(
         # data=dict(
         #     train=dict(
         #         bucket_name="vcmi-gym",
-        #         s3_dir="v10/4x1024",
+        #         s3_dir="v11/4x1024",
         #         cache_dir=os.path.abspath("data/.s3_cache"),
         #         cached_files_max=None,
         #         num_workers=1,
@@ -77,7 +77,7 @@ config = dict(
         #     ),
         #     eval=dict(
         #         bucket_name="vcmi-gym",
-        #         s3_dir="v10/8x512",
+        #         s3_dir="v11/8x512",
         #         cache_dir=os.path.abspath("data/.s3_cache"),
         #         cached_files_max=None,
         #         num_workers=1,

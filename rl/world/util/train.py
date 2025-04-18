@@ -12,7 +12,7 @@ from datetime import datetime
 
 from ..util.dataset_s3 import DatasetS3
 from ..util.dataset_vcmi import DatasetVCMI
-from ..util.misc import dig, aggregate_metrics, timer_stats
+from ..util.misc import dig, aggregate_metrics, timer_stats, safe_mean
 from ..util.persistence import load_local_or_s3_checkpoint, save_checkpoint, save_buffer_async
 from ..util.stats import Stats
 from ..util.structured_logger import StructuredLogger
@@ -205,14 +205,28 @@ def train(
                     raise
 
     if no_wandb:
-        def wandb_log(data, commit=False):
-            logger.info(data)
+        from unittest.mock import Mock
+        wandb = Mock()
     else:
         wandb = setup_wandb(config, model, __file__)
 
-        def wandb_log(data, commit=False):
-            wandb.log(data, commit=commit)
-            logger.info(data)
+    accumulated_logs = {}
+
+    def accumulate_logs(data):
+        for k, v in data.items():
+            if k not in accumulated_logs:
+                accumulated_logs[k] = [v]
+            else:
+                accumulated_logs[k].append(v)
+
+    def aggregate_logs():
+        agg_data = {k: safe_mean(v) for k, v in accumulated_logs.items()}
+        accumulated_logs.clear()
+        return agg_data
+
+    def wandb_log(data, commit=False):
+        wandb.log(data, commit=commit)
+        logger.info(data)
 
     wandb_log({
         "train/learning_rate": learning_rate,
@@ -245,16 +259,11 @@ def train(
         "eval": Timer(),
     }
 
+    timers["all"].start()
+
     eval_loss_best = None
 
     while True:
-        timers["sample"].reset()
-        timers["train"].reset()
-        timers["eval"].reset()
-
-        timers["all"].reset()
-        timers["all"].start()
-
         now = time.time()
         with timers["sample"]:
             buffer.load_samples(dataloader)
@@ -283,7 +292,7 @@ def train(
 
         loss_weights = stats.compute_loss_weights()
 
-        wlog = {"iteration": stats.iteration}
+        wlog = {}
 
         # Evaluate first (for a baseline when resuming with modified params)
         if now - last_evaluation_at > config["eval"]["interval_s"]:
@@ -327,11 +336,11 @@ def train(
             if now - last_checkpoint_at > config["checkpoint_interval_s"]:
                 last_checkpoint_at = now
 
-                if eval_loss_best is None and resume_config is not None:
+                if eval_loss_best is None:
                     # Initial baseline for resumed configs
                     eval_loss_best = eval_loss
                     logger.info("No baseline for checkpoint yet (eval_loss=%f, eval_loss_best=None), setting it now" % (eval_loss))
-                elif eval_loss >= eval_loss_best:
+                elif eval_loss and eval_loss >= eval_loss_best:
                     logger.info("Bad checkpoint (eval_loss=%f, eval_loss_best=%f), will skip it" % (eval_loss, eval_loss_best))
                 else:
                     logger.info("Good checkpoint (eval_loss=%f, eval_loss_best=%f), will save it" % (eval_loss, eval_loss_best))
@@ -369,30 +378,6 @@ def train(
                 thread.start()
 
         with timers["train"]:
-            # (
-            #     train_continuous_loss,
-            #     train_binary_loss,
-            #     train_categorical_loss,
-            #     train_loss,
-            #     train_wait,
-            # ) = train_model(
-            #     logger=logger,
-            #     model=model,
-            #     optimizer=optimizer,
-            #     scaler=scaler,
-            #     buffer=buffer,
-            #     stats=stats,
-            #     loss_weights=loss_weights,
-            #     epochs=train_epochs,
-            #     batch_size=train_batch_size,
-            #     accumulate_grad=config["train"]["accumulate_grad"],
-            # )
-            # wlog["train_loss/continuous"] = train_continuous_loss
-            # wlog["train_loss/binary"] = train_binary_loss
-            # wlog["train_loss/categorical"] = train_categorical_loss
-            # wlog["train_loss/total"] = train_loss
-            # wlog["train_dataset/wait_time_s"] = train_wait
-
             train_model_fn(
                 logger=logger,
                 model=model,
@@ -407,11 +392,13 @@ def train(
                 wlog=wlog,
             )
 
+        accumulate_logs(wlog)
+
         if "eval_loss/total" in wlog:
-            wlog = dict(wlog, **timer_stats(timers))
+            wlog = dict(aggregate_logs(), iteration=stats.iteration, **timer_stats(timers))
             wandb_log(wlog, commit=True)
         else:
-            logger.info(wlog)
+            logger.info(dict(wlog, iteration=stats.iteration))
 
         # XXX: must log timers here (some may have been skipped)
         stats.iteration += 1
