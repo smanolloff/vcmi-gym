@@ -33,11 +33,12 @@ env_kwargs = dict(
 
 config = dict(
     name_template="{datetime}-{id}-swap-T-E512_H8_L6-B300-RTX3080",
+    out_dir_template="data/world/t10n",
 
     env=dict(
         train=dict(
-            num_workers=3,
-            batch_size=1000,  # buffer capacity = num_workers * batch_size
+            num_workers=1,
+            batch_size=100,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
@@ -87,12 +88,13 @@ config = dict(
     ),
 
     eval=dict(
-        interval_s=60,           # wandb_log will also be called here
-        batch_size=200,
+        interval_s=60,  # wandb_log will also be called here
+        batch_size=20,
     ),
     train=dict(
+        accumulate_grad=False,  # makes 1 batch = entire buffer
         accumulate_grad=False,
-        batch_size=250,
+        batch_size=25,
         learning_rate=1e-4,
         epochs=1,
     )

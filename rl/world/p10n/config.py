@@ -33,6 +33,7 @@ env_kwargs = dict(
 
 config = dict(
     name_template="{datetime}-{id}-noswap-BattleAI",
+    out_dir_template="data/world/p10n",
 
     env=dict(
         train=dict(
@@ -87,10 +88,11 @@ config = dict(
     ),
 
     eval=dict(
-        interval_s=60,           # wandb_log will also be called here
+        interval_s=60,  # wandb_log will also be called here
         batch_size=25,
     ),
     train=dict(
+        accumulate_grad=False,  # makes 1 batch = entire buffer
         batch_size=20,
         learning_rate=1e-4,
         epochs=1,

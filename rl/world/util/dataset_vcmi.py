@@ -36,7 +36,7 @@ class DatasetVCMI(IterableDataset):
         env_kwargs,
         metric_queue=None,
         metric_report_interval=5,
-        mw_functor=noop_functor
+        mw_functor=None
     ):
         self.logger = logger
         self.env_kwargs = env_kwargs
@@ -45,7 +45,7 @@ class DatasetVCMI(IterableDataset):
         self.metric_reported_at = time.time()
         self.timer_all = Timer()
         self.timer_idle = Timer()
-        self.mw_functor = mw_functor
+        self.mw_functor = mw_functor or noop_functor
 
         print("Env kwargs: %s" % self.env_kwargs)
         self.env = None

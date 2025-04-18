@@ -1,20 +1,10 @@
 import os
 import torch
 import torch.nn as nn
-import random
-import string
-import json
-import botocore.exceptions
-import threading
-import logging
 import argparse
 import math
-import time
-import numpy as np
 import enum
 import contextlib
-from functools import partial
-from datetime import datetime
 
 from torch.nn.functional import (
     mse_loss,
@@ -22,14 +12,13 @@ from torch.nn.functional import (
     cross_entropy,
 )
 
-from ..util.dataset_vcmi import DatasetVCMI, Data, Context
-from ..util.dataset_s3 import DatasetS3
 from ..util.buffer_base import BufferBase
+from ..util.dataset_vcmi import Data, Context
+from ..util.misc import layer_init
 from ..util.obs_index import ObsIndex
-from ..util.persistence import load_local_or_s3_checkpoint, save_checkpoint, save_buffer_async
-from ..util.structured_logger import StructuredLogger
-from ..util.wandb import setup_wandb
 from ..util.timer import Timer
+from ..util.train import train
+
 from ..util.constants_v11 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
@@ -99,15 +88,6 @@ def vcmi_dataloader_functor():
         return data
 
     return mw
-
-
-def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
-    if isinstance(layer, torch.nn.Linear):
-        torch.nn.init.orthogonal_(layer.weight, gain)
-        torch.nn.init.constant_(layer.bias, bias_const)
-    for mod in list(layer.modules())[1:]:
-        layer_init(mod, gain, bias_const)
-    return layer
 
 
 class Buffer(BufferBase):
@@ -456,99 +436,6 @@ class TransitionModel(nn.Module):
             return obs_pred
 
 
-class Stats:
-    def __init__(self, model, device):
-        # Store [mean, var] for each continuous feature
-        # Shape: (N_CONT_FEATURES, 2)
-        self.continuous = {
-            "global": torch.zeros(*model.rel_index_global["continuous"].shape, 2, device=device),
-            "player": torch.zeros(*model.rel_index_player["continuous"].shape, 2, device=device),
-            "hex": torch.zeros(*model.rel_index_hex["continuous"].shape, 2, device=device),
-        }
-
-        # Store [n_ones, n] for each binary feature
-        # Shape: (N_BIN_FEATURES, 2)
-        self.binary = {
-            "global": torch.zeros(*model.rel_index_global["binary"].shape, 2, dtype=torch.int64, device=device),
-            "player": torch.zeros(*model.rel_index_player["binary"].shape, 2, dtype=torch.int64, device=device),
-            "hex": torch.zeros(*model.rel_index_hex["binary"].shape, 2, dtype=torch.int64, device=device),
-        }
-
-        # Store [n_ones_class0, n_ones_class1, ...]  for each categorical feature
-        # Python list with N_CAT_FEATURES elements
-        # Each element has shape: (N_CLASSES, 2), where N_CLASSES varies
-        # e.g.
-        # [
-        #  [n_ones_F1_class0, n_ones_F1_class1, n_ones_F1_class2],
-        #  [n_ones_F2_class0, n_ones_F2_class2, n_ones_F2_class3, n_ones_F2_class4],
-        #  ...etc
-        # ]
-        self.categoricals = {
-            "global": [torch.zeros(ind.shape, dtype=torch.int64, device=device) for ind in model.rel_index_global["categoricals"]],
-            "player": [torch.zeros(ind.shape, dtype=torch.int64, device=device) for ind in model.rel_index_player["categoricals"]],
-            "hex": [torch.zeros(ind.shape, dtype=torch.int64, device=device) for ind in model.rel_index_hex["categoricals"]],
-        }
-
-        # Simple counter. 1 sample = 1 obs
-        # i.e. the counter for each hex feature will be 165*num_samples
-        self.num_samples = 0
-
-        # Number of updates, should correspond to training iteration
-        self.iteration = 0
-
-    def export_data(self):
-        return {
-            "iteration": self.iteration,
-            "num_samples": self.num_samples,
-            "continuous": self.continuous,
-            "binary": self.binary,
-            "categoricals": self.categoricals
-        }
-
-    def load_state_dict(self, data):
-        self.continuous = data["continuous"]
-        self.binary = data["binary"]
-        self.categoricals = data["categoricals"]
-
-    def update(self, buffer, model):
-        with torch.no_grad():
-            self._update(buffer, model)
-
-    def _update(self, buffer, model):
-        self.num_samples += buffer.capacity
-
-        # self.continuous["global"][:, 0] = model.encoder_global_continuous[0].running_mean
-        # self.continuous["global"][:, 1] = model.encoder_global_continuous[0].running_var
-        # self.continuous["player"][:, 0] = model.encoder_player_continuous[1].running_mean
-        # self.continuous["player"][:, 1] = model.encoder_player_continuous[1].running_var
-        # self.continuous["hex"][:, 0] = model.encoder_hex_continuous[1].running_mean
-        # self.continuous["hex"][:, 1] = model.encoder_hex_continuous[1].running_var
-
-        obs = buffer.obs_buffer
-
-        # stat.add_(obs[:, ind].sum(0).round().long())
-        values_global = obs[:, model.abs_index["global"]["binary"]].round().long()
-        self.binary["global"][:, 0] += values_global.sum(0)
-        self.binary["global"][:, 1] += np.prod(values_global.shape)
-
-        values_player = obs[:, model.abs_index["player"]["binary"]].flatten(end_dim=1).round().long()
-        self.binary["player"][:, 0] += values_player.sum(0)
-        self.binary["player"][:, 1] += np.prod(values_player.shape)
-
-        values_hex = obs[:, model.abs_index["hex"]["binary"]].flatten(end_dim=1).round().long()
-        self.binary["hex"][:, 0] += values_hex.sum(0)
-        self.binary["hex"][:, 1] += np.prod(values_hex.shape)
-
-        for ind, stat in zip(model.abs_index["global"]["categoricals"], self.categoricals["global"]):
-            stat.add_(obs[:, ind].round().long().sum(0))
-
-        for ind, stat in zip(model.abs_index["player"]["categoricals"], self.categoricals["player"]):
-            stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
-
-        for ind, stat in zip(model.abs_index["hex"]["categoricals"], self.categoricals["hex"]):
-            stat.add_(obs[:, ind].flatten(end_dim=1).round().long().sum(0))
-
-
 def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
     logits_global_continuous = pred_obs[:, obs_index["global"]["continuous"]]
     logits_global_binary = pred_obs[:, obs_index["global"]["binary"]]
@@ -633,45 +520,6 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
     return loss_binary, loss_continuous, loss_categorical
 
 
-def compute_loss_weights(stats, device):
-    weights = {
-        "binary": {
-            "global": torch.tensor(0., device=device),
-            "player": torch.tensor(0., device=device),
-            "hex": torch.tensor(0., device=device)
-        },
-        "categoricals": {
-            "global": [],
-            "player": [],
-            "hex": []
-        },
-    }
-
-    # NOTE: Clamping weights to prevent huge weights for binaries
-    # which are never positive (e.g. SLEEPING stack flag)
-    for type in weights["binary"].keys():
-        s = stats.binary[type]
-        if len(s) == 0:
-            continue
-        num_positives = s[:, 0]
-        num_negatives = s[:, 1] - num_positives
-        pos_weights = num_negatives / num_positives
-        weights["binary"][type] = pos_weights.clamp(max=100)
-
-    # NOTE: Computing weights only for labels that have appeared
-    # to prevent huge weights for labels which never occur
-    # (e.g. hex.IS_REAR) from making the other weights very small
-    for type, cat_weights in weights["categoricals"].items():
-        for cat_stats in stats.categoricals[type]:
-            w = torch.zeros(cat_stats.shape, dtype=torch.float32, device=device)
-            mask = cat_stats > 0
-            masked_stats = cat_stats[mask].float()
-            w[mask] = masked_stats.mean() / masked_stats
-            cat_weights.append(w.clamp(max=100))
-
-    return weights
-
-
 def train_model(
     logger,
     model,
@@ -683,6 +531,7 @@ def train_model(
     epochs,
     batch_size,
     accumulate_grad,
+    wlog
 ):
     model.train()
     continuous_losses = []
@@ -694,9 +543,10 @@ def train_model(
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
     assert buffer.capacity % batch_size == 0, f"{buffer.capacity} % {batch_size} == 0"
-    grad_steps = buffer.capacity // batch_size
-    # grad_step = 0
-    assert grad_steps > 0
+
+    if accumulate_grad:
+        grad_steps = buffer.capacity // batch_size
+        assert grad_steps > 0
 
     for epoch in range(epochs):
         timer.start()
@@ -728,7 +578,6 @@ def train_model(
                     loss_tot.backward()
                     optimizer.step()
                 optimizer.zero_grad()
-
             timer.start()
         timer.stop()
 
@@ -742,22 +591,29 @@ def train_model(
                 optimizer.step()
             optimizer.zero_grad()
 
-        continuous_loss = sum(continuous_losses) / len(continuous_losses)
-        binary_loss = sum(binary_losses) / len(binary_losses)
-        categorical_loss = sum(categorical_losses) / len(categorical_losses)
-        total_loss = sum(total_losses) / len(total_losses)
-        total_wait = timer.peek()
+    continuous_loss = sum(continuous_losses) / len(continuous_losses)
+    binary_loss = sum(binary_losses) / len(binary_losses)
+    categorical_loss = sum(categorical_losses) / len(categorical_losses)
+    total_loss = sum(total_losses) / len(total_losses)
+    total_wait = timer.peek()
 
-        return (
-            continuous_loss,
-            binary_loss,
-            categorical_loss,
-            total_loss,
-            total_wait,
-        )
+    wlog["train_loss/continuous"] = continuous_loss
+    wlog["train_loss/binary"] = binary_loss
+    wlog["train_loss/categorical"] = categorical_loss
+    wlog["train_loss/total"] = total_loss
+    wlog["train_dataset/wait_time_s"] = total_wait
+
+    return total_loss
 
 
-def eval_model(logger, model, loss_weights, buffer, batch_size):
+def eval_model(
+    logger,
+    model,
+    loss_weights,
+    buffer,
+    batch_size,
+    wlog
+):
     model.eval()
 
     continuous_losses = []
@@ -790,398 +646,13 @@ def eval_model(logger, model, loss_weights, buffer, batch_size):
     total_loss = sum(total_losses) / len(total_losses)
     total_wait = timer.peek()
 
-    return (
-        continuous_loss,
-        binary_loss,
-        categorical_loss,
-        total_loss,
-        total_wait
-    )
-
-
-def dig(data, *keys):
-    for key in keys:
-        if isinstance(data, dict) and key in data:
-            data = data[key]
-        else:
-            return None
-    return data
-
-
-def aggregate_metrics(queue):
-    total = 0
-    count = 0
-
-    while not queue.empty():
-        item = queue.get()
-        total += item
-        count += 1
-
-    return total / count if count else None
-
-
-def timer_stats(timers):
-    res = {}
-    t_all = timers["all"].peek()
-    for k, v in timers.items():
-        res[f"timer/{k}"] = v.peek()
-        if k != "all":
-            res[f"timer_rel/{k}"] = v.peek() / t_all
-
-    res["timer/other"] = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
-    res["timer_rel/other"] = res["timer/other"] / t_all
-    return res
-
-
-def train(resume_config, loglevel, dry_run, no_wandb, sample_only):
-    if resume_config:
-        with open(resume_config, "r") as f:
-            print(f"Resuming from config: {f.name}")
-            config = json.load(f)
-
-        run_id = config["run"]["id"]
-        config["run"]["resumed_config"] = resume_config
-    else:
-        from .config import config
-        run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
-        config["run"] = dict(
-            id=run_id,
-            name=config["name_template"].format(id=run_id, datetime=datetime.utcnow().strftime("%Y%m%d_%H%M%S")),
-            out_dir=os.path.abspath("data/t10n"),
-            resumed_config=None,
-        )
-
-    checkpoint_s3_config = dig(config, "s3", "checkpoint")
-    train_s3_config = dig(config, "s3", "data", "train")
-    eval_s3_config = dig(config, "s3", "data", "eval")
-    train_env_config = dig(config, "env", "train")
-    eval_env_config = dig(config, "env", "eval")
-
-    train_sample_from_env = train_env_config is not None
-    eval_sample_from_env = eval_env_config is not None
-
-    train_sample_from_s3 = (not train_sample_from_env) and train_s3_config is not None
-    eval_sample_from_s3 = (not eval_sample_from_env) and eval_s3_config is not None
-
-    train_save_samples = train_sample_from_env and train_s3_config is not None
-    eval_save_samples = eval_sample_from_env and eval_s3_config is not None
-
-    train_batch_size = config["train"]["batch_size"]
-    eval_batch_size = config["eval"]["batch_size"]
-
-    if train_env_config:
-        # Prevent guaranteed waiting time for each batch during training
-        assert train_batch_size <= (train_env_config["num_workers"] * train_env_config["batch_size"])
-        # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
-        assert (train_env_config["num_workers"] * train_env_config["batch_size"]) % train_batch_size == 0
-    else:
-        assert train_batch_size <= (train_s3_config["num_workers"] * train_s3_config["batch_size"])
-        assert (train_s3_config["num_workers"] * train_s3_config["batch_size"]) % train_batch_size == 0
-
-    if eval_env_config:
-        # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
-        assert eval_batch_size <= (eval_env_config["num_workers"] * eval_env_config["batch_size"])
-        assert (eval_env_config["num_workers"] * eval_env_config["batch_size"]) % eval_batch_size == 0
-    else:
-        assert eval_batch_size <= (eval_s3_config["num_workers"] * eval_s3_config["batch_size"])
-        assert (eval_s3_config["num_workers"] * eval_s3_config["batch_size"]) % eval_batch_size == 0
-
-    assert config["checkpoint_interval_s"] > config["eval"]["interval_s"]
-
-    os.makedirs(config["run"]["out_dir"], exist_ok=True)
-
-    with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
-        print(f"Saving new config to: {f.name}")
-        json.dump(config, f, indent=4)
-
-    logger = StructuredLogger(level=getattr(logging, loglevel), filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"), context=dict(run_id=run_id))
-    logger.info(dict(config=config))
-
-    learning_rate = config["train"]["learning_rate"]
-    train_epochs = config["train"]["epochs"]
-
-    # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
-    torch.backends.cudnn.benchmark = True
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = TransitionModel(device=device)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-    if device.type == "cuda":
-        scaler = torch.amp.GradScaler()
-    else:
-        scaler = None
-
-    optimize_local_storage = config.get("s3", {}).get("optimize_local_storage")
-
-    def make_vcmi_dataloader(cfg, mq):
-        return torch.utils.data.DataLoader(
-            DatasetVCMI(logger=logger, env_kwargs=cfg["kwargs"], metric_queue=mq, mw_functor=vcmi_dataloader_functor),
-            batch_size=cfg["batch_size"],
-            num_workers=cfg["num_workers"],
-            prefetch_factor=cfg["prefetch_factor"],
-            # persistent_workers=True,  # no effect here
-        )
-
-    def make_s3_dataloader(cfg, mq, split_ratio=None, split_side=None):
-        return torch.utils.data.DataLoader(
-            DatasetS3(
-                logger=logger,
-                bucket_name=cfg["bucket_name"],
-                s3_dir=cfg["s3_dir"],
-                cache_dir=cfg["cache_dir"],
-                cached_files_max=cfg["cached_files_max"],
-                shuffle=cfg["shuffle"],
-                split_ratio=split_ratio,
-                split_side=split_side,
-                aws_access_key=os.environ["AWS_ACCESS_KEY"],
-                aws_secret_key=os.environ["AWS_SECRET_KEY"],
-                metric_queue=mq,
-                # mw_functor=
-            ),
-            batch_size=cfg["batch_size"],
-            num_workers=cfg["num_workers"],
-            prefetch_factor=cfg["prefetch_factor"],
-            pin_memory=cfg["pin_memory"]
-        )
-
-    train_metric_queue = torch.multiprocessing.Queue()
-    eval_metric_queue = torch.multiprocessing.Queue()
-
-    if train_sample_from_env:
-        dataloader_obj = make_vcmi_dataloader(train_env_config, train_metric_queue)
-    if eval_sample_from_env:
-        eval_dataloader_obj = make_vcmi_dataloader(eval_env_config, eval_metric_queue)
-    if train_sample_from_s3:
-        dataloader_obj = make_s3_dataloader(train_s3_config, train_metric_queue, 0.98, 0)
-    if eval_sample_from_s3:
-        # eval_dataloader_obj = make_s3_dataloader(eval_s3_config, eval_metric_queue)
-        eval_dataloader_obj = make_s3_dataloader(dict(eval_s3_config, s3_dir=train_s3_config["s3_dir"]), eval_metric_queue, 0.98, 1)
-
-    def make_buffer(dloader):
-        return Buffer(logger=logger, dataloader=dloader, dim_obs=DIM_OBS, n_actions=N_ACTIONS, device=device)
-
-    buffer = make_buffer(dataloader_obj)
-    dataloader = iter(dataloader_obj)
-    eval_buffer = make_buffer(eval_dataloader_obj)
-    eval_dataloader = iter(eval_dataloader_obj)
-    stats = Stats(model, device=device)
-
-    if resume_config:
-        load_checkpoint = partial(
-            load_local_or_s3_checkpoint,
-            logger,
-            dry_run,
-            checkpoint_s3_config,
-            optimize_local_storage,
-            device,
-            config["run"]["out_dir"],
-            run_id,
-        )
-
-        load_checkpoint("model", model, strict=True)
-        load_checkpoint("optimizer", optimizer)
-
-        if scaler:
-            try:
-                load_checkpoint("scaler", scaler)
-            except botocore.exceptions.ClientError as e:
-                if e.response["Error"]["Code"] == "404":
-                    logger.warn("WARNING: scaler weights not found (maybe the model was trained on CPU only?)")
-                else:
-                    raise
-
-    if no_wandb:
-        def wandb_log(data, commit=False):
-            logger.info(data)
-    else:
-        wandb = setup_wandb(config, model, __file__)
-
-        def wandb_log(data, commit=False):
-            wandb.log(data, commit=commit)
-            logger.info(data)
-
-    wandb_log({
-        "train/learning_rate": learning_rate,
-        "train/buffer_capacity": buffer.capacity,
-        "train/epochs": train_epochs,
-        "train/batch_size": train_batch_size,
-        "eval/buffer_capacity": eval_buffer.capacity,
-        "eval/batch_size": eval_batch_size,
-    })
-
-    last_checkpoint_at = time.time()
-    last_evaluation_at = 0
-
-    # during training, we simply check if the event is set and optionally skip the upload
-    # Non-bloking, but uploads may be skipped (checkpoint uploads)
-    uploading_event = threading.Event()
-    train_uploading_event_buf = threading.Event()
-    eval_uploading_event_buf = threading.Event()
-
-    # during sample collection, we use a cond lock to prevent more than 1 upload at a time
-    # Blocking, but all uploads are processed (buffer uploads)
-    train_uploading_cond = threading.Condition()
-    eval_uploading_cond = threading.Condition()
-
-    timers = {
-        "all": Timer(),
-        "sample": Timer(),
-        "train": Timer(),
-        "eval": Timer(),
-    }
-
-    eval_loss_best = None
-
-    while True:
-        timers["sample"].reset()
-        timers["train"].reset()
-        timers["eval"].reset()
-
-        timers["all"].reset()
-        timers["all"].start()
-
-        now = time.time()
-        with timers["sample"]:
-            buffer.load_samples(dataloader)
-
-        logger.info("Samples loaded: %d" % buffer.capacity)
-
-        assert buffer.full and not buffer.index
-
-        if train_save_samples:
-            save_buffer_async(
-                run_id=run_id,
-                logger=logger,
-                dry_run=dry_run,
-                buffer=buffer,
-                env_config=train_env_config,
-                s3_config=train_s3_config,
-                allow_skip=not sample_only,
-                uploading_cond=train_uploading_cond,
-                uploading_event_buf=train_uploading_event_buf,
-                optimize_local_storage=optimize_local_storage
-            )
-
-        if sample_only:
-            stats.iteration += 1
-            continue
-
-        loss_weights = compute_loss_weights(stats, device=device)
-
-        wlog = {"iteration": stats.iteration}
-
-        # Evaluate first (for a baseline when resuming with modified params)
-        if now - last_evaluation_at > config["eval"]["interval_s"]:
-            last_evaluation_at = now
-
-            with timers["sample"]:
-                eval_buffer.load_samples(eval_dataloader)
-
-            with timers["eval"]:
-                (
-                    eval_continuous_loss,
-                    eval_binary_loss,
-                    eval_categorical_loss,
-                    eval_loss,
-                    eval_wait
-                ) = eval_model(
-                    logger=logger,
-                    model=model,
-                    loss_weights=loss_weights,
-                    buffer=eval_buffer,
-                    batch_size=eval_batch_size,
-                )
-
-            wlog["eval_loss/continuous"] = eval_continuous_loss
-            wlog["eval_loss/binary"] = eval_binary_loss
-            wlog["eval_loss/categorical"] = eval_categorical_loss
-            wlog["eval_loss/total"] = eval_loss
-            wlog["eval_dataset/wait_time_s"] = eval_wait
-
-            train_dataset_metrics = aggregate_metrics(train_metric_queue)
-            if train_dataset_metrics:
-                wlog["train_dataset/avg_worker_utilization"] = train_dataset_metrics
-
-            eval_dataset_metrics = aggregate_metrics(eval_metric_queue)
-            if eval_dataset_metrics:
-                wlog["eval_dataset/avg_worker_utilization"] = eval_dataset_metrics
-
-            if eval_save_samples:
-                save_buffer_async(
-                    run_id=run_id,
-                    logger=logger,
-                    dry_run=dry_run,
-                    buffer=eval_buffer,
-                    env_config=eval_env_config,
-                    s3_config=eval_s3_config,
-                    allow_skip=not sample_only,
-                    uploading_cond=eval_uploading_cond,
-                    uploading_event_buf=eval_uploading_event_buf,
-                    optimize_local_storage=optimize_local_storage
-                )
-
-            if now - last_checkpoint_at > config["checkpoint_interval_s"]:
-                last_checkpoint_at = now
-
-                if eval_loss_best is None:
-                    # Initial baseline
-                    eval_loss_best = eval_loss
-                    logger.info("No baseline for checkpoint yet (eval_loss=%f, eval_loss_best=None), setting it now" % (eval_loss))
-                elif eval_loss >= eval_loss_best:
-                    logger.info("Bad checkpoint (eval_loss=%f, eval_loss_best=%f), will skip it" % (eval_loss, eval_loss_best))
-                else:
-                    logger.info("Good checkpoint (eval_loss=%f, eval_loss_best=%f), will save it" % (eval_loss, eval_loss_best))
-                    eval_loss_best = eval_loss
-                    thread = threading.Thread(target=save_checkpoint, kwargs=dict(
-                        logger=logger,
-                        dry_run=dry_run,
-                        model=model,
-                        optimizer=optimizer,
-                        scaler=scaler,
-                        out_dir=config["run"]["out_dir"],
-                        run_id=run_id,
-                        optimize_local_storage=optimize_local_storage,
-                        s3_config=config.get("s3", {}).get("checkpoint"),
-                        uploading_event=uploading_event
-                    ))
-                    thread.start()
-
-        with timers["train"]:
-            (
-                train_continuous_loss,
-                train_binary_loss,
-                train_categorical_loss,
-                train_loss,
-                train_wait,
-            ) = train_model(
-                logger=logger,
-                model=model,
-                optimizer=optimizer,
-                scaler=scaler,
-                buffer=buffer,
-                stats=stats,
-                loss_weights=loss_weights,
-                epochs=train_epochs,
-                batch_size=train_batch_size,
-                accumulate_grad=config["train"]["accumulate_grad"],
-            )
-
-        wlog["train_loss/continuous"] = train_continuous_loss
-        wlog["train_loss/binary"] = train_binary_loss
-        wlog["train_loss/categorical"] = train_categorical_loss
-        wlog["train_loss/total"] = train_loss
-        wlog["train_dataset/wait_time_s"] = train_wait
-
-        if "eval_loss/total" in wlog:
-            wlog = dict(wlog, **timer_stats(timers))
-            wandb_log(wlog, commit=True)
-        else:
-            logger.info(wlog)
-
-        # XXX: must log timers here (some may have been skipped)
-        stats.iteration += 1
+    wlog["eval_loss/continuous"] = continuous_loss
+    wlog["eval_loss/binary"] = binary_loss
+    wlog["eval_loss/categorical"] = categorical_loss
+    wlog["eval_loss/total"] = total_loss
+    wlog["eval_dataset/wait_time_s"] = total_wait
+
+    return total_loss
 
 
 def test(cfg_file):
@@ -1332,7 +803,23 @@ if __name__ == "__main__":
 
     if args.action == "test":
         test(args.f)
-    elif args.action == "train":
-        train(args.f, args.loglevel, args.dry_run, args.no_wandb, False)
-    elif args.action == "sample":
-        train(args.f, args.loglevel, args.dry_run, args.no_wandb, True)
+    else:
+        from .config import config
+        common_args = dict(
+            config=config,
+            resume_config=args.f,
+            loglevel=args.loglevel,
+            dry_run=args.dry_run,
+            no_wandb=args.no_wandb,
+            # sample_only=False,
+            model_creator=TransitionModel,
+            buffer_creator=Buffer,
+            vcmi_dataloader_functor=vcmi_dataloader_functor,
+            s3_dataloader_functor=None,
+            eval_model_fn=eval_model,
+            train_model_fn=train_model
+        )
+        if args.action == "train":
+            train(**dict(common_args, sample_only=False))
+        elif args.action == "sample":
+            train(**dict(common_args, sample_only=True))

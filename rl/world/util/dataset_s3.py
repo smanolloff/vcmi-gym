@@ -35,7 +35,7 @@ class DatasetS3(IterableDataset):
         split_side=0,
         metric_queue=None,
         metric_report_interval=5,
-        mw_functor=noop_functor
+        mw_functor=None
     ):
         """
         Args:
@@ -59,7 +59,7 @@ class DatasetS3(IterableDataset):
 
         self.timer_all = Timer()
         self.timer_idle = Timer()
-        self.mw_functor = mw_functor
+        self.mw_functor = mw_functor or noop_functor
 
         assert split_ratio >= 0 and split_ratio <= 1, split_ratio
         assert split_side in [0, 1], split_side
