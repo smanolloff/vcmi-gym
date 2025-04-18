@@ -65,10 +65,28 @@ def load_local_or_s3_checkpoint(
         shutil.copy2(filename, backname)
 
 
-def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, optimize_local_storage, s3_config, uploading_event):
-    f_model = os.path.join(out_dir, f"{run_id}-model.pt")
-    f_optimizer = os.path.join(out_dir, f"{run_id}-optimizer.pt")
-    f_scaler = os.path.join(out_dir, f"{run_id}-scaler.pt")
+def save_checkpoint(
+    logger,
+    dry_run,
+    model,
+    optimizer,
+    scaler,
+    out_dir,
+    run_id,
+    optimize_local_storage,
+    s3_config,
+    uploading_event,
+    permanent=False
+):
+    if permanent:
+        prefix = run_id
+    else:
+        prefix = f"{run_id}-{time.time():.0f}"
+
+    f_model = os.path.join(out_dir, f"{prefix}-model.pt")
+    f_optimizer = os.path.join(out_dir, f"{prefix}-optimizer.pt")
+    f_scaler = os.path.join(out_dir, f"{prefix}-scaler.pt")
+
     msg = dict(
         event="Saving checkpoint...",
         model=f_model,
@@ -142,7 +160,7 @@ def save_checkpoint(logger, dry_run, model, optimizer, scaler, out_dir, run_id, 
     s3_dir = s3_config["s3_dir"]
     s3 = init_s3_client()
 
-    files.insert(0, os.path.join(out_dir, f"{run_id}-config.json"))
+    files.insert(0, os.path.join(out_dir, f"{prefix}-config.json"))
 
     try:
         for f in files:

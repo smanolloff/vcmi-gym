@@ -90,6 +90,7 @@ config = dict(
 
     eval=dict(
         interval_s=60,  # wandb_log will also be called here
+        permasave_interval_s=6*3600,  # 6h
         batch_size=20,
     ),
     train=dict(

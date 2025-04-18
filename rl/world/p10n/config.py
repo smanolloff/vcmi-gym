@@ -52,6 +52,7 @@ config = dict(
     ),
 
     checkpoint_interval_s=900,  # NOTE: checked only after eval
+    permanent_checkpoint_interval_s=6*3600,  # 6h (use int(2e9) to disable)
 
     s3=dict(
         optimize_local_storage=False,

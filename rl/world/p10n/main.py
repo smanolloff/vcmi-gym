@@ -1,4 +1,3 @@
-import os
 import torch
 import torch.nn as nn
 import argparse
@@ -538,10 +537,13 @@ def eval_model(
 
 
 def test(cfg_file):
-    from vcmi_gym.envs.v10.vcmi_env import VcmiEnv
+    import json
+    from vcmi_gym.envs.v11.vcmi_env import VcmiEnv
 
-    run_id = os.path.basename(cfg_file).removesuffix("-config.json")
-    weights_file = f"data/t10n/{run_id}-model.pt"
+    with open(cfg_file, "r") as f:
+        cfg = json.load(f)
+
+    weights_file = "%s/%s-model.pt" % (cfg["run"]["out_dir"], cfg["run"]["id"])
     model = load_for_test(weights_file)
     # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1, swap_sides=1)
     env = VcmiEnv(mapname="gym/generated/evaluation/8x512.vmap", conntype="thread", random_heroes=1, opponent="BattleAI")
@@ -558,12 +560,12 @@ def load_for_test(file):
 
 
 def do_test(model, env):
-    from vcmi_gym.envs.v10.decoder.decoder import Decoder
+    from vcmi_gym.envs.v11.decoder.decoder import Decoder
 
     t = lambda x: torch.as_tensor(x).unsqueeze(0)
 
     env.reset()
-    for _ in range(10):
+    for _ in range(100):
         if env.terminated or env.truncated:
             env.reset()
         act = env.random_action()

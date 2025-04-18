@@ -98,6 +98,7 @@ def train(
         assert (eval_s3_config["num_workers"] * eval_s3_config["batch_size"]) % eval_batch_size == 0
 
     assert config["checkpoint_interval_s"] > config["eval"]["interval_s"]
+    assert config["permanent_checkpoint_interval_s"] > config["eval"]["interval_s"]
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
@@ -223,6 +224,7 @@ def train(
     })
 
     last_checkpoint_at = time.time()
+    last_permanent_checkpoint_at = time.time()
     last_evaluation_at = 0
 
     # during training, we simply check if the event is set and optionally skip the upload
@@ -347,6 +349,24 @@ def train(
                         uploading_event=uploading_event
                     ))
                     thread.start()
+
+            if now - last_permanent_checkpoint_at > config["permanent_checkpoint_interval_s"]:
+                last_permanent_checkpoint_at = now
+                logger.info("Saving permanent checkpoint...")
+                thread = threading.Thread(target=save_checkpoint, kwargs=dict(
+                    logger=logger,
+                    dry_run=dry_run,
+                    model=model,
+                    optimizer=optimizer,
+                    scaler=scaler,
+                    out_dir=config["run"]["out_dir"],
+                    run_id=run_id,
+                    optimize_local_storage=optimize_local_storage,
+                    s3_config=config.get("s3", {}).get("checkpoint"),
+                    uploading_event=threading.Event(),  # don't skip this upload
+                    permanent=True
+                ))
+                thread.start()
 
         with timers["train"]:
             # (
