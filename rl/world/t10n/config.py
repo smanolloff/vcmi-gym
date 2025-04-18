@@ -93,7 +93,6 @@ config = dict(
     ),
     train=dict(
         accumulate_grad=False,  # makes 1 batch = entire buffer
-        accumulate_grad=False,
         batch_size=25,
         learning_rate=1e-4,
         epochs=1,
