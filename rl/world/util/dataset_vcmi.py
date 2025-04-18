@@ -54,9 +54,6 @@ class DatasetVCMI(IterableDataset):
         self.env.close() if self.env else None
 
     def __iter__(self):
-        # worker_id = torch.utils.data.get_worker_info().id
-        # i = 0
-
         assert self.env is None, "multiple calls to __iter__ not supported"
 
         from vcmi_gym import VcmiEnv_v11 as VcmiEnv

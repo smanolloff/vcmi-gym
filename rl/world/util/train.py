@@ -171,12 +171,12 @@ def train(
         # eval_dataloader_obj = make_s3_dataloader(eval_s3_config, eval_metric_queue)
         eval_dataloader_obj = make_s3_dataloader(dict(eval_s3_config, s3_dir=train_s3_config["s3_dir"]), eval_metric_queue, 0.98, 1)
 
-    def make_buffer(dloader):
-        return buffer_creator(logger=logger, dataloader=dloader, dim_obs=DIM_OBS, n_actions=N_ACTIONS, device=device)
+    def make_buffer(dloader, name):
+        return buffer_creator(logger=logger, dataloader=dloader, dim_obs=DIM_OBS, n_actions=N_ACTIONS, name=name, device=device)
 
-    buffer = make_buffer(dataloader_obj)
+    buffer = make_buffer(dataloader_obj, "train")
     dataloader = iter(dataloader_obj)
-    eval_buffer = make_buffer(eval_dataloader_obj)
+    eval_buffer = make_buffer(eval_dataloader_obj, "eval")
     eval_dataloader = iter(eval_dataloader_obj)
     stats = Stats(model, device=device)
 
@@ -327,8 +327,8 @@ def train(
             if now - last_checkpoint_at > config["checkpoint_interval_s"]:
                 last_checkpoint_at = now
 
-                if eval_loss_best is None:
-                    # Initial baseline
+                if eval_loss_best is None and resume_config is not None:
+                    # Initial baseline for resumed configs
                     eval_loss_best = eval_loss
                     logger.info("No baseline for checkpoint yet (eval_loss=%f, eval_loss_best=None), setting it now" % (eval_loss))
                 elif eval_loss >= eval_loss_best:

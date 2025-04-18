@@ -2,12 +2,12 @@ import torch
 
 
 class BufferBase:
-    def __init__(self, logger, dataloader, dim_obs, n_actions, worker_cutoffs=[], device=torch.device("cpu")):
+    def __init__(self, logger, dataloader, dim_obs, n_actions, name="buffer", device=torch.device("cpu")):
         self.logger = logger
         self.dataloader = dataloader
         self.capacity = dataloader.num_workers * dataloader.batch_size
+        self.name = name
         self.device = device
-        self.worker_cutoffs = worker_cutoffs
 
         self.containers = {
             "obs": torch.zeros((self.capacity, dim_obs), dtype=torch.float32, device=device),
