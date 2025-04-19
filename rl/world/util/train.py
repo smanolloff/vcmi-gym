@@ -373,7 +373,8 @@ def train(
                     optimize_local_storage=optimize_local_storage,
                     s3_config=config.get("s3", {}).get("checkpoint"),
                     uploading_event=threading.Event(),  # don't skip this upload
-                    permanent=True
+                    permanent=True,
+                    config=config,
                 ))
                 thread.start()
 

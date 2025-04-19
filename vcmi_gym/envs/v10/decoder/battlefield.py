@@ -442,7 +442,7 @@ class Battlefield():
                                 value += "A" if flags1.WILL_ACT else " "
                                 value += "R" if flags1.CAN_RETALIATE else " "
                         elif a == "QUEUE":
-                            value = str(stack.QUEUE.v.argmax())  # gets pos of first "1""
+                            value = str(stack.QUEUE.v.argmax()) if any(stack.QUEUE.v) else ""
                         elif a == "ATTACK MODS":
                             if flags1 is None:
                                 value = "?"

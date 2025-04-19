@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import time
 import threading
+import json
 import boto3
 import botocore.exceptions
 from boto3.s3.transfer import TransferConfig
@@ -76,9 +77,11 @@ def save_checkpoint(
     optimize_local_storage,
     s3_config,
     uploading_event,
-    permanent=False
+    permanent=False,
+    config=None
 ):
     if permanent:
+        assert config, "config is also needed for permanent checkpoints"
         prefix = run_id
     else:
         prefix = f"{run_id}-{time.time():.0f}"
@@ -108,6 +111,11 @@ def save_checkpoint(
     else:
         logger.info(msg)
         # Prevent corrupted checkpoints if terminated during torch.save
+
+        if permanent:
+            with open(os.path.join(out_dir, f"{prefix}-config.json"), "w") as f:
+                logger.debug(f"Saving config to: {f.name}")
+                json.dump(config, f, indent=4, sort_keys=False)
 
         if optimize_local_storage:
             # Use "...~" as a lockfile
