@@ -5,6 +5,7 @@ import string
 import logging
 import torch
 import time
+import math
 import threading
 import botocore.exceptions
 from functools import partial
@@ -340,7 +341,7 @@ def train(
                     # Initial baseline for resumed configs
                     eval_loss_best = eval_loss
                     logger.info("No baseline for checkpoint yet (eval_loss=%f, eval_loss_best=None), setting it now" % (eval_loss))
-                elif eval_loss and (eval_loss.isnan() or eval_loss >= eval_loss_best):
+                elif eval_loss and (math.isnan(eval_loss) or eval_loss >= eval_loss_best):
                     logger.info("Bad checkpoint (eval_loss=%f, eval_loss_best=%f), will skip it" % (eval_loss, eval_loss_best))
                 else:
                     logger.info("Good checkpoint (eval_loss=%f, eval_loss_best=%f), will save it" % (eval_loss, eval_loss_best))

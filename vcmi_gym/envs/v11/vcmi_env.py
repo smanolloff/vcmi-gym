@@ -128,7 +128,6 @@ class VcmiEnv(gym.Env):
         vcmi_stats_mode: str = "disabled",
         vcmi_stats_storage: str = "-",
         vcmi_stats_persist_freq: int = 100,
-        true_rng: bool = False,
         allow_invalid_actions: bool = False,
         user_timeout: int = 0,
         vcmi_timeout: int = 0,

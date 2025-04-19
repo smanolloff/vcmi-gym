@@ -536,18 +536,24 @@ def eval_model(
     return total_loss
 
 
-def test(cfg_file):
-    import json
+def test(weights_file):
     from vcmi_gym.envs.v11.vcmi_env import VcmiEnv
 
-    with open(cfg_file, "r") as f:
-        cfg = json.load(f)
-
     with torch.no_grad():
-        weights_file = "%s/%s-model.pt" % (cfg["run"]["out_dir"], cfg["run"]["id"])
         model = load_for_test(weights_file)
         # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1, swap_sides=1)
-        env = VcmiEnv(mapname="gym/generated/evaluation/8x512.vmap", conntype="thread", random_heroes=1, opponent="BattleAI")
+        env = VcmiEnv(
+            mapname="gym/generated/evaluation/8x512.vmap",
+            opponent="BattleAI",
+            swap_sides=0,
+            random_heroes=1,
+            random_obstacles=1,
+            town_chance=20,
+            warmachine_chance=30,
+            random_terrain_chance=100,
+            tight_formation_chance=30,
+            conntype="thread"
+        )
         do_test(model, env)
 
 
@@ -662,7 +668,7 @@ def do_test(model, env):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-f", metavar="FILE", help="config file to resume or test")
+    parser.add_argument("-f", metavar="FILE", help="config file to resume training or model file to test")
     parser.add_argument("--dry-run", action="store_true", help="do not save anything to disk (implies --no-wandb)")
     parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
     parser.add_argument("--loglevel", metavar="LOGLEVEL", default="INFO", help="DEBUG | INFO | WARN | ERROR")
