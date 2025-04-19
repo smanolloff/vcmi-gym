@@ -340,7 +340,7 @@ def train(
                     # Initial baseline for resumed configs
                     eval_loss_best = eval_loss
                     logger.info("No baseline for checkpoint yet (eval_loss=%f, eval_loss_best=None), setting it now" % (eval_loss))
-                elif eval_loss and eval_loss >= eval_loss_best:
+                elif eval_loss and (eval_loss.isnan() or eval_loss >= eval_loss_best):
                     logger.info("Bad checkpoint (eval_loss=%f, eval_loss_best=%f), will skip it" % (eval_loss, eval_loss_best))
                 else:
                     logger.info("Good checkpoint (eval_loss=%f, eval_loss_best=%f), will save it" % (eval_loss, eval_loss_best))
@@ -361,7 +361,7 @@ def train(
 
             if now - last_permanent_checkpoint_at > config["permanent_checkpoint_interval_s"]:
                 last_permanent_checkpoint_at = now
-                logger.info("Saving permanent checkpoint...")
+                logger.info("Time for a permanent checkpoint")
                 thread = threading.Thread(target=save_checkpoint, kwargs=dict(
                     logger=logger,
                     dry_run=dry_run,

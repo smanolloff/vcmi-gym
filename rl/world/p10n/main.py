@@ -9,7 +9,7 @@ from torch.nn.functional import cross_entropy
 
 from ..util.buffer_base import BufferBase
 from ..util.dataset_vcmi import Data, Context
-from ..util.misc import layer_init
+from ..util.misc import layer_init, safe_mean
 from ..util.obs_index import ObsIndex
 from ..util.timer import Timer
 from ..util.train import train
@@ -543,11 +543,12 @@ def test(cfg_file):
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
 
-    weights_file = "%s/%s-model.pt" % (cfg["run"]["out_dir"], cfg["run"]["id"])
-    model = load_for_test(weights_file)
-    # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1, swap_sides=1)
-    env = VcmiEnv(mapname="gym/generated/evaluation/8x512.vmap", conntype="thread", random_heroes=1, opponent="BattleAI")
-    do_test(model, env)
+    with torch.no_grad():
+        weights_file = "%s/%s-model.pt" % (cfg["run"]["out_dir"], cfg["run"]["id"])
+        model = load_for_test(weights_file)
+        # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1, swap_sides=1)
+        env = VcmiEnv(mapname="gym/generated/evaluation/8x512.vmap", conntype="thread", random_heroes=1, opponent="BattleAI")
+        do_test(model, env)
 
 
 def load_for_test(file):
@@ -569,6 +570,7 @@ def do_test(model, env):
 
     matches = []
     losses = []
+    episodes = 0
     verbose = False
 
     def _print(txt):
@@ -580,6 +582,7 @@ def do_test(model, env):
     for step in range(total_steps):
         if env.terminated or env.truncated:
             env.reset()
+            episodes += 1
         act = env.random_action()
         obs0, rew, term, trunc, _info = env.step(act)
         done = term or trunc
@@ -652,6 +655,8 @@ def do_test(model, env):
         if step % (total_steps // 10) == 0:
             print("(progress: %.0f%%)" % (100 * (step / total_steps)))
 
+    print("Episodes: %d" % episodes)
+    print("Loss: %s" % (safe_mean(losses)))
     print("Accuracy: %.2f%%" % (100 * (sum(matches) / len(matches))))
 
 

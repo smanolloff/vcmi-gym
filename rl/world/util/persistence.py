@@ -82,9 +82,9 @@ def save_checkpoint(
 ):
     if permanent:
         assert config, "config is also needed for permanent checkpoints"
-        prefix = run_id
-    else:
         prefix = f"{run_id}-{time.time():.0f}"
+    else:
+        prefix = run_id
 
     f_model = os.path.join(out_dir, f"{prefix}-model.pt")
     f_optimizer = os.path.join(out_dir, f"{prefix}-optimizer.pt")
