@@ -6,11 +6,7 @@ import math
 import enum
 import contextlib
 
-from torch.nn.functional import (
-    mse_loss,
-    binary_cross_entropy_with_logits,
-    cross_entropy,
-)
+import torch.nn.functional as F
 
 from ..util.buffer_base import BufferBase
 from ..util.dataset_vcmi import Data, Context
@@ -23,6 +19,7 @@ from ..util.constants_v11 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
+    GLOBAL_ATTR_MAP,
     N_ACTIONS,
 )
 
@@ -451,71 +448,100 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
     loss_binary = 0
     loss_categorical = 0
 
+    hex_losses_continuous = torch.zeros(pred_obs.shape[0], dtype=torch.float32, device=pred_obs.device)
+    hex_losses_binary = torch.zeros(pred_obs.shape[0], dtype=torch.float32, device=pred_obs.device)
+    hex_losses_categorical = torch.zeros(pred_obs.shape[0], dtype=torch.float32, device=pred_obs.device)
+
     # Global
 
     if logits_global_continuous.numel():
         target_global_continuous = next_obs[:, obs_index["global"]["continuous"]]
-        loss_continuous += mse_loss(logits_global_continuous, target_global_continuous)
+        loss_continuous += F.mse_loss(logits_global_continuous, target_global_continuous)
 
     if logits_global_binary.numel():
         target_global_binary = next_obs[:, obs_index["global"]["binary"]]
         # weight_global_binary = loss_weights["binary"]["global"]
-        # loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
-        loss_binary += binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
+        # loss_binary += F.binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
+        loss_binary += F.binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
 
     if logits_global_categoricals:
         target_global_categoricals = [next_obs[:, index] for index in obs_index["global"]["categoricals"]]
         # weight_global_categoricals = loss_weights["categoricals"]["global"]
         # for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
-        #     loss_categorical += cross_entropy(logits, target, weight=weight)
+        #     loss_categorical += F.cross_entropy(logits, target, weight=weight)
         for logits, target in zip(logits_global_categoricals, target_global_categoricals):
-            loss_categorical += cross_entropy(logits, target)
+            loss_categorical += F.cross_entropy(logits, target)
 
     # Player (2x)
 
     if logits_player_continuous.numel():
         target_player_continuous = next_obs[:, obs_index["player"]["continuous"]]
-        loss_continuous += mse_loss(logits_player_continuous, target_player_continuous)
+        loss_continuous += F.mse_loss(logits_player_continuous, target_player_continuous)
 
     if logits_player_binary.numel():
         target_player_binary = next_obs[:, obs_index["player"]["binary"]]
         # weight_player_binary = loss_weights["binary"]["player"]
-        # loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
-        loss_binary += binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
+        # loss_binary += F.binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
+        loss_binary += F.binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
 
     # XXX: CrossEntropyLoss expects (B, C, *) input where C=num_classes
     #      => transpose (B, 2, C) => (B, C, 2)
     #      (not needed for BCE or MSE)
     # See difference:
-    # [cross_entropy(logits, target).item(), cross_entropy(logits.flatten(start_dim=0, end_dim=1), target.flatten(start_dim=0, end_dim=1)).item(), cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2)).item()]
+    # [F.cross_entropy(logits, target).item(), F.cross_entropy(logits.flatten(start_dim=0, end_dim=1), target.flatten(start_dim=0, end_dim=1)).item(), F.cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2)).item()]
 
     if logits_player_categoricals:
         target_player_categoricals = [next_obs[:, index] for index in obs_index["player"]["categoricals"]]
         # weight_player_categoricals = loss_weights["categoricals"]["player"]
         # for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
-        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        #     loss_categorical += F.cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
         for logits, target in zip(logits_player_categoricals, target_player_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+            loss_categorical += F.cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
 
     # Hex (165x)
 
     if logits_hex_continuous.numel():
         target_hex_continuous = next_obs[:, obs_index["hex"]["continuous"]]
-        loss_continuous += mse_loss(logits_hex_continuous, target_hex_continuous)
+        hex_losses_continuous += F.mse_loss(
+            logits_hex_continuous,
+            target_hex_continuous,
+            reduction="none",
+        ).flatten(start_dim=1).mean(dim=1)
+        # => (B) of losses
 
     if logits_hex_binary.numel():
         target_hex_binary = next_obs[:, obs_index["hex"]["binary"]]
         # weight_hex_binary = loss_weights["binary"]["hex"]
-        # loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
-        loss_binary += binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary)
+        # loss_binary += F.binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
+        hex_losses_binary += F.binary_cross_entropy_with_logits(
+            logits_hex_binary,
+            target_hex_binary,
+            reduction="none"
+        ).flatten(start_dim=1).mean(dim=1)
 
     if logits_hex_categoricals:
         target_hex_categoricals = [next_obs[:, index] for index in obs_index["hex"]["categoricals"]]
         # weight_hex_categoricals = loss_weights["categoricals"]["hex"]
         # for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
-        #     loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
+        #     loss_categorical += F.cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
         for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
-            loss_categorical += cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+            hex_losses_categorical += F.cross_entropy(
+                logits.swapaxes(1, 2),
+                target.swapaxes(1, 2),
+                reduction="none"
+            ).mean(dim=1)
+
+    # Ignore hex for terminal obs
+    is_terminal = torch.nonzero(next_obs[:, GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][1]])
+    # => (b) of indexes where obs is terminal (b < B)
+
+    hex_losses_continuous[is_terminal] = 0
+    hex_losses_binary[is_terminal] = 0
+    hex_losses_categorical[is_terminal] = 0
+
+    loss_binary += hex_losses_binary.mean()
+    loss_continuous += hex_losses_continuous.mean()
+    loss_categorical += hex_losses_categorical.mean()
 
     return loss_binary, loss_continuous, loss_categorical
 
