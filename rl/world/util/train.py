@@ -195,6 +195,7 @@ def train(
 
         load_checkpoint("model", model, strict=True)
         load_checkpoint("optimizer", optimizer)
+        optimizer.param_groups[0]["lr"] = learning_rate
 
         if scaler:
             try:
@@ -230,7 +231,7 @@ def train(
         logger.info(data)
 
     wandb_log({
-        "train/learning_rate": learning_rate,
+        "train/learning_rate": optimizer.param_groups[0]["lr"],
         "train/buffer_capacity": buffer.capacity,
         "train/epochs": train_epochs,
         "train/batch_size": train_batch_size,
