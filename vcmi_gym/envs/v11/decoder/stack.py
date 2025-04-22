@@ -70,5 +70,5 @@ class Stack(namedtuple("Stack", ["hex"] + list([k.removeprefix("STACK_") for k i
         elif self.SLOT.v == 8:
             return "S"
         else:
-            assert self.SLOT.v in range(7)
+            assert self.SLOT.v in range(7), self.SLOT.v
             return str(self.SLOT.v)

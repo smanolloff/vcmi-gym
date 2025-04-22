@@ -8,7 +8,7 @@ from torch.nn.functional import cross_entropy
 
 from ..util.buffer_base import BufferBase
 from ..util.dataset_vcmi import Data, Context
-from ..util.misc import layer_init, safe_mean
+from ..util.misc import layer_init
 from ..util.obs_index import ObsIndex
 from ..util.timer import Timer
 
@@ -30,6 +30,12 @@ class MainAction(enum.IntEnum):
     RESET = 0
     WAIT = enum.auto()
     HEX = enum.auto()
+
+
+class Prediction(enum.IntEnum):
+    PROBS = 0               # softmax(logits)
+    SAMPLE = enum.auto()    # sample(softmax(logits))
+    GREEDY = enum.auto()    # argmax(logits)
 
 
 def vcmi_dataloader_functor():
@@ -66,16 +72,16 @@ def s3_dataloader_functor():
     #             yield obs, action
     raise NotImplementedError()
 
-    def mw(data: Data, ctx: Context):
-        if ctx.transition_id == ctx.num_transitions - 1:
-            state["reward_carry"] = data.reward
-            if not data.done:
-                return None
-        if ctx.transition_id == 0 and ctx.ep_steps > 0:
-            return data._replace(reward=state["reward_carry"])
-        return data
+    # def mw(data: Data, ctx: Context):
+    #     if ctx.transition_id == ctx.num_transitions - 1:
+    #         state["reward_carry"] = data.reward
+    #         if not data.done:
+    #             return None
+    #     if ctx.transition_id == 0 and ctx.ep_steps > 0:
+    #         return data._replace(reward=state["reward_carry"])
+    #     return data
 
-    return mw
+    # return mw
 
 
 class Buffer(BufferBase):
@@ -315,24 +321,48 @@ class ActionPredictionModel(nn.Module):
 
         return main_out, hex_out
 
-    def predict_(self, obs, logits=None, deterministic=True):
-        was_training = self.training
-        self.eval()
-        if logits is None:
-            main_logits, hex_logits = self.forward(obs)
-        else:
-            main_logits, hex_logits = logits
+    def _predict_probs(self, obs, logits):
+        main_logits, hex_logits = logits
+        B = obs.shape[0]
 
-        self.train(was_training)
+        probs_main_action = main_logits.softmax(dim=-1)
+        # => (B, len(MainAction)) of MainAction probs
 
-        if deterministic:
-            def pick(logits):
-                return logits.argmax(dim=1)
+        probs_hex_id = hex_logits[:, :, 0].softmax(dim=-1)
+        # => (B, 165) of Hex id probs
+
+        probs_hex_action = hex_logits[:, :, 1:].softmax(dim=-1)
+        # => (B, 165, len(HexAction)) of hex actions probs for the each hex id
+
+        # Now add the chance of choosing each hex:
+        probs_hex_action = probs_hex_action * probs_hex_id.reshape(B, 165, 1).expand(probs_hex_action.shape)
+        # => (B, 165, len(HexAction))
+
+        # Now add the chance of choosing a hex action at all:
+        probs_hex_action = probs_hex_action * probs_main_action[:, MainAction.HEX].reshape(B, 1, 1).expand(probs_hex_action.shape)
+        # => (B, 165, len(HexAction))
+
+        probs = torch.cat((
+            probs_main_action[:, MainAction.RESET].reshape(B, 1),
+            probs_main_action[:, MainAction.WAIT].reshape(B, 1),
+            probs_hex_action.flatten(start_dim=1)
+        ), dim=1)
+        # => (B, 2312)
+
+        # assert probs.sum(dim=1) == 1, probs.sum()
+        return probs
+
+    def _predict_action(self, obs, logits, strategy):
+        main_logits, hex_logits = logits
+
+        if strategy == Prediction.GREEDY:
+            def pick(x):
+                return x.argmax(dim=1)
         else:
-            def pick(logits):
-                num_classes = logits.shape[-1]
-                probs_2d = logits.softmax(dim=-1).view(-1, num_classes)
-                return torch.multinomial(probs_2d, num_samples=1).view(logits.shape[:-1])
+            def pick(x):
+                num_classes = x.shape[-1]
+                probs_2d = x.softmax(dim=-1).view(-1, num_classes)
+                return torch.multinomial(probs_2d, num_samples=1).view(x.shape[:-1])
 
         action_main = pick(main_logits)
         # => (B) of MainAction values
@@ -354,10 +384,19 @@ class ActionPredictionModel(nn.Module):
             .where(action_main != MainAction.HEX, action_calc)  # HEX => calc
         )
 
-    def predict(self, obs, deterministic=False):
+    def predict_(self, obs, logits=None, strategy=Prediction.GREEDY):
+        if logits is None:
+            logits = self.forward(obs)
+
+        if strategy == Prediction.PROBS:
+            return self._predict_probs(obs, logits)
+        else:
+            return self._predict_action(obs, logits, strategy)
+
+    def predict(self, obs, strategy=Prediction.GREEDY):
         with torch.no_grad():
             obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
-            return self.predict_(obs, deterministic=deterministic)[0].item()
+            return self.predict_(obs, strategy=strategy)[0].item()
 
 
 def compute_loss(action, logits_main, logits_hex):
@@ -552,133 +591,3 @@ def eval_model(
     wlog["eval_dataset/wait_time_s"] = total_wait
 
     return total_loss
-
-
-def test(weights_file):
-    from vcmi_gym.envs.v11.vcmi_env import VcmiEnv
-
-    with torch.no_grad():
-        model = load_for_test(weights_file)
-        # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1, swap_sides=1)
-        env = VcmiEnv(
-            mapname="gym/generated/evaluation/8x512.vmap",
-            opponent="BattleAI",
-            swap_sides=0,
-            random_heroes=1,
-            random_obstacles=1,
-            town_chance=20,
-            warmachine_chance=30,
-            random_terrain_chance=100,
-            tight_formation_chance=30,
-            conntype="thread"
-        )
-        do_test(model, env)
-
-
-def load_for_test(file):
-    model = ActionPredictionModel()
-    model.eval()
-    print(f"Loading {file}")
-    weights = torch.load(file, weights_only=True, map_location=torch.device("cpu"))
-    model.load_state_dict(weights, strict=True)
-    return model
-
-
-def do_test(model, env):
-    from vcmi_gym.envs.v11.decoder.decoder import Decoder
-
-    t = lambda x: torch.as_tensor(x).unsqueeze(0)
-
-    env.reset()
-    print("Testing accuracy for 1000 steps...")
-
-    matches = []
-    losses = []
-    episodes = 0
-    verbose = False
-
-    def _print(txt):
-        if verbose:
-            print(txt)
-
-    total_steps = 1000
-
-    for step in range(total_steps):
-        if env.terminated or env.truncated:
-            env.reset()
-            episodes += 1
-        act = env.random_action()
-        obs0, rew, term, trunc, _info = env.step(act)
-        done = term or trunc
-
-        num_transitions = len(obs0["transitions"]["observations"])
-        for i in range(1, num_transitions):
-            obs = obs0["transitions"]["observations"][i]
-            act = obs0["transitions"]["actions"][i]
-
-            if act == -1:
-                # Usually, act=-1 on every *last* transition
-                # We care about it only if it's the last for the entire episode
-                assert i == num_transitions - 1, f"{i} == {num_transitions} - 1"
-                if not done:
-                    continue
-
-            logits_main, logits_hex = model(t(obs))
-            act_pred = model.predict_(t(obs), logits=(logits_main, logits_hex))[0].item()
-
-            losses.append(compute_loss(t(act), logits_main, logits_hex))
-            matches.append(act == act_pred)
-
-            if not verbose:
-                continue
-
-            bf = Decoder.decode(obs)
-            _print(bf.render(0))
-
-            probs_main = logits_main[0].softmax(0)
-            probs_hex = logits_hex[0, :, 0].softmax(0)
-
-            # Probs + indices for top 3 hexes
-            k = 3
-            topk_hexes = probs_hex.topk(k)
-            # => (k,)
-
-            # Probs + indices for all 14 actions of the top 3 hexes
-            probs_actions_topk_hexes = logits_hex[0, topk_hexes.indices, 1:].softmax(1)
-            # => (k, N_HEX_ACTIONS)
-
-            topk_hexes_topk_actions = probs_actions_topk_hexes.topk(k, dim=1)
-            # => (k, k)  # dim0=hexes, dim1=actions
-
-            hexactnames = list(HEX_ACT_MAP.keys())
-
-            _print("Real action: %d (%s)" % (act, env.action_text(act, bf=bf)))
-            _print("Pred action: %d (%s) %s" % (act_pred, env.action_text(act_pred, bf=bf), "✅" if act == act_pred else "❌"))
-
-            losses = compute_loss(t(act), logits_main, logits_hex)
-            _print("Total loss: %.3f (%.2f + %.2f + %.2f)" % (sum(losses), *losses))
-            _print("Probs:")
-
-            assert MainAction.HEX == len(MainAction) - 1
-            for ma in MainAction:
-                _print(" * %s: %.2f" % (ma.name, probs_main[ma.value]))
-
-            for i in range(k):
-                hex = bf.get_hex(topk_hexes.indices[i].item())
-                hex_desc = "Hex(y=%s x=%s)/%.2f" % (hex.Y_COORD.v, hex.X_COORD.v, topk_hexes.values[i])
-                hexact_desc = []
-                for ind, prob in zip(topk_hexes_topk_actions.indices[i], topk_hexes_topk_actions.values[i]):
-                    actcalc = 2 + topk_hexes.indices[i]*len(HEX_ACT_MAP) + ind
-                    text = "%d: %s/%.2f" % (actcalc, hexactnames[ind.item()], prob.item())
-                    hexact_desc.append(text.ljust(23))
-                _print("    - [k=%d] %-18s => %s" % (i, hex_desc, " ".join(hexact_desc)))
-
-            # import ipdb; ipdb.set_trace()  # noqa
-            _print("==========================================================")
-
-        if step % (total_steps // 10) == 0:
-            print("(progress: %.0f%%)" % (100 * (step / total_steps)))
-
-    print("Episodes: %d" % episodes)
-    print("Loss: %s" % (safe_mean(losses)))
-    print("Accuracy: %.2f%%" % (100 * (sum(matches) / len(matches))))
