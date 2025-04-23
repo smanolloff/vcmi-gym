@@ -114,3 +114,23 @@ if(DEBUG_BUILD)
     target_compile_definitions(connector_v11 PRIVATE DEBUG_BUILD)
     target_compile_definitions(exporter_v11 PRIVATE DEBUG_BUILD)
 endif()
+
+#
+# V12
+#
+set(CONNECTOR_V12_FILES v12/common.h v12/common.cpp v12/connector.cpp v12/threadconnector.h v12/threadconnector.cpp)
+set(EXPORTER_V12_FILES v12/exporter.h v12/exporter.cpp)
+pybind11_add_module(connector_v12 ${CONNECTOR_V12_FILES})
+pybind11_add_module(exporter_v12 ${EXPORTER_V12_FILES})
+target_include_directories(connector_v12 PUBLIC "${VCMI_DIR}")
+target_include_directories(connector_v12 PUBLIC "${VCMI_DIR}/AI/MMAI")
+target_include_directories(exporter_v12 PUBLIC "${VCMI_DIR}")
+target_include_directories(exporter_v12 PUBLIC "${VCMI_DIR}/AI/MMAI")
+target_link_libraries(connector_v12 PRIVATE "${Boost_LIBRARIES}")
+target_link_libraries(connector_v12 PUBLIC ${LIBMLCLIENT})
+set_property(TARGET exporter_v12 PROPERTY SUFFIX)
+set_property(TARGET connector_v12 PROPERTY SUFFIX)
+if(DEBUG_BUILD)
+    target_compile_definitions(connector_v12 PRIVATE DEBUG_BUILD)
+    target_compile_definitions(exporter_v12 PRIVATE DEBUG_BUILD)
+endif()
