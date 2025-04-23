@@ -26,18 +26,19 @@ env_kwargs = dict(
     user_timeout=3600,
     vcmi_timeout=3600,
     boot_timeout=300,
-    conntype="thread",
     vcmi_loglevel_global="error",
     vcmi_loglevel_ai="error",
 )
 
 config = dict(
-    name_template="{datetime}-{id}-swap-T-E512_H8_L6-B300-RTX3080",
+    name_template="{datetime}-{id}-v12-swap-T-E512_H8_L6-B300-RTX3080",
     out_dir_template="data/world/t10n",
     wandb_group="transition-model",
 
     env=dict(
         train=dict(
+            # num_workers=10,
+            # batch_size=1000,
             num_workers=1,
             batch_size=100,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
@@ -45,6 +46,8 @@ config = dict(
             # kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         eval=dict(
+            # num_workers=1,
+            # batch_size=1000,  # buffer capacity = num_workers * batch_size
             num_workers=1,
             batch_size=200,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
@@ -93,10 +96,12 @@ config = dict(
 
     eval=dict(
         interval_s=60,  # wandb_log will also be called here
+        # batch_size=200,
         batch_size=20,
     ),
     train=dict(
         accumulate_grad=False,  # makes 1 batch = entire buffer
+        # batch_size=250,
         batch_size=25,
         learning_rate=1e-4,
         epochs=1,
