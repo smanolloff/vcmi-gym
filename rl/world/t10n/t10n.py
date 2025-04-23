@@ -12,7 +12,7 @@ from ..util.misc import layer_init
 from ..util.obs_index import ObsIndex
 from ..util.timer import Timer
 
-from ..util.constants_v11 import (
+from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,

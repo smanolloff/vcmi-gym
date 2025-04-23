@@ -12,7 +12,7 @@ from ..util.misc import layer_init
 from ..util.obs_index import ObsIndex
 from ..util.timer import Timer
 
-from ..util.constants_v11 import (
+from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
@@ -52,7 +52,7 @@ def vcmi_dataloader_functor():
 
 def s3_dataloader_functor():
     # XXX: must only pass through non-terminal obs which are from the ENEMY
-    #      Below is the code from v10, should be *much* simpler in v11
+    #      Below is the code from v10, should be *much* simpler in v12
     #      (as there is now a BATTLE_SIDE_ACTIVE_PLAYER global attribute)
     #
     # hexes = obs[STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].reshape(165, -1)

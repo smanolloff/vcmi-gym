@@ -5,7 +5,7 @@ from . import p10n
 from ..util.train import train
 from ..util.misc import safe_mean
 
-from ..util.constants_v11 import (
+from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
@@ -18,7 +18,7 @@ DIM_OBS = DIM_OTHER + DIM_HEXES
 
 
 def test(weights_file):
-    from vcmi_gym.envs.v11.vcmi_env import VcmiEnv
+    from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
 
     with torch.no_grad():
         model = load_for_test(weights_file)
@@ -49,7 +49,7 @@ def load_for_test(file):
 
 
 def do_test(model, env):
-    from vcmi_gym.envs.v11.decoder.decoder import Decoder
+    from vcmi_gym.envs.v12.decoder.decoder import Decoder
 
     t = lambda x: torch.as_tensor(x).unsqueeze(0)
 

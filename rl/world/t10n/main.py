@@ -6,7 +6,7 @@ from ..util.train import train
 
 
 def test(weights_file):
-    from vcmi_gym.envs.v11.vcmi_env import VcmiEnv
+    from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
 
     with torch.no_grad():
         model = load_for_test(weights_file)
@@ -37,7 +37,7 @@ def load_for_test(file):
 
 
 def do_test(model, env):
-    from vcmi_gym.envs.v11.decoder.decoder import Decoder
+    from vcmi_gym.envs.v12.decoder.decoder import Decoder
 
     env.reset()
     for _ in range(10):
