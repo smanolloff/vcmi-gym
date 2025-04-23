@@ -1,6 +1,8 @@
 import re
 import torch
+from functools import partial
 
+from .world import WorldModel
 from .t10n import t10n
 from .p10n import p10n
 
@@ -31,103 +33,6 @@ IDX_WINNER_END = GLOBAL_ATTR_MAP["BATTLE_WINNER"][2] + IDX_WINNER_START
 MAX_TRANSITIONS = 23
 
 
-class WorldModel:
-    def __init__(
-        self,
-        device=torch.device("cpu"),
-        transition_model_file="data/world/t10n/cvftmtsn-model.pt",
-        action_prediction_model_file="data/world/p10n/czzklpfu-model.pt",
-    ):
-        def load_weights(model, file):
-            model.load_state_dict(torch.load(file, weights_only=True, map_location=device), strict=True)
-
-        self.transition_model = t10n.TransitionModel(device)
-        self.transition_model.eval()
-
-        self.action_prediction_model = p10n.ActionPredictionModel(device)
-        self.action_prediction_model.eval()
-
-        load_weights(self.transition_model, transition_model_file)
-        load_weights(self.action_prediction_model, action_prediction_model_file)
-
-    def full_transition(self, state, action, t10n_strategy, p10n_strategy):
-        with torch.no_grad():
-            initial_player = state[:, IDX_BSAP_START:IDX_BSAP_END].argmax(dim=1)
-            initial_winner = state[:, IDX_WINNER_START:IDX_WINNER_END].argmax(dim=1)
-            # => (B)  # values 0=done, 1=red or 2=blue
-
-            dream = [(state[0].numpy(), action[0].item())]
-
-            # We need the logits for rendering later when strategy=PROBS
-            state_logits = self.transition_model(state, action)
-            state = self.transition_model.reconstruct(state_logits, strategy=t10n_strategy)
-
-            for _ in range(MAX_TRANSITIONS):
-                current_player = state[:, IDX_BSAP_START:IDX_BSAP_END].argmax(dim=1)
-                current_winner = state[:, IDX_WINNER_START:IDX_WINNER_END].argmax(dim=1)
-
-                # More transitions are needed as long as the other player is active
-                idx_in_progress = torch.nonzero(
-                    (current_player != initial_player) & (current_winner == initial_winner),
-                    as_tuple=True
-                )[0]
-
-                if idx_in_progress.numel() == 0:
-                    break
-
-                state_in_progress = state[idx_in_progress]
-                state_logits_in_progress = state_logits[idx_in_progress]
-
-                if p10n_strategy == p10n.Prediction.PROBS:
-                    action_probs_in_progress = self.action_prediction_model.predict_(state_in_progress, strategy=p10n_strategy)
-                    action_in_progress = action_probs_in_progress.argmax(dim=1)
-                else:
-                    action_in_progress = self.action_prediction_model.predict_(state_in_progress, strategy=p10n_strategy)
-
-                # p10n predicts -1 when it believes battle has ended
-                # => some of the "in_progress" states will have a reset action
-                # (must filter them out)
-                idx_in_progress_valid_action = (action_in_progress != -1).nonzero(as_tuple=True)[0]
-                # ^ indexes of `idx_in_progress`
-                # e.g. if B=10
-                # and idx_in_progress = [2, 3]              // means B=2 and B=3 are in progress
-                # and idx_in_progress_valid_action = [0]    // means B=2 has valid action
-
-                idx_in_progress = idx_in_progress[idx_in_progress_valid_action]
-                state_in_progress = state_in_progress[idx_in_progress_valid_action]
-                state_logits_in_progress = state_logits_in_progress[idx_in_progress_valid_action]
-                action_in_progress = action_in_progress[idx_in_progress_valid_action]
-
-                # Transition to next state:
-                if p10n_strategy == p10n.Prediction.PROBS:
-                    action_probs_in_progress = action_probs_in_progress[idx_in_progress_valid_action]
-                    state_logits[idx_in_progress] = self.transition_model.forward_probs(state_in_progress, action_probs_in_progress)
-                else:
-                    state_logits[idx_in_progress] = self.transition_model(state_in_progress, action_in_progress)
-
-                state[idx_in_progress] = self.transition_model.reconstruct(state_logits[idx_in_progress], strategy=t10n_strategy)
-
-                if t10n_strategy == t10n.Reconstruction.PROBS:
-                    # Rendering probs will likely fail => collapse first
-                    greedy = self.transition_model.reconstruct(state_logits_in_progress, strategy=t10n.Reconstruction.GREEDY)
-                    dream.append((greedy[0].numpy(), action_in_progress.item()))
-                else:
-                    # Rendering greedy is ok, samples is kind-of-ok => leave as-is
-                    dream.append((state_in_progress[0].numpy(), action_in_progress.item()))
-
-            if idx_in_progress.numel() > 0:
-                print(f"WARNING: state still in progress after {MAX_TRANSITIONS} transitions")
-
-            # Finally append latest state (it should have no action)
-            if t10n_strategy == t10n.Reconstruction.PROBS:
-                greedy = self.transition_model.reconstruct(state_logits, strategy=t10n.Reconstruction.GREEDY)
-                dream.append((greedy[0].numpy(), -1))
-            else:
-                dream.append((state[0].numpy(), -1))
-
-            return dream
-
-
 def prepare(state, action, reward, headline):
     bf = Decoder.decode(state)
     ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -147,7 +52,21 @@ def prepare(state, action, reward, headline):
     return render["bf_lines"]
 
 
+def render_dream(dream):
+    try:
+        ary_lines = [prepare(s, a, None, "Dream step %d:" % i) for i, (s, a) in enumerate(dream)]
+    except Exception:
+        print("!!!!!!!!! ERRROR PREPARING !!!!!. TEMP RENDER:")
+        ary_lines = [print("\n").join(prepare(s, a, None, "Dream step %d:" % i)) for i, (s, a) in enumerate(dream)]
+        print("\n\n")
+
+    print("")
+    print("\n".join([(" → ".join(rowlines)) for rowlines in zip(*ary_lines)]))
+    print("")
+
+
 if __name__ == "__main__":
+    dream = []
     wm = WorldModel()
 
     from vcmi_gym.envs.v11.vcmi_env import VcmiEnv
@@ -182,6 +101,9 @@ if __name__ == "__main__":
 
     total_steps = 1000
 
+    dream = []
+    callback = lambda s, a: dream.append((s, a))
+
     for step in range(total_steps):
         if env.terminated or env.truncated:
             env.reset()
@@ -202,25 +124,17 @@ if __name__ == "__main__":
         start_act = obs0["transitions"]["actions"][0]
         print("Dream act: %s" % start_act)
 
+        def do_dream(t10n_strat, p10n_strat):
+            with torch.no_grad():
+                wm.full_transition(t(start_obs), t(start_act), t10n_strat, p10n_strat, callback=callback)
+
         # Change in pdb to repeat same step
         # (e.g. to see "alternate dreams" when strategy is SAMPLES)
         pdb_state = dict(repeat=False)
 
-        def do_dream(t10n_strategy, p10n_strategy):
-            dream = wm.full_transition(t(start_obs), t(start_act), t10n_strategy, p10n_strategy)
-
-            try:
-                ary_lines = [prepare(s, a, None, "Dream step %d:" % i) for i, (s, a) in enumerate(dream)]
-            except Exception:
-                print("!!!!!!!!! ERRROR PREPARING !!!!!. TEMP RENDER:")
-                ary_lines = [print("\n").join(prepare(s, a, None, "Dream step %d:" % i)) for i, (s, a) in enumerate(dream)]
-                print("\n\n")
-
-            print("")
-            print("\n".join([(" → ".join(rowlines)) for rowlines in zip(*ary_lines)]))
-            print("")
-            return dream
-
+        dream.clear()
         do_dream(t10n.Reconstruction.PROBS, p10n.Prediction.PROBS)
+        render_dream(dream)
+
         import ipdb; ipdb.set_trace()  # noqa
         print("")
