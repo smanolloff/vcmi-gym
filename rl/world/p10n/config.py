@@ -37,16 +37,12 @@ config = dict(
 
     env=dict(
         train=dict(
-            # num_workers=6,
-            # batch_size=1000,
             num_workers=1,
             batch_size=100,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         eval=dict(
-            # num_workers=1,
-            # batch_size=5000,
             num_workers=1,
             batch_size=50,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
@@ -92,16 +88,28 @@ config = dict(
         # )
     ),
 
-    eval=dict(
-        interval_s=60,  # wandb_log will also be called here
-        # batch_size=250,
-        batch_size=25,
-    ),
     train=dict(
         accumulate_grad=False,  # makes 1 batch = entire buffer
-        # batch_size=500,
         batch_size=20,
         learning_rate=1e-4,
         epochs=1,
+    ),
+    eval=dict(
+        interval_s=60,  # wandb_log will also be called here
+        batch_size=25,
     )
 )
+
+if os.getenv("VASTAI", None) == "1":
+    if config.get("env", {}).get("train"):
+        config["env"]["train"]["num_workers"] = 6
+        config["env"]["train"]["batch_size"] = 1000
+        config["env"]["train"]["kwargs"]["mapname"] = "gym/generated/4096/4x1024.vmap"
+
+    if config.get("env", {}).get("eval"):
+        config["env"]["eval"]["num_workers"] = 1
+        config["env"]["eval"]["batch_size"] = 5000
+        config["env"]["eval"]["kwargs"]["mapname"] = "gym/generated/evaluation/8x512.vmap"
+
+    config["train"]["batch_size"] = 250
+    config["eval"]["batch_size"] = 500

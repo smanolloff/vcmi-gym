@@ -14,6 +14,7 @@ export AWS_ACCESS_KEY="AKIATMR________NAX7XH"
 export AWS_SECRET_KEY="7d194BC_________________________Opi5dcDA"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export RAY_memory_monitor_refresh_ms=0
+export VASTAI=1
 cd $WORKSPACE/vcmi-gym
 EOF
 # XXX: sourcing ~/.bashrc does not work without interactive terminal
