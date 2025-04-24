@@ -15,9 +15,9 @@ class ObsIndex:
     def __init__(self, device):
         self.device = device
 
-        self.rel_index_global = {"continuous": [], "binary": [], "categoricals": []}
-        self.rel_index_player = {"continuous": [], "binary": [], "categoricals": []}
-        self.rel_index_hex = {"continuous": [], "binary": [], "categoricals": []}
+        self.rel_index_global = {"continuous": [], "binary": [], "categoricals": [], "thresholds": []}
+        self.rel_index_player = {"continuous": [], "binary": [], "categoricals": [], "thresholds": []}
+        self.rel_index_hex = {"continuous": [], "binary": [], "categoricals": [], "thresholds": []}
 
         self._add_indices(GLOBAL_ATTR_MAP, self.rel_index_global)
         self._add_indices(PLAYER_ATTR_MAP, self.rel_index_player)
@@ -28,6 +28,7 @@ class ObsIndex:
                 index[type] = torch.tensor(index[type], device=self.device)
 
             index["categoricals"] = [torch.tensor(ind, device=self.device) for ind in index["categoricals"]]
+            index["thresholds"] = [torch.tensor(ind, device=self.device) for ind in index["thresholds"]]
 
         self._build_obs_indices()
 
@@ -42,7 +43,7 @@ class ObsIndex:
                     i += 1
                     length -= 1
             elif enctype.endswith("IMPLICIT_NULL"):
-                raise Exception("IMPLICIT_NULL is not supported")
+                pass
             elif enctype.endswith("MASKING_NULL"):
                 raise Exception("MASKING_NULL is not supported")
             elif enctype.endswith("STRICT_NULL"):
@@ -54,7 +55,7 @@ class ObsIndex:
 
             t = None
             if enctype.startswith("ACCUMULATING"):
-                t = "binary"
+                t = "threshold"
             elif enctype.startswith("BINARY"):
                 t = "binary"
             elif enctype.startswith("CATEGORICAL"):
@@ -64,15 +65,15 @@ class ObsIndex:
             elif enctype.startswith("LINNORM"):
                 t = "continuous"
             elif enctype.startswith("EXPBIN"):
-                t = "categorical"
+                t = "continuous"
             elif enctype.startswith("LINBIN"):
-                t = "categorical"
+                t = "continuous"
             else:
                 raise Exception("Unexpected enctype: %s" % enctype)
 
-            if t == "categorical":
+            if t in ["categorical", "threshold"]:
                 ind = []
-                index["categoricals"].append(ind)
+                index[f"{t}s"].append(ind)
                 for _ in range(length):
                     ind.append(i)
                     i += 1
@@ -91,9 +92,30 @@ class ObsIndex:
         # XXX: Discrete (or "noncontinuous") is a combination of binary + categoricals
         #      where for direct extraction from obs
         self.abs_index = {
-            "global": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
-            "player": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
-            "hex": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
+            "global": {
+                "continuous": t([]),
+                "binary": t([]),
+                "categoricals": [],
+                "categorical": t([]),
+                "thresholds": [],
+                "threshold": t([])
+            },
+            "player": {
+                "continuous": t([]),
+                "binary": t([]),
+                "categoricals": [],
+                "categorical": t([]),
+                "thresholds": [],
+                "threshold": t([])
+            },
+            "hex": {
+                "continuous": t([]),
+                "binary": t([]),
+                "categoricals": [],
+                "categorical": t([]),
+                "thresholds": [],
+                "threshold": t([])
+            },
         }
 
         # Global
@@ -107,12 +129,11 @@ class ObsIndex:
         if self.rel_index_global["categoricals"]:
             self.abs_index["global"]["categoricals"] = self.rel_index_global["categoricals"]
 
-        self.abs_index["global"]["categorical"] = torch.cat(tuple(self.abs_index["global"]["categoricals"]), dim=0)
+        if self.rel_index_global["thresholds"]:
+            self.abs_index["global"]["thresholds"] = self.rel_index_global["thresholds"]
 
-        global_discrete = torch.zeros(0, dtype=torch.int64, device=self.device)
-        global_discrete = torch.cat((global_discrete, self.abs_index["global"]["binary"]), dim=0)
-        global_discrete = torch.cat((global_discrete, *self.abs_index["global"]["categoricals"]), dim=0)
-        self.abs_index["global"]["discrete"] = global_discrete
+        self.abs_index["global"]["categorical"] = torch.cat(tuple(self.abs_index["global"]["categoricals"]), dim=0)
+        self.abs_index["global"]["threshold"] = torch.cat(tuple(self.abs_index["global"]["thresholds"]), dim=0)
 
         # Helper function to reduce code duplication
         # Essentially replaces this:
@@ -159,13 +180,11 @@ class ObsIndex:
         self.abs_index["player"]["binary"] = repind_players(self.rel_index_player["binary"])
         for cat_ind in self.rel_index_player["categoricals"]:
             self.abs_index["player"]["categoricals"].append(repind_players(cat_ind))
-
         self.abs_index["player"]["categorical"] = torch.cat(tuple(self.abs_index["player"]["categoricals"]), dim=1)
 
-        player_discrete = torch.zeros([2, 0], dtype=torch.int64, device=self.device)
-        player_discrete = torch.cat((player_discrete, self.abs_index["player"]["binary"]), dim=1)
-        player_discrete = torch.cat((player_discrete, *self.abs_index["player"]["categoricals"]), dim=1)
-        self.abs_index["player"]["discrete"] = player_discrete
+        for thr_ind in self.rel_index_player["thresholds"]:
+            self.abs_index["player"]["thresholds"].append(repind_players(thr_ind))
+        self.abs_index["player"]["threshold"] = torch.cat(tuple(self.abs_index["player"]["thresholds"]), dim=1)
 
         # Hexes (165)
         repind_hexes = partial(
@@ -181,7 +200,6 @@ class ObsIndex:
             self.abs_index["hex"]["categoricals"].append(repind_hexes(cat_ind))
         self.abs_index["hex"]["categorical"] = torch.cat(tuple(self.abs_index["hex"]["categoricals"]), dim=1)
 
-        hex_discrete = torch.zeros([165, 0], dtype=torch.int64, device=self.device)
-        hex_discrete = torch.cat((hex_discrete, self.abs_index["hex"]["binary"]), dim=1)
-        hex_discrete = torch.cat((hex_discrete, *self.abs_index["hex"]["categoricals"]), dim=1)
-        self.abs_index["hex"]["discrete"] = hex_discrete
+        for thr_ind in self.rel_index_hex["thresholds"]:
+            self.abs_index["hex"]["thresholds"].append(repind_hexes(thr_ind))
+        self.abs_index["hex"]["threshold"] = torch.cat(tuple(self.abs_index["hex"]["thresholds"]), dim=1)

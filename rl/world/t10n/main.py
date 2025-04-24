@@ -13,7 +13,7 @@ def test(weights_file):
         model.eval()
         # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", random_heroes=1, swap_sides=1)
         env = VcmiEnv(
-            mapname="gym/generated/evaluation/8x512.vmap",
+            # mapname="gym/generated/evaluation/8x512.vmap",
             opponent="BattleAI",
             swap_sides=0,
             random_heroes=1,
@@ -93,7 +93,7 @@ def do_test(model, env):
                 pred_obs=obs_pred_raw.unsqueeze(0),
             )
 
-            print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f" % losses)
+            print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f, threshold=%.4f" % losses)
 
             # print(Decoder.decode(obs_prev).render(0))
             # for i in range(len(bfields)):

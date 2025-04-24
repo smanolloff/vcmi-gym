@@ -161,6 +161,13 @@ class ActionPredictionModel(nn.Module):
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_global_categoricals.append(cat_emb_size)
 
+        # Thresholds:
+        # [(B, T1), (B, T2), ...]
+        self.encoders_global_thresholds = nn.ModuleList([])
+        for ind in self.rel_index_global["thresholds"]:
+            self.encoders_global_thresholds.append(nn.LazyLinear(len(ind)))
+            # No nonlinearity needed?
+
         # Merge
         z_size_global = 128
         self.encoder_merged_global = nn.Sequential(
@@ -192,6 +199,12 @@ class ActionPredictionModel(nn.Module):
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_player_categoricals.append(cat_emb_size)
 
+        # Thresholds per player:
+        # [(B, T1), (B, T2), ...]
+        self.encoders_player_thresholds = nn.ModuleList([])
+        for ind in self.rel_index_player["thresholds"]:
+            self.encoders_player_thresholds.append(nn.LazyLinear(len(ind)))
+
         # Merge per player
         z_size_player = 128
         self.encoder_merged_player = nn.Sequential(
@@ -221,6 +234,12 @@ class ActionPredictionModel(nn.Module):
         for ind in self.rel_index_hex["categoricals"]:
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_hex_categoricals.append(cat_emb_size)
+
+        # Thresholds per hex:
+        # [(B, T1), (B, T2), ...]
+        self.encoders_hex_thresholds = nn.ModuleList([])
+        for ind in self.rel_index_hex["thresholds"]:
+            self.encoders_hex_thresholds.append(nn.LazyLinear(len(ind)))
 
         # Merge per hex
         z_size_hex = 512
@@ -273,33 +292,39 @@ class ActionPredictionModel(nn.Module):
         global_continuous_in = obs[:, self.abs_index["global"]["continuous"]]
         global_binary_in = obs[:, self.abs_index["global"]["binary"]]
         global_categorical_ins = [obs[:, ind] for ind in self.abs_index["global"]["categoricals"]]
+        global_threshold_ins = [obs[:, ind] for ind in self.abs_index["global"]["thresholds"]]
         global_continuous_z = self.encoder_global_continuous(global_continuous_in)
         global_binary_z = self.encoder_global_binary(global_binary_in)
 
         # XXX: Embedding layers expect single-integer inputs
         #      e.g. for input with num_classes=4, instead of `[0,0,1,0]` it expects just `2`
         global_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
-        global_merged = torch.cat((global_continuous_z, global_binary_z, global_categorical_z), dim=-1)
+        global_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], dim=-1)
+        global_merged = torch.cat((global_continuous_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
         z_global = self.encoder_merged_global(global_merged)
         # => (B, Z_GLOBAL)
 
         player_continuous_in = obs[:, self.abs_index["player"]["continuous"]]
         player_binary_in = obs[:, self.abs_index["player"]["binary"]]
         player_categorical_ins = [obs[:, ind] for ind in self.abs_index["player"]["categoricals"]]
+        player_threshold_ins = [obs[:, ind] for ind in self.abs_index["player"]["thresholds"]]
         player_continuous_z = self.encoder_player_continuous(player_continuous_in)
         player_binary_z = self.encoder_player_binary(player_binary_in)
         player_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
-        player_merged = torch.cat((player_continuous_z, player_binary_z, player_categorical_z), dim=-1)
+        player_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], dim=-1)
+        player_merged = torch.cat((player_continuous_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
         z_player = self.encoder_merged_player(player_merged)
         # => (B, 2, Z_PLAYER)
 
         hex_continuous_in = obs[:, self.abs_index["hex"]["continuous"]]
         hex_binary_in = obs[:, self.abs_index["hex"]["binary"]]
         hex_categorical_ins = [obs[:, ind] for ind in self.abs_index["hex"]["categoricals"]]
+        hex_threshold_ins = [obs[:, ind] for ind in self.abs_index["hex"]["thresholds"]]
         hex_continuous_z = self.encoder_hex_continuous(hex_continuous_in)
         hex_binary_z = self.encoder_hex_binary(hex_binary_in)
         hex_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
-        hex_merged = torch.cat((hex_continuous_z, hex_binary_z, hex_categorical_z), dim=-1)
+        hex_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
+        hex_merged = torch.cat((hex_continuous_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
         z_hex = self.encoder_merged_hex(hex_merged)
         z_hex = self.transformer_hex(z_hex)
         # => (B, 165, Z_HEX)
