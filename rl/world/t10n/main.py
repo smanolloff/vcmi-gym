@@ -11,7 +11,7 @@ def test(weights_file):
     with torch.no_grad():
         model = load_for_test(weights_file)
         model.eval()
-        # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", conntype="thread", random_heroes=1, swap_sides=1)
+        # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", random_heroes=1, swap_sides=1)
         env = VcmiEnv(
             mapname="gym/generated/evaluation/8x512.vmap",
             opponent="BattleAI",
@@ -22,7 +22,6 @@ def test(weights_file):
             warmachine_chance=30,
             random_terrain_chance=100,
             tight_formation_chance=30,
-            conntype="thread"
         )
         do_test(model, env)
 
@@ -164,7 +163,7 @@ if __name__ == "__main__":
         args.no_wandb = True
 
     if args.action == "test":
-        t10n.test(args.f)
+        test(args.f)
     else:
         from .config import config
         common_args = dict(

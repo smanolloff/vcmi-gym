@@ -41,6 +41,10 @@ class Value:
         self.struct = None
 
         if enctype.endswith("EXPLICIT_NULL"):
+            if raw.argmax() == 0 and self.raw[0] > 0.5:
+                self.v = None
+                return
+
             raw_nonnull = self.raw[1:]
         else:
             raw_nonnull = self.raw

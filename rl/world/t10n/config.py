@@ -42,8 +42,8 @@ config = dict(
             num_workers=1,
             batch_size=100,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
-            kwargs=dict(env_kwargs, mapname="gym/A1.vmap")
-            # kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
+            # kwargs=dict(env_kwargs, mapname="gym/A1.vmap")
+            kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         eval=dict(
             # num_workers=1,
@@ -51,8 +51,8 @@ config = dict(
             num_workers=1,
             batch_size=200,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
-            kwargs=dict(env_kwargs, mapname="gym/A1.vmap"),
-            # kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
+            # kwargs=dict(env_kwargs, mapname="gym/A1.vmap"),
+            kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
         ),
     ),
 
