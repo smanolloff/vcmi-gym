@@ -1,7 +1,7 @@
 import torch
 from functools import partial
 
-from .constants_v11 import (
+from .constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
@@ -34,7 +34,7 @@ class ObsIndex:
     def _add_indices(self, attr_map, index):
         i = 0
 
-        for attr, (enctype, offset, n, vmax) in attr_map.items():
+        for attr, (enctype, offset, n, vmax, _p) in attr_map.items():
             length = n
             if enctype.endswith("EXPLICIT_NULL"):
                 if not enctype.startswith("CATEGORICAL"):
@@ -63,6 +63,10 @@ class ObsIndex:
                 t = "continuous"
             elif enctype.startswith("LINNORM"):
                 t = "continuous"
+            elif enctype.startswith("EXPBIN"):
+                t = "categorical"
+            elif enctype.startswith("LINBIN"):
+                t = "categorical"
             else:
                 raise Exception("Unexpected enctype: %s" % enctype)
 

@@ -206,7 +206,7 @@ if __name__ == "__main__":
     dataset = DatasetS3(
         logger=logger,
         bucket_name="vcmi-gym",
-        s3_dir="v11/4x1024",
+        s3_dir="v12/4x1024",
         shuffle=False,
         cache_dir=os.path.abspath("data/.s3_cache"),
         aws_access_key=os.environ["AWS_ACCESS_KEY"],

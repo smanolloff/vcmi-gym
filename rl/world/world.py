@@ -3,7 +3,7 @@ import torch
 from .t10n import t10n
 from .p10n import p10n
 
-from .util.constants_v11 import (
+from .util.constants_v12 import (
     GLOBAL_ATTR_MAP
 )
 

@@ -20,7 +20,7 @@ from ..util.structured_logger import StructuredLogger
 from ..util.timer import Timer
 from ..util.wandb import setup_wandb
 
-from ..util.constants_v11 import (
+from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,

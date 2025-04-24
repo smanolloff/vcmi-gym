@@ -56,7 +56,7 @@ class DatasetVCMI(IterableDataset):
     def __iter__(self):
         assert self.env is None, "multiple calls to __iter__ not supported"
 
-        from vcmi_gym import VcmiEnv_v11 as VcmiEnv
+        from vcmi_gym import VcmiEnv_v12 as VcmiEnv
         self.env = VcmiEnv(**self.env_kwargs)
 
         obs = self.env.reset()[0]

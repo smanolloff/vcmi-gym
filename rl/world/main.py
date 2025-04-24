@@ -6,7 +6,7 @@ from .world import WorldModel
 from .t10n import t10n
 from .p10n import p10n
 
-from .util.constants_v11 import (
+from .util.constants_v12 import (
     GLOBAL_ATTR_MAP
 )
 
@@ -69,8 +69,8 @@ if __name__ == "__main__":
     dream = []
     wm = WorldModel()
 
-    from vcmi_gym.envs.v11.vcmi_env import VcmiEnv
-    from vcmi_gym.envs.v11.decoder.decoder import Decoder
+    from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
+    from vcmi_gym.envs.v12.decoder.decoder import Decoder
 
     env = VcmiEnv(
         mapname="gym/generated/evaluation/8x512.vmap",
