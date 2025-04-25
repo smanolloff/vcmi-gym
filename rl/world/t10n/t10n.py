@@ -698,7 +698,7 @@ def train_model(
     n_batches = 0
 
     agglosses = collections.defaultdict(float)
-    varlosses = {
+    attrlosses = {
         "global": np.zeros(len(GLOBAL_ATTR_MAP)),
         "player": np.zeros(len(PLAYER_ATTR_MAP)),
         "hex": np.zeros(len(HEX_ATTR_MAP)),
@@ -734,7 +734,7 @@ def train_model(
                     for i in range(typeloss.shape[0]):
                         var_loss = typeloss[i]
                         var_id = model.obs_index.var_ids[group][subtype][i]
-                        varlosses[group][var_id] += var_loss.item()
+                        attrlosses[group][var_id] += var_loss.item()
 
             if accumulate_grad:
                 if scaler:
@@ -767,10 +767,13 @@ def train_model(
     total_wait = timer.peek()
     wlog["train_dataset/wait_time_s"] = total_wait
 
-    for k, v in agglosses.items():
-        wlog[f"train_loss/{k}"] = v / n_batches
+    agglosses = {k: v / n_batches for k, v in agglosses.items()}
+    attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
 
-    return wlog["train_loss/total"], dict(agglosses), varlosses
+    for k, v in agglosses.items():
+        wlog[f"train_loss/{k}"] = agglosses[k]
+
+    return wlog["train_loss/total"], agglosses, attrlosses
 
 
 def eval_model(
@@ -784,7 +787,7 @@ def eval_model(
     model.eval()
     timer = Timer()
     agglosses = collections.defaultdict(float)
-    varlosses = {
+    attrlosses = {
         "global": np.zeros(len(GLOBAL_ATTR_MAP)),
         "player": np.zeros(len(PLAYER_ATTR_MAP)),
         "hex": np.zeros(len(HEX_ATTR_MAP)),
@@ -812,13 +815,17 @@ def eval_model(
                 for i in range(typeloss.shape[0]):
                     var_loss = typeloss[i]
                     var_id = model.obs_index.var_ids[group][subtype][i]
-                    varlosses[group][var_id] += var_loss.item()
+                    attrlosses[group][var_id] += var_loss.item()
 
         timer.start()
 
     total_wait = timer.peek()
     wlog["eval_dataset/wait_time_s"] = total_wait
-    for k, v in agglosses.items():
-        wlog[f"eval_loss/{k}"] = v / n_batches
 
-    return wlog["eval_loss/total"], dict(agglosses), varlosses
+    agglosses = {k: v / n_batches for k, v in agglosses.items()}
+    attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
+
+    for k, v in agglosses.items():
+        wlog[f"eval_loss/{k}"] = agglosses[k]
+
+    return wlog["eval_loss/total"], agglosses, attrlosses
