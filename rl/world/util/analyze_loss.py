@@ -72,9 +72,7 @@ def analyze_loss(model, train_attrlosses, eval_attrlosses, topk=3, verbose=False
 
     res = {}
     for group in attrstats.keys():
-        res[group] = []
-        for pair in zip(attrnames[group], attrstats[group]):
-            res[group].append(pair)
+        res[group] = list(zip(attrnames[group], attrstats[group]))
 
     topk_frac = {}
     topk_diff = {}

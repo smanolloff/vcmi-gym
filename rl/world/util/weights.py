@@ -18,13 +18,13 @@ def build_feature_weights(model, weights_config):
 
     feature_weights = {}
 
-    for group in obsind.var_ids.keys():
+    for group in obsind.attr_ids.keys():
         # global/player/hex
         feature_weights[group] = {}
-        for subtype in obsind.var_ids[group].keys():
+        for subtype in obsind.attr_ids[group].keys():
             # continuous/cont_nullbit/binaries/...
-            feature_weights[group][subtype] = torch.zeros(len(obsind.var_ids[group][subtype]), device=model.device)
-            for i, var_id in enumerate(obsind.var_ids[group][subtype]):
+            feature_weights[group][subtype] = torch.zeros(len(obsind.attr_ids[group][subtype]), device=model.device)
+            for i, var_id in enumerate(obsind.attr_ids[group][subtype]):
                 var_name = attrnames[group][var_id]
                 var_weight = weights_config[group][var_name]
                 feature_weights[group][subtype][i] = var_weight
