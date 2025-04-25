@@ -733,8 +733,8 @@ def train_model(
                     agglosses[group] += typeloss.sum().item()
                     for i in range(typeloss.shape[0]):
                         var_loss = typeloss[i]
-                        var_id = model.obs_index.var_ids[group][subtype][i]
-                        attrlosses[group][var_id] += var_loss.item()
+                        attr_id = model.obs_index.attr_ids[group][subtype][i]
+                        attrlosses[group][attr_id] += var_loss.item()
 
             if accumulate_grad:
                 if scaler:
@@ -814,8 +814,8 @@ def eval_model(
                 agglosses[group] += typeloss.sum().item()
                 for i in range(typeloss.shape[0]):
                     var_loss = typeloss[i]
-                    var_id = model.obs_index.var_ids[group][subtype][i]
-                    attrlosses[group][var_id] += var_loss.item()
+                    attr_id = model.obs_index.attr_ids[group][subtype][i]
+                    attrlosses[group][attr_id] += var_loss.item()
 
         timer.start()
 

@@ -50,27 +50,32 @@ def analyze_loss(model, train_attrlosses, eval_attrlosses, topk=3, verbose=False
             # _print("  * diff: %.3f (x%.1f) | train: %.3f | eval: %.3f" % (diff_loss, diff_frac, train_loss, eval_loss))
 
             _print("==== Attrs: %s/%s" % (group, subtype))
-            if len(model.obs_index.var_ids[group][subtype]) == 0:
+            if len(model.obs_index.attr_ids[group][subtype]) == 0:
                 continue
 
-            train_loss = train_attrlosses[group][model.obs_index.var_ids[group][subtype]].sum()
-            eval_loss = eval_attrlosses[group][model.obs_index.var_ids[group][subtype]].sum()
+            train_loss = train_attrlosses[group][model.obs_index.attr_ids[group][subtype]].sum()
+            eval_loss = eval_attrlosses[group][model.obs_index.attr_ids[group][subtype]].sum()
             diff_loss = eval_loss - train_loss
             diff_frac = (diff_loss / train_loss) if train_loss != 0 else float("nan")
             _print("  * diff: %.3f (x%.1f) | train: %.3f | eval: %.3f" % (diff_loss, diff_frac, train_loss, eval_loss))
 
-            train_loss = train_attrlosses[group][model.obs_index.var_ids[group][subtype]]
-            eval_loss = eval_attrlosses[group][model.obs_index.var_ids[group][subtype]]
-            for i, var_id in enumerate(model.obs_index.var_ids[group][subtype]):
-                var_name = attrnames[group][var_id]
+            train_loss = train_attrlosses[group][model.obs_index.attr_ids[group][subtype]]
+            eval_loss = eval_attrlosses[group][model.obs_index.attr_ids[group][subtype]]
+            for i, attr_id in enumerate(model.obs_index.attr_ids[group][subtype]):
+                var_name = attrnames[group][attr_id]
                 attr_train_loss = train_loss[i]
                 attr_eval_loss = eval_loss[i]
                 attr_diff_loss = attr_eval_loss - attr_train_loss
                 attr_diff_frac = (attr_diff_loss / attr_train_loss) if attr_train_loss != 0 else float("nan")
-                attrstats[group][var_id][:] = torch.tensor([attr_diff_loss, attr_diff_frac, attr_eval_loss, attr_train_loss])
+                attrstats[group][attr_id][:] = torch.tensor([attr_diff_loss, attr_diff_frac, attr_eval_loss, attr_train_loss])
                 _print("    %-30s diff: %.3f (x%.1f) | train: %.3f | eval: %.3f" % (var_name, attr_diff_loss, attr_diff_frac, attr_train_loss, attr_eval_loss))
 
-    res = [(attrnames[group][i], attrstats[group][i]) for group in attrstats.keys() for i in range(attrstats[group])]
+    res = {}
+    for group in attrstats.keys():
+        res[group] = []
+        for pair in zip(attrnames[group], attrstats[group]):
+            res[group].append(pair)
+
     topk_frac = {}
     topk_diff = {}
 

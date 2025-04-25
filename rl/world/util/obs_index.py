@@ -32,10 +32,10 @@ class ObsIndex:
         #   ...
         # ]
         #
-        # var_ids["hex"]["categoricals"] = [
-        #   0,              # var_id of Y_COORD in the HEX_ENCODING definitions
-        #   1,              # var_id of X_COORD in the HEX_ENCODING definitions
-        #   4,              # var_id of IS_REAR in the HEX_ENCODING definitions
+        # attr_ids["hex"]["categoricals"] = [
+        #   0,              # attr_id of Y_COORD in the HEX_ENCODING definitions
+        #   1,              # attr_id of X_COORD in the HEX_ENCODING definitions
+        #   4,              # attr_id of IS_REAR in the HEX_ENCODING definitions
         #   ...
         # ]
         #
@@ -63,15 +63,15 @@ class ObsIndex:
             "hex": empty_containers(),
         }
 
-        self.var_ids = {
+        self.attr_ids = {
             "global": empty_containers(),
             "player": empty_containers(),
             "hex": empty_containers(),
         }
 
-        self._add_rel_indices(GLOBAL_ATTR_MAP, self.rel_index["global"], self.var_ids["global"])
-        self._add_rel_indices(PLAYER_ATTR_MAP, self.rel_index["player"], self.var_ids["player"])
-        self._add_rel_indices(HEX_ATTR_MAP, self.rel_index["hex"], self.var_ids["hex"])
+        self._add_rel_indices(GLOBAL_ATTR_MAP, self.rel_index["global"], self.attr_ids["global"])
+        self._add_rel_indices(PLAYER_ATTR_MAP, self.rel_index["player"], self.attr_ids["player"])
+        self._add_rel_indices(HEX_ATTR_MAP, self.rel_index["hex"], self.attr_ids["hex"])
 
         for index in [self.rel_index["global"], self.rel_index["player"], self.rel_index["hex"]]:
             for type in ["continuous", "cont_nullbit"]:
@@ -83,10 +83,10 @@ class ObsIndex:
 
         self._build_abs_indices()
 
-    def _add_rel_indices(self, attr_map, index, var_ids):
+    def _add_rel_indices(self, attr_map, index, attr_ids):
         i = 0
 
-        for var_id, (attr, (enctype, offset, n, vmax, _p)) in enumerate(attr_map.items()):
+        for attr_id, (attr, (enctype, offset, n, vmax, _p)) in enumerate(attr_map.items()):
             t = None
             if enctype.startswith("ACCUMULATING"):
                 t = "threshold"
@@ -111,7 +111,7 @@ class ObsIndex:
                 # NULL is "special" category or bit for CONTINUOUS encodings
                 if t == "continuous":
                     index["cont_nullbit"].append(i)
-                    var_ids["cont_nullbit"].append(var_id)
+                    attr_ids["cont_nullbit"].append(attr_id)
                     i += 1
                     length -= 1
             elif enctype.endswith("IMPLICIT_NULL"):
@@ -134,17 +134,17 @@ class ObsIndex:
                 for _ in range(length):
                     ind.append(i)
                     i += 1
-                var_ids[plural].append(var_id)
+                attr_ids[plural].append(attr_id)
                 index[plural].append(ind)
             else:
                 for _ in range(length):
                     index[t].append(i)
                     i += 1
-                var_ids[t].append(var_id)
+                attr_ids[t].append(attr_id)
 
         # Sanity check
-        flattened_var_ids = [item for sublist in var_ids.values() for item in sublist]
-        assert len(set(flattened_var_ids)) == len(attr_map)
+        flattened_attr_ids = [item for sublist in attr_ids.values() for item in sublist]
+        assert len(set(flattened_attr_ids)) == len(attr_map)
 
     # Index for extracting values from (batched) observation
     # This is different than the other indexes:
