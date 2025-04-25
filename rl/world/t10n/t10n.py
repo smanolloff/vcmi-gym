@@ -541,11 +541,16 @@ def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
         loss_binary += F.binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
 
     if logits_global_categoricals:
+
         target_global_categoricals = [next_obs[:, index] for index in obs_index["global"]["categoricals"]]
         # weight_global_categoricals = loss_weights["categoricals"]["global"]
         # for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
         #     loss_categorical += F.cross_entropy(logits, target, weight=weight)
-        for logits, target in zip(logits_global_categoricals, target_global_categoricals):
+
+        # XXX: hack to prevent enormous categorical eval loss when swap_sides=1
+        #      (a bug with this value? TODO: check it)
+        assert list(GLOBAL_ATTR_MAP.keys()).index("BATTLE_SIDE") == 0
+        for logits, target in zip(logits_global_categoricals[1:], target_global_categoricals[1:]):
             loss_categorical += F.cross_entropy(logits, target)
 
     if logits_global_thresholds:
