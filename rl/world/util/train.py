@@ -25,12 +25,40 @@ from ..util.constants_v12 import (
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
+    GLOBAL_ATTR_MAP,
+    PLAYER_ATTR_MAP,
+    HEX_ATTR_MAP,
 )
 
 
 DIM_OTHER = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
 DIM_HEXES = 165*STATE_SIZE_ONE_HEX
 DIM_OBS = DIM_OTHER + DIM_HEXES
+
+
+def build_feature_weights(model, config):
+    obsind = model.obs_index
+
+    attrnames = {
+        "global": list(GLOBAL_ATTR_MAP.keys()),
+        "player": list(PLAYER_ATTR_MAP.keys()),
+        "hex": list(HEX_ATTR_MAP.keys())
+    }
+
+    feature_weights = {}
+
+    for group in obsind.var_ids.keys():
+        # global/player/hex
+        feature_weights[group] = {}
+        for subtype in obsind.var_ids[group].keys():
+            # continuous/cont_nullbit/binaries/...
+            feature_weights[group][subtype] = torch.zeros(len(obsind.var_ids[group][subtype]), device=model.device)
+            for i, var_id in enumerate(obsind.var_ids[group][subtype]):
+                var_name = attrnames[group][var_id]
+                var_weight = config["weights"][group][var_name]
+                feature_weights[group][subtype][i] = var_weight
+
+    return feature_weights
 
 
 def train(
@@ -118,6 +146,7 @@ def train(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model_creator(device=device)
+    feature_weights = build_feature_weights(model, config)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -292,7 +321,7 @@ def train(
             stats.iteration += 1
             continue
 
-        loss_weights = stats.compute_loss_weights()
+        # loss_weights = stats.compute_loss_weights()
 
         wlog = {}
 
@@ -307,7 +336,7 @@ def train(
                 eval_loss = eval_model_fn(
                     logger=logger,
                     model=model,
-                    loss_weights=loss_weights,
+                    loss_weights=feature_weights,
                     buffer=eval_buffer,
                     batch_size=eval_batch_size,
                     wlog=wlog
@@ -388,7 +417,7 @@ def train(
                 scaler=scaler,
                 buffer=buffer,
                 stats=stats,
-                loss_weights=loss_weights,
+                loss_weights=feature_weights,
                 epochs=train_epochs,
                 batch_size=train_batch_size,
                 accumulate_grad=config["train"]["accumulate_grad"],

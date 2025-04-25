@@ -3,7 +3,7 @@ import torch.nn as nn
 import math
 import enum
 import contextlib
-
+import collections
 import torch.nn.functional as F
 
 from ..util.buffer_base import BufferBase
@@ -141,12 +141,10 @@ class TransitionModel(nn.Module):
         super().__init__()
         self.device = device
 
-        obsind = ObsIndex(device)
+        self.obs_index = ObsIndex(device)
 
-        self.abs_index = obsind.abs_index
-        self.rel_index_global = obsind.rel_index_global
-        self.rel_index_player = obsind.rel_index_player
-        self.rel_index_hex = obsind.rel_index_hex
+        self.abs_index = self.obs_index.abs_index
+        self.rel_index = self.obs_index.rel_index
 
         #
         # ChatGPT notes regarding encoders:
@@ -197,25 +195,32 @@ class TransitionModel(nn.Module):
         # (B, n)
         self.encoder_global_continuous = nn.Identity()
 
-        # Binaries:
+        # Continuous (nulls):
         # (B, n)
-        self.encoder_global_binary = nn.Identity()
-        if self.abs_index["global"]["binary"].numel():
-            n_binary_features = len(self.abs_index["global"]["binary"])
-            self.encoder_global_binary = nn.LazyLinear(n_binary_features)
+        self.encoder_global_cont_nullbit = nn.Identity()
+        global_nullbit_size = len(self.rel_index["global"]["cont_nullbit"])
+        if global_nullbit_size:
+            self.encoder_global_cont_nullbit = nn.LazyLinear(global_nullbit_size)
+            # No nonlinearity needed?
+
+        # Binaries:
+        # [(B, b1), (B, b2), ...]
+        self.encoders_global_binaries = nn.ModuleList([])
+        for ind in self.rel_index["global"]["binaries"]:
+            self.encoders_global_binaries.append(nn.LazyLinear(len(ind)))
             # No nonlinearity needed?
 
         # Categoricals:
         # [(B, C1), (B, C2), ...]
         self.encoders_global_categoricals = nn.ModuleList([])
-        for ind in self.rel_index_global["categoricals"]:
+        for ind in self.rel_index["global"]["categoricals"]:
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_global_categoricals.append(cat_emb_size)
 
         # Thresholds:
         # [(B, T1), (B, T2), ...]
         self.encoders_global_thresholds = nn.ModuleList([])
-        for ind in self.rel_index_global["thresholds"]:
+        for ind in self.rel_index["global"]["thresholds"]:
             self.encoders_global_thresholds.append(nn.LazyLinear(len(ind)))
             # No nonlinearity needed?
 
@@ -236,24 +241,32 @@ class TransitionModel(nn.Module):
         # (B, n)
         self.encoder_player_continuous = nn.Identity()
 
-        # Binaries per player:
+        # Continuous (nulls) per player:
         # (B, n)
-        self.encoder_player_binary = nn.Identity()
-        if self.abs_index["player"]["binary"].numel():
-            n_binary_features = len(self.abs_index["player"]["binary"][0])
-            self.encoder_player_binary = nn.LazyLinear(n_binary_features)
+        self.encoder_player_cont_nullbit = nn.Identity()
+        player_nullbit_size = len(self.rel_index["player"]["cont_nullbit"])
+        if player_nullbit_size:
+            self.encoder_player_cont_nullbit = nn.LazyLinear(player_nullbit_size)
+            # No nonlinearity needed?
+
+        # Binaries per player:
+        # [(B, b1), (B, b2), ...]
+        self.encoders_player_binaries = nn.ModuleList([])
+        for ind in self.rel_index["player"]["binaries"]:
+            self.encoders_player_binaries.append(nn.LazyLinear(len(ind)))
+            # No nonlinearity needed?
 
         # Categoricals per player:
         # [(B, C1), (B, C2), ...]
         self.encoders_player_categoricals = nn.ModuleList([])
-        for ind in self.rel_index_player["categoricals"]:
+        for ind in self.rel_index["player"]["categoricals"]:
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_player_categoricals.append(cat_emb_size)
 
         # Thresholds per player:
         # [(B, T1), (B, T2), ...]
         self.encoders_player_thresholds = nn.ModuleList([])
-        for ind in self.rel_index_player["thresholds"]:
+        for ind in self.rel_index["player"]["thresholds"]:
             self.encoders_player_thresholds.append(nn.LazyLinear(len(ind)))
 
         # Merge per player
@@ -273,23 +286,32 @@ class TransitionModel(nn.Module):
         # (B, n)
         self.encoder_hex_continuous = nn.Identity()
 
-        # Binaries per hex:
+        # Continuous (nulls) per hex:
         # (B, n)
-        if self.abs_index["hex"]["binary"].numel():
-            n_binary_features = len(self.abs_index["hex"]["binary"][0])
-            self.encoder_hex_binary = nn.LazyLinear(n_binary_features)
+        self.encoder_hex_cont_nullbit = nn.Identity()
+        hex_nullbit_size = len(self.rel_index["hex"]["cont_nullbit"])
+        if hex_nullbit_size:
+            self.encoder_hex_cont_nullbit = nn.LazyLinear(hex_nullbit_size)
+            # No nonlinearity needed?
+
+        # Binaries per hex:
+        # [(B, b1), (B, b2), ...]
+        self.encoders_hex_binaries = nn.ModuleList([])
+        for ind in self.rel_index["hex"]["binaries"]:
+            self.encoders_hex_binaries.append(nn.LazyLinear(len(ind)))
+            # No nonlinearity needed?
 
         # Categoricals per hex:
         # [(B, C1), (B, C2), ...]
         self.encoders_hex_categoricals = nn.ModuleList([])
-        for ind in self.rel_index_hex["categoricals"]:
+        for ind in self.rel_index["hex"]["categoricals"]:
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_hex_categoricals.append(cat_emb_size)
 
         # Thresholds per hex:
         # [(B, T1), (B, T2), ...]
         self.encoders_hex_thresholds = nn.ModuleList([])
-        for ind in self.rel_index_hex["thresholds"]:
+        for ind in self.rel_index["hex"]["thresholds"]:
             self.encoders_hex_thresholds.append(nn.LazyLinear(len(ind)))
 
         # Merge per hex
@@ -350,42 +372,54 @@ class TransitionModel(nn.Module):
     def _forward(self, obs, action_z):
         assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
 
+        # torch.cat which returns empty tensor if tuple is empty
+        def torch_cat(tuple_of_tensors, **kwargs):
+            if len(tuple_of_tensors) == 0:
+                return torch.tensor([])
+            return torch.cat(tuple_of_tensors, **kwargs)
+
         global_continuous_in = obs[:, self.abs_index["global"]["continuous"]]
-        global_binary_in = obs[:, self.abs_index["global"]["binary"]]
+        global_cont_nullbit_in = obs[:, self.abs_index["global"]["continuous"]]
+        global_binary_ins = [obs[:, ind] for ind in self.abs_index["global"]["binaries"]]
         global_categorical_ins = [obs[:, ind] for ind in self.abs_index["global"]["categoricals"]]
         global_threshold_ins = [obs[:, ind] for ind in self.abs_index["global"]["thresholds"]]
         global_continuous_z = self.encoder_global_continuous(global_continuous_in)
-        global_binary_z = self.encoder_global_binary(global_binary_in)
+        global_cont_nullbit_z = self.encoder_global_cont_nullbit(global_cont_nullbit_in)
+        global_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_global_binaries, global_binary_ins)], dim=-1)
 
         # XXX: Embedding layers expect single-integer inputs
         #      e.g. for input with num_classes=4, instead of `[0,0,1,0]` it expects just `2`
-        global_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
-        global_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], dim=-1)
-        global_merged = torch.cat((action_z, global_continuous_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
+        global_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
+        global_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], dim=-1)
+        global_merged = torch_cat((action_z, global_continuous_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
         z_global = self.encoder_merged_global(global_merged)
         # => (B, Z_GLOBAL)
 
         player_continuous_in = obs[:, self.abs_index["player"]["continuous"]]
-        player_binary_in = obs[:, self.abs_index["player"]["binary"]]
+        player_cont_nullbit_in = obs[:, self.abs_index["player"]["continuous"]]
+        player_binary_ins = [obs[:, ind] for ind in self.abs_index["player"]["binaries"]]
         player_categorical_ins = [obs[:, ind] for ind in self.abs_index["player"]["categoricals"]]
         player_threshold_ins = [obs[:, ind] for ind in self.abs_index["player"]["thresholds"]]
         player_continuous_z = self.encoder_player_continuous(player_continuous_in)
-        player_binary_z = self.encoder_player_binary(player_binary_in)
-        player_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
-        player_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], dim=-1)
-        player_merged = torch.cat((action_z.unsqueeze(1).expand(-1, 2, -1), player_continuous_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
+        player_cont_nullbit_z = self.encoder_player_cont_nullbit(player_cont_nullbit_in)
+        player_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_binaries, player_binary_ins)], dim=-1)
+        player_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
+        player_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], dim=-1)
+        player_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 2, -1), player_continuous_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
         z_player = self.encoder_merged_player(player_merged)
         # => (B, 2, Z_PLAYER)
 
         hex_continuous_in = obs[:, self.abs_index["hex"]["continuous"]]
-        hex_binary_in = obs[:, self.abs_index["hex"]["binary"]]
+        hex_cont_nullbit_in = obs[:, self.abs_index["hex"]["continuous"]]
+        hex_binary_ins = [obs[:, ind] for ind in self.abs_index["hex"]["binaries"]]
         hex_categorical_ins = [obs[:, ind] for ind in self.abs_index["hex"]["categoricals"]]
         hex_threshold_ins = [obs[:, ind] for ind in self.abs_index["hex"]["thresholds"]]
         hex_continuous_z = self.encoder_hex_continuous(hex_continuous_in)
-        hex_binary_z = self.encoder_hex_binary(hex_binary_in)
-        hex_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
-        hex_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
-        hex_merged = torch.cat((action_z.unsqueeze(1).expand(-1, 165, -1), hex_continuous_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
+        hex_cont_nullbit_z = self.encoder_hex_cont_nullbit(hex_cont_nullbit_in)
+        hex_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_binaries, hex_binary_ins)], dim=-1)
+        hex_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
+        hex_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
+        hex_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 165, -1), hex_continuous_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
         z_hex = self.encoder_merged_hex(hex_merged)
         z_hex = self.transformer_hex(z_hex)
         # => (B, 165, Z_HEX)
@@ -414,15 +448,18 @@ class TransitionModel(nn.Module):
 
     def reconstruct(self, obs_out, strategy=Reconstruction.GREEDY):
         global_continuous_out = obs_out[:, self.abs_index["global"]["continuous"]]
-        global_binary_out = obs_out[:, self.abs_index["global"]["binary"]]
+        global_cont_nullbit_out = obs_out[:, self.abs_index["global"]["cont_nullbit"]]
+        global_binary_outs = [obs_out[:, ind] for ind in self.abs_index["global"]["binaries"]]
         global_categorical_outs = [obs_out[:, ind] for ind in self.abs_index["global"]["categoricals"]]
         global_threshold_outs = [obs_out[:, ind] for ind in self.abs_index["global"]["thresholds"]]
         player_continuous_out = obs_out[:, self.abs_index["player"]["continuous"]]
-        player_binary_out = obs_out[:, self.abs_index["player"]["binary"]]
+        player_cont_nullbit_out = obs_out[:, self.abs_index["player"]["cont_nullbit"]]
+        player_binary_outs = [obs_out[:, ind] for ind in self.abs_index["player"]["binaries"]]
         player_categorical_outs = [obs_out[:, ind] for ind in self.abs_index["player"]["categoricals"]]
         player_threshold_outs = [obs_out[:, ind] for ind in self.abs_index["player"]["thresholds"]]
         hex_continuous_out = obs_out[:, self.abs_index["hex"]["continuous"]]
-        hex_binary_out = obs_out[:, self.abs_index["hex"]["binary"]]
+        hex_cont_nullbit_out = obs_out[:, self.abs_index["hex"]["cont_nullbit"]]
+        hex_binary_outs = [obs_out[:, ind] for ind in self.abs_index["hex"]["binaries"]]
         hex_categorical_outs = [obs_out[:, ind] for ind in self.abs_index["hex"]["categoricals"]]
         hex_threshold_outs = [obs_out[:, ind] for ind in self.abs_index["hex"]["thresholds"]]
         next_obs = torch.zeros_like(obs_out)
@@ -440,9 +477,6 @@ class TransitionModel(nn.Module):
             def reconstruct_categorical(logits):
                 return logits.softmax(dim=-1)
 
-            def reconstruct_threshold(logits):
-                return reconstruct_binary(logits)
-
         elif strategy == Reconstruction.SAMPLES:
             def reconstruct_binary(logits):
                 return torch.bernoulli(logits.sigmoid())
@@ -453,9 +487,6 @@ class TransitionModel(nn.Module):
                 sampled_classes = torch.multinomial(probs_2d, num_samples=1).view(logits.shape[:-1])
                 return F.one_hot(sampled_classes, num_classes=num_classes).float()
 
-            def reconstruct_threshold(logits):
-                return reconstruct_binary(logits)
-
         elif strategy == Reconstruction.GREEDY:
             def reconstruct_binary(logits):
                 return logits.sigmoid().round()
@@ -463,29 +494,32 @@ class TransitionModel(nn.Module):
             def reconstruct_categorical(logits):
                 return F.one_hot(logits.argmax(dim=-1), num_classes=logits.shape[-1]).float()
 
-            def reconstruct_threshold(logits):
-                return reconstruct_binary(logits)
-
         next_obs[:, self.abs_index["global"]["continuous"]] = reconstruct_continuous(global_continuous_out)
-        next_obs[:, self.abs_index["global"]["binary"]] = reconstruct_binary(global_binary_out)
+        next_obs[:, self.abs_index["global"]["cont_nullbit"]] = reconstruct_continuous(global_cont_nullbit_out)
+        for ind, out in zip(self.abs_index["global"]["binaries"], global_binary_outs):
+            next_obs[:, ind] = reconstruct_binary(out)
         for ind, out in zip(self.abs_index["global"]["categoricals"], global_categorical_outs):
             next_obs[:, ind] = reconstruct_categorical(out)
         for ind, out in zip(self.abs_index["global"]["thresholds"], global_threshold_outs):
-            next_obs[:, ind] = reconstruct_threshold(out)
+            next_obs[:, ind] = reconstruct_binary(out)
 
         next_obs[:, self.abs_index["player"]["continuous"]] = reconstruct_continuous(player_continuous_out)
-        next_obs[:, self.abs_index["player"]["binary"]] = reconstruct_binary(player_binary_out)
+        next_obs[:, self.abs_index["player"]["cont_nullbit"]] = reconstruct_continuous(player_cont_nullbit_out)
+        for ind, out in zip(self.abs_index["player"]["binaries"], player_binary_outs):
+            next_obs[:, ind] = reconstruct_binary(out)
         for ind, out in zip(self.abs_index["player"]["categoricals"], player_categorical_outs):
             next_obs[:, ind] = reconstruct_categorical(out)
         for ind, out in zip(self.abs_index["player"]["thresholds"], player_threshold_outs):
-            next_obs[:, ind] = reconstruct_threshold(out)
+            next_obs[:, ind] = reconstruct_binary(out)
 
         next_obs[:, self.abs_index["hex"]["continuous"]] = reconstruct_continuous(hex_continuous_out)
-        next_obs[:, self.abs_index["hex"]["binary"]] = reconstruct_binary(hex_binary_out)
+        next_obs[:, self.abs_index["hex"]["cont_nullbit"]] = reconstruct_continuous(hex_cont_nullbit_out)
+        for ind, out in zip(self.abs_index["hex"]["binaries"], hex_binary_outs):
+            next_obs[:, ind] = reconstruct_binary(out)
         for ind, out in zip(self.abs_index["hex"]["categoricals"], hex_categorical_outs):
             next_obs[:, ind] = reconstruct_categorical(out)
         for ind, out in zip(self.abs_index["hex"]["thresholds"], hex_threshold_outs):
-            next_obs[:, ind] = reconstruct_threshold(out)
+            next_obs[:, ind] = reconstruct_binary(out)
 
         return next_obs
 
@@ -504,162 +538,150 @@ class TransitionModel(nn.Module):
             return self.predict_(obs, action, strategy=strategy)[0].numpy()
 
 
-def compute_losses(logger, obs_index, loss_weights, next_obs, pred_obs):
-    logits_global_continuous = pred_obs[:, obs_index["global"]["continuous"]]
-    logits_global_binary = pred_obs[:, obs_index["global"]["binary"]]
-    logits_global_categoricals = [pred_obs[:, ind] for ind in obs_index["global"]["categoricals"]]
-    logits_global_thresholds = [pred_obs[:, ind] for ind in obs_index["global"]["thresholds"]]
-    logits_player_continuous = pred_obs[:, obs_index["player"]["continuous"]]
-    logits_player_binary = pred_obs[:, obs_index["player"]["binary"]]
-    logits_player_categoricals = [pred_obs[:, ind] for ind in obs_index["player"]["categoricals"]]
-    logits_player_thresholds = [pred_obs[:, ind] for ind in obs_index["player"]["thresholds"]]
-    logits_hex_continuous = pred_obs[:, obs_index["hex"]["continuous"]]
-    logits_hex_binary = pred_obs[:, obs_index["hex"]["binary"]]
-    logits_hex_categoricals = [pred_obs[:, ind] for ind in obs_index["hex"]["categoricals"]]
-    logits_hex_thresholds = [pred_obs[:, ind] for ind in obs_index["hex"]["thresholds"]]
+def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
+    # Aggregate each feature's loss across players/hexes
+    mdim = tuple(range(logits["continuous"].dim() - 1))
+    # mdim = (0,) if t == "global" else (0, 1)
 
-    loss_continuous = 0
-    loss_binary = 0
-    loss_categorical = 0
-    loss_threshold = 0
+    losses = {}
 
-    hex_losses_continuous = torch.zeros(pred_obs.shape[0], dtype=torch.float32, device=pred_obs.device)
-    hex_losses_binary = torch.zeros(pred_obs.shape[0], dtype=torch.float32, device=pred_obs.device)
-    hex_losses_categorical = torch.zeros(pred_obs.shape[0], dtype=torch.float32, device=pred_obs.device)
-    hex_losses_threshold = torch.zeros(pred_obs.shape[0], dtype=torch.float32, device=pred_obs.device)
+    for subtype in ["continuous", "cont_nullbit", "binaries", "categoricals", "thresholds"]:
+        if not len(logits[subtype]):
+            losses[subtype] = torch.tensor(0., device=device)
+            continue
 
-    # Global
+        lgt = logits[subtype]
+        tgt = target[subtype]
 
-    if logits_global_continuous.numel():
-        target_global_continuous = next_obs[:, obs_index["global"]["continuous"]]
-        loss_continuous += F.mse_loss(logits_global_continuous, target_global_continuous)
+        if subtype == "continuous":
+            # (B, N_CONT_FEATS)             when t="global"
+            # (B, 2, N_CONT_FEATS)          when t="player"
+            # (B, 165, N_CONT_FEATS)        when t="hex"
+            losses[subtype] = F.mse_loss(lgt, tgt, reduction="none").mean(dim=mdim)
+            # => (N_CONT_FEATS)
 
-    if logits_global_binary.numel():
-        target_global_binary = next_obs[:, obs_index["global"]["binary"]]
-        # weight_global_binary = loss_weights["binary"]["global"]
-        # loss_binary += F.binary_cross_entropy_with_logits(logits_global_binary, target_global_binary, pos_weight=weight_global_binary)
-        loss_binary += F.binary_cross_entropy_with_logits(logits_global_binary, target_global_binary)
+        elif subtype == "cont_nullbit":
+            # (B, N_EXPLICIT_NULL_CONT_FEATS)      when t="global"
+            # (B, 2, N_EXPLICIT_NULL_CONT_FEATS)   when t="player"
+            # (B, 165, N_EXPLICIT_NULL_CONT_FEATS) when t="hex"
+            losses[subtype] = F.binary_cross_entropy_with_logits(lgt, tgt, reduction="none").mean(dim=mdim)
+            # => (N_EXPLICIT_NULL_CONT_FEATS)
 
-    if logits_global_categoricals:
+        elif subtype == "binaries":
+            loss = torch.zeros(len(lgt), device=device)
+            for i, (i_lgt, i_tgt) in enumerate(zip(lgt, tgt)):
+                # (B, N_BIN_FEATi_BITS)      when t="global"
+                # (B, 2, N_BIN_FEATi_BITS)   when t="player"
+                # (B, 165, N_BIN_FEATi_BITS) when t="hex"
 
-        target_global_categoricals = [next_obs[:, index] for index in obs_index["global"]["categoricals"]]
-        # weight_global_categoricals = loss_weights["categoricals"]["global"]
-        # for logits, target, weight in zip(logits_global_categoricals, target_global_categoricals, weight_global_categoricals):
-        #     loss_categorical += F.cross_entropy(logits, target, weight=weight)
+                # XXX:
+                # reduction="none" would result in (B, N_FEATi_BITS) result
+                # ...but having separate losses for each bit would be too much
+                # ... If separate weights are needed for each bit, then maybe dont reduce it...
+                # => for now, just reduce it to a single loss per feature
+                loss[i] = F.binary_cross_entropy_with_logits(i_lgt, i_tgt)
+                # (1)  # single loss the i'th binary feat
+            losses[subtype] = loss
+            # (N_BIN_FEATS)
 
-        # XXX: hack to prevent enormous categorical eval loss when swap_sides=1
-        #      (a bug with this value? TODO: check it)
-        assert list(GLOBAL_ATTR_MAP.keys()).index("BATTLE_SIDE") == 0
-        for logits, target in zip(logits_global_categoricals[1:], target_global_categoricals[1:]):
-            loss_categorical += F.cross_entropy(logits, target)
+        elif subtype == "categoricals":
+            loss = torch.zeros(len(lgt), device=device)
 
-    if logits_global_thresholds:
-        target_global_thresholds = [next_obs[:, index] for index in obs_index["global"]["thresholds"]]
-        for logits, target in zip(logits_global_thresholds, target_global_thresholds):
-            bce_loss = F.binary_cross_entropy_with_logits(logits, target)
-            # Monotonicity regularization:
-            probs = torch.sigmoid(logits)
-            mono_diff = probs[:, :-1] - probs[:, 1:]
-            mono_violation = F.relu(-mono_diff)
-            mono_loss = mono_violation.mean()  # * 1.0  (lambda coefficient)
-            loss_threshold += (bce_loss + mono_loss)
+            # XXX: hack to prevent enormous categorical eval loss when swap_sides=1
+            #      (a bug with this value? TODO: check it)
+            # TODO: fix via weights["categoricals"]
+            # assert list(GLOBAL_ATTR_MAP.keys()).index("BATTLE_SIDE") == 0
+            # for i, (i_lgt, i_tgt) in enumerate(zip(logits["categoricals"][1:], target["categoricals"][1:]), start=1):
 
-    # Player (2x)
+            for i, (i_lgt, i_tgt) in enumerate(zip(lgt, tgt)):
+                # (B, N_CAT_FEATi_CLASSES)      when t="global"
+                # (B, 2, N_CAT_FEATi_CLASSES)   when t="player"
+                # (B, 165, N_CAT_FEATi_CLASSES) when t="hex"
 
-    if logits_player_continuous.numel():
-        target_player_continuous = next_obs[:, obs_index["player"]["continuous"]]
-        loss_continuous += F.mse_loss(logits_player_continuous, target_player_continuous)
+                if i_lgt.dim() == 3:
+                    # XXX: CrossEntropyLoss expects (B, C, *) input where C=num_classes
+                    #      => transpose (B, 165, C) => (B, C, 165)
+                    #      (not needed for BCE or MSE)
+                    i_lgt = i_lgt.swapaxes(1, 2)
+                    i_tgt = i_tgt.swapaxes(1, 2)
 
-    if logits_player_binary.numel():
-        target_player_binary = next_obs[:, obs_index["player"]["binary"]]
-        # weight_player_binary = loss_weights["binary"]["player"]
-        # loss_binary += F.binary_cross_entropy_with_logits(logits_player_binary, target_player_binary, pos_weight=weight_player_binary)
-        loss_binary += F.binary_cross_entropy_with_logits(logits_player_binary, target_player_binary)
+                loss[i] = F.cross_entropy(i_lgt, i_tgt)
+                # (1)  # single loss for the i'th categorical feature
+            losses[subtype] = loss
+            # (N_CAT_FEATS)
 
-    # XXX: CrossEntropyLoss expects (B, C, *) input where C=num_classes
-    #      => transpose (B, 2, C) => (B, C, 2)
-    #      (not needed for BCE or MSE)
-    # See difference:
-    # [F.cross_entropy(logits, target).item(), F.cross_entropy(logits.flatten(start_dim=0, end_dim=1), target.flatten(start_dim=0, end_dim=1)).item(), F.cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2)).item()]
+        elif subtype == "thresholds":
+            loss = torch.zeros(len(lgt), device=device)
 
-    if logits_player_categoricals:
-        target_player_categoricals = [next_obs[:, index] for index in obs_index["player"]["categoricals"]]
-        # weight_player_categoricals = loss_weights["categoricals"]["player"]
-        # for logits, target, weight in zip(logits_player_categoricals, target_player_categoricals, weight_player_categoricals):
-        #     loss_categorical += F.cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
-        for logits, target in zip(logits_player_categoricals, target_player_categoricals):
-            loss_categorical += F.cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2))
+            for i, (i_lgt, i_tgt) in enumerate(zip(lgt, tgt)):
+                # (B, N_THR_FEATi_BINS)      when t="global"
+                # (B, 2, N_THR_FEATi_BINS)   when t="player"
+                # (B, 165, N_THR_FEATi_BINS) when t="hex"
 
-    if logits_player_thresholds:
-        target_player_thresholds = [next_obs[:, index] for index in obs_index["player"]["thresholds"]]
-        for logits, target in zip(logits_player_thresholds, target_player_thresholds):
-            bce_loss = F.binary_cross_entropy_with_logits(logits, target)
-            # Monotonicity regularization:
-            probs = torch.sigmoid(logits)
-            mono_diff = probs[:, :, :-1] - probs[:, :, 1:]
-            mono_violation = F.relu(-mono_diff)
-            mono_loss = mono_violation.mean()  # * 1.0  (lambda coefficient)
-            loss_threshold += (bce_loss + mono_loss)
+                bce_loss = F.binary_cross_entropy_with_logits(i_lgt, i_tgt)
+                # (1)  # single loss for the i'th global threshold feature
 
-    # Hex (165x)
+                # Monotonicity regularization:
+                #   > t1
+                #   => tensor([ 0.6004,  1.3230,  1.0605,  0.7150, -0.2482])
+                #       ^ raw logits
+                #
+                #   > probs = torch.sigmoid(t1)
+                #   => tensor([0.6458, 0.7897, 0.7428, 0.6715, 0.4383])
+                #       (individual prob for each bit)
+                #
+                #   > violation = probs[..., 1:] - probs[..., :-1]
+                #   => tensor([[-0.0460,  0.3775, -0.1651,  0.0951],
+                #              [-0.2894,  0.1434, -0.3976,  0.4508]])
+                #               ^p1-p0    ^p2-p1  ^p3-p2    ^p4-p3
+                #
+                #       Values show if the next bit has *higher* prob
+                #       (threshold encoding should never have increasing probs)
+                #
+                #   > loss = torch.relu(violation)
+                #   => tensor([[0.0000, 0.3775, 0.0000, 0.0951],
+                #              [0.0000, 0.1434, 0.0000, 0.4508]])
+                #       (negative violations i.e. decreasing probs are not a loss)
+                #
+                #  i.e. loss only where tne next is higher prob than current
+                probs = torch.sigmoid(i_lgt)
+                mono_diff = probs[..., 1:] - probs[..., :-1]
+                mono_loss = F.relu(mono_diff).mean()  # * 1.0  (optional lambda coefficient)
+                loss[i] = (bce_loss + mono_loss)
+                # (1)  # single loss for the i'th global threshold feature
+            losses[subtype] = loss
+            # (N_THR_FEATS)
+        else:
+            raise Exception("unexpected subtype: %s" % subtype)
 
-    if logits_hex_continuous.numel():
-        target_hex_continuous = next_obs[:, obs_index["hex"]["continuous"]]
-        hex_losses_continuous += F.mse_loss(
-            logits_hex_continuous,
-            target_hex_continuous,
-            reduction="none",
-        ).flatten(start_dim=1).mean(dim=1)
-        # => (B) of losses
+        losses[subtype] *= weights[subtype]
 
-    if logits_hex_binary.numel():
-        target_hex_binary = next_obs[:, obs_index["hex"]["binary"]]
-        # weight_hex_binary = loss_weights["binary"]["hex"]
-        # loss_binary += F.binary_cross_entropy_with_logits(logits_hex_binary, target_hex_binary, pos_weight=weight_hex_binary)
-        hex_losses_binary += F.binary_cross_entropy_with_logits(
-            logits_hex_binary,
-            target_hex_binary,
-            reduction="none"
-        ).flatten(start_dim=1).mean(dim=1)
+    return losses
 
-    if logits_hex_categoricals:
-        target_hex_categoricals = [next_obs[:, index] for index in obs_index["hex"]["categoricals"]]
-        # weight_hex_categoricals = loss_weights["categoricals"]["hex"]
-        # for logits, target, weight in zip(logits_hex_categoricals, target_hex_categoricals, weight_hex_categoricals):
-        #     loss_categorical += F.cross_entropy(logits.swapaxes(1, 2), target.swapaxes(1, 2), weight=weight)
-        for logits, target in zip(logits_hex_categoricals, target_hex_categoricals):
-            hex_losses_categorical += F.cross_entropy(
-                logits.swapaxes(1, 2),
-                target.swapaxes(1, 2),
-                reduction="none"
-            ).mean(dim=1)
 
-    if logits_hex_thresholds:
-        target_hex_thresholds = [next_obs[:, index] for index in obs_index["hex"]["thresholds"]]
-        for logits, target in zip(logits_hex_thresholds, target_hex_thresholds):
-            bce_loss = F.binary_cross_entropy_with_logits(logits, target)
-            # Monotonicity regularization:
-            probs = torch.sigmoid(logits)
-            mono_diff = probs[:, :, :-1] - probs[:, :, 1:]
-            mono_violation = F.relu(-mono_diff)
-            mono_loss = mono_violation.mean()  # * 1.0  (lambda coefficient)
-            loss_threshold += (bce_loss + mono_loss)
+def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
+    # For shapes, see ObsIndex._build_abs_indices()
+    extract = lambda t, obs: {
+        "continuous": obs[:, abs_index[t]["continuous"]],
+        "cont_nullbit": obs[:, abs_index[t]["cont_nullbit"]],
+        "binaries": [obs[:, ind] for ind in abs_index[t]["binaries"]],
+        "categoricals": [obs[:, ind] for ind in abs_index[t]["categoricals"]],
+        "thresholds": [obs[:, ind] for ind in abs_index[t]["thresholds"]],
+    }
 
-    # Ignore hex for terminal obs
-    is_terminal = torch.nonzero(next_obs[:, GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][1]])
-    # => (b) of indexes where obs is terminal (b < B)
+    losses = {}
+    device = next_obs.device
+    total_loss = torch.tensor(0., device=pred_obs.device)
 
-    hex_losses_continuous[is_terminal] = 0
-    hex_losses_binary[is_terminal] = 0
-    hex_losses_categorical[is_terminal] = 0
-    hex_losses_threshold[is_terminal] = 0
+    for group in ["global", "player", "hex"]:
+        logits = extract(group, pred_obs)
+        target = extract(group, next_obs)
+        index = abs_index[group]
+        weights = loss_weights[group]
+        losses[group] = _compute_losses(logits, target, index, weights=weights, device=device)
+        total_loss += sum(subtype_losses.sum() for subtype_losses in losses[group].values())
 
-    loss_binary += hex_losses_binary.mean()
-    loss_continuous += hex_losses_continuous.mean()
-    loss_categorical += hex_losses_categorical.mean()
-    loss_threshold += hex_losses_threshold.mean()
-
-    return loss_binary, loss_continuous, loss_categorical, loss_threshold
+    return total_loss, losses
 
 
 def train_model(
@@ -676,12 +698,8 @@ def train_model(
     wlog
 ):
     model.train()
-    continuous_losses = []
-    binary_losses = []
-    categorical_losses = []
-    threshold_losses = []
-    total_losses = []
     timer = Timer()
+    losshist = collections.defaultdict(list)
 
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
@@ -699,17 +717,19 @@ def train_model(
 
             with maybe_autocast:
                 pred_obs = model(obs, action)
-                loss_cont, loss_bin, loss_cat, loss_thr = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
-                loss_tot = loss_cont + loss_bin + loss_cat + loss_thr
+                loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
-            continuous_losses.append(loss_cont.item())
-            binary_losses.append(loss_bin.item())
-            categorical_losses.append(loss_cat.item())
-            threshold_losses.append(loss_thr.item())
-            total_losses.append(loss_tot.item())
+            losshist["total"].append(loss_tot.item())
+            for group, sublosses in losses.items():
+                # global/player/hex
+                for vartype, loss in sublosses.items():
+                    # continuous/cont_nullbit/binaries/...
+                    losshist[vartype].append(loss.sum().item())
+                    losshist[group].append(loss.sum().item())
 
             if accumulate_grad:
                 if scaler:
+                    # XXX: loss_tot / grad_steps should be within autocast
                     scaler.scale(loss_tot / grad_steps).backward()
                 else:
                     (loss_tot / grad_steps).backward()
@@ -735,21 +755,12 @@ def train_model(
                 optimizer.step()
             optimizer.zero_grad()
 
-    continuous_loss = sum(continuous_losses) / len(continuous_losses)
-    binary_loss = sum(binary_losses) / len(binary_losses)
-    categorical_loss = sum(categorical_losses) / len(categorical_losses)
-    threshold_loss = sum(threshold_losses) / len(threshold_losses)
-    total_loss = sum(total_losses) / len(total_losses)
     total_wait = timer.peek()
-
-    wlog["train_loss/continuous"] = continuous_loss
-    wlog["train_loss/binary"] = binary_loss
-    wlog["train_loss/categorical"] = categorical_loss
-    wlog["train_loss/threshold"] = threshold_loss
-    wlog["train_loss/total"] = total_loss
     wlog["train_dataset/wait_time_s"] = total_wait
+    for k, v in losshist.items():
+        wlog[f"train_loss/{k}"] = sum(v) / len(v)
 
-    return total_loss
+    return wlog["train_loss/total"]
 
 
 def eval_model(
@@ -761,13 +772,8 @@ def eval_model(
     wlog
 ):
     model.eval()
-
-    continuous_losses = []
-    binary_losses = []
-    categorical_losses = []
-    threshold_losses = []
-    total_losses = []
     timer = Timer()
+    losshist = collections.defaultdict(list)
 
     timer.start()
     for batch in buffer.sample_iter(batch_size):
@@ -777,29 +783,20 @@ def eval_model(
         with torch.no_grad():
             pred_obs = model(obs, action)
 
-        loss_cont, loss_bin, loss_cat, loss_thr = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
-        loss_tot = loss_cont + loss_bin + loss_cat + loss_thr
+        loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
+        losshist["total"].append(loss_tot.item())
+        for group, sublosses in losses.items():
+            # global/player/hex
+            for vartype, loss in sublosses.items():
+                # continuous/cont_nullbit/binaries/...
+                losshist[vartype].append(loss.sum().item())
+                losshist[group].append(loss.sum().item())
 
-        continuous_losses.append(loss_cont.item())
-        binary_losses.append(loss_bin.item())
-        categorical_losses.append(loss_cat.item())
-        threshold_losses.append(loss_thr.item())
-        total_losses.append(loss_tot.item())
         timer.start()
-    timer.stop()
 
-    continuous_loss = sum(continuous_losses) / len(continuous_losses)
-    binary_loss = sum(binary_losses) / len(binary_losses)
-    categorical_loss = sum(categorical_losses) / len(categorical_losses)
-    threshold_loss = sum(threshold_losses) / len(threshold_losses)
-    total_loss = sum(total_losses) / len(total_losses)
     total_wait = timer.peek()
-
-    wlog["eval_loss/continuous"] = continuous_loss
-    wlog["eval_loss/binary"] = binary_loss
-    wlog["eval_loss/categorical"] = categorical_loss
-    wlog["eval_loss/threshold"] = threshold_loss
-    wlog["eval_loss/total"] = total_loss
     wlog["eval_dataset/wait_time_s"] = total_wait
+    for k, v in losshist.items():
+        wlog[f"eval_loss/{k}"] = sum(v) / len(v)
 
-    return total_loss
+    return wlog["eval_loss/total"]

@@ -1,5 +1,7 @@
 import os
 
+from .weights import weights
+
 #
 # Depending on the `env` and `s3` configs, the behaviour is:
 #
@@ -98,6 +100,7 @@ config = dict(
         interval_s=60,  # wandb_log will also be called here
         batch_size=2,
     ),
+    weights=weights
 )
 
 if os.getenv("VASTAI", None) == "1":
