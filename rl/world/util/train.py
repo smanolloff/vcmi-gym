@@ -20,6 +20,7 @@ from .structured_logger import StructuredLogger
 from .timer import Timer
 from .wandb import setup_wandb
 from .weights import build_feature_weights
+from .analyze_loss import analyze_loss
 
 from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
@@ -396,6 +397,9 @@ def train(
                 accumulate_grad=config["train"]["accumulate_grad"],
                 wlog=wlog,
             )
+
+        # analyzed_attrs, top3_frac, top3_loss = analyze()
+        # import ipdb; ipdb.set_trace()  # noqa
 
         accumulate_logs(wlog)
 
