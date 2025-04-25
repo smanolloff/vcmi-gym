@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 import math
 import enum
 import contextlib
@@ -17,6 +18,8 @@ from ..util.constants_v12 import (
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
     GLOBAL_ATTR_MAP,
+    PLAYER_ATTR_MAP,
+    HEX_ATTR_MAP,
     N_ACTIONS,
 )
 
@@ -375,7 +378,7 @@ class TransitionModel(nn.Module):
         # torch.cat which returns empty tensor if tuple is empty
         def torch_cat(tuple_of_tensors, **kwargs):
             if len(tuple_of_tensors) == 0:
-                return torch.tensor([])
+                return torch.tensor([], device=self.device)
             return torch.cat(tuple_of_tensors, **kwargs)
 
         global_continuous_in = obs[:, self.abs_index["global"]["continuous"]]
@@ -547,7 +550,7 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
 
     for subtype in ["continuous", "cont_nullbit", "binaries", "categoricals", "thresholds"]:
         if not len(logits[subtype]):
-            losses[subtype] = torch.tensor(0., device=device)
+            losses[subtype] = torch.tensor([], device=device)
             continue
 
         lgt = logits[subtype]
@@ -586,13 +589,6 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
 
         elif subtype == "categoricals":
             loss = torch.zeros(len(lgt), device=device)
-
-            # XXX: hack to prevent enormous categorical eval loss when swap_sides=1
-            #      (a bug with this value? TODO: check it)
-            # TODO: fix via weights["categoricals"]
-            # assert list(GLOBAL_ATTR_MAP.keys()).index("BATTLE_SIDE") == 0
-            # for i, (i_lgt, i_tgt) in enumerate(zip(logits["categoricals"][1:], target["categoricals"][1:]), start=1):
-
             for i, (i_lgt, i_tgt) in enumerate(zip(lgt, tgt)):
                 # (B, N_CAT_FEATi_CLASSES)      when t="global"
                 # (B, 2, N_CAT_FEATi_CLASSES)   when t="player"
@@ -699,7 +695,14 @@ def train_model(
 ):
     model.train()
     timer = Timer()
-    losshist = collections.defaultdict(list)
+    n_batches = 0
+
+    agglosses = collections.defaultdict(float)
+    varlosses = {
+        "global": np.zeros(len(GLOBAL_ATTR_MAP)),
+        "player": np.zeros(len(PLAYER_ATTR_MAP)),
+        "hex": np.zeros(len(HEX_ATTR_MAP)),
+    }
 
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
@@ -713,19 +716,25 @@ def train_model(
         timer.start()
         for batch in buffer.sample_iter(batch_size):
             timer.stop()
+            n_batches += 1
+
             obs, action, next_obs, next_mask, next_rew, next_done = batch
 
             with maybe_autocast:
                 pred_obs = model(obs, action)
                 loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
-            losshist["total"].append(loss_tot.item())
-            for group, sublosses in losses.items():
+            agglosses["total"] += loss_tot.item()
+            for group, grouploss in losses.items():
                 # global/player/hex
-                for vartype, loss in sublosses.items():
+                for subtype, typeloss in grouploss.items():
                     # continuous/cont_nullbit/binaries/...
-                    losshist[vartype].append(loss.sum().item())
-                    losshist[group].append(loss.sum().item())
+                    agglosses[subtype] += typeloss.sum().item()
+                    agglosses[group] += typeloss.sum().item()
+                    for i in range(typeloss.shape[0]):
+                        var_loss = typeloss[i]
+                        var_id = model.obs_index.var_ids[group][subtype][i]
+                        varlosses[group][var_id] += var_loss.item()
 
             if accumulate_grad:
                 if scaler:
@@ -757,10 +766,11 @@ def train_model(
 
     total_wait = timer.peek()
     wlog["train_dataset/wait_time_s"] = total_wait
-    for k, v in losshist.items():
-        wlog[f"train_loss/{k}"] = sum(v) / len(v)
 
-    return wlog["train_loss/total"]
+    for k, v in agglosses.items():
+        wlog[f"train_loss/{k}"] = v / n_batches
+
+    return wlog["train_loss/total"], dict(agglosses), varlosses
 
 
 def eval_model(
@@ -773,30 +783,42 @@ def eval_model(
 ):
     model.eval()
     timer = Timer()
-    losshist = collections.defaultdict(list)
+    agglosses = collections.defaultdict(float)
+    varlosses = {
+        "global": np.zeros(len(GLOBAL_ATTR_MAP)),
+        "player": np.zeros(len(PLAYER_ATTR_MAP)),
+        "hex": np.zeros(len(HEX_ATTR_MAP)),
+    }
+    n_batches = 0
 
     timer.start()
     for batch in buffer.sample_iter(batch_size):
         timer.stop()
+        n_batches += 1
         obs, action, next_obs, next_mask, next_rew, next_done = batch
 
         with torch.no_grad():
             pred_obs = model(obs, action)
 
         loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
-        losshist["total"].append(loss_tot.item())
-        for group, sublosses in losses.items():
+
+        agglosses["total"] += loss_tot.item()
+        for group, grouploss in losses.items():
             # global/player/hex
-            for vartype, loss in sublosses.items():
+            for subtype, typeloss in grouploss.items():
                 # continuous/cont_nullbit/binaries/...
-                losshist[vartype].append(loss.sum().item())
-                losshist[group].append(loss.sum().item())
+                agglosses[subtype] += typeloss.sum().item()
+                agglosses[group] += typeloss.sum().item()
+                for i in range(typeloss.shape[0]):
+                    var_loss = typeloss[i]
+                    var_id = model.obs_index.var_ids[group][subtype][i]
+                    varlosses[group][var_id] += var_loss.item()
 
         timer.start()
 
     total_wait = timer.peek()
     wlog["eval_dataset/wait_time_s"] = total_wait
-    for k, v in losshist.items():
-        wlog[f"eval_loss/{k}"] = sum(v) / len(v)
+    for k, v in agglosses.items():
+        wlog[f"eval_loss/{k}"] = v / n_batches
 
-    return wlog["eval_loss/total"]
+    return wlog["eval_loss/total"], dict(agglosses), varlosses

@@ -11,54 +11,27 @@ import botocore.exceptions
 from functools import partial
 from datetime import datetime
 
-from ..util.dataset_s3 import DatasetS3
-from ..util.dataset_vcmi import DatasetVCMI
-from ..util.misc import dig, aggregate_metrics, timer_stats, safe_mean
-from ..util.persistence import load_local_or_s3_checkpoint, save_checkpoint, save_buffer_async
-from ..util.stats import Stats
-from ..util.structured_logger import StructuredLogger
-from ..util.timer import Timer
-from ..util.wandb import setup_wandb
+from .dataset_s3 import DatasetS3
+from .dataset_vcmi import DatasetVCMI
+from .misc import dig, aggregate_metrics, timer_stats, safe_mean
+from .persistence import load_local_or_s3_checkpoint, save_checkpoint, save_buffer_async
+from .stats import Stats
+from .structured_logger import StructuredLogger
+from .timer import Timer
+from .wandb import setup_wandb
+from .weights import build_feature_weights
 
 from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
-    GLOBAL_ATTR_MAP,
-    PLAYER_ATTR_MAP,
-    HEX_ATTR_MAP,
 )
 
 
 DIM_OTHER = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
 DIM_HEXES = 165*STATE_SIZE_ONE_HEX
 DIM_OBS = DIM_OTHER + DIM_HEXES
-
-
-def build_feature_weights(model, config):
-    obsind = model.obs_index
-
-    attrnames = {
-        "global": list(GLOBAL_ATTR_MAP.keys()),
-        "player": list(PLAYER_ATTR_MAP.keys()),
-        "hex": list(HEX_ATTR_MAP.keys())
-    }
-
-    feature_weights = {}
-
-    for group in obsind.var_ids.keys():
-        # global/player/hex
-        feature_weights[group] = {}
-        for subtype in obsind.var_ids[group].keys():
-            # continuous/cont_nullbit/binaries/...
-            feature_weights[group][subtype] = torch.zeros(len(obsind.var_ids[group][subtype]), device=model.device)
-            for i, var_id in enumerate(obsind.var_ids[group][subtype]):
-                var_name = attrnames[group][var_id]
-                var_weight = config["weights"][group][var_name]
-                feature_weights[group][subtype][i] = var_weight
-
-    return feature_weights
 
 
 def train(
@@ -146,7 +119,7 @@ def train(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model_creator(device=device)
-    feature_weights = build_feature_weights(model, config)
+    feature_weights = build_feature_weights(model, config["weights"])
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -333,7 +306,7 @@ def train(
                 eval_buffer.load_samples(eval_dataloader)
 
             with timers["eval"]:
-                eval_loss = eval_model_fn(
+                eval_loss, eval_agglosses, eval_attrlosses = eval_model_fn(
                     logger=logger,
                     model=model,
                     loss_weights=feature_weights,
@@ -410,7 +383,7 @@ def train(
                 thread.start()
 
         with timers["train"]:
-            train_model_fn(
+            train_loss, train_agglosses, train_attrlosses = train_model_fn(
                 logger=logger,
                 model=model,
                 optimizer=optimizer,

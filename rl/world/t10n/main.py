@@ -2,6 +2,7 @@ import argparse
 import torch
 
 from . import t10n
+from ..util.weights import build_feature_weights
 from ..util.train import train
 
 
@@ -37,8 +38,12 @@ def load_for_test(file):
 
 def do_test(model, env):
     from vcmi_gym.envs.v12.decoder.decoder import Decoder
+    from .config import config
 
     env.reset()
+
+    weights = build_feature_weights(model, config["weights"])
+
     for _ in range(10):
         print("=" * 100)
         if env.terminated or env.truncated:
@@ -85,15 +90,16 @@ def do_test(model, env):
             lines_real = prepare(obs_next, -1, None, "Real:")
             lines_pred = prepare(obs_pred, -1, None, "Predicted:")
 
-            losses = t10n.compute_losses(
+            total_loss, losses = t10n.compute_losses(
                 logger=None,
-                obs_index=model.abs_index,
-                loss_weights=None,
+                abs_index=model.abs_index,
+                loss_weights=weights,
                 next_obs=torch.as_tensor(obs_next).unsqueeze(0),
                 pred_obs=obs_pred_raw.unsqueeze(0),
             )
 
-            print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f, threshold=%.4f" % losses)
+            # print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f, threshold=%.4f" % losses)
+            print("Losses: %s | %s" % (total_loss, losses))
 
             # print(Decoder.decode(obs_prev).render(0))
             # for i in range(len(bfields)):
