@@ -49,17 +49,14 @@ class Hex(namedtuple("Hex", ["data", "stack"] + list([k for k in HEX_ATTR_MAP.ke
             if field in ["data", "stack"]:
                 continue
 
-            value = getattr(self, field)
-            value = value.struct if value.struct else value.v
             maxlen = max(maxlen, len(field))
+            value = getattr(self, field)
 
-            if value is not None:
-                pass
-            elif compact:
+            if compact and value.v is None:
                 continue
 
             lines.append((field, value))
-        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))
+        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if v is None else v) for (field, v) in lines]))
 
     def action(self, hexaction):
         if isinstance(hexaction, str):

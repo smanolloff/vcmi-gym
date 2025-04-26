@@ -33,13 +33,10 @@ class GlobalStats(namedtuple("GlobalStats", ["data"] + list(GLOBAL_ATTR_MAP.keys
             if field == "data":
                 continue
 
-            value = getattr(self, field)
-            value = value.struct if value.struct else value.v
             maxlen = max(maxlen, len(field))
+            value = getattr(self, field)
 
-            if value is not None:
-                pass
-            elif compact:
+            if compact and value.v is None:
                 continue
 
             lines.append((field, value))
@@ -57,14 +54,11 @@ class PlayerStats(namedtuple("PlayerStats", ["data"] + list(PLAYER_ATTR_MAP.keys
             if field == "data":
                 continue
 
-            value = getattr(self, field)
-            value = value.struct if value.struct else value.v
             maxlen = max(maxlen, len(field))
+            value = getattr(self, field)
 
-            if value is not None:
-                pass
-            elif compact:
+            if compact and value.v is None:
                 continue
 
             lines.append((field, value))
-        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))
+        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if v is None else v) for (field, v) in lines]))

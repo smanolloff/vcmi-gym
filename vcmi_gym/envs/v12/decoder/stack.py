@@ -45,19 +45,28 @@ class Stack(namedtuple("Stack", ["hex"] + list([k.removeprefix("STACK_") for k i
                 continue
 
             value = getattr(self, field)
-            value = value.struct if value.struct else value.v
+
+            if value.struct:
+                v = value.struct
+            elif value.vrange:
+                if value.vrange[0] == value.vrange[1]:
+                    v = value.vrange[0]
+                else:
+                    v = "%s…%s" % value.vrange
+            else:
+                v = value.v
+
             maxlen = max(maxlen, len(field))
 
             if value is not None:
                 match field:
                     case "SIDE":
-                        value = self._side()
-
+                        v = self._side()
             elif compact:
                 continue
 
-            lines.append((field, value))
-        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if value is None else value) for (field, value) in lines]))
+            lines.append((field, v))
+        print("\n".join(["%s | %s" % (field.ljust(maxlen), "" if v is None else v) for (field, v) in lines]))
 
     def _side(self):
         if self.SIDE.v is None:

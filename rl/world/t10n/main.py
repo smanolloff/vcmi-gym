@@ -14,7 +14,7 @@ def test(weights_file):
         model.eval()
         # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", random_heroes=1, swap_sides=1)
         env = VcmiEnv(
-            # mapname="gym/generated/evaluation/8x512.vmap",
+            mapname="gym/generated/evaluation/8x512.vmap",
             opponent="BattleAI",
             swap_sides=0,
             random_heroes=1,
@@ -128,25 +128,25 @@ def do_test(model, env):
             #         assert a == 1
             #         return "Wait"
 
-        if len(dream) > 2:
-            print(" ******** SEQUENCE: ********** ")
-            print(env.render_transitions(add_regular_render=False))
-            print(" ******** DREAM: ********** ")
-            rcfg = env.reward_cfg._replace(step_fixed=0)
-            for i, (obs, act, obs_real) in enumerate(dream):
-                print("*" * 10)
-                if i == 0:
-                    print("Start:")
-                    print(Decoder.decode(obs).render(act))
-                else:
-                    bf_real = Decoder.decode(obs_real)
-                    bf = Decoder.decode(obs)
-                    print(f"Real step #{i}:")
-                    print(bf_real.render(act))
-                    print("")
-                    print(f"Dream step #{i}:")
-                    print(bf.render(act))
-                    print(f"Real / Dream rewards: {env.calc_reward(0, bf_real, rcfg)} / {env.calc_reward(0, bf, rcfg)}:")
+        # if len(dream) > 2:
+        #     print(" ******** SEQUENCE: ********** ")
+        #     print(env.render_transitions(add_regular_render=False))
+        #     print(" ******** DREAM: ********** ")
+        #     rcfg = env.reward_cfg._replace(step_fixed=0)
+        #     for i, (obs, act, obs_real) in enumerate(dream):
+        #         print("*" * 10)
+        #         if i == 0:
+        #             print("Start:")
+        #             print(Decoder.decode(obs).render(act))
+        #         else:
+        #             bf_real = Decoder.decode(obs_real)
+        #             bf = Decoder.decode(obs)
+        #             print(f"Real step #{i}:")
+        #             print(bf_real.render(act))
+        #             print("")
+        #             print(f"Dream step #{i}:")
+        #             print(bf.render(act))
+        #             print(f"Real / Dream rewards: {env.calc_reward(0, bf_real, rcfg)} / {env.calc_reward(0, bf, rcfg)}:")
 
     # print(env.render_transitions())
 

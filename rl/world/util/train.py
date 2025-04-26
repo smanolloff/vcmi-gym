@@ -400,11 +400,11 @@ def train(
 
         # from .analyze_loss import analyze_loss
         # topk = 5
-        # analyzed_attrs, top3_frac, top3_loss = analyze_loss(model, train_attrlosses, eval_attrlosses, topk=topk)
-        # for group_name, group_topk_attrs in top3_frac.items():
+        # analyzed_attrs, topk_frac, top3_loss = analyze_loss(model, train_attrlosses, eval_attrlosses, topk=topk)
+        # for group_name, group_topk_attrs in topk_frac.items():
         #     print("Top%d loss diff attrs in group: %s" % (topk, group_name))
-        #     for name, (diff_loss, diff_frac, train_loss, eval_loss) in group_topk_attrs:
-        #         print("    %-30s diff: %.3f (x%.1f) | train: %.3f | eval: %.3f" % (name, diff_loss, diff_frac, train_loss, eval_loss))
+        #     for name, (diff_loss, diff_frac, eval_loss, train_loss) in group_topk_attrs:
+        #         print("    %-30s diff: %.3f (x%.1f) | eval: %.3f | train: %.3f" % (name, diff_loss, diff_frac, eval_loss, train_loss))
         # import ipdb; ipdb.set_trace()  # noqa
 
         accumulate_logs(wlog)

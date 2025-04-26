@@ -12,7 +12,17 @@ class Value:
         elif self.struct:
             return f"Value(struct={self.struct})"
         else:
-            return f"Value(v={self.v})"
+            return f"Value(v={self})"
+
+    def __str__(self):
+        if self.v is None:
+            return ""
+        elif self.struct:
+            return str(self.struct)
+        elif self.vrange:
+            return "%s..%s" % self.vrange
+        else:
+            return str(self.v)
 
     def __init__(
         self,

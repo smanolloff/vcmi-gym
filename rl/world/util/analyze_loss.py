@@ -68,7 +68,7 @@ def analyze_loss(model, train_attrlosses, eval_attrlosses, topk=3, verbose=False
                 attr_diff_loss = attr_eval_loss - attr_train_loss
                 attr_diff_frac = (attr_diff_loss / attr_train_loss) if attr_train_loss != 0 else float("nan")
                 attrstats[group][attr_id][:] = torch.tensor([attr_diff_loss, attr_diff_frac, attr_eval_loss, attr_train_loss])
-                _print("    %-30s diff: %.3f (x%.1f) | train: %.3f | eval: %.3f" % (var_name, attr_diff_loss, attr_diff_frac, attr_train_loss, attr_eval_loss))
+                _print("    %-30s diff: %.3f (x%.1f) | eval: %.3f | train: %.3f" % (var_name, attr_diff_loss, attr_diff_frac, attr_eval_loss, attr_train_loss))
 
     res = {}
     for group in attrstats.keys():
@@ -78,8 +78,11 @@ def analyze_loss(model, train_attrlosses, eval_attrlosses, topk=3, verbose=False
     topk_diff = {}
 
     for group in attrstats:
-        topk_frac_ind = attrstats[group][:, 0].topk(topk).indices
-        topk_diff_ind = attrstats[group][:, 1].topk(topk).indices
+        k = min(topk, attrstats[group].shape[0])
+        if k == 0:
+            continue
+        topk_frac_ind = attrstats[group][:, 0].topk(k).indices
+        topk_diff_ind = attrstats[group][:, 1].topk(k).indices
         topk_frac[group] = [(attrnames[group][i], attrstats[group][i]) for i in topk_frac_ind]
         topk_diff[group] = [(attrnames[group][i], attrstats[group][i]) for i in topk_diff_ind]
 

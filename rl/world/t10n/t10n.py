@@ -323,12 +323,13 @@ class TransitionModel(nn.Module):
             # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(z_size_hex),
             nn.LeakyReLU(),
+            nn.Dropout(p=0.3)
         )
         # => (B, 165, Z_HEX)
 
         # Transformer (hexes only)
         self.transformer_hex = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=z_size_hex, nhead=8, batch_first=True),
+            nn.TransformerEncoderLayer(d_model=z_size_hex, nhead=8, dropout=0.3, batch_first=True),
             num_layers=6
         )
         # => (B, 165, Z_HEX)
@@ -338,7 +339,10 @@ class TransitionModel(nn.Module):
         #
 
         # (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
-        self.aggregator = nn.LazyLinear(2048)
+        self.aggregator = nn.Sequential(
+            nn.LazyLinear(2048),
+            nn.LeakyReLU(),
+        )
         # => (B, Z_AGG)
 
         #
@@ -543,8 +547,17 @@ class TransitionModel(nn.Module):
 
 def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
     # Aggregate each feature's loss across players/hexes
-    mdim = tuple(range(logits["continuous"].dim() - 1))
+    # mdim = tuple(range(logits["continuous"].dim() - 1))
     # mdim = (0,) if t == "global" else (0, 1)
+
+    if logits["continuous"].dim() == 3:
+        # (B, 165, N_FEATS)
+        def sum_repeats(loss):
+            return loss.sum(dim=1)
+    else:
+        # (B, N_FEATS)
+        def sum_repeats(loss):
+            return loss
 
     losses = {}
 
@@ -560,14 +573,14 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
             # (B, N_CONT_FEATS)             when t="global"
             # (B, 2, N_CONT_FEATS)          when t="player"
             # (B, 165, N_CONT_FEATS)        when t="hex"
-            losses[subtype] = F.mse_loss(lgt, tgt, reduction="none").mean(dim=mdim)
+            losses[subtype] = sum_repeats(F.mse_loss(lgt, tgt, reduction="none")).mean(dim=0)
             # => (N_CONT_FEATS)
 
         elif subtype == "cont_nullbit":
             # (B, N_EXPLICIT_NULL_CONT_FEATS)      when t="global"
             # (B, 2, N_EXPLICIT_NULL_CONT_FEATS)   when t="player"
             # (B, 165, N_EXPLICIT_NULL_CONT_FEATS) when t="hex"
-            losses[subtype] = F.binary_cross_entropy_with_logits(lgt, tgt, reduction="none").mean(dim=mdim)
+            losses[subtype] = sum_repeats(F.binary_cross_entropy_with_logits(lgt, tgt, reduction="none")).mean(dim=0)
             # => (N_EXPLICIT_NULL_CONT_FEATS)
 
         elif subtype == "binaries":
@@ -578,11 +591,11 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
                 # (B, 165, N_BIN_FEATi_BITS) when t="hex"
 
                 # XXX:
-                # reduction="none" would result in (B, N_FEATi_BITS) result
+                # reduction="none" would result in same-as-input shape result
                 # ...but having separate losses for each bit would be too much
                 # ... If separate weights are needed for each bit, then maybe dont reduce it...
                 # => for now, just reduce it to a single loss per feature
-                loss[i] = F.binary_cross_entropy_with_logits(i_lgt, i_tgt)
+                loss[i] = sum_repeats(F.binary_cross_entropy_with_logits(i_lgt, i_tgt, reduction="none")).mean()
                 # (1)  # single loss the i'th binary feat
             losses[subtype] = loss
             # (N_BIN_FEATS)
@@ -601,7 +614,8 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
                     i_lgt = i_lgt.swapaxes(1, 2)
                     i_tgt = i_tgt.swapaxes(1, 2)
 
-                loss[i] = F.cross_entropy(i_lgt, i_tgt)
+                # XXX: cross_entropy always removes last dim (even with reduction=none)
+                loss[i] = sum_repeats(F.cross_entropy(i_lgt, i_tgt, reduction="none")).mean(dim=0)
                 # (1)  # single loss for the i'th categorical feature
             losses[subtype] = loss
             # (N_CAT_FEATS)
@@ -614,7 +628,7 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
                 # (B, 2, N_THR_FEATi_BINS)   when t="player"
                 # (B, 165, N_THR_FEATi_BINS) when t="hex"
 
-                bce_loss = F.binary_cross_entropy_with_logits(i_lgt, i_tgt)
+                bce_loss = sum_repeats(F.binary_cross_entropy_with_logits(i_lgt, i_tgt, reduction="none")).mean()
                 # (1)  # single loss for the i'th global threshold feature
 
                 # Monotonicity regularization:
