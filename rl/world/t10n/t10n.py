@@ -573,11 +573,28 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
             return loss
 
     # MSE but relative
-    # (clamp is a crude method of solving enormous losses when target is 0)
-    def msre_loss(pred, target):
-        return torch.clamp(((pred - target) / (target + 1e-6)) ** 2, max=10)
+    # Too explosive if target is close to 0
+    def msre_loss(pred, target, eps=torch.tensor(1e-6)):
+        return ((pred - target) / (target + eps)) ** 2
+
+    def clamped_msre_loss(*args, **kwargs):
+        return torch.clamp(msre_loss(*args, **kwargs), max=100.0)
+
+    # => (clamp is a crude method of solving enormous losses when target is 0)
+
+    # hybrid variant (too forgiving if target < threshold)
+    # def msre_loss(pred, target):
+    #     threshold = torch.tensor(1e-2)
+    #     is_small = (target < threshold)
+    #     abs_err = (pred - target).abs()
+    #     rel_err = (abs_err / torch.max(target, threshold)).abs()
+    #     loss = torch.where(is_small, abs_err, rel_err)
+    #     return loss
 
     losses = {}
+
+    # This is used to debug the msre loss issue where clamping does not seem to help
+    debuglosses = {}
 
     for dgroup in DataGroup.as_list():
         if not len(logits[dgroup]):
@@ -591,14 +608,16 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
             # (B, N_CONTABS_FEATS)             when t=Group.GLOBAL
             # (B, 2, N_CONTABS_FEATS)          when t=Group.PLAYER
             # (B, 165, N_CONTABS_FEATS)        when t=Group.HEX
-            losses[dgroup] = sum_repeats(F.mse_loss(lgt, tgt, reduction="none")).mean(dim=0)
+            debuglosses[dgroup] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
+            losses[dgroup] = sum_repeats(clamped_msre_loss(lgt, tgt)).mean(dim=0)
             # => (N_CONT_FEATS)
 
         elif dgroup == Group.CONT_REL:
             # (B, N_CONTREL_FEATS)             when t=Group.GLOBAL
             # (B, 2, N_CONTREL_FEATS)          when t=Group.PLAYER
             # (B, 165, N_CONTREL_FEATS)        when t=Group.HEX
-            losses[dgroup] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
+            # CONT_REL are already relative and always in the (0, 1k) range => use abs error
+            losses[dgroup] = sum_repeats(F.mse_loss(lgt, tgt, reduction="none")).mean(dim=0)
             # => (N_CONT_FEATS)
 
         elif dgroup == Group.CONT_NULLBIT:
@@ -691,7 +710,10 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
 
         losses[dgroup] *= weights[dgroup]
 
-    return losses
+        if dgroup in debuglosses:
+            debuglosses[dgroup] *= weights[dgroup]
+
+    return losses, debuglosses
 
 
 def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
@@ -706,6 +728,7 @@ def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
     }
 
     losses = {}
+    debuglosses = {}
     device = next_obs.device
     total_loss = torch.tensor(0., device=pred_obs.device)
 
@@ -714,10 +737,10 @@ def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
         target = extract(cgroup, next_obs)
         index = abs_index[cgroup]
         weights = loss_weights[cgroup]
-        losses[cgroup] = _compute_losses(logits, target, index, weights=weights, device=device)
+        losses[cgroup], debuglosses[cgroup] = _compute_losses(logits, target, index, weights=weights, device=device)
         total_loss += sum(subtype_losses.sum() for subtype_losses in losses[cgroup].values())
 
-    return total_loss, losses
+    return total_loss, losses, debuglosses
 
 
 def train_model(
@@ -738,6 +761,7 @@ def train_model(
     n_batches = 0
 
     agglosses = collections.defaultdict(float)
+    aggdebuglosses = collections.defaultdict(float)
     attrlosses = {
         Group.GLOBAL: np.zeros(len(GLOBAL_ATTR_MAP)),
         Group.PLAYER: np.zeros(len(PLAYER_ATTR_MAP)),
@@ -762,19 +786,23 @@ def train_model(
 
             with maybe_autocast:
                 pred_obs = model(obs, action)
-                loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
+                loss_tot, losses, debuglosses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
             agglosses["total"] += loss_tot.item()
-            for cgroup, grouploss in losses.items():
+            for context, datatype_groups in losses.items():
                 # global/player/hex
-                for dgroup, typeloss in grouploss.items():
+                for typename, typeloss in datatype_groups.items():
                     # continuous/cont_nullbit/binaries/...
-                    agglosses[dgroup] += typeloss.sum().item()
-                    agglosses[cgroup] += typeloss.sum().item()
+                    agglosses[typename] += typeloss.sum().item()
+                    agglosses[context] += typeloss.sum().item()
                     for i in range(typeloss.shape[0]):
                         var_loss = typeloss[i]
-                        attr_id = model.obs_index.attr_ids[cgroup][dgroup][i]
-                        attrlosses[cgroup][attr_id] += var_loss.item()
+                        attr_id = model.obs_index.attr_ids[context][typename][i]
+                        attrlosses[context][attr_id] += var_loss.item()
+
+            for context, datatype_groups in debuglosses.items():
+                for typename, typeloss in datatype_groups.items():
+                    aggdebuglosses[typename] += typeloss.sum().item()
 
             if accumulate_grad:
                 if scaler:
@@ -811,7 +839,10 @@ def train_model(
     attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
 
     for k, v in agglosses.items():
-        wlog[f"train_loss/{k}"] = agglosses[k]
+        wlog[f"train_loss/{k}"] = v
+
+    for k, v in aggdebuglosses.items():
+        wlog[f"debug/train_loss/{k}"] = v
 
     return wlog["train_loss/total"], agglosses, attrlosses
 
@@ -826,6 +857,7 @@ def eval_model(
 ):
     model.eval()
     timer = Timer()
+    aggdebuglosses = collections.defaultdict(float)
     agglosses = collections.defaultdict(float)
     attrlosses = {
         Group.GLOBAL: np.zeros(len(GLOBAL_ATTR_MAP)),
@@ -843,19 +875,26 @@ def eval_model(
         with torch.no_grad():
             pred_obs = model(obs, action)
 
-        loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
+        loss_tot, losses, debuglosses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
         agglosses["total"] += loss_tot.item()
         for cgroup, grouploss in losses.items():
             # global/player/hex
-            for dgroup, typeloss in grouploss.items():
-                # continuous/cont_nullbit/binaries/...
-                agglosses[dgroup] += typeloss.sum().item()
-                agglosses[cgroup] += typeloss.sum().item()
-                for i in range(typeloss.shape[0]):
-                    var_loss = typeloss[i]
-                    attr_id = model.obs_index.attr_ids[cgroup][dgroup][i]
-                    attrlosses[cgroup][attr_id] += var_loss.item()
+            for context, datatype_groups in losses.items():
+                # global/player/hex
+                for typename, typeloss in datatype_groups.items():
+                    # continuous/cont_nullbit/binaries/...
+                    agglosses[typename] += typeloss.sum().item()
+                    agglosses[context] += typeloss.sum().item()
+                    for i in range(typeloss.shape[0]):
+                        var_loss = typeloss[i]
+                        attr_id = model.obs_index.attr_ids[context][typename][i]
+                        attrlosses[context][attr_id] += var_loss.item()
+
+            for context, datatype_groups in debuglosses.items():
+                for typename, typeloss in datatype_groups.items():
+                    aggdebuglosses[typename] += typeloss.sum().item()
+                    aggdebuglosses[context] += typeloss.sum().item()
 
         timer.start()
 
@@ -866,6 +905,9 @@ def eval_model(
     attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
 
     for k, v in agglosses.items():
-        wlog[f"eval_loss/{k}"] = agglosses[k]
+        wlog[f"eval_loss/{k}"] = v
+
+    for k, v in aggdebuglosses.items():
+        wlog[f"debug/eval_loss/{k}"] = v
 
     return wlog["eval_loss/total"], agglosses, attrlosses
