@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from ..util.buffer_base import BufferBase
 from ..util.dataset_vcmi import Data, Context
 from ..util.misc import layer_init
-from ..util.obs_index import ObsIndex, Group
+from ..util.obs_index import ObsIndex, Group, ContextGroup, DataGroup
 from ..util.timer import Timer
 
 from ..util.constants_v12 import (
@@ -573,40 +573,43 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
             return loss
 
     # MSE but relative
-    msre_loss = lambda have, want: ((have - want) / (want + 1e-6)) ** 2
+    # (clamp is a crude method of solving enormous losses when target is 0)
+    def msre_loss(pred, target):
+        return torch.clamp(((pred - target) / (target + 1e-6)) ** 2, max=10)
 
     losses = {}
 
-    for subtype in [Group.CONT_ABS, Group.CONT_REL, Group.CONT_NULLBIT, Group.BINARIES, Group.CATEGORICALS, Group.THRESHOLDS]:
-        if not len(logits[subtype]):
-            losses[subtype] = torch.tensor([], device=device)
+    for dgroup in DataGroup.as_list():
+        if not len(logits[dgroup]):
+            losses[dgroup] = torch.tensor([], device=device)
             continue
 
-        lgt = logits[subtype]
-        tgt = target[subtype]
+        lgt = logits[dgroup]
+        tgt = target[dgroup]
 
-        if subtype == Group.CONT_ABS:
+        if dgroup == Group.CONT_ABS:
             # (B, N_CONTABS_FEATS)             when t=Group.GLOBAL
             # (B, 2, N_CONTABS_FEATS)          when t=Group.PLAYER
             # (B, 165, N_CONTABS_FEATS)        when t=Group.HEX
-            losses[subtype] = sum_repeats(F.mse_loss(lgt, tgt, reduction="none")).mean(dim=0)
+            losses[dgroup] = sum_repeats(F.mse_loss(lgt, tgt, reduction="none")).mean(dim=0)
             # => (N_CONT_FEATS)
 
-        elif subtype == Group.CONT_REL:
+        elif dgroup == Group.CONT_REL:
             # (B, N_CONTREL_FEATS)             when t=Group.GLOBAL
             # (B, 2, N_CONTREL_FEATS)          when t=Group.PLAYER
             # (B, 165, N_CONTREL_FEATS)        when t=Group.HEX
-            losses[subtype] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
+            import ipdb; ipdb.set_trace()  # noqa
+            losses[dgroup] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
             # => (N_CONT_FEATS)
 
-        elif subtype == Group.CONT_NULLBIT:
+        elif dgroup == Group.CONT_NULLBIT:
             # (B, N_EXPLICIT_NULL_CONT_FEATS)      when t=Group.GLOBAL
             # (B, 2, N_EXPLICIT_NULL_CONT_FEATS)   when t=Group.PLAYER
             # (B, 165, N_EXPLICIT_NULL_CONT_FEATS) when t=Group.HEX
-            losses[subtype] = sum_repeats(F.binary_cross_entropy_with_logits(lgt, tgt, reduction="none")).mean(dim=0)
+            losses[dgroup] = sum_repeats(F.binary_cross_entropy_with_logits(lgt, tgt, reduction="none")).mean(dim=0)
             # => (N_EXPLICIT_NULL_CONT_FEATS)
 
-        elif subtype == Group.BINARIES:
+        elif dgroup == Group.BINARIES:
             loss = torch.zeros(len(lgt), device=device)
             for i, (i_lgt, i_tgt) in enumerate(zip(lgt, tgt)):
                 # (B, N_BIN_FEATi_BITS)      when t=Group.GLOBAL
@@ -620,10 +623,10 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
                 # => for now, just reduce it to a single loss per feature
                 loss[i] = sum_repeats(F.binary_cross_entropy_with_logits(i_lgt, i_tgt, reduction="none")).mean()
                 # (1)  # single loss the i'th binary feat
-            losses[subtype] = loss
+            losses[dgroup] = loss
             # (N_BIN_FEATS)
 
-        elif subtype == Group.CATEGORICALS:
+        elif dgroup == Group.CATEGORICALS:
             loss = torch.zeros(len(lgt), device=device)
             for i, (i_lgt, i_tgt) in enumerate(zip(lgt, tgt)):
                 # (B, N_CAT_FEATi_CLASSES)      when t=Group.GLOBAL
@@ -640,10 +643,10 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
                 # XXX: cross_entropy always removes last dim (even with reduction=none)
                 loss[i] = sum_repeats(F.cross_entropy(i_lgt, i_tgt, reduction="none")).mean(dim=0)
                 # (1)  # single loss for the i'th categorical feature
-            losses[subtype] = loss
+            losses[dgroup] = loss
             # (N_CAT_FEATS)
 
-        elif subtype == Group.THRESHOLDS:
+        elif dgroup == Group.THRESHOLDS:
             loss = torch.zeros(len(lgt), device=device)
 
             for i, (i_lgt, i_tgt) in enumerate(zip(lgt, tgt)):
@@ -682,12 +685,12 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
                 mono_loss = F.relu(mono_diff).mean()  # * 1.0  (optional lambda coefficient)
                 loss[i] = (bce_loss + mono_loss)
                 # (1)  # single loss for the i'th global threshold feature
-            losses[subtype] = loss
+            losses[dgroup] = loss
             # (N_THR_FEATS)
         else:
-            raise Exception("unexpected subtype: %s" % subtype)
+            raise Exception("unexpected dgroup: %s" % dgroup)
 
-        losses[subtype] *= weights[subtype]
+        losses[dgroup] *= weights[dgroup]
 
     return losses
 
@@ -707,13 +710,13 @@ def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
     device = next_obs.device
     total_loss = torch.tensor(0., device=pred_obs.device)
 
-    for group in [Group.GLOBAL, Group.PLAYER, Group.HEX]:
-        logits = extract(group, pred_obs)
-        target = extract(group, next_obs)
-        index = abs_index[group]
-        weights = loss_weights[group]
-        losses[group] = _compute_losses(logits, target, index, weights=weights, device=device)
-        total_loss += sum(subtype_losses.sum() for subtype_losses in losses[group].values())
+    for cgroup in ContextGroup.as_list():
+        logits = extract(cgroup, pred_obs)
+        target = extract(cgroup, next_obs)
+        index = abs_index[cgroup]
+        weights = loss_weights[cgroup]
+        losses[cgroup] = _compute_losses(logits, target, index, weights=weights, device=device)
+        total_loss += sum(subtype_losses.sum() for subtype_losses in losses[cgroup].values())
 
     return total_loss, losses
 
@@ -763,16 +766,16 @@ def train_model(
                 loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
             agglosses["total"] += loss_tot.item()
-            for group, grouploss in losses.items():
+            for cgroup, grouploss in losses.items():
                 # global/player/hex
-                for subtype, typeloss in grouploss.items():
+                for dgroup, typeloss in grouploss.items():
                     # continuous/cont_nullbit/binaries/...
-                    agglosses[subtype] += typeloss.sum().item()
-                    agglosses[group] += typeloss.sum().item()
+                    agglosses[dgroup] += typeloss.sum().item()
+                    agglosses[cgroup] += typeloss.sum().item()
                     for i in range(typeloss.shape[0]):
                         var_loss = typeloss[i]
-                        attr_id = model.obs_index.attr_ids[group][subtype][i]
-                        attrlosses[group][attr_id] += var_loss.item()
+                        attr_id = model.obs_index.attr_ids[cgroup][dgroup][i]
+                        attrlosses[cgroup][attr_id] += var_loss.item()
 
             if accumulate_grad:
                 if scaler:
@@ -844,16 +847,16 @@ def eval_model(
         loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
         agglosses["total"] += loss_tot.item()
-        for group, grouploss in losses.items():
+        for cgroup, grouploss in losses.items():
             # global/player/hex
-            for subtype, typeloss in grouploss.items():
+            for dgroup, typeloss in grouploss.items():
                 # continuous/cont_nullbit/binaries/...
-                agglosses[subtype] += typeloss.sum().item()
-                agglosses[group] += typeloss.sum().item()
+                agglosses[dgroup] += typeloss.sum().item()
+                agglosses[cgroup] += typeloss.sum().item()
                 for i in range(typeloss.shape[0]):
                     var_loss = typeloss[i]
-                    attr_id = model.obs_index.attr_ids[group][subtype][i]
-                    attrlosses[group][attr_id] += var_loss.item()
+                    attr_id = model.obs_index.attr_ids[cgroup][dgroup][i]
+                    attrlosses[cgroup][attr_id] += var_loss.item()
 
         timer.start()
 
