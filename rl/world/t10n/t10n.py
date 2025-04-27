@@ -572,28 +572,22 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
         def sum_repeats(loss):
             return loss
 
-    # MSE but relative
-    # Too explosive if target is close to 0
-    def msre_loss(pred, target, eps=torch.tensor(1e-6)):
-        return ((pred - target) / (target + eps)) ** 2
+    # MSRE loss explodes when target=0
+    # * loss clamping to 10 does not help
+    # * eps does not help unless it's very high (e.g. 0.01)
+    #   eps=0.01 and clamp=10 seems to allows some learning, but the loss signal
+    #   might be too skewed as LINNORM(v=1, vmax=1500)=0.0007 (<< eps)
+    # def msre_loss(pred, target, eps=torch.tensor(1e-3)):
+    #     return ((pred - target) / (target + eps)) ** 2
 
-    def clamped_msre_loss(*args, **kwargs):
-        return torch.clamp(msre_loss(*args, **kwargs), max=100.0)
-
-    # => (clamp is a crude method of solving enormous losses when target is 0)
-
-    # hybrid variant (too forgiving if target < threshold)
-    # def msre_loss(pred, target):
-    #     threshold = torch.tensor(1e-2)
-    #     is_small = (target < threshold)
-    #     abs_err = (pred - target).abs()
-    #     rel_err = (abs_err / torch.max(target, threshold)).abs()
-    #     loss = torch.where(is_small, abs_err, rel_err)
-    #     return loss
+    # Slighly relaxed version of MSRE (abs instead of square)
+    # With eps=1e-3 + clamp=100 it does allow learning
+    def mre_loss(pred, target, eps=1e-3, clamp=100.0):
+        return torch.abs((pred - target) / (target + eps)).clamp(max=clamp)
 
     losses = {}
 
-    # This is used to debug the msre loss issue where clamping does not seem to help
+    # Used for debugging the explosive msre loss
     debuglosses = {}
 
     for dgroup in DataGroup.as_list():
@@ -608,8 +602,8 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
             # (B, N_CONTABS_FEATS)             when t=Group.GLOBAL
             # (B, 2, N_CONTABS_FEATS)          when t=Group.PLAYER
             # (B, 165, N_CONTABS_FEATS)        when t=Group.HEX
-            debuglosses[dgroup] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
-            losses[dgroup] = sum_repeats(clamped_msre_loss(lgt, tgt)).mean(dim=0)
+            # debuglosses[dgroup] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
+            losses[dgroup] = sum_repeats(mre_loss(lgt, tgt)).mean(dim=0)
             # => (N_CONT_FEATS)
 
         elif dgroup == Group.CONT_REL:
