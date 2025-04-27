@@ -598,7 +598,6 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
             # (B, N_CONTREL_FEATS)             when t=Group.GLOBAL
             # (B, 2, N_CONTREL_FEATS)          when t=Group.PLAYER
             # (B, 165, N_CONTREL_FEATS)        when t=Group.HEX
-            import ipdb; ipdb.set_trace()  # noqa
             losses[dgroup] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
             # => (N_CONT_FEATS)
 
