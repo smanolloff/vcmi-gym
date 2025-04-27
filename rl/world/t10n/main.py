@@ -107,6 +107,7 @@ def do_test(model, env):
             print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real, lines_pred)]))
             print("")
 
+            import ipdb; ipdb.set_trace()  # noqa
             # bf_next = Decoder.decode(obs_next)
             # bf_pred = Decoder.decode(obs_pred)
 
