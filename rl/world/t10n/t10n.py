@@ -572,19 +572,6 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
         def sum_repeats(loss):
             return loss
 
-    # MSRE loss explodes when target=0
-    # * loss clamping to 10 does not help
-    # * eps does not help unless it's very high (e.g. 0.01)
-    #   eps=0.01 and clamp=10 seems to allows some learning, but the loss signal
-    #   might be too skewed as LINNORM(v=1, vmax=1500)=0.0007 (<< eps)
-    # def msre_loss(pred, target, eps=torch.tensor(1e-3)):
-    #     return ((pred - target) / (target + eps)) ** 2
-
-    # Slighly relaxed version of MSRE (abs instead of square)
-    # With eps=1e-3 + clamp=100 it does allow learning
-    def mre_loss(pred, target, eps=1e-3, clamp=100.0):
-        return torch.abs((pred - target) / (target + eps)).clamp(max=clamp)
-
     losses = {}
 
     # Used for debugging the explosive msre loss
@@ -598,19 +585,11 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
         lgt = logits[dgroup]
         tgt = target[dgroup]
 
-        if dgroup == Group.CONT_ABS:
+        if dgroup in [Group.CONT_ABS, Group.CONT_REL]:
             # (B, N_CONTABS_FEATS)             when t=Group.GLOBAL
             # (B, 2, N_CONTABS_FEATS)          when t=Group.PLAYER
             # (B, 165, N_CONTABS_FEATS)        when t=Group.HEX
             # debuglosses[dgroup] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
-            losses[dgroup] = sum_repeats(mre_loss(lgt, tgt)).mean(dim=0)
-            # => (N_CONT_FEATS)
-
-        elif dgroup == Group.CONT_REL:
-            # (B, N_CONTREL_FEATS)             when t=Group.GLOBAL
-            # (B, 2, N_CONTREL_FEATS)          when t=Group.PLAYER
-            # (B, 165, N_CONTREL_FEATS)        when t=Group.HEX
-            # CONT_REL are already relative and always in the (0, 1k) range => use abs error
             losses[dgroup] = sum_repeats(F.mse_loss(lgt, tgt, reduction="none")).mean(dim=0)
             # => (N_CONT_FEATS)
 
