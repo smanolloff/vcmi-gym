@@ -59,6 +59,11 @@ tmux source ~/.tmux.conf || :
 touch ~/.no_auto_tmux
 
 #
+# S3 setup
+# edit ~/.bashrc and set AWS keys
+#
+
+#
 # GIT setup
 # use git.sh (would exceed vastai init maxlen)
 #
