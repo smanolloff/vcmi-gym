@@ -807,7 +807,7 @@ def train_model(
 
     total_wait = timer.peek()
     wlog["train_dataset/wait_time_s"] = total_wait
-    wlog["total"] = total_loss
+    wlog["train_loss/total"] = total_loss / n_batches
 
     for context, datatype_groups in agglosses.items():
         for typename, typeloss in datatype_groups.items():
@@ -876,7 +876,7 @@ def eval_model(
 
     total_wait = timer.peek()
     wlog["eval_dataset/wait_time_s"] = total_wait
-    wlog["total"] = total_loss
+    wlog["eval_loss/total"] = total_loss / n_batches
 
     for context, datatype_groups in agglosses.items():
         for typename, typeloss in datatype_groups.items():

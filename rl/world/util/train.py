@@ -267,9 +267,11 @@ def train(
     timers["all"].start()
 
     eval_loss_best = None
+    wandb_commit = False
 
     while True:
         now = time.time()
+
         with timers["sample"]:
             buffer.load_samples(dataloader)
 
@@ -302,6 +304,7 @@ def train(
         # Evaluate first (for a baseline when resuming with modified params)
         if now - last_evaluation_at > config["eval"]["interval_s"]:
             last_evaluation_at = now
+            wandb_commit = True
 
             with timers["sample"]:
                 eval_buffer.load_samples(eval_dataloader)
@@ -409,9 +412,10 @@ def train(
 
         accumulate_logs(wlog)
 
-        if "eval_loss/total" in wlog:
+        if wandb_commit:
             wlog = dict(aggregate_logs(), iteration=stats.iteration, **timer_stats(timers))
             wandb_log(wlog, commit=True)
+            wandb_commit = False
         else:
             logger.info(dict(wlog, iteration=stats.iteration))
 
