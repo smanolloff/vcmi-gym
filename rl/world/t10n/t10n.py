@@ -733,8 +733,9 @@ def train_model(
     timer = Timer()
     n_batches = 0
 
-    agglosses = collections.defaultdict(float)
     aggdebuglosses = collections.defaultdict(float)
+    total_loss = 0
+    agglosses = collections.defaultdict(lambda: collections.defaultdict(float))
     attrlosses = {
         Group.GLOBAL: np.zeros(len(GLOBAL_ATTR_MAP)),
         Group.PLAYER: np.zeros(len(PLAYER_ATTR_MAP)),
@@ -761,13 +762,12 @@ def train_model(
                 pred_obs = model(obs, action)
                 loss_tot, losses, debuglosses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
-            agglosses["total"] += loss_tot.item()
+            total_loss += loss_tot.item()
             for context, datatype_groups in losses.items():
                 # global/player/hex
                 for typename, typeloss in datatype_groups.items():
                     # continuous/cont_nullbit/binaries/...
-                    agglosses[typename] += typeloss.sum().item()
-                    agglosses[context] += typeloss.sum().item()
+                    agglosses[context][typename] += typeloss.sum().item()
                     for i in range(typeloss.shape[0]):
                         var_loss = typeloss[i]
                         attr_id = model.obs_index.attr_ids[context][typename][i]
@@ -807,17 +807,22 @@ def train_model(
 
     total_wait = timer.peek()
     wlog["train_dataset/wait_time_s"] = total_wait
+    wlog["total"] = total_loss
 
-    agglosses = {k: v / n_batches for k, v in agglosses.items()}
-    attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
-
-    for k, v in agglosses.items():
-        wlog[f"train_loss/{k}"] = v
+    for context, datatype_groups in agglosses.items():
+        for typename, typeloss in datatype_groups.items():
+            k = f"{context}/{typename}"
+            v = typeloss / n_batches
+            agglosses[context][typename] = v
+            wlog[f"train_loss/{k}"] = v
 
     for k, v in aggdebuglosses.items():
         wlog[f"debug/train_loss/{k}"] = v
 
-    return wlog["train_loss/total"], agglosses, attrlosses
+    # NOTE: these could be logged to wandb.Table for custom histogram plots
+    attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
+
+    return total_loss, agglosses, attrlosses
 
 
 def eval_model(
@@ -831,7 +836,8 @@ def eval_model(
     model.eval()
     timer = Timer()
     aggdebuglosses = collections.defaultdict(float)
-    agglosses = collections.defaultdict(float)
+    total_loss = 0
+    agglosses = collections.defaultdict(lambda: collections.defaultdict(float))
     attrlosses = {
         Group.GLOBAL: np.zeros(len(GLOBAL_ATTR_MAP)),
         Group.PLAYER: np.zeros(len(PLAYER_ATTR_MAP)),
@@ -850,37 +856,39 @@ def eval_model(
 
         loss_tot, losses, debuglosses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
-        agglosses["total"] += loss_tot.item()
-        for cgroup, grouploss in losses.items():
+        total_loss += loss_tot.item()
+        for context, datatype_groups in losses.items():
             # global/player/hex
-            for context, datatype_groups in losses.items():
-                # global/player/hex
-                for typename, typeloss in datatype_groups.items():
-                    # continuous/cont_nullbit/binaries/...
-                    agglosses[typename] += typeloss.sum().item()
-                    agglosses[context] += typeloss.sum().item()
-                    for i in range(typeloss.shape[0]):
-                        var_loss = typeloss[i]
-                        attr_id = model.obs_index.attr_ids[context][typename][i]
-                        attrlosses[context][attr_id] += var_loss.item()
+            for typename, typeloss in datatype_groups.items():
+                # continuous/cont_nullbit/binaries/...
+                agglosses[context][typename] += typeloss.sum().item()
+                for i in range(typeloss.shape[0]):
+                    var_loss = typeloss[i]
+                    attr_id = model.obs_index.attr_ids[context][typename][i]
+                    attrlosses[context][attr_id] += var_loss.item()
 
-            for context, datatype_groups in debuglosses.items():
-                for typename, typeloss in datatype_groups.items():
-                    aggdebuglosses[typename] += typeloss.sum().item()
-                    aggdebuglosses[context] += typeloss.sum().item()
+        for context, datatype_groups in debuglosses.items():
+            for typename, typeloss in datatype_groups.items():
+                aggdebuglosses[typename] += typeloss.sum().item()
+                aggdebuglosses[context] += typeloss.sum().item()
 
         timer.start()
 
     total_wait = timer.peek()
     wlog["eval_dataset/wait_time_s"] = total_wait
+    wlog["total"] = total_loss
 
-    agglosses = {k: v / n_batches for k, v in agglosses.items()}
-    attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
-
-    for k, v in agglosses.items():
-        wlog[f"eval_loss/{k}"] = v
+    for context, datatype_groups in agglosses.items():
+        for typename, typeloss in datatype_groups.items():
+            k = f"{context}/{typename}"
+            v = typeloss / n_batches
+            agglosses[context][typename] = v
+            wlog[f"eval_loss/{k}"] = v
 
     for k, v in aggdebuglosses.items():
         wlog[f"debug/eval_loss/{k}"] = v
 
-    return wlog["eval_loss/total"], agglosses, attrlosses
+    # NOTE: these could be logged to wandb.Table for custom histogram plots
+    attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
+
+    return total_loss, agglosses, attrlosses

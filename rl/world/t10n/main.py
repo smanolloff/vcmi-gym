@@ -90,7 +90,7 @@ def do_test(model, env):
             lines_real = prepare(obs_next, -1, None, "Real:")
             lines_pred = prepare(obs_pred, -1, None, "Predicted:")
 
-            total_loss, losses = t10n.compute_losses(
+            total_loss, losses, debuglosses = t10n.compute_losses(
                 logger=None,
                 abs_index=model.abs_index,
                 loss_weights=weights,

@@ -140,9 +140,12 @@ class Decoder:
                 res[attr] = Value(**dict(kwargs, struct_cls=HexActionFlags, struct_mapping=pyconnector.HEX_ACT_MAP))
             else:
                 res[attr] = Value(**kwargs)
-
-        stack0 = Stack(hex=None, **dict(sres)) if sres["SIDE"].v is not None else None
         hex = Hex(**dict(res, data=hexdata, stack=None))
+
+        if all(sres[k].v is not None for k in ["SIDE", "SLOT"]):  # , "SPEED"]):
+            stack0 = Stack(hex=None, **dict(sres))
+        else:
+            stack0 = None
 
         # NOTE: no circular dependency (hex.stack.hex will be None and vice versa)
         # "shallow" links are still quite useful though

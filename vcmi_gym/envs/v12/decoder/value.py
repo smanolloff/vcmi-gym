@@ -95,7 +95,13 @@ class Value:
             self.v = raw_nonnull.argmax()
         elif enctype.startswith("EXPNORM"):
             assert len(raw_nonnull) == 1, f"internal error: len(raw_nonnull): {len(raw_nonnull)} != 1"
-            self.v = round(vmax ** raw_nonnull[0]) - 1
+            encoded = raw_nonnull[0]
+            exp_slope = math.exp(slope)
+            numerator = math.exp(encoded * (slope + 1e-6)) - 1
+            denominator = exp_slope - 1
+            res = (numerator / denominator) * vmax
+            self.v = round(res)
+
         elif enctype.startswith("LINNORM"):
             assert len(raw_nonnull) == 1, f"internal error: len(raw_nonnull): {len(raw_nonnull)} != 1"
             self.v = round(raw_nonnull[0] * vmax)
