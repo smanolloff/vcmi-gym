@@ -453,8 +453,6 @@ def train(
                 accumulate_grad=config["train"]["accumulate_grad"],
             )
 
-        time.sleep(1)
-
         # Mean loss for entire stage (1 row per attribute)
         df_stage_train[TableColumn.STAGE] = "train"
         df_stages = concat_dfs(df_stages, df_stage_train)
