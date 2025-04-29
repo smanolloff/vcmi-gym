@@ -28,6 +28,9 @@ from ..util.constants_v12 import (
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
+    GLOBAL_ATTR_MAP,
+    PLAYER_ATTR_MAP,
+    HEX_ATTR_MAP,
 )
 
 
@@ -106,19 +109,16 @@ def train(
 
     # assert config["wandb_log_interval_s"] > config["eval"]["interval_s"]
 
-    wtable_columns = [
-        TableColumn.STAGE,
-        TableColumn.ATTRIBUTE,
-        TableColumn.CONTEXT,
-        TableColumn.DATATYPE,
-        TableColumn.LOSS,
-    ]
+    assert config["wandb_table_log_interval_s"] >= config["wandb_table_update_interval_s"]
+    assert config["wandb_table_update_interval_s"] >= config["eval"]["interval_s"]
 
-    if config["wandb_table_interval_s"] > 0:
-        assert config["wandb_table_interval_s"] >= config["wandb_log_interval_s"]
-        loss_storage_df = pd.DataFrame(columns=wtable_columns)
-    else:
-        loss_storage_df = None
+    if config["wandb_table_log"]:
+        # Every update addds `num_attrs` rows
+        num_updates = config["wandb_table_log_interval_s"] // config["wandb_table_update_interval_s"]
+        num_attrs = sum(len(attrmap) for attrmap in [GLOBAL_ATTR_MAP, PLAYER_ATTR_MAP, HEX_ATTR_MAP])
+        max_rows = 200_000  # can be changed via wandb.Table.MAX_ARTIFACT_ROWS = ...
+        max_updates = max_rows // num_attrs
+        assert num_updates < max_updates
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
 
@@ -229,10 +229,8 @@ def train(
     if no_wandb:
         from unittest.mock import Mock
         wandb = Mock()
-        wtable = Mock(columns=wtable_columns)
     else:
         wandb = setup_wandb(config, model, __file__)
-        wtable = wandb.Table(columns=wtable_columns)
 
     accumulated_logs = {}
 
@@ -248,20 +246,11 @@ def train(
         accumulated_logs.clear()
         return agg_data
 
-    def wandb_log(data, commit=False):
-        wandb.log(data, commit=commit)
-        logger.info(data)
-
+    # Aggregate loss for entire stage (1 row per context/datatype pair)
     def aggregate_losses(stage, df):
-        aggregated = (
-            df[df[TableColumn.STAGE] == stage]
-            .groupby([TableColumn.ATTRIBUTE, TableColumn.CONTEXT, TableColumn.DATATYPE])[TableColumn.LOSS]
-            .mean()  # mean by attribute
-            # => dict with keys = tuple(attrname, context, datatype), values = float(loss)
-            .groupby([TableColumn.CONTEXT, TableColumn.DATATYPE])  # NOTE: no column LOSS anymore
-            .sum()   # sum by context/datatype
-            # => dict with keys = tuple(context, datatype), values = float(loss)
-        )
+        aggregated = df.groupby([TableColumn.CONTEXT, TableColumn.DATATYPE])[TableColumn.LOSS].sum()
+        # => keys = tuple(context, datatype), values = float(loss)
+
         res = {f"{stage}_loss/total": 0}
         for (ctx, dt), v in aggregated.items():
             res[f"{stage}_loss/{ctx}/{dt}"] = v
@@ -269,19 +258,39 @@ def train(
 
         return res
 
-    wandb_log({
+    table_columns = [
+        TableColumn.STEP,
+        TableColumn.STAGE,
+        TableColumn.ATTRIBUTE,
+        TableColumn.CONTEXT,
+        TableColumn.DATATYPE,
+        TableColumn.LOSS,
+    ]
+
+    # Accumulates data for table update
+    df_stages = pd.DataFrame(columns=table_columns)
+
+    # Accumulates data for wandb.log
+    df_wandb = pd.DataFrame(columns=table_columns)
+
+    # Shorthand to supress pandas warning
+    concat_dfs = lambda dfa, dfb: dfb.copy() if dfa.empty else pd.concat([dfa, dfb], ignore_index=True)
+    reset_df = lambda df: df.iloc[0:0]
+
+    wandb.log({
         "train/learning_rate": optimizer.param_groups[0]["lr"],
         "train/buffer_capacity": buffer.capacity,
         "train/epochs": train_epochs,
         "train/batch_size": train_batch_size,
         "eval/buffer_capacity": eval_buffer.capacity,
         "eval/batch_size": eval_batch_size,
-    })
+    }, commit=False)
 
     last_checkpoint_at = time.time()
     last_permanent_checkpoint_at = time.time()
     last_evaluation_at = 0
     last_wandb_commit_log_at = time.time()
+    last_wandb_table_update_at = time.time()
     last_wandb_table_log_at = time.time()
 
     # during training, we simply check if the event is set and optionally skip the upload
@@ -336,8 +345,7 @@ def train(
 
         # loss_weights = stats.compute_loss_weights()
 
-        wlog = {}
-        eval_losses_this_iter = None
+        wlog = {"iteration": stats.iteration}
 
         # Evaluate first (for a baseline when resuming with modified params)
         if now - last_evaluation_at > config["eval"]["interval_s"]:
@@ -347,7 +355,7 @@ def train(
                 eval_buffer.load_samples(eval_dataloader)
 
             with timers["eval"]:
-                eval_loss_rows, eval_total_wait = eval_model_fn(
+                df_stage_eval, eval_total_wait = eval_model_fn(
                     logger=logger,
                     model=model,
                     loss_weights=feature_weights,
@@ -355,17 +363,12 @@ def train(
                     batch_size=eval_batch_size,
                 )
 
-            eval_losses_this_iter = pd.DataFrame(eval_loss_rows, columns=wtable_columns)
-            eval_losses_this_iter[TableColumn.STAGE] = "eval"
-            wlog.update(**aggregate_losses("eval", eval_losses_this_iter))
+            # Mean loss for entire stage (1 row per attribute)
+            df_stage_eval[TableColumn.STAGE] = "eval"
+            df_stages = concat_dfs(df_stages, df_stage_eval)
 
+            wlog.update(**aggregate_losses("eval", df_stage_eval))
             wlog["eval_dataset/wait_time_s"] = eval_total_wait
-
-            if loss_storage_df is not None:
-                if loss_storage_df.empty:
-                    loss_storage_df = eval_losses_this_iter.copy()
-                else:
-                    loss_storage_df = pd.concat([loss_storage_df, eval_losses_this_iter], ignore_index=True)
 
             train_dataset_metrics = aggregate_metrics(train_metric_queue)
             if train_dataset_metrics:
@@ -437,7 +440,7 @@ def train(
                 thread.start()
 
         with timers["train"]:
-            train_loss_rows, train_total_wait = train_model_fn(
+            df_stage_train, train_total_wait = train_model_fn(
                 logger=logger,
                 model=model,
                 optimizer=optimizer,
@@ -450,16 +453,14 @@ def train(
                 accumulate_grad=config["train"]["accumulate_grad"],
             )
 
-        train_losses_this_iter = pd.DataFrame(train_loss_rows, columns=wtable_columns)
-        train_losses_this_iter[TableColumn.STAGE] = "train"
-        wlog.update(**aggregate_losses("train", train_losses_this_iter))
-        wlog["train_dataset/wait_time_s"] = train_total_wait
+        time.sleep(1)
 
-        if loss_storage_df is not None:
-            if loss_storage_df.empty:
-                loss_storage_df = train_losses_this_iter.copy()
-            else:
-                loss_storage_df = pd.concat([loss_storage_df, train_losses_this_iter], ignore_index=True)
+        # Mean loss for entire stage (1 row per attribute)
+        df_stage_train[TableColumn.STAGE] = "train"
+        df_stages = concat_dfs(df_stages, df_stage_train)
+
+        wlog.update(**aggregate_losses("train", df_stage_train))
+        wlog["train_dataset/wait_time_s"] = train_total_wait
 
         # from .analyze_loss import analyze_loss
         # topk = 5
@@ -474,39 +475,43 @@ def train(
 
         if now - last_wandb_commit_log_at > config["wandb_log_interval_s"]:
             last_wandb_commit_log_at = now
-            wlog = dict(iteration=stats.iteration, **aggregate_logs(), **timer_stats(timers))
 
-            if loss_storage_df is not None and now - last_wandb_table_log_at > config["wandb_table_interval_s"]:
-                last_wandb_table_log_at = now
+            if now - last_wandb_table_update_at > config["wandb_table_update_interval_s"]:
+                last_wandb_table_update_at = now
 
-                groupby = [
+                # Aggregate loss for the wandb log update
+                # (1 row per attribute)
+                df_update = df_stages.groupby([
                     TableColumn.STAGE,
                     TableColumn.ATTRIBUTE,
                     TableColumn.CONTEXT,
                     TableColumn.DATATYPE,
-                ]
+                ], as_index=False)[TableColumn.LOSS].mean()
 
-                assert wtable.columns == groupby + [TableColumn.LOSS], wtable.columns
+                df_update[TableColumn.STEP] = wandb.run.step
 
                 # XXX: Cannot log the wtable via structured logger (fails to serialize it)
-                # => log it separately, then call wandb.log() instead of wandb_log()
-                regular_log = {"event": "Per-attribute losses", "attrs": {}}
+                # => log it separately
+                logger.info({"event": "Attribute losses", "tables": {
+                    "train": dict(df_update[df_update[TableColumn.STAGE] == "train"][[TableColumn.ATTRIBUTE, TableColumn.LOSS]].values),
+                    "eval": dict(df_update[df_update[TableColumn.STAGE] == "eval"][[TableColumn.ATTRIBUTE, TableColumn.LOSS]].values),
+                }})
 
-                for _id, stage, attr, context, datatype, loss in loss_storage_df.groupby(groupby, as_index=False)[TableColumn.LOSS].mean().itertuples():
-                    wtable.add_data(stage, attr, context, datatype, loss)
-                    regular_log["attrs"][attr] = loss
+                df_wandb = concat_dfs(df_wandb, df_update)
+                df_update = reset_df(df_stages)
 
-                logger.info(regular_log)
-                wandb_log(wlog, commit=False)
-                wlog["tables/loss"] = wtable
-                wandb.log(wlog, commit=True)
+                if now - last_wandb_table_log_at > config["wandb_table_log_interval_s"]:
+                    last_wandb_table_log_at = now
+                    if config["wandb_table_log"]:
+                        logger.info("Uploading table with %d rows to wandb..." % len(df_wandb))
+                        wandb.log({"tables/loss": wandb.Table(dataframe=df_wandb)}, commit=False)
+                    df_wandb = reset_df(df_wandb)
 
-                # Reset storage
-                loss_storage_df = pd.DataFrame(columns=wtable_columns)
-            else:
-                wandb_log(wlog, commit=True)
-        else:
-            logger.info(dict(wlog, iteration=stats.iteration))
+            wlog.update(aggregate_logs())
+            wlog.update(timer_stats(timers))
+            wandb.log(wlog, commit=True)
+
+        logger.info(wlog)
 
         # XXX: must log timers here (some may have been skipped)
         stats.iteration += 1

@@ -97,11 +97,13 @@ config = dict(
         epochs=1,
     ),
     eval=dict(
-        interval_s=60,
+        interval_s=5,
         batch_size=2,
     ),
-    wandb_log_interval_s=60,
-    wandb_table_interval_s=600,  # use 0 to disable wandb tables
+    wandb_log_interval_s=5,
+    wandb_table_update_interval_s=8,  # data will be added here (rows=2*NUM_ATTRS)
+    wandb_table_log_interval_s=20,    # table will be uploaded here (creates new W&B artifact version)
+    wandb_table_log=True,
     weights=weights
 )
 
@@ -118,3 +120,8 @@ if os.getenv("VASTAI", None) == "1":
 
     config["train"]["batch_size"] = 250
     config["eval"]["batch_size"] = 200
+    config["eval"]["interval_s"] = 60
+
+    config["wandb_log_interval_s"] = 60
+    config["wandb_table_update_interval_s"] = 600
+    config["wandb_table_log_interval_s"] = 3600

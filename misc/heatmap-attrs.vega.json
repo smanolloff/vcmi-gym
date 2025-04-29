@@ -1,10 +1,84 @@
-// To filter by comma-separated list:
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
   "params": [
     {
-      "name": "filterList",
-      "expr": "split('${string:filter}', ',')"
+      "name": "stage",
+      "value": "${string:Stage:eval}"
+    },
+    {
+      "name": "context",
+      "value": "${string:Context (CSV):global}"
+    },
+    {
+      "name": "datatype",
+      "value": "${string:DataType (CSV):cont_abs}"
+    },
+    {
+      "name": "attrs",
+      "value": "${string:Attrs (CSV):all}"
+    },
+    {
+      "name": "title",
+      "value": "${string:Title:Attribute loss heatmap}"
+    },
+    {
+      "name": "xmin",
+      "value": "${string:X (min)}"
+    },
+    {
+      "name": "xmax",
+      "value": "${string:X (max)}"
+    },
+    {
+      "name": "contextList",
+      "expr": "split(context, ',')"
+    },
+    {
+      "name": "datatypeList",
+      "expr": "split(datatype, ',')"
+    },
+    {
+      "name": "attrsList",
+      "expr": "split(attrs, ',')"
     }
   ],
+  "description": "Heatmap of a key-value table",
+  "data": {"name": "wandb"},
+  "title": {"text": {"expr": "title"}},
+  "mark": {"type": "rect", "tooltip": true},
+  "width": 300,
+  "height": 200,
   "transform": [
-    {"filter": "'${string:filter}' === '' || indexof(split(filterList, ','), datum.id) !== -1"}
+    {"filter": "stage === datum.stage"},
+    {"filter": "xmin === '' || datum.step >= xmin"},
+    {"filter": "xmax === '' || datum.step <= xmax"},
+    {"filter": "context === 'all' || indexof(contextList, datum.context) !== -1"},
+    {"filter": "datatype === 'all' || indexof(datatypeList, datum.datatype) !== -1"},
+    {"filter": "attrs === 'all' || indexof(attrsList, datum.attribute) !== -1"}
   ],
+  "encoding": {
+    "x": {
+      "bin": {"maxbins": "${string:maxbins:60}"},
+      "field": "step",
+      "type": "quantitative",
+      "title": ""
+    },
+    "y": {
+      "field": "attribute",
+      "type": "nominal",
+      "title": ""
+    },
+    "color": {
+      "field": "loss",
+      "aggregate": "mean",
+      "type": "quantitative",
+      "scale": {"range": ["#000066", "yellow"]},
+      "legend": ""
+    }
+  },
+  "config": {
+    "view": {
+      "stroke": "transparent"
+    }
+  }
+}

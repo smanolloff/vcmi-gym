@@ -4,6 +4,7 @@ import math
 import enum
 import contextlib
 import torch.nn.functional as F
+import pandas as pd
 
 from ..util.buffer_base import BufferBase
 from ..util.dataset_vcmi import Data, Context
@@ -722,6 +723,15 @@ def losses_to_rows(losses, obs_index):
     return rows
 
 
+# Aggregate batch losses into a *single* loss per attribute
+def rows_to_df(rows):
+    return pd.DataFrame(rows).groupby([
+        TableColumn.ATTRIBUTE,
+        TableColumn.CONTEXT,
+        TableColumn.DATATYPE
+    ], as_index=False)[TableColumn.LOSS].mean()
+
+
 def train_model(
     logger,
     model,
@@ -786,7 +796,7 @@ def train_model(
                 optimizer.step()
             optimizer.zero_grad()
 
-    return loss_rows, timer.peek()
+    return rows_to_df(loss_rows), timer.peek()
 
 
 def eval_model(
@@ -812,4 +822,4 @@ def eval_model(
         loss_rows.extend(losses_to_rows(losses, model.obs_index))
         timer.start()
 
-    return loss_rows, timer.peek()
+    return rows_to_df(loss_rows), timer.peek()
