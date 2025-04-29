@@ -257,7 +257,8 @@ def train(
             df[df[TableColumn.STAGE] == stage]
             .groupby([TableColumn.ATTRIBUTE, TableColumn.CONTEXT, TableColumn.DATATYPE])[TableColumn.LOSS]
             .mean()  # mean by attribute
-            .groupby([TableColumn.CONTEXT, TableColumn.DATATYPE])[TableColumn.LOSS]
+            # => dict with keys = tuple(attrname, context, datatype), values = float(loss)
+            .groupby([TableColumn.CONTEXT, TableColumn.DATATYPE])  # NOTE: no column LOSS anymore
             .sum()   # sum by context/datatype
             # => dict with keys = tuple(context, datatype), values = float(loss)
         )
