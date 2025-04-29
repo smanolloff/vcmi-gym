@@ -4,7 +4,6 @@ import torch
 
 # Pandas dataframe columns for losses to aggregate before logging as W&B tables
 class TableColumn:
-    STEP = "step"               # wandb.run.step
     STAGE = "stage"             # "train" / "test"
     ATTRIBUTE = "attribute"     # "BATTLE_SIDE" / ...
     CONTEXT = "context"         # "global" / "player" / "hex"

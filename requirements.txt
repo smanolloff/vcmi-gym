@@ -10,6 +10,7 @@ gymnasium==0.29.1
 #onnx-pytorch
 pygit2
 boto3
+pandas
 
 ray
 #ray[tune]

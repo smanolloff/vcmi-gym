@@ -101,7 +101,7 @@ config = dict(
         batch_size=2,
     ),
     wandb_log_interval_s=60,
-    wandb_table_interval_s=600,
+    wandb_table_interval_s=600,  # use 0 to disable wandb tables
     weights=weights
 )
 

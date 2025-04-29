@@ -106,10 +106,17 @@ def train(
 
     # assert config["wandb_log_interval_s"] > config["eval"]["interval_s"]
 
+    wtable_columns = [
+        TableColumn.STAGE,
+        TableColumn.ATTRIBUTE,
+        TableColumn.CONTEXT,
+        TableColumn.DATATYPE,
+        TableColumn.LOSS,
+    ]
+
     if config["wandb_table_interval_s"] > 0:
         assert config["wandb_table_interval_s"] >= config["wandb_log_interval_s"]
-        loss_storage_df = pd.DataFrame(columns=TableColumn.as_list())
-
+        loss_storage_df = pd.DataFrame(columns=wtable_columns)
     else:
         loss_storage_df = None
 
@@ -218,15 +225,6 @@ def train(
                     logger.warn("WARNING: scaler weights not found (maybe the model was trained on CPU only?)")
                 else:
                     raise
-
-    wtable_columns = [
-        TableColumn.STEP,
-        TableColumn.STAGE,
-        TableColumn.ATTRIBUTE,
-        TableColumn.CONTEXT,
-        TableColumn.DATATYPE,
-        TableColumn.LOSS,
-    ]
 
     if no_wandb:
         from unittest.mock import Mock
@@ -354,15 +352,17 @@ def train(
                     batch_size=eval_batch_size,
                 )
 
-            eval_losses_this_iter = pd.DataFrame(eval_loss_rows)
-            eval_losses_this_iter[TableColumn.STEP] = -1
+            eval_losses_this_iter = pd.DataFrame(eval_loss_rows, columns=wtable_columns)
             eval_losses_this_iter[TableColumn.STAGE] = "eval"
             wlog.update(**aggregate_losses("eval", eval_losses_this_iter))
 
             wlog["eval_dataset/wait_time_s"] = eval_total_wait
 
             if loss_storage_df is not None:
-                loss_storage_df = pd.concat([loss_storage_df, eval_losses_this_iter], ignore_index=True)
+                if loss_storage_df.empty:
+                    loss_storage_df = eval_losses_this_iter.copy()
+                else:
+                    loss_storage_df = pd.concat([loss_storage_df, eval_losses_this_iter], ignore_index=True)
 
             train_dataset_metrics = aggregate_metrics(train_metric_queue)
             if train_dataset_metrics:
@@ -447,14 +447,16 @@ def train(
                 accumulate_grad=config["train"]["accumulate_grad"],
             )
 
-        train_losses_this_iter = pd.DataFrame(train_loss_rows)
-        train_losses_this_iter[TableColumn.STEP] = -1
+        train_losses_this_iter = pd.DataFrame(train_loss_rows, columns=wtable_columns)
         train_losses_this_iter[TableColumn.STAGE] = "train"
         wlog.update(**aggregate_losses("train", train_losses_this_iter))
         wlog["train_dataset/wait_time_s"] = train_total_wait
 
         if loss_storage_df is not None:
-            loss_storage_df = pd.concat([loss_storage_df, train_losses_this_iter], ignore_index=True)
+            if loss_storage_df.empty:
+                loss_storage_df = train_losses_this_iter.copy()
+            else:
+                loss_storage_df = pd.concat([loss_storage_df, train_losses_this_iter], ignore_index=True)
 
         # from .analyze_loss import analyze_loss
         # topk = 5
@@ -481,24 +483,23 @@ def train(
                     TableColumn.DATATYPE,
                 ]
 
-                assert wtable.columns == [TableColumn.STEP] + groupby + [TableColumn.LOSS], wtable.columns
+                assert wtable.columns == groupby + [TableColumn.LOSS], wtable.columns
 
                 # XXX: Cannot log the wtable via structured logger (fails to serialize it)
                 # => log it separately, then call wandb.log() instead of wandb_log()
                 regular_log = {"event": "Per-attribute losses", "attrs": {}}
 
                 for _id, stage, attr, context, datatype, loss in loss_storage_df.groupby(groupby, as_index=False)[TableColumn.LOSS].mean().itertuples():
-                    wtable.add_data(wandb.run.step, stage, attr, context, datatype, loss)
+                    wtable.add_data(stage, attr, context, datatype, loss)
                     regular_log["attrs"][attr] = loss
 
                 logger.info(regular_log)
                 wandb_log(wlog, commit=False)
                 wlog["tables/loss"] = wtable
-                import ipdb; ipdb.set_trace()  # noqa
                 wandb.log(wlog, commit=True)
 
                 # Reset storage
-                loss_storage_df = pd.DataFrame(columns=loss_storage_df.columns)
+                loss_storage_df = pd.DataFrame(columns=wtable_columns)
             else:
                 wandb_log(wlog, commit=True)
         else:
