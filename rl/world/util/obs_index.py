@@ -81,6 +81,12 @@ class ObsIndex:
 
         empty_containers = lambda: {dg: [] for dg in DataGroup.as_list()}
 
+        self.attr_names = {
+            ContextGroup.GLOBAL: list(GLOBAL_ATTR_MAP),
+            ContextGroup.PLAYER: list(PLAYER_ATTR_MAP),
+            ContextGroup.HEX: list(HEX_ATTR_MAP)
+        }
+
         self.rel_index = {cg: empty_containers() for cg in ContextGroup.as_list()}
         self.attr_ids = {cg: empty_containers() for cg in ContextGroup.as_list()}
 
@@ -290,3 +296,6 @@ class ObsIndex:
 
         for thr_ind in self.rel_index[Group.HEX][Group.THRESHOLDS]:
             self.abs_index[Group.HEX][Group.THRESHOLDS].append(repind_hexes(thr_ind))
+
+    def attr_name(self, context, attr_id):
+        return self.attr_names[context][attr_id]

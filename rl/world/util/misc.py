@@ -2,6 +2,20 @@ import numpy as np
 import torch
 
 
+# Pandas dataframe columns for losses to aggregate before logging as W&B tables
+class TableColumn:
+    STEP = "step"               # wandb.run.step
+    STAGE = "stage"             # "train" / "test"
+    ATTRIBUTE = "attribute"     # "BATTLE_SIDE" / ...
+    CONTEXT = "context"         # "global" / "player" / "hex"
+    DATATYPE = "datatype"       # "cont_abs" / "cont_rel" / "categorical" / ...
+    LOSS = "loss"               # float
+
+    @classmethod
+    def as_list(cls):
+        return [v for k, v in vars(cls).items() if k.isupper() and isinstance(v, str)]
+
+
 def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
     if isinstance(layer, torch.nn.Linear):
         torch.nn.init.orthogonal_(layer.weight, gain)

@@ -1,0 +1,10 @@
+// To filter by comma-separated list:
+  "params": [
+    {
+      "name": "filterList",
+      "expr": "split('${string:filter}', ',')"
+    }
+  ],
+  "transform": [
+    {"filter": "'${string:filter}' === '' || indexof(split(filterList, ','), datum.id) !== -1"}
+  ],

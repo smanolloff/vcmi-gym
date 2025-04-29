@@ -17,6 +17,7 @@ export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 alias python=python3
 cd $WORKSPACE/vcmi-gym
+set -x
 EOF
 # XXX: sourcing ~/.bashrc does not work without interactive terminal
 export AWS_ACCESS_KEY="AKIATMR________NAX7XH"

@@ -97,9 +97,11 @@ config = dict(
         epochs=1,
     ),
     eval=dict(
-        interval_s=60,  # wandb_log will also be called here
+        interval_s=60,
         batch_size=2,
     ),
+    wandb_log_interval_s=60,
+    wandb_table_interval_s=600,
     weights=weights
 )
 

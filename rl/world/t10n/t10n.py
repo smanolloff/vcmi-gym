@@ -1,10 +1,8 @@
 import torch
 import torch.nn as nn
-import numpy as np
 import math
 import enum
 import contextlib
-import collections
 import torch.nn.functional as F
 
 from ..util.buffer_base import BufferBase
@@ -12,14 +10,12 @@ from ..util.dataset_vcmi import Data, Context
 from ..util.misc import layer_init
 from ..util.obs_index import ObsIndex, Group, ContextGroup, DataGroup
 from ..util.timer import Timer
+from ..util.misc import TableColumn
 
 from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
-    GLOBAL_ATTR_MAP,
-    PLAYER_ATTR_MAP,
-    HEX_ATTR_MAP,
     N_ACTIONS,
 )
 
@@ -574,9 +570,6 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
 
     losses = {}
 
-    # Used for debugging the explosive msre loss
-    debuglosses = {}
-
     for dgroup in DataGroup.as_list():
         if not len(logits[dgroup]):
             losses[dgroup] = torch.tensor([], device=device)
@@ -589,7 +582,6 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
             # (B, N_CONTABS_FEATS)             when t=Group.GLOBAL
             # (B, 2, N_CONTABS_FEATS)          when t=Group.PLAYER
             # (B, 165, N_CONTABS_FEATS)        when t=Group.HEX
-            # debuglosses[dgroup] = sum_repeats(msre_loss(lgt, tgt)).mean(dim=0)
             losses[dgroup] = sum_repeats(F.mse_loss(lgt, tgt, reduction="none")).mean(dim=0)
             # => (N_CONT_FEATS)
 
@@ -683,10 +675,7 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
 
         losses[dgroup] *= weights[dgroup]
 
-        if dgroup in debuglosses:
-            debuglosses[dgroup] *= weights[dgroup]
-
-    return losses, debuglosses
+    return losses
 
 
 def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
@@ -701,7 +690,6 @@ def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
     }
 
     losses = {}
-    debuglosses = {}
     device = next_obs.device
     total_loss = torch.tensor(0., device=pred_obs.device)
 
@@ -710,10 +698,28 @@ def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
         target = extract(cgroup, next_obs)
         index = abs_index[cgroup]
         weights = loss_weights[cgroup]
-        losses[cgroup], debuglosses[cgroup] = _compute_losses(logits, target, index, weights=weights, device=device)
+        losses[cgroup] = _compute_losses(logits, target, index, weights=weights, device=device)
         total_loss += sum(subtype_losses.sum() for subtype_losses in losses[cgroup].values())
 
-    return total_loss, losses, debuglosses
+    return total_loss, losses
+
+
+def losses_to_rows(losses, obs_index):
+    rows = []
+    for context, datatype_groups in losses.items():
+        # global/player/hex
+        for typename, typeloss in datatype_groups.items():
+            # continuous/cont_nullbit/binaries/...
+            for i in range(typeloss.shape[0]):
+                attr_id = obs_index.attr_ids[context][typename][i]
+                attr_name = obs_index.attr_names[context][attr_id]
+                rows.append({
+                    TableColumn.ATTRIBUTE: attr_name,
+                    TableColumn.CONTEXT: context,
+                    TableColumn.DATATYPE: typename,
+                    TableColumn.LOSS: typeloss[i].item()
+                })
+    return rows
 
 
 def train_model(
@@ -727,24 +733,14 @@ def train_model(
     epochs,
     batch_size,
     accumulate_grad,
-    wlog
 ):
-    model.train()
-    timer = Timer()
-    n_batches = 0
-
-    aggdebuglosses = collections.defaultdict(float)
-    total_loss = 0
-    agglosses = collections.defaultdict(lambda: collections.defaultdict(float))
-    attrlosses = {
-        Group.GLOBAL: np.zeros(len(GLOBAL_ATTR_MAP)),
-        Group.PLAYER: np.zeros(len(PLAYER_ATTR_MAP)),
-        Group.HEX: np.zeros(len(HEX_ATTR_MAP)),
-    }
+    assert buffer.capacity % batch_size == 0, f"{buffer.capacity} % {batch_size} == 0"
 
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
-    assert buffer.capacity % batch_size == 0, f"{buffer.capacity} % {batch_size} == 0"
+    model.train()
+    timer = Timer()
+    loss_rows = []
 
     if accumulate_grad:
         grad_steps = buffer.capacity // batch_size
@@ -754,28 +750,13 @@ def train_model(
         timer.start()
         for batch in buffer.sample_iter(batch_size):
             timer.stop()
-            n_batches += 1
-
             obs, action, next_obs, next_mask, next_rew, next_done = batch
 
             with maybe_autocast:
                 pred_obs = model(obs, action)
-                loss_tot, losses, debuglosses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
+                loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
 
-            total_loss += loss_tot.item()
-            for context, datatype_groups in losses.items():
-                # global/player/hex
-                for typename, typeloss in datatype_groups.items():
-                    # continuous/cont_nullbit/binaries/...
-                    agglosses[context][typename] += typeloss.sum().item()
-                    for i in range(typeloss.shape[0]):
-                        var_loss = typeloss[i]
-                        attr_id = model.obs_index.attr_ids[context][typename][i]
-                        attrlosses[context][attr_id] += var_loss.item()
-
-            for context, datatype_groups in debuglosses.items():
-                for typename, typeloss in datatype_groups.items():
-                    aggdebuglosses[typename] += typeloss.sum().item()
+            loss_rows.extend(losses_to_rows(losses, model.obs_index))
 
             if accumulate_grad:
                 if scaler:
@@ -805,24 +786,7 @@ def train_model(
                 optimizer.step()
             optimizer.zero_grad()
 
-    total_wait = timer.peek()
-    wlog["train_dataset/wait_time_s"] = total_wait
-    wlog["train_loss/total"] = total_loss / n_batches
-
-    for context, datatype_groups in agglosses.items():
-        for typename, typeloss in datatype_groups.items():
-            k = f"{context}/{typename}"
-            v = typeloss / n_batches
-            agglosses[context][typename] = v
-            wlog[f"train_loss/{k}"] = v
-
-    for k, v in aggdebuglosses.items():
-        wlog[f"debug/train_loss/{k}"] = v
-
-    # NOTE: these could be logged to wandb.Table for custom histogram plots
-    attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
-
-    return total_loss, agglosses, attrlosses
+    return loss_rows, timer.peek()
 
 
 def eval_model(
@@ -831,64 +795,21 @@ def eval_model(
     loss_weights,
     buffer,
     batch_size,
-    wlog
 ):
     model.eval()
     timer = Timer()
-    aggdebuglosses = collections.defaultdict(float)
-    total_loss = 0
-    agglosses = collections.defaultdict(lambda: collections.defaultdict(float))
-    attrlosses = {
-        Group.GLOBAL: np.zeros(len(GLOBAL_ATTR_MAP)),
-        Group.PLAYER: np.zeros(len(PLAYER_ATTR_MAP)),
-        Group.HEX: np.zeros(len(HEX_ATTR_MAP)),
-    }
-    n_batches = 0
+    loss_rows = []
 
     timer.start()
     for batch in buffer.sample_iter(batch_size):
         timer.stop()
-        n_batches += 1
         obs, action, next_obs, next_mask, next_rew, next_done = batch
 
         with torch.no_grad():
             pred_obs = model(obs, action)
 
-        loss_tot, losses, debuglosses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
-
-        total_loss += loss_tot.item()
-        for context, datatype_groups in losses.items():
-            # global/player/hex
-            for typename, typeloss in datatype_groups.items():
-                # continuous/cont_nullbit/binaries/...
-                agglosses[context][typename] += typeloss.sum().item()
-                for i in range(typeloss.shape[0]):
-                    var_loss = typeloss[i]
-                    attr_id = model.obs_index.attr_ids[context][typename][i]
-                    attrlosses[context][attr_id] += var_loss.item()
-
-        for context, datatype_groups in debuglosses.items():
-            for typename, typeloss in datatype_groups.items():
-                aggdebuglosses[typename] += typeloss.sum().item()
-                aggdebuglosses[context] += typeloss.sum().item()
-
+        loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
+        loss_rows.extend(losses_to_rows(losses, model.obs_index))
         timer.start()
 
-    total_wait = timer.peek()
-    wlog["eval_dataset/wait_time_s"] = total_wait
-    wlog["eval_loss/total"] = total_loss / n_batches
-
-    for context, datatype_groups in agglosses.items():
-        for typename, typeloss in datatype_groups.items():
-            k = f"{context}/{typename}"
-            v = typeloss / n_batches
-            agglosses[context][typename] = v
-            wlog[f"eval_loss/{k}"] = v
-
-    for k, v in aggdebuglosses.items():
-        wlog[f"debug/eval_loss/{k}"] = v
-
-    # NOTE: these could be logged to wandb.Table for custom histogram plots
-    attrlosses = {k: v / n_batches for k, v in attrlosses.items()}
-
-    return total_loss, agglosses, attrlosses
+    return loss_rows, timer.peek()
