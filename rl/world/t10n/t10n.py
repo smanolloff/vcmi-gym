@@ -18,6 +18,7 @@ from ..util.constants_v12 import (
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
+    N_HEX_ACTIONS,
 )
 
 
@@ -89,6 +90,11 @@ def vcmi_dataloader_functor():
 
 
 class Buffer(BufferBase):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.action_counters = torch.zeros(N_HEX_ACTIONS).long()
+        self.tmp_counter = 0
+
     def _valid_indices(self):
         max_index = self.capacity if self.full else self.index
         # Valid are indices of samples where done=False and cutoff=False
@@ -97,6 +103,15 @@ class Buffer(BufferBase):
         ok_samples = ~self.containers["done"][:max_index - 1].bool()
         ok_samples[self.worker_cutoffs] = False
         return torch.nonzero(ok_samples, as_tuple=True)[0]
+
+    def add_batch(self, data):
+        self.action_counters.add_(torch.bincount((data.action - 2) % N_HEX_ACTIONS, minlength=N_HEX_ACTIONS))
+        self.tmp_counter += len(data.action)
+        if self.tmp_counter > 1_000_000:
+            total = self.action_counters.sum()
+            self.logger.info("Action dist after %d samples: %s" % (total, (self.action_counters / total).tolist()))
+            self.tmp_counter = 0
+        super().add_batch(data)
 
     def sample(self, batch_size):
         inds = self._valid_indices()

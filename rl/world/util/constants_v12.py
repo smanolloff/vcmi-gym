@@ -1,5 +1,6 @@
 from vcmi_gym.envs.v12.pyconnector import (
     N_ACTIONS,
+    N_HEX_ACTIONS,
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
