@@ -274,7 +274,7 @@ class TransitionModel(nn.Module):
         # Merge
         z_size_global = 256
         self.encoder_merged_global = nn.Sequential(
-            # => (B, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+            # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(z_size_global),
             nn.LeakyReLU(),
         )
@@ -320,7 +320,7 @@ class TransitionModel(nn.Module):
         # Merge per player
         z_size_player = 256
         self.encoder_merged_player = nn.Sequential(
-            # => (B, 2, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+            # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(z_size_player),
             nn.LeakyReLU(),
         )
@@ -366,7 +366,7 @@ class TransitionModel(nn.Module):
         # Merge per hex
         z_size_hex = 512
         self.encoder_merged_hex = nn.Sequential(
-            # => (B, 165, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+            # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(z_size_hex),
             nn.LeakyReLU(),
             nn.Dropout(p=0.3)
@@ -390,13 +390,6 @@ class TransitionModel(nn.Module):
             nn.LeakyReLU(),
         )
         # => (B, Z_AGG)
-
-        # (B, Z_TRANSITION + Z_AGG)
-        self.transition = nn.Sequential(
-            nn.LazyLinear(2048),
-            nn.LeakyReLU(),
-        )
-        # => (B, Z_TRANS)
 
         #
         # Heads
@@ -453,8 +446,7 @@ class TransitionModel(nn.Module):
         #      e.g. for input with num_classes=4, instead of `[0,0,1,0]` it expects just `2`
         global_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
         global_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], dim=-1)
-        global_merged = torch_cat((global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
-        # global_merged = torch_cat((action_z, global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
+        global_merged = torch_cat((action_z, global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
         z_global = self.encoder_merged_global(global_merged)
         # => (B, Z_GLOBAL)
 
@@ -470,8 +462,7 @@ class TransitionModel(nn.Module):
         player_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_binaries, player_binary_ins)], dim=-1)
         player_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
         player_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], dim=-1)
-        player_merged = torch_cat((player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
-        # player_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 2, -1), player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
+        player_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 2, -1), player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
         z_player = self.encoder_merged_player(player_merged)
         # => (B, 2, Z_PLAYER)
 
@@ -487,8 +478,7 @@ class TransitionModel(nn.Module):
         hex_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_binaries, hex_binary_ins)], dim=-1)
         hex_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
         hex_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
-        hex_merged = torch_cat((hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
-        # hex_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 165, -1), hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
+        hex_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 165, -1), hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
         z_hex = self.encoder_merged_hex(hex_merged)
         z_hex = self.transformer_hex(z_hex)
         # => (B, 165, Z_HEX)
@@ -498,20 +488,17 @@ class TransitionModel(nn.Module):
         z_agg = self.aggregator(torch.cat([z_global, mean_z_player, mean_z_hex], dim=-1))
         # => (B, Z_AGG)
 
-        z_trans = self.transition(torch.cat([action_z, z_agg], dim=-1))
-        # => (B, Z_TRANS)
-
         #
         # Outputs
         #
 
-        global_out = self.head_global(z_trans)
+        global_out = self.head_global(z_agg)
         # => (B, STATE_SIZE_GLOBAL)
 
-        player_out = self.head_player(torch.cat([z_trans.unsqueeze(1).expand(-1, 2, -1), z_player], dim=-1))
+        player_out = self.head_player(torch.cat([z_agg.unsqueeze(1).expand(-1, 2, -1), z_player], dim=-1))
         # => (B, 2, STATE_SIZE_ONE_PLAYER)
 
-        hex_out = self.head_hex(torch.cat([z_trans.unsqueeze(1).expand(-1, 165, -1), z_hex], dim=-1))
+        hex_out = self.head_hex(torch.cat([z_agg.unsqueeze(1).expand(-1, 165, -1), z_hex], dim=-1))
         # => (B, 165, STATE_SIZE_ONE_HEX)
 
         obs_out = torch.cat((global_out, player_out.flatten(start_dim=1), hex_out.flatten(start_dim=1)), dim=1)
