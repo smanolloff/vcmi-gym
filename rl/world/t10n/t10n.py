@@ -3,6 +3,7 @@ import torch.nn as nn
 import math
 import enum
 import contextlib
+import random
 import torch.nn.functional as F
 import pandas as pd
 
@@ -19,6 +20,7 @@ from ..util.constants_v12 import (
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
     N_HEX_ACTIONS,
+    HEX_ACT_MAP,
 )
 
 
@@ -74,6 +76,28 @@ class Reconstruction(enum.IntEnum):
 #   - we `yield` it only if s=3 (last step)
 #
 
+#
+# Action distribution of random agent vs. StupidAI:
+#
+#  prob | action
+# ------|---------
+# 0.021 | AMOVE_TR
+# 0.036 | AMOVE_R
+# 0.098 | AMOVE_BR
+# 0.057 | AMOVE_BL
+# 0.029 | AMOVE_L
+# 0.016 | AMOVE_TL
+# 0.003 | AMOVE_2TR
+# 0.006 | AMOVE_2R
+# 0.017 | AMOVE_2BR
+# 0.007 | AMOVE_2BL
+# 0.003 | AMOVE_2L
+# 0.021 | AMOVE_2TL
+# 0.471 | MOVE
+# 0.213 | SHOOT
+#
+#
+
 def vcmi_dataloader_functor():
     state = {"reward_carry": 0}
 
@@ -82,8 +106,15 @@ def vcmi_dataloader_functor():
             state["reward_carry"] = data.reward
             if not data.done:
                 return None
+
+        if (data.action - 2) % len(HEX_ACT_MAP) == HEX_ACT_MAP["MOVE"]:
+            # Skip 50% of MOVEs
+            if random.random() < 0.5:
+                return None
+
         if ctx.transition_id == 0 and ctx.ep_steps > 0:
-            return data._replace(reward=state["reward_carry"])
+            data = data._replace(reward=state["reward_carry"])
+
         return data
 
     return mw
