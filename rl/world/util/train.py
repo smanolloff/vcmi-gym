@@ -21,7 +21,6 @@ from .structured_logger import StructuredLogger
 from .timer import Timer
 from .wandb import setup_wandb
 from .weights import build_feature_weights
-from .analyze_loss import analyze_loss
 
 from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
@@ -496,7 +495,6 @@ def train(
                 }})
 
                 df_wandb = concat_dfs(df_wandb, df_update)
-                df_update = reset_df(df_stages)
 
                 if now - last_wandb_table_log_at > config["wandb_table_log_interval_s"]:
                     last_wandb_table_log_at = now
@@ -504,6 +502,9 @@ def train(
                         logger.info("Uploading table with %d rows to wandb..." % len(df_wandb))
                         wandb.log({"tables/loss": wandb.Table(dataframe=df_wandb)}, commit=False)
                     df_wandb = reset_df(df_wandb)
+
+                df_update = reset_df(df_update)
+                df_stages = reset_df(df_stages)
 
             wlog.update(aggregate_logs())
             wlog.update(timer_stats(timers))
