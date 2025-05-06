@@ -107,12 +107,10 @@ def vcmi_dataloader_functor():
             if not data.done:
                 return None
 
-        # NO need for that: VcmiEnv's random_action() should now choose other
-        # actions more often
-        # if (data.action - 2) % len(HEX_ACT_MAP) == HEX_ACT_MAP["MOVE"]:
-        #     # Skip 50% of MOVEs
-        #     if random.random() < 0.5:
-        #         return None
+        if (data.action - 2) % len(HEX_ACT_MAP) == HEX_ACT_MAP["MOVE"]:
+            # Skip 50% of MOVEs
+            if random.random() < 0.5:
+                return None
 
         if ctx.transition_id == 0 and ctx.ep_steps > 0:
             data = data._replace(reward=state["reward_carry"])
@@ -609,7 +607,7 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
     # Aggregate each feature's loss across players/hexes
 
     if logits[Group.CONT_ABS].dim() == 3:
-        # (B, 165, N_FEATS)
+        # (B, 165, N_FEATS) (or (B, 165) for categoricals after CE)
         def sum_repeats(loss):
             return loss.sum(dim=1)
     else:
@@ -672,7 +670,7 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
                     i_lgt = i_lgt.swapaxes(1, 2)
                     i_tgt = i_tgt.swapaxes(1, 2)
 
-                # XXX: cross_entropy always removes last dim (even with reduction=none)
+                # XXX: cross_entropy always removes the "C" dim (even with reduction=none)
                 loss[i] = sum_repeats(F.cross_entropy(i_lgt, i_tgt, reduction="none")).mean(dim=0)
                 # (1)  # single loss for the i'th categorical feature
             losses[dgroup] = loss

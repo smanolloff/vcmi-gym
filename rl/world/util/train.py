@@ -510,6 +510,9 @@ def train(
             wlog.update(timer_stats(timers))
             wandb.log(wlog, commit=True)
 
+            [t.reset() for t in timers.values()]
+            timers["all"].start()
+
         logger.info(wlog)
 
         # XXX: must log timers here (some may have been skipped)

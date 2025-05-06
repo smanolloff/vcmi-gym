@@ -1,0 +1,68 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Line plot for t10n training num_samples. W&B data query: history(_step,iteration); config(env.train.batch_size,env.train.num_workers).",
+  "data": {"name": "wandb"},
+  "transform": [
+    {"calculate": "datum.iteration * datum.batch_size * datum.num_workers", "as": "num_samples"}
+  ],
+  "title": {"text": "num_samples"},
+  "encoding": {
+    "x": {
+      "field": "_step",
+      "type": "quantitative",
+      "axis": {"grid": false, "title": ""}
+    }
+  },
+  "layer": [
+    {
+      "encoding": {
+        "y": {
+          "field": "num_samples",
+          "type": "quantitative",
+          "axis": {"tickCount": 5, "format": ".3s", "title": ""}
+        }
+      },
+      "layer": [
+        {
+          "selection": {"grid": {"type": "interval", "bind": "scales"}},
+          "mark": "line",
+          "encoding": {
+            "size": {"value": 2}
+          }
+        },
+        {
+          "mark": "point",
+          "transform": [
+            {"filter": {"selection": "hover"}}
+          ],
+          "encoding": {
+            "y": {"field": "num_samples", "type": "quantitative"}
+          }
+        }
+      ]
+    },
+    {
+      "mark": {"type": "rule"},
+      "encoding": {
+        "tooltip": [
+          {"field": "_step", "type": "quantitative"},
+          {"field": "num_samples", "type": "quantitative", "format": ".3s"}
+        ],
+        "opacity": {
+          "condition": {"value": 3, "selection": "hover"},
+          "value": 0
+        }
+      },
+      "selection": {
+        "hover": {
+          "type": "single",
+          "fields": ["_step"],
+          "nearest": true,
+          "on": "mouseover",
+          "empty": "none",
+          "clear": "mouseout"
+        }
+      }
+    }
+  ]
+}

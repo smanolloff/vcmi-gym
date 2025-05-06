@@ -1,0 +1,147 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Heatmap of t10n attribute losses. W&B data query: historyTable(tables/loss). Parameters: CSV context: global|player|hex; CSV DataType: cont_abs|cont_rel|cont_nullbit|binaries|categoricals|thresholds; CSV Attrs: (VCMI v12 attributes)",
+  "params": [
+    {
+      "name": "context",
+      "value": "${string:CSV Context:*}"
+    },
+    {
+      "name": "datatype",
+      "value": "${string:CSV DataType:*}"
+    },
+    {
+      "name": "attrs",
+      "value": "${string:CSV Attrs:*}"
+    },
+    {
+      "name": "xminfrac",
+      "value": "${string:X (min) frac:0.2}"
+    },
+    {
+      "name": "xmin",
+      "value": "${string:X (min):auto}"
+    },
+    {
+      "name": "xmax",
+      "value": "${string:X (max):auto}"
+    },
+    {
+      "name": "contextList",
+      "expr": "split(context, ',')"
+    },
+    {
+      "name": "datatypeList",
+      "expr": "split(datatype, ',')"
+    },
+    {
+      "name": "attrsList",
+      "expr": "split(attrs, ',')"
+    }
+  ],
+  "data": {"name": "wandb"},
+  "transform": [
+    {"joinaggregate": [{"op": "max", "field": "step", "as": "last_step"}]},
+    {"joinaggregate": [{"op": "min", "field": "step", "as": "first_step"}]},
+    {"calculate": "round(datum.step / 10) * 10", "as": "roundstep"},
+    {"filter": "xmin === 'auto' ? datum.step >= (datum.last_step * xminfrac) : datum.step >= xmin"},
+    {"filter": "xmax === 'auto' || datum.step <= xmax"},
+    {"filter": "context === '*' || indexof(contextList, datum.context) !== -1"},
+    {"filter": "datatype === '*' || indexof(datatypeList, datum.datatype) !== -1"},
+    {"filter": "attrs === '*' || indexof(attrsList, datum.attribute) !== -1"}
+  ],
+  "title": {"fontSize": 11, "text": {"expr": "context + '/' + datatype + '/' + attrs"}},
+  "encoding": {
+    "x": {
+      "field": "roundstep",
+      "type": "quantitative",
+      "axis": {"grid": false},
+      "title": ""
+    }
+  },
+  "layer": [
+    {
+      "encoding": {
+        "y": {
+          "field": "loss",
+          "type": "quantitative",
+          "aggregate": "sum",
+          "title": "",
+          "scale": {"type": "log"},
+          "axis": {"ticks": false, "tickCount": 5, "gridColor": "#eee"}
+        },
+        "color": {
+          "type": "nominal",
+          "field": "name",
+          "scale": {"range": {"field": "color"}},
+          "legend": ""
+        }
+      },
+      "layer": [
+        {
+          "selection": {"grid": {"type": "interval", "bind": "scales"}},
+          "mark": "line",
+          "encoding": {
+            "size": {"value": 2},
+            "color": {
+              "field": "stage",
+              "type": "nominal",
+              "scale": {
+                "domain": ["train", "eval"],
+                "range": ["#338dd8", "#ff7f0e"]
+              }
+            }
+          }
+        },
+        {
+          "mark": "point",
+          "transform": [
+            {"filter": {"selection": "hover"}}
+          ],
+          "encoding": {
+            "y": {"field": "loss", "type": "quantitative"},
+            "color": {
+              "field": "stage",
+              "type": "nominal",
+              "scale": {
+                "domain": ["train", "eval"],
+                "range": ["#338dd8", "#ff7f0e"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "transform": [
+        {
+          "pivot": "stage",
+          "value": "loss",
+          "groupby": ["roundstep"]
+        }
+      ],
+      "mark": {"type": "rule"},
+      "encoding": {
+        "tooltip": [
+          {"field": "roundstep", "type": "quantitative", "title": "step"},
+          {"field": "train", "type": "quantitative", "title": "train", "format": ".5f"},
+          {"field": "eval", "type": "quantitative", "title": "eval", "format": ".5f"}
+        ],
+        "opacity": {
+          "condition": {"value": 3, "selection": "hover"},
+          "value": 0
+        }
+      },
+      "selection": {
+        "hover": {
+          "type": "single",
+          "fields": ["roundstep"],
+          "nearest": true,
+          "on": "mouseover",
+          "empty": "none",
+          "clear": "mouseout"
+        }
+      }
+    }
+  ]
+}
