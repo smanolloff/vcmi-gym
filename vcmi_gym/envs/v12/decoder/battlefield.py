@@ -67,8 +67,6 @@ class Battlefield():
 
         return self.global_stats.BATTLE_WINNER.v == self.global_stats.BATTLE_SIDE.v
 
-    # XXX: code below is for v7 and needs changes for v8
-
     # def get_lstack(self, i):
     #     return self._get_stack(0, i)
 

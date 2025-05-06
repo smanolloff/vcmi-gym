@@ -73,6 +73,7 @@ namespace Connector::V12::Thread {
         const int randomObstacles;
         const int townChance;
         const int warmachineChance;
+        const int randomStackChance;
         const int tightFormationChance;
         const int randomTerrainChance;
         const std::string battlefieldPattern;
@@ -147,6 +148,7 @@ namespace Connector::V12::Thread {
             const int randomObstacles,
             const int townChance,
             const int warmachineChance,
+            const int randomStackChance,
             const int tightFormationChance,
             const int randomTerrainChance,
             const std::string battlefieldPattern,

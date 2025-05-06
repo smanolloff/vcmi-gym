@@ -26,6 +26,7 @@ namespace Connector::V12 {
                 const int &,         // randomObstacles
                 const int &,         // townChance
                 const int &,         // warmachineChance
+                const int &,         // randomStackChance
                 const int &,         // tightFormationChance
                 const int &,         // randomTerrainChance
                 const std::string &, // battlefieldPattern
