@@ -107,10 +107,12 @@ def vcmi_dataloader_functor():
             if not data.done:
                 return None
 
-        if (data.action - 2) % len(HEX_ACT_MAP) == HEX_ACT_MAP["MOVE"]:
-            # Skip 50% of MOVEs
-            if random.random() < 0.5:
-                return None
+        # NO need for that: VcmiEnv's random_action() should now choose other
+        # actions more often
+        # if (data.action - 2) % len(HEX_ACT_MAP) == HEX_ACT_MAP["MOVE"]:
+        #     # Skip 50% of MOVEs
+        #     if random.random() < 0.5:
+        #         return None
 
         if ctx.transition_id == 0 and ctx.ep_steps > 0:
             data = data._replace(reward=state["reward_carry"])
