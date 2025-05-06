@@ -58,6 +58,16 @@ tmux source ~/.tmux.conf || :
 touch ~/.no_auto_tmux
 
 #
+# APT setup (optional - only if apt errors occur)
+# Replace repos in /etc/apt/sources.list with the official ones:
+#
+# deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+# deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+# deb http://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
+# deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+#
+
+#
 # S3 setup
 # edit ~/.bashrc and set AWS keys
 #
@@ -72,18 +82,19 @@ touch ~/.no_auto_tmux
 # use vcmi.sh (would exceed vastai init maxlen)
 #
 
-###
-### After login (manual):
-###
+#
+# W&B setup
 # wandb init -p vcmi-gym && wandb login
-# python3 -m rl.t10n.util.s3downloader data/t10n/.cache
+#
 
+###
+### OTHER
 ###
 ### To stop the VM from within itself
 ### (CONTAINER_ID from the UI in the top-left corner of the instance widget)
 ###
 # vastai stop instance <CONTAINER_ID>
-
+###
 ###
 ### To log tmux pane in .tmux/:
 ###

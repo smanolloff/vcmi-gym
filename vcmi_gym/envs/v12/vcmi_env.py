@@ -426,13 +426,24 @@ class VcmiEnv(gym.Env):
     def random_action(self):
         if self.terminated or self.truncated:
             return None
-        actions = np.where(self.obs["action_mask"])[0]
-        if not actions.any():
-            print("?!?!!?!?!??!?!!?!?")
-            self.render_transitions()
-            print(self.render())
-            raise Exception("action mask allows no actions, but last result was not terminal")
-        return np.random.choice(actions)
+        actions = np.where(self.obs["action_mask"][2:])[0]
+        act_remainders = actions % 14
+        grouped_actions = []
+        for r in range(14):
+            inds = actions[act_remainders == r]
+            if len(inds):
+                grouped_actions.append(inds + 2)
+
+        if self.obs["action_mask"][1]:  # WAIT
+            grouped_actions.append([1])
+
+        # Choose a group (MOVE, AMOVE_TL, AMOVE_TR, ... etc)
+        chosen_group = np.random.choice(range(len(grouped_actions)))
+
+        # Choose an action from the group
+        chosen_action = np.random.choice(grouped_actions[chosen_group])
+
+        return chosen_action
 
     @staticmethod
     def build_obs(pyresult, intrews):
