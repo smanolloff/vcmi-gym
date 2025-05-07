@@ -705,7 +705,9 @@ class TransitionModel(nn.Module):
             return z_agg
 
         def decode(z):
-            res = torch.zeros_like(obs)
+            # Due to torch.amp.autocast, dtype of nn output tensors may be reduced
+            # (i.e. z may be float16)
+            res = torch.zeros_like(obs, dtype=z.dtype)
 
             z_global, mean_z_player, mean_z_hex = self.decoder_agg(z).split([
                 self.z_size_global,
