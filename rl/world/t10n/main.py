@@ -2,11 +2,12 @@ import argparse
 import torch
 
 from . import t10n
+from . import symmetric
 from ..util.weights import build_feature_weights
 from ..util.train import train
 
 
-def test(weights_file):
+def test(mod, weights_file):
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
 
     with torch.no_grad():
@@ -27,8 +28,8 @@ def test(weights_file):
         do_test(model, env)
 
 
-def load_for_test(file):
-    model = t10n.TransitionModel()
+def load_for_test(mod, file):
+    model = mod.TransitionModel()
     model.eval()
     print(f"Loading {file}")
     weights = torch.load(file, weights_only=True, map_location=torch.device("cpu"))
@@ -36,7 +37,7 @@ def load_for_test(file):
     return model
 
 
-def do_test(model, env):
+def do_test(mod, model, env):
     from vcmi_gym.envs.v12.decoder.decoder import Decoder
     from .config import config
 
@@ -90,7 +91,7 @@ def do_test(model, env):
             lines_real = prepare(obs_next, -1, None, "Real:")
             lines_pred = prepare(obs_pred, -1, None, "Predicted:")
 
-            total_loss, losses = t10n.compute_losses(
+            total_loss, losses = mod.compute_losses(
                 logger=None,
                 abs_index=model.abs_index,
                 loss_weights=weights,
@@ -163,14 +164,22 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true", help="do not save anything to disk (implies --no-wandb)")
     parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
     parser.add_argument("--loglevel", metavar="LOGLEVEL", default="INFO", help="DEBUG | INFO | WARN | ERROR")
+    parser.add_argument("--mod", metavar="mod", default="t10n", help="t10n | symmetric")
     parser.add_argument('action', metavar="ACTION", type=str, help="train | test | sample")
     args = parser.parse_args()
+
+    if args.mod == "t10n":
+        mod = t10n
+    elif args.mod == "symmetric":
+        mod = symmetric
+    else:
+        raise Exception("Unexpected mod: %s" % args.mod)
 
     if args.dry_run:
         args.no_wandb = True
 
     if args.action == "test":
-        test(args.f)
+        test(mod, args.f)
     else:
         from .config import config
         common_args = dict(
@@ -180,12 +189,12 @@ if __name__ == "__main__":
             dry_run=args.dry_run,
             no_wandb=args.no_wandb,
             # sample_only=False,
-            model_creator=t10n.TransitionModel,
-            buffer_creator=t10n.Buffer,
-            vcmi_dataloader_functor=t10n.vcmi_dataloader_functor,
+            model_creator=mod.TransitionModel,
+            buffer_creator=mod.Buffer,
+            vcmi_dataloader_functor=mod.vcmi_dataloader_functor,
             s3_dataloader_functor=None,
-            eval_model_fn=t10n.eval_model,
-            train_model_fn=t10n.train_model
+            eval_model_fn=mod.eval_model,
+            train_model_fn=mod.train_model
         )
         if args.action == "train":
             train(**dict(common_args, sample_only=False))
