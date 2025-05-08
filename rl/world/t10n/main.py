@@ -11,7 +11,7 @@ def test(mod, weights_file):
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
 
     with torch.no_grad():
-        model = load_for_test(weights_file)
+        model = load_for_test(mod, weights_file)
         model.eval()
         # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", random_heroes=1, swap_sides=1)
         env = VcmiEnv(
@@ -25,7 +25,7 @@ def test(mod, weights_file):
             random_terrain_chance=100,
             tight_formation_chance=30,
         )
-        do_test(model, env)
+        do_test(mod, model, env)
 
 
 def load_for_test(mod, file):

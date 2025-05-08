@@ -623,8 +623,12 @@ class TransitionModel(nn.Module):
         layer_init(self)
 
         # Weight tying
-        for emb, fc in zip(self.encoders_global_categoricals, self.decoders_global_categoricals):
-            fc.weight = emb.weight
+        # for emb, fc in zip(self.encoders_global_categoricals, self.decoders_global_categoricals):
+        #     fc.weight = emb.weight
+        # for emb, fc in zip(self.encoders_player_categoricals, self.decoders_player_categoricals):
+        #     fc.weight = emb.weight
+        # for emb, fc in zip(self.encoders_hex_categoricals, self.decoders_hex_categoricals):
+        #     fc.weight = emb.weight
 
     def forward_probs(self, obs, action_probs):
         action_z = torch.matmul(action_probs, self.encoder_action.weight)  # shape: [batch_size, embedding_dim]
