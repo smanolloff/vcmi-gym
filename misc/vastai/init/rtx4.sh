@@ -57,34 +57,17 @@ tmux source ~/.tmux.conf || :
 
 touch ~/.no_auto_tmux
 
-#
-# APT setup (optional - only if apt errors occur)
-# Replace repos in /etc/apt/sources.list with the official ones:
-#
-# deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
-# deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
-# deb http://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
-# deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
-#
+# APT setup (apt fails to resolve VCMI deps from some of the non-official mirrors)
+cat <<-EOF >/etc/apt/sources.list
+deb http://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+EOF
 
 #
-# S3 setup
-# edit ~/.bashrc and set AWS keys
-#
-
-#
-# GIT setup
-# use git.sh (would exceed vastai init maxlen)
-#
-
-#
-# VCMI setup
-# use vcmi.sh (would exceed vastai init maxlen)
-#
-
-#
-# W&B setup
-# wandb init -p vcmi-gym && wandb login
+# POST-INSTALL: copy-paste code directly in terminal:
+# post-install.sh
 #
 
 ###

@@ -1,11 +1,60 @@
-cat <<-EOF >vcmi.sh
+(
+set +x
+echo -n "AWS_ACCESS_KEY: "
+read AWS_ACCESS_KEY
+
+echo -n "AWS_SECRET_KEY: "
+read AWS_SECRET_KEY
+
+echo -n "VCMI ZIP password: "
+read pwd
+
+wandb init -p vcmi-gym && wandb login
+
+set -ex
+
+sed -re "s/(export AWS_ACCESS_KEY)=.*/\1='$AWS_ACCESS_KEY'/" \
+    -re "s/(export AWS_SECRET_KEY)=.*/\1='$AWS_SECRET_KEY'/" \
+    -i ~/.bashrc
+
+source ~/.bashrc
+
+set -u
+
+##
+## git init script
+##
+
+cat <<-EOF >~/.gitconfig
+[core]
+    pager = less -R
+    editor = vim
+    excludesfile = ~/.gitignore_global
+[color]
+    ui = true
+[url "https://github.com/"]
+    insteadOf = git@github.com:
+[alias]
+    co = checkout
+    ci = commit
+    st = status
+    br = branch
+    d = diff
+    h = log --pretty=format:\\"%C(magenta)%h%C(reset) %C(green)%ad%C(reset) %s%d %C(blue)[%an]%C(reset)\\" --graph --date=short -15
+    hh = log --pretty=format:\\"%C(magenta)%h%C(reset) %C(green)%ad%C(reset) %s%d %C(blue)[%an]%C(reset)\\" --graph --date=short -15 --first-parent
+EOF
+
+cat <<-EOF >~/.gitignore_global
+*.swp
+*.log
+*.orig
+*.pyc
+.venv
+EOF
+
 ##
 ## VCMI build script
 ##
-echo -n "ZIP password: "
-read pwd
-
-set -eux
 
 git submodule update --init --recursive
 cd vcmi
@@ -17,7 +66,7 @@ s3 = boto3.client("s3", aws_access_key_id=os.environ["AWS_ACCESS_KEY"], aws_secr
 s3.download_file("vcmi-gym", "h3.tar.zip", "h3.tar.zip")
 PYEOF
 
-unzip -P "\$pwd" h3.tar.zip
+unzip -P "$pwd" h3.tar.zip
 tar -xf h3.tar
 rm h3.tar*
 mkdir -p data/config
@@ -47,9 +96,4 @@ cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 cmake --build rel/ -- -j8
-EOF
-
-##
-## To build vcmi (create script manually first):
-##
-# bash vcmi.sh H3_ZIP_PASSWORD
+)
