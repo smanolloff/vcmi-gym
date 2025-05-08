@@ -278,6 +278,7 @@ class TransitionModel(nn.Module):
         self.encoder_merged_global = nn.Sequential(
             # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(self.z_size_global),
+            nn.LayerNorm(self.z_size_global),
             nn.LeakyReLU(),
         )
         # => (B, Z_GLOBAL)
@@ -324,6 +325,7 @@ class TransitionModel(nn.Module):
         self.encoder_merged_player = nn.Sequential(
             # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(self.z_size_player),
+            nn.LayerNorm(self.z_size_player),
             nn.LeakyReLU(),
         )
         # => (B, 2, Z_PLAYER)
@@ -370,6 +372,7 @@ class TransitionModel(nn.Module):
         self.encoder_merged_hex = nn.Sequential(
             # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(self.z_size_hex),
+            nn.LayerNorm(self.z_size_hex),
             nn.LeakyReLU(),
             nn.Dropout(p=0.3)
         )
@@ -389,6 +392,7 @@ class TransitionModel(nn.Module):
         # (B, Z_GLOBAL + MEAN(2, Z_PLAYER) + MEAN(165, Z_HEX))
         self.aggregator = nn.Sequential(
             nn.LazyLinear(2048),
+            nn.LayerNorm(2048),
             nn.LeakyReLU(),
         )
         # => (B, Z_AGG)
@@ -404,6 +408,7 @@ class TransitionModel(nn.Module):
         # (B, Z_AGG)
         self.decoder_agg = nn.Sequential(
             nn.LazyLinear(self.z_size_global + self.z_size_player + self.z_size_hex),
+            nn.LayerNorm(self.z_size_global + self.z_size_player + self.z_size_hex),
             nn.LeakyReLU(),
         )
         # => (B, Z_GLOBAL + Z_PLAYER + Z_HEX)
@@ -427,6 +432,7 @@ class TransitionModel(nn.Module):
         # (B, Z_GLOBAL)
         self.decoder_merged_global = nn.Sequential(
             nn.LazyLinear(z_global_size_unmerged),
+            nn.LayerNorm(z_global_size_unmerged),
             nn.LeakyReLU(),
         )
         # => (B, N_CONT_ABS_FEATS + N_CONT_REL_FEATS + N_CONT_NULLBIT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
@@ -493,6 +499,7 @@ class TransitionModel(nn.Module):
         # (B, 2, Z_PLAYER)
         self.decoder_merged_player = nn.Sequential(
             nn.LazyLinear(z_player_size_unmerged),
+            nn.LayerNorm(z_player_size_unmerged),
             nn.LeakyReLU(),
         )
         # => (B, 2, N_CONT_ABS_FEATS + N_CONT_REL_FEATS + N_CONT_NULLBIT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
@@ -570,6 +577,7 @@ class TransitionModel(nn.Module):
         # (B, 165, Z_HEX)
         self.decoder_merged_hex = nn.Sequential(
             nn.LazyLinear(z_hex_size_unmerged),
+            nn.LayerNorm(z_hex_size_unmerged),
             nn.LeakyReLU(),
         )
         # => (B, 165, N_CONT_ABS_FEATS + N_CONT_REL_FEATS + N_CONT_NULLBIT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
@@ -698,7 +706,7 @@ class TransitionModel(nn.Module):
             hex_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
             hex_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 165, -1), hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
             z_hex = self.encoder_merged_hex(hex_merged)
-            z_hex = self.encoder_transformer_hex(z_hex)
+            z_hex = z_hex + self.encoder_transformer_hex(z_hex)
             # => (B, 165, Z_HEX)
 
             mean_z_player = z_player.mean(dim=1)
@@ -828,7 +836,7 @@ class TransitionModel(nn.Module):
             hex_query = self.decoder_transformer_query_hex.unsqueeze(0).expand(z_hex_mem.shape[0], -1, -1)
 
             # Cross‐attention + FFN → still (B, 165, Z_HEX)
-            z_hex_transformer = self.decoder_transformer_hex(hex_query, z_hex_mem)
+            z_hex_transformer = z_hex_mem + self.decoder_transformer_hex(hex_query, z_hex_mem)
 
             (
                 z_hex_cont_abs,
