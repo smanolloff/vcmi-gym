@@ -65,7 +65,7 @@ def main():
     num_episodes = 0
     num_samples = 0
 
-    for _ in range(10):
+    for _ in range(100):
         b = next(it)
         action_counters += torch.bincount((b.action - 2) % N_HEX_ACTIONS, minlength=N_HEX_ACTIONS)
         num_episodes += b.done.sum(0)
