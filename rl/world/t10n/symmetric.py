@@ -3,12 +3,11 @@ import torch.nn as nn
 import math
 import enum
 import contextlib
-import random
 import torch.nn.functional as F
 import pandas as pd
 
 from ..util.buffer_base import BufferBase
-from ..util.dataset_vcmi import Data, Context
+from ..util.dataset_vcmi import Data, Context, DataInstruction
 from ..util.misc import layer_init
 from ..util.obs_index import ObsIndex, Group, ContextGroup, DataGroup
 from ..util.timer import Timer
@@ -20,7 +19,6 @@ from ..util.constants_v12 import (
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
     N_HEX_ACTIONS,
-    HEX_ACT_MAP,
 )
 
 
@@ -102,20 +100,22 @@ def vcmi_dataloader_functor():
     state = {"reward_carry": 0}
 
     def mw(data: Data, ctx: Context):
+        instruction = DataInstruction.USE
+
+        # Always skip last transition (it is identical to the next first transition)
         if ctx.transition_id == ctx.num_transitions - 1:
             state["reward_carry"] = data.reward
             if not data.done:
-                return None
-
-        if (data.action - 2) % len(HEX_ACT_MAP) == HEX_ACT_MAP["MOVE"]:
-            # Skip 50% of MOVEs
-            if random.random() < 0.5:
-                return None
+                instruction = DataInstruction.SKIP
 
         if ctx.transition_id == 0 and ctx.ep_steps > 0:
             data = data._replace(reward=state["reward_carry"])
 
-        return data
+        # XXX:
+        # SKIP instructions MUST NOT be used to promote more AMOVE samples here
+        # as this results in inconsistent transitions in the buffer.
+
+        return data, instruction
 
     return mw
 
@@ -380,8 +380,8 @@ class TransitionModel(nn.Module):
 
         # Transformer (hexes only)
         self.encoder_transformer_hex = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=self.z_size_hex, nhead=2, dropout=0.3, batch_first=True),
-            num_layers=1
+            nn.TransformerEncoderLayer(d_model=self.z_size_hex, nhead=8, dropout=0.3, batch_first=True),
+            num_layers=4
         )
         # => (B, 165, Z_HEX)
 
@@ -755,24 +755,24 @@ class TransitionModel(nn.Module):
                 sum(len(ind) for ind in g_relind[Group.THRESHOLDS])
             ], dim=-1)
 
-            res[:, g_absind[Group.CONT_ABS]] = self.decoder_global_cont_abs(z_global_cont_abs)
-            res[:, g_absind[Group.CONT_REL]] = self.decoder_global_cont_rel(z_global_cont_rel)
-            res[:, g_absind[Group.CONT_NULLBIT]] = self.decoder_global_cont_nullbit(z_global_cont_nullbit)
+            res[:, g_absind[Group.CONT_ABS]] = self.decoder_global_cont_abs(z_global_cont_abs).to(res.dtype)
+            res[:, g_absind[Group.CONT_REL]] = self.decoder_global_cont_rel(z_global_cont_rel).to(res.dtype)
+            res[:, g_absind[Group.CONT_NULLBIT]] = self.decoder_global_cont_nullbit(z_global_cont_nullbit).to(res.dtype)
 
             z_global_bin_ins = z_global_bin.split([len(relind) for relind in g_relind[Group.BINARIES]], dim=-1)
             for dec, x, absind in zip(self.decoders_global_binaries, z_global_bin_ins, g_absind[Group.BINARIES]):
                 # x is (B, N) where N is the i-th bin feature's num_bits
-                res[:, absind] = dec(x).flatten(start_dim=1)
+                res[:, absind] = dec(x).flatten(start_dim=1).to(res.dtype)
 
             z_global_cat_ins = z_global_cat.split([emb_calc(len(relind)) for relind in g_relind[Group.CATEGORICALS]], dim=-1)
             for dec, x, absind in zip(self.decoders_global_categoricals, z_global_cat_ins, g_absind[Group.CATEGORICALS]):
                 # x is (B, C) where C is the i-th cat feature's num_classes
-                res[:, absind] = dec(x).flatten(start_dim=1)
+                res[:, absind] = dec(x).flatten(start_dim=1).to(res.dtype)
 
             z_global_thr_ins = z_global_thr.split([len(relind) for relind in g_relind[Group.THRESHOLDS]], dim=-1)
             for dec, x, absind in zip(self.decoders_global_thresholds, z_global_thr_ins, g_absind[Group.THRESHOLDS]):
                 # x is (B, T) where T is the i-th thr feature's num_thresholds (or bins)
-                res[:, absind] = dec(x).flatten(start_dim=1)
+                res[:, absind] = dec(x).flatten(start_dim=1).to(res.dtype)
 
             #
             # Player
@@ -801,24 +801,24 @@ class TransitionModel(nn.Module):
                 sum(len(ind) for ind in p_relind[Group.THRESHOLDS])
             ], dim=-1)
 
-            res[:, p_absind[Group.CONT_ABS]] = self.decoder_player_cont_abs(z_player_cont_abs)
-            res[:, p_absind[Group.CONT_REL]] = self.decoder_player_cont_rel(z_player_cont_rel)
-            res[:, p_absind[Group.CONT_NULLBIT]] = self.decoder_player_cont_nullbit(z_player_cont_nullbit)
+            res[:, p_absind[Group.CONT_ABS]] = self.decoder_player_cont_abs(z_player_cont_abs).to(res.dtype)
+            res[:, p_absind[Group.CONT_REL]] = self.decoder_player_cont_rel(z_player_cont_rel).to(res.dtype)
+            res[:, p_absind[Group.CONT_NULLBIT]] = self.decoder_player_cont_nullbit(z_player_cont_nullbit).to(res.dtype)
 
             z_player_bin_ins = z_player_bin.split([len(relind) for relind in p_relind[Group.BINARIES]], dim=-1)
             for dec, x, absind in zip(self.decoders_player_binaries, z_player_bin_ins, p_absind[Group.BINARIES]):
                 # x is (B, N) where N is the i-th bin feature's num_bits
-                res[:, absind] = dec(x)
+                res[:, absind] = dec(x).to(res.dtype)
 
             z_player_cat_ins = z_player_cat.split([emb_calc(len(relind)) for relind in p_relind[Group.CATEGORICALS]], dim=-1)
             for dec, x, absind in zip(self.decoders_player_categoricals, z_player_cat_ins, p_absind[Group.CATEGORICALS]):
                 # x is (B, C) where C is the i-th cat feature's num_classes
-                res[:, absind] = dec(x)
+                res[:, absind] = dec(x).to(res.dtype)
 
             z_player_thr_ins = z_player_thr.split([len(relind) for relind in p_relind[Group.THRESHOLDS]], dim=-1)
             for dec, x, absind in zip(self.decoders_player_thresholds, z_player_thr_ins, p_absind[Group.THRESHOLDS]):
                 # x is (B, T) where T is the i-th thr feature's num_thresholds (or bins)
-                res[:, absind] = dec(x)
+                res[:, absind] = dec(x).to(res.dtype)
 
             #
             # Hex
@@ -854,24 +854,24 @@ class TransitionModel(nn.Module):
                 sum(len(ind) for ind in h_relind[Group.THRESHOLDS])
             ], dim=-1)
 
-            res[:, h_absind[Group.CONT_ABS]] = self.decoder_hex_cont_abs(z_hex_cont_abs)
-            res[:, h_absind[Group.CONT_REL]] = self.decoder_hex_cont_rel(z_hex_cont_rel)
-            res[:, h_absind[Group.CONT_NULLBIT]] = self.decoder_hex_cont_nullbit(z_hex_cont_nullbit)
+            res[:, h_absind[Group.CONT_ABS]] = self.decoder_hex_cont_abs(z_hex_cont_abs).to(res.dtype)
+            res[:, h_absind[Group.CONT_REL]] = self.decoder_hex_cont_rel(z_hex_cont_rel).to(res.dtype)
+            res[:, h_absind[Group.CONT_NULLBIT]] = self.decoder_hex_cont_nullbit(z_hex_cont_nullbit).to(res.dtype)
 
             z_hex_bin_ins = z_hex_bin.split([len(relind) for relind in h_relind[Group.BINARIES]], dim=-1)
             for dec, x, absind in zip(self.decoders_hex_binaries, z_hex_bin_ins, h_absind[Group.BINARIES]):
                 # x is (B, N) where N is the i-th bin feature's num_bits
-                res[:, absind] = dec(x)
+                res[:, absind] = dec(x).to(res.dtype)
 
             z_hex_cat_ins = z_hex_cat.split([emb_calc(len(relind)) for relind in h_relind[Group.CATEGORICALS]], dim=-1)
             for dec, x, absind in zip(self.decoders_hex_categoricals, z_hex_cat_ins, h_absind[Group.CATEGORICALS]):
                 # x is (B, C) where C is the i-th cat feature's num_classes
-                res[:, absind] = dec(x)
+                res[:, absind] = dec(x).to(res.dtype)
 
             z_hex_thr_ins = z_hex_thr.split([len(relind) for relind in h_relind[Group.THRESHOLDS]], dim=-1)
             for dec, x, absind in zip(self.decoders_hex_thresholds, z_hex_thr_ins, h_absind[Group.THRESHOLDS]):
                 # x is (B, T) where T is the i-th thr feature's num_thresholds (or bins)
-                res[:, absind] = dec(x)
+                res[:, absind] = dec(x).to(res.dtype)
 
             return res
 

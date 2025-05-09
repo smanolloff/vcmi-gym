@@ -23,6 +23,7 @@ def test(mod, weights_file):
             town_chance=20,
             warmachine_chance=30,
             random_terrain_chance=100,
+            random_stack_chance=70,
             tight_formation_chance=30,
         )
         do_test(mod, model, env)

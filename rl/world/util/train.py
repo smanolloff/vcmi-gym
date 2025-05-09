@@ -133,7 +133,9 @@ def train(
 
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
     torch.backends.cudnn.benchmark = True
-    torch.autograd.set_detect_anomaly(True)
+
+    # This always triggers on the first iteration...
+    # torch.autograd.set_detect_anomaly(True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model_creator(device=device)

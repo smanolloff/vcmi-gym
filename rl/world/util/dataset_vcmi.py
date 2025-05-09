@@ -1,18 +1,13 @@
 import time
 import torch
 import logging
+import enum
 import queue
 import numpy as np
 from torch.utils.data import IterableDataset
 from typing import NamedTuple
 
 from .timer import Timer
-
-
-# Need a functor instead of simple function each sub-process
-# will need to use one copy of this function
-def noop_functor():
-    return lambda data, ctx: data
 
 
 class Data(NamedTuple):
@@ -27,6 +22,18 @@ class Context(NamedTuple):
     ep_steps: int
     transition_id: int
     num_transitions: int
+
+
+class DataInstruction(enum.IntEnum):
+    USE = 0
+    SKIP = enum.auto()
+    # SKIP_ALL = enum.auto()
+
+
+# Need a functor instead of simple function when using DataLoader
+# as each sub-process will need to use a separate copy of this function
+def noop_functor():
+    return lambda data, ctx: (data, DataInstruction.USE)
 
 
 class DatasetVCMI(IterableDataset):
@@ -120,14 +127,18 @@ class DatasetVCMI(IterableDataset):
                 num_transitions = len(obs["transitions"]["observations"])
 
                 for t, (t_obs, t_mask, t_reward, t_done, t_action) in enumerate(zipped):
-                    data = middleware(
+                    data, instruction = middleware(
                         Data(obs=t_obs, mask=t_mask, reward=t_reward, done=t_done, action=t_action),
                         Context(ep_steps=0, transition_id=t, num_transitions=num_transitions)
                     )
 
-                    if data is not None:
+                    if instruction == DataInstruction.USE:
                         with self.timer_idle:
                             yield data
+                    elif instruction == DataInstruction.SKIP:
+                        pass
+                    else:
+                        raise Exception("Invalid DataInstruction: %s" % instruction)
 
                     if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:
                         self.metric_reported_at = time.time()

@@ -3,12 +3,11 @@ import torch.nn as nn
 import math
 import enum
 import contextlib
-import random
 import torch.nn.functional as F
 import pandas as pd
 
 from ..util.buffer_base import BufferBase
-from ..util.dataset_vcmi import Data, Context
+from ..util.dataset_vcmi import Data, Context, DataInstruction
 from ..util.misc import layer_init
 from ..util.obs_index import ObsIndex, Group, ContextGroup, DataGroup
 from ..util.timer import Timer
@@ -20,7 +19,6 @@ from ..util.constants_v12 import (
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
     N_HEX_ACTIONS,
-    HEX_ACT_MAP,
 )
 
 
@@ -102,20 +100,22 @@ def vcmi_dataloader_functor():
     state = {"reward_carry": 0}
 
     def mw(data: Data, ctx: Context):
+        instruction = DataInstruction.USE
+
+        # Always skip last transition (it is identical to the next first transition)
         if ctx.transition_id == ctx.num_transitions - 1:
             state["reward_carry"] = data.reward
             if not data.done:
-                return None
-
-        if (data.action - 2) % len(HEX_ACT_MAP) == HEX_ACT_MAP["MOVE"]:
-            # Skip 50% of MOVEs
-            if random.random() < 0.5:
-                return None
+                instruction = DataInstruction.SKIP
 
         if ctx.transition_id == 0 and ctx.ep_steps > 0:
             data = data._replace(reward=state["reward_carry"])
 
-        return data
+        # XXX:
+        # SKIP instructions MUST NOT be used to promote more AMOVE samples here
+        # as this results in inconsistent transitions in the buffer.
+
+        return data, instruction
 
     return mw
 

@@ -8,6 +8,7 @@ import re
 import random
 import glob
 import logging
+import enum
 import numpy as np
 from torch.utils.data import IterableDataset
 
@@ -15,8 +16,15 @@ from .timer import Timer
 from .dataset_vcmi import Data
 
 
+class DataInstruction(enum.IntEnum):
+    USE = 0
+    SKIP = enum.auto()
+
+
+# Need a functor instead of simple function when using DataLoader
+# as each sub-process will need to use a separate copy of this function
 def noop_functor():
-    return lambda data: data
+    return lambda data, ctx: (data, DataInstruction.USE)
 
 
 class DatasetS3(IterableDataset):
@@ -162,12 +170,15 @@ class DatasetS3(IterableDataset):
                     samples = dict(np.load(self._download_file(s3_key)))
 
                     for (o, m, r, d, a) in zip(samples["obs"], samples["mask"], samples["reward"], samples["done"], samples["action"]):
-                        with self.timer_idle:
-                            data = middleware(Data(obs=o, mask=m, reward=r, done=d, action=a))
+                        data, instruction = middleware(Data(obs=o, mask=m, reward=r, done=d, action=a))
 
-                        if data is not None:
+                        if instruction == DataInstruction.USE:
                             with self.timer_idle:
                                 yield data
+                        elif instruction == DataInstruction.SKIP:
+                            pass
+                        else:
+                            raise Exception("Invalid DataInstruction: %s" % instruction)
 
                         if self.metric_queue and time.time() - self.metric_reported_at > self.metric_report_interval:
                             self.metric_reported_at = time.time()

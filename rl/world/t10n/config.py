@@ -34,7 +34,7 @@ env_kwargs = dict(
 )
 
 config = dict(
-    name_template="{datetime}-{id}-v12-swap-T-E512_H8_L6-B300-RTX3080",
+    name_template="{datetime}-{id}-v12",
     out_dir_template="data/world/t10n",
     wandb_group="transition-model",
 
@@ -93,13 +93,13 @@ config = dict(
 
     train=dict(
         accumulate_grad=False,  # makes 1 batch = entire buffer
-        batch_size=2,
+        batch_size=2,           # calculated dynamically
         learning_rate=1e-4,
         epochs=1,
     ),
     eval=dict(
         interval_s=5,
-        batch_size=2,
+        batch_size=2,           # calculated dynamically
     ),
     wandb_log_interval_s=5,
     wandb_table_update_interval_s=8,  # data will be added here (rows=2*NUM_ATTRS)
@@ -109,20 +109,20 @@ config = dict(
 )
 
 if os.getenv("VASTAI", None) == "1":
-    if config.get("env", {}).get("train"):
-        config["env"]["train"]["num_workers"] = 6
-        config["env"]["train"]["batch_size"] = 1000
-        config["env"]["train"]["kwargs"]["mapname"] = "gym/generated/4096/4x1024.vmap"
-
-    if config.get("env", {}).get("eval"):
-        config["env"]["eval"]["num_workers"] = 1
-        config["env"]["eval"]["batch_size"] = 5000
-        config["env"]["eval"]["kwargs"]["mapname"] = "gym/generated/evaluation/8x512.vmap"
-
-    config["train"]["batch_size"] = 250
-    config["eval"]["batch_size"] = 200
-    config["eval"]["interval_s"] = 60
-
     config["wandb_log_interval_s"] = 60
     config["wandb_table_update_interval_s"] = 600
     config["wandb_table_log_interval_s"] = 3600
+
+    config["train"]["batch_size"] = 300
+    config["eval"]["batch_size"] = config["train"]["batch_size"]
+    config["eval"]["interval_s"] = 60
+
+    if config.get("env", {}).get("train"):
+        config["env"]["train"]["num_workers"] = 6
+        config["env"]["train"]["batch_size"] = config["train"]["batch_size"]
+        config["env"]["train"]["kwargs"]["mapname"] = "gym/generated/4096/4x1024.vmap"
+
+    if config.get("env", {}).get("eval"):
+        # XXX:same batch size as train, but only 1 worker (plenty of time between evals)
+        config["env"]["eval"]["batch_size"] = config["train"]["batch_size"] * config["env"]["train"]["num_workers"]
+        config["env"]["eval"]["kwargs"]["mapname"] = "gym/generated/evaluation/8x512.vmap"
