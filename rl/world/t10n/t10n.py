@@ -136,6 +136,8 @@ class Buffer(BufferBase):
         return torch.nonzero(ok_samples, as_tuple=True)[0]
 
     def add_batch(self, data):
+        # XXX: this is INCORRECT -- for WAIT (1) actions, it would compute
+        #   -1 % 14 = 13 => report it as SHOOT
         self.action_counters.add_(torch.bincount((data.action - 2) % N_HEX_ACTIONS, minlength=N_HEX_ACTIONS))
         self.tmp_counter += len(data.action)
         if self.tmp_counter > 1_000_000:

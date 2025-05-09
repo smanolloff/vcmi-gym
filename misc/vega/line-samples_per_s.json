@@ -1,0 +1,85 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Line plot of samples processed per second.",
+  "data": {"name": "wandb"},
+  "title": {"text": "samples/s"},
+  "transform": [
+    {"calculate": "datum.iteration * datum.batch_size * datum.num_workers", "as": "num_samples"},
+    {"calculate": "toDate(datum._timestamp * 1000)", "as": "time"},
+    {
+      "window": [
+        {"op": "lag", "field": "num_samples", "as": "prev_samples"},
+        {"op": "lag", "field": "_timestamp", "as": "prev_ts"}
+      ],
+      "frame": [-1, 0]
+    },
+    {
+      "calculate": "(datum.num_samples - datum.prev_samples) * 1000 / (datum._timestamp - datum.prev_ts)",
+      "as": "samples_per_second"
+    },
+    {
+      "filter": "isValid(datum.samples_per_second) && datum.samples_per_second > 1"
+    }
+  ],
+
+  "encoding": {
+    "x": {
+      "field": "time",
+      "type": "temporal",
+      "axis": {"grid": false, "title": ""}
+    }
+  },
+
+  "layer": [
+    {
+      "encoding": {
+        "y": {
+          "field": "samples_per_second",
+          "type": "quantitative",
+          "axis": {"tickCount": 5, "format": ".3s", "title": ""}
+        }
+      },
+      "layer": [
+        {
+          "selection": {"grid": {"type": "interval", "bind": "scales"}},
+          "mark": "line",
+          "encoding": {
+            "size": {"value": 2}
+          }
+        },
+        {
+          "mark": "point",
+          "transform": [
+            {"filter": {"selection": "hover"}}
+          ],
+          "encoding": {
+            "y": {"field": "samples_per_second", "type": "quantitative"}
+          }
+        }
+      ]
+    },
+    {
+      "mark": {"type": "rule"},
+      "encoding": {
+        "tooltip": [
+          {"field": "time", "type": "temporal", "format": "%b %e %I:%M %p"},
+          {"field": "samples_per_second", "type": "quantitative", "format": ".3s", "title": "samples/s"}
+        ],
+        "opacity": {
+          "condition": {"value": 3, "selection": "hover"},
+          "value": 0
+        }
+      },
+      "selection": {
+        "hover": {
+          "type": "single",
+          "fields": ["_step"],
+          "nearest": true,
+          "on": "mouseover",
+          "empty": "none",
+          "clear": "mouseout"
+        }
+      }
+    }
+  ]
+}

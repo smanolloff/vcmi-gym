@@ -41,7 +41,8 @@ def setup_wandb(config, model, src_file):
 
     start_infos = wandb.config.get("_start_infos", [])
     start_infos.append(start_info)
-    wandb.config.update(dict(_start_infos=start_infos), allow_val_change=True)
+    # Store VastAI instance ID separately (outside of the array) for UI convenience
+    wandb.config.update(dict(vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"), _start_infos=start_infos), allow_val_change=True)
 
     # Must be after wandb.init
     if start_info["git_is_dirty"]:
