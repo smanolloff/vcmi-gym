@@ -97,3 +97,4 @@ cmake -S . -B rel -Wno-dev \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 cmake --build rel/ -- -j8
 )
+source ~/.bashrc

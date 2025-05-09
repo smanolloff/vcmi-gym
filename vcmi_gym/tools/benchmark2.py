@@ -25,34 +25,7 @@ import logging
 from vcmi_gym.envs.v12.pyconnector import HEX_ACT_MAP, N_HEX_ACTIONS
 from rl.world.util.structured_logger import StructuredLogger
 from rl.world.util.dataset_vcmi import DatasetVCMI, Data, Context
-
-
-def vcmi_dataloader_functor():
-    state = {"reward_carry": 0}
-
-    def mw(data: Data, ctx: Context):
-        if ctx.transition_id == ctx.num_transitions - 1:
-            state["reward_carry"] = data.reward
-            if not data.done:
-                return None
-
-        if (data.action - 2) % N_HEX_ACTIONS == HEX_ACT_MAP["MOVE"]:
-            # Skip 50% of MOVEs
-            if random.random() < 0.5:
-                return None
-
-        if ctx.transition_id == 0 and ctx.ep_steps > 0:
-            data = data._replace(reward=state["reward_carry"])
-
-        return data
-
-    return mw
-
-
-    # return model.predict(
-    #     torch.as_tensor(obs).float(),
-    #     torch.as_tensor(np.array(mask))
-    # )
+from rl.world.t10n.t10n import vcmi_dataloader_functor
 
 
 def main():
@@ -87,31 +60,36 @@ def main():
 
     it = iter(dataloader)
 
-    for x in range(10):
-        print("========= %d ========" % x)
-        batches = [next(it) for _ in range(100)]
-        actions = torch.cat([b.action for b in batches])
-        dones = torch.cat([b.done for b in batches])
+    tstart = time.time()
+    action_counters = torch.zeros(N_HEX_ACTIONS, dtype=torch.long)
+    num_episodes = 0
+    num_samples = 0
 
-        num_episodes = len(dones[dones > 0])
-        num_samples = len(actions)
-        action_counters = torch.bincount((actions - 2) % N_HEX_ACTIONS, minlength=N_HEX_ACTIONS)
+    for _ in range(10):
+        b = next(it)
+        action_counters += torch.bincount((b.action - 2) % N_HEX_ACTIONS, minlength=N_HEX_ACTIONS)
+        num_episodes += b.done.sum(0)
+        num_samples += b.done.numel()
 
-        print("")
-        print("* Total samples: %d" % num_samples)
-        print("* Total episodes: %d" % num_episodes)
-        print("* ep_len_mean: %d" % (num_samples / num_episodes) if num_episodes else float("nan"))
+    print("")
 
-        assert action_counters.sum() == num_samples
+    num_seconds = time.time() - tstart
+    print("* Total duration: %d seconds" % num_seconds)
+    print("* Total samples: %d" % num_samples)
+    print("* Total episodes: %d" % num_episodes)
+    print("* ep_len_mean: %d" % (num_samples / num_episodes) if num_episodes else float("nan"))
+    print("* samples/s: %d" % (num_samples / num_seconds))
 
-        print("Action distribution:")
-        print("")
-        print("   action  | prob")
-        print("-----------|-------")
-        for name, count in zip(HEX_ACT_MAP, action_counters / num_samples):
-            print(" %-9s | %.3f" % (name, count))
+    assert action_counters.sum() == num_samples
 
-        print("")
+    print("Action distribution:")
+    print("")
+    print("   action  | prob")
+    print("-----------|-------")
+    for name, count in zip(HEX_ACT_MAP, action_counters / num_samples):
+        print(" %-9s | %.3f" % (name, count))
+
+    print("")
 
 
 if __name__ == "__main__":
