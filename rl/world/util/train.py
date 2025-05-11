@@ -87,18 +87,21 @@ def train(
     eval_batch_size = config["eval"]["batch_size"]
 
     if train_env_config:
-        # Prevent guaranteed waiting time for each batch during training
-        assert train_batch_size <= (train_env_config["num_workers"] * train_env_config["batch_size"])
-        # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
-        assert (train_env_config["num_workers"] * train_env_config["batch_size"]) % train_batch_size == 0
+        # num_workers=0 for debugging (runs in main thread)
+        if train_env_config["num_workers"] > 0:
+            # Prevent guaranteed waiting time for each batch during training
+            assert train_batch_size <= (train_env_config["num_workers"] * train_env_config["batch_size"])
+            # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
+            assert (train_env_config["num_workers"] * train_env_config["batch_size"]) % train_batch_size == 0
     else:
         assert train_batch_size <= (train_s3_config["num_workers"] * train_s3_config["batch_size"])
         assert (train_s3_config["num_workers"] * train_s3_config["batch_size"]) % train_batch_size == 0
 
     if eval_env_config:
-        # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
-        assert eval_batch_size <= (eval_env_config["num_workers"] * eval_env_config["batch_size"])
-        assert (eval_env_config["num_workers"] * eval_env_config["batch_size"]) % eval_batch_size == 0
+        if eval_env_config["num_workers"] > 0:
+            # Samples would be lost otherwise (batched_iter uses loop with step=batch_size)
+            assert eval_batch_size <= (eval_env_config["num_workers"] * eval_env_config["batch_size"])
+            assert (eval_env_config["num_workers"] * eval_env_config["batch_size"]) % eval_batch_size == 0
     else:
         assert eval_batch_size <= (eval_s3_config["num_workers"] * eval_s3_config["batch_size"])
         assert (eval_s3_config["num_workers"] * eval_s3_config["batch_size"]) % eval_batch_size == 0
@@ -249,11 +252,15 @@ def train(
         return agg_data
 
     # Aggregate loss for entire stage (1 row per context/datatype pair)
-    def aggregate_losses(stage, df):
+    def aggregate_losses(stage, df, rew_loss):
         aggregated = df.groupby([TableColumn.CONTEXT, TableColumn.DATATYPE])[TableColumn.LOSS].sum()
         # => keys = tuple(context, datatype), values = float(loss)
 
-        res = {f"{stage}_loss/total": 0}
+        res = {
+            f"{stage}_loss/total": rew_loss,
+            f"{stage}_loss/reward": rew_loss
+        }
+
         for (ctx, dt), v in aggregated.items():
             res[f"{stage}_loss/{ctx}/{dt}"] = v
             res[f"{stage}_loss/total"] += v
@@ -357,7 +364,7 @@ def train(
                 eval_buffer.load_samples(eval_dataloader)
 
             with timers["eval"]:
-                df_stage_eval, eval_total_wait = eval_model_fn(
+                df_stage_eval, rew_loss_eval, eval_total_wait = eval_model_fn(
                     logger=logger,
                     model=model,
                     loss_weights=feature_weights,
@@ -369,7 +376,7 @@ def train(
             df_stage_eval[TableColumn.STAGE] = "eval"
             df_stages = concat_dfs(df_stages, df_stage_eval)
 
-            wlog.update(**aggregate_losses("eval", df_stage_eval))
+            wlog.update(**aggregate_losses("eval", df_stage_eval, rew_loss_eval))
             wlog["eval_dataset/wait_time_s"] = eval_total_wait
 
             train_dataset_metrics = aggregate_metrics(train_metric_queue)
@@ -442,7 +449,7 @@ def train(
                 thread.start()
 
         with timers["train"]:
-            df_stage_train, train_total_wait = train_model_fn(
+            df_stage_train, rew_loss_train, train_total_wait = train_model_fn(
                 logger=logger,
                 model=model,
                 optimizer=optimizer,
@@ -459,17 +466,8 @@ def train(
         df_stage_train[TableColumn.STAGE] = "train"
         df_stages = concat_dfs(df_stages, df_stage_train)
 
-        wlog.update(**aggregate_losses("train", df_stage_train))
+        wlog.update(**aggregate_losses("train", df_stage_train, rew_loss_train))
         wlog["train_dataset/wait_time_s"] = train_total_wait
-
-        # from .analyze_loss import analyze_loss
-        # topk = 5
-        # analyzed_attrs, topk_frac, top3_loss = analyze_loss(model, train_attrlosses, eval_attrlosses, topk=topk)
-        # for group_name, group_topk_attrs in topk_frac.items():
-        #     print("Top%d loss diff attrs in group: %s" % (topk, group_name))
-        #     for name, (diff_loss, diff_frac, eval_loss, train_loss) in group_topk_attrs:
-        #         print("    %-30s diff: %.3f (x%.1f) | eval: %.3f | train: %.3f" % (name, diff_loss, diff_frac, eval_loss, train_loss))
-        # import ipdb; ipdb.set_trace()  # noqa
 
         accumulate_logs(wlog)
 

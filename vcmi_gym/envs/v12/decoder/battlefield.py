@@ -259,8 +259,12 @@ class Battlefield():
                     if last_action:
                         assert N_NONHEX_ACTIONS == 2
                         value = "%d: " % last_action
-                        if last_action < 2:
-                            value += "Wait" if last_action else "Retreat"
+                        if last_action < 0:
+                            pass  # -1 is used for "no action", e.g. in last transition of obs
+                        elif last_action == 1:
+                            value += "Wait"
+                        elif last_action == 2:
+                            value += "Retreat"
                         else:
                             hex = self.get_hex((last_action - 2) // len(HEX_ACT_MAP))
                             act = list(HEX_ACT_MAP)[(last_action - 2) % len(HEX_ACT_MAP)]

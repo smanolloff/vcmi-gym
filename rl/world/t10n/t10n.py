@@ -8,7 +8,7 @@ import pandas as pd
 
 from ..util.buffer_base import BufferBase
 from ..util.dataset_vcmi import Data, Context, DataInstruction
-from ..util.misc import layer_init
+from ..util.misc import layer_init, safe_mean
 from ..util.obs_index import ObsIndex, Group, ContextGroup, DataGroup
 from ..util.timer import Timer
 from ..util.misc import TableColumn
@@ -135,17 +135,6 @@ class Buffer(BufferBase):
         ok_samples[self.worker_cutoffs] = False
         return torch.nonzero(ok_samples, as_tuple=True)[0]
 
-    def add_batch(self, data):
-        # XXX: this is INCORRECT -- for WAIT (1) actions, it would compute
-        #   -1 % 14 = 13 => report it as SHOOT
-        self.action_counters.add_(torch.bincount((data.action - 2) % N_HEX_ACTIONS, minlength=N_HEX_ACTIONS))
-        self.tmp_counter += len(data.action)
-        if self.tmp_counter > 1_000_000:
-            total = self.action_counters.sum()
-            self.logger.info("Action dist after %d samples: %s" % (total, (self.action_counters / total).tolist()))
-            self.tmp_counter = 0
-        super().add_batch(data)
-
     def sample(self, batch_size):
         inds = self._valid_indices()
         sampled_indices = inds[torch.randint(len(inds), (batch_size,), device=self.device)]
@@ -157,7 +146,6 @@ class Buffer(BufferBase):
         next_mask = self.containers["mask"][sampled_indices + 1]
         next_reward = self.containers["reward"][sampled_indices + 1]
         next_done = self.containers["done"][sampled_indices + 1]
-
         return obs, action, next_obs, next_mask, next_reward, next_done
 
     def sample_iter(self, batch_size):
@@ -398,7 +386,8 @@ class TransitionModel(nn.Module):
         #
 
         # => (B, Z_AGG)
-        self.head_global = nn.LazyLinear(STATE_SIZE_GLOBAL)
+        # Output 1 one extra logit for the reward
+        self.head_rew_and_global = nn.LazyLinear(1 + STATE_SIZE_GLOBAL)
 
         # => (B, 2, Z_AGG + Z_PLAYER)
         self.head_player = nn.LazyLinear(STATE_SIZE_ONE_PLAYER)
@@ -494,7 +483,13 @@ class TransitionModel(nn.Module):
         # Outputs
         #
 
-        global_out = self.head_global(z_agg)
+        rew_and_global_out = self.head_rew_and_global(z_agg)
+        # => (B, 1 + STATE_SIZE_GLOBAL)
+
+        rew_out = rew_and_global_out[:, 0]
+        # => (B)
+
+        global_out = rew_and_global_out[:, 1:]
         # => (B, STATE_SIZE_GLOBAL)
 
         player_out = self.head_player(torch.cat([z_agg.unsqueeze(1).expand(-1, 2, -1), z_player], dim=-1))
@@ -505,7 +500,7 @@ class TransitionModel(nn.Module):
 
         obs_out = torch.cat((global_out, player_out.flatten(start_dim=1), hex_out.flatten(start_dim=1)), dim=1)
 
-        return obs_out
+        return obs_out, rew_out
 
     def reconstruct(self, obs_out, strategy=Reconstruction.GREEDY):
         global_cont_abs_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
@@ -591,21 +586,22 @@ class TransitionModel(nn.Module):
         return next_obs
 
     def predict_from_probs_(self, obs, action_probs, strategy=Reconstruction.GREEDY):
-        logits = self.forward_probs(obs, action_probs)
-        return self.reconstruct(logits, strategy=strategy)
+        logits_obs, rew = self.forward_probs(obs, action_probs)
+        return self.reconstruct(logits_obs, strategy=strategy), rew
 
     def predict_(self, obs, action, strategy=Reconstruction.GREEDY):
-        logits = self.forward(obs, action)
-        return self.reconstruct(logits, strategy=strategy)
+        logits_obs, rew = self.forward(obs, action)
+        return self.reconstruct(logits_obs, strategy=strategy), rew
 
     def predict(self, obs, action, strategy=Reconstruction.GREEDY):
         with torch.no_grad():
             obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
             action = torch.as_tensor(action, dtype=torch.int64, device=self.device).unsqueeze(0)
-            return self.predict_(obs, action, strategy=strategy)[0].numpy()
+            obs_pred, rew_pred = self.predict_(obs, action, strategy=strategy)
+            return obs_pred[0].numpy(), rew_pred[0].item()
 
 
-def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
+def _compute_obs_losses(logits, target, index, weights, device=torch.device("cpu")):
     # Aggregate each feature's loss across players/hexes
 
     if logits[Group.CONT_ABS].dim() == 3:
@@ -727,7 +723,7 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
     return losses
 
 
-def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
+def compute_losses(logger, abs_index, loss_weights, next_obs, next_rew, pred_obs, pred_rew):
     # For shapes, see ObsIndex._build_abs_indices()
     extract = lambda t, obs: {
         Group.CONT_ABS: obs[:, abs_index[t][Group.CONT_ABS]],
@@ -738,19 +734,21 @@ def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
         Group.THRESHOLDS: [obs[:, ind] for ind in abs_index[t][Group.THRESHOLDS]],
     }
 
-    losses = {}
     device = next_obs.device
-    total_loss = torch.tensor(0., device=pred_obs.device)
+
+    obs_losses = {}
+    rew_loss = F.mse_loss(pred_rew, next_rew)
+    total_loss = rew_loss
 
     for cgroup in ContextGroup.as_list():
         logits = extract(cgroup, pred_obs)
         target = extract(cgroup, next_obs)
         index = abs_index[cgroup]
         weights = loss_weights[cgroup]
-        losses[cgroup] = _compute_losses(logits, target, index, weights=weights, device=device)
-        total_loss += sum(subtype_losses.sum() for subtype_losses in losses[cgroup].values())
+        obs_losses[cgroup] = _compute_obs_losses(logits, target, index, weights=weights, device=device)
+        total_loss += sum(subtype_losses.sum() for subtype_losses in obs_losses[cgroup].values())
 
-    return total_loss, losses
+    return total_loss, obs_losses, rew_loss
 
 
 def losses_to_rows(losses, obs_index):
@@ -798,7 +796,8 @@ def train_model(
 
     model.train()
     timer = Timer()
-    loss_rows = []
+    obs_loss_rows = []
+    rew_losses = []
 
     if accumulate_grad:
         grad_steps = buffer.capacity // batch_size
@@ -811,10 +810,11 @@ def train_model(
             obs, action, next_obs, next_mask, next_rew, next_done = batch
 
             with maybe_autocast:
-                pred_obs = model(obs, action)
-                loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
+                pred_obs, pred_rew = model(obs, action)
+                loss_tot, obs_losses, rew_loss = compute_losses(logger, model.abs_index, loss_weights, next_obs, next_rew, pred_obs, pred_rew)
 
-            loss_rows.extend(losses_to_rows(losses, model.obs_index))
+            obs_loss_rows.extend(losses_to_rows(obs_losses, model.obs_index))
+            rew_losses.append(rew_loss.mean(dim=0).item())
 
             if accumulate_grad:
                 if scaler:
@@ -844,7 +844,7 @@ def train_model(
                 optimizer.step()
             optimizer.zero_grad()
 
-    return rows_to_df(loss_rows), timer.peek()
+    return rows_to_df(obs_loss_rows), safe_mean(rew_losses), timer.peek()
 
 
 def eval_model(
@@ -856,7 +856,8 @@ def eval_model(
 ):
     model.eval()
     timer = Timer()
-    loss_rows = []
+    obs_loss_rows = []
+    rew_losses = []
 
     timer.start()
     for batch in buffer.sample_iter(batch_size):
@@ -864,10 +865,11 @@ def eval_model(
         obs, action, next_obs, next_mask, next_rew, next_done = batch
 
         with torch.no_grad():
-            pred_obs = model(obs, action)
+            pred_obs, pred_rew = model(obs, action)
 
-        loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
-        loss_rows.extend(losses_to_rows(losses, model.obs_index))
+        loss_tot, obs_losses, rew_loss = compute_losses(logger, model.abs_index, loss_weights, next_obs, next_rew, pred_obs, pred_rew)
+        obs_loss_rows.extend(losses_to_rows(obs_losses, model.obs_index))
+        rew_losses.append(rew_loss.mean(dim=0).item())
         timer.start()
 
-    return rows_to_df(loss_rows), timer.peek()
+    return rows_to_df(obs_loss_rows), safe_mean(rew_losses), timer.peek()

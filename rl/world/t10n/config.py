@@ -40,9 +40,9 @@ config = dict(
 
     env=dict(
         train=dict(
-            num_workers=1,
+            num_workers=0,  # debug with num_workers=0 + prefetch_factor=None
             batch_size=4,  # buffer capacity = num_workers * batch_size
-            prefetch_factor=1,
+            prefetch_factor=None,
             kwargs=dict(env_kwargs, mapname="gym/A1.vmap")
         ),
         eval=dict(
@@ -119,10 +119,13 @@ if os.getenv("VASTAI", None) == "1":
 
     if config.get("env", {}).get("train"):
         config["env"]["train"]["num_workers"] = 6
+        config["env"]["train"]["prefetch_factor"] = 1
         config["env"]["train"]["batch_size"] = config["train"]["batch_size"]
         config["env"]["train"]["kwargs"]["mapname"] = "gym/generated/4096/4x1024.vmap"
 
     if config.get("env", {}).get("eval"):
+        config["env"]["eval"]["num_workers"] = 1
+        config["env"]["eval"]["prefetch_factor"] = 1
         # XXX:same batch size as train, but only 1 worker (plenty of time between evals)
         config["env"]["eval"]["batch_size"] = config["train"]["batch_size"] * config["env"]["train"]["num_workers"]
         config["env"]["eval"]["kwargs"]["mapname"] = "gym/generated/evaluation/8x512.vmap"

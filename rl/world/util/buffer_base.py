@@ -5,7 +5,8 @@ class BufferBase:
     def __init__(self, logger, dataloader, dim_obs, n_actions, name="buffer", device=torch.device("cpu")):
         self.logger = logger
         self.dataloader = dataloader
-        self.capacity = dataloader.num_workers * dataloader.batch_size
+        # num_workers can be set to 0 for debugging
+        self.capacity = dataloader.batch_size * max(dataloader.num_workers, 1)
         self.name = name
         self.device = device
 

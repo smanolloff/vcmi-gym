@@ -129,7 +129,7 @@ class DatasetVCMI(IterableDataset):
                 for t, (t_obs, t_mask, t_reward, t_done, t_action) in enumerate(zipped):
                     data, instruction = middleware(
                         Data(obs=t_obs, mask=t_mask, reward=t_reward, done=t_done, action=t_action),
-                        Context(ep_steps=0, transition_id=t, num_transitions=num_transitions)
+                        Context(ep_steps=ep_steps, transition_id=t, num_transitions=num_transitions)
                     )
 
                     if instruction == DataInstruction.USE:
