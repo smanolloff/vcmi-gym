@@ -252,14 +252,11 @@ def train(
         return agg_data
 
     # Aggregate loss for entire stage (1 row per context/datatype pair)
-    def aggregate_losses(stage, df, rew_loss):
+    def aggregate_losses(stage, df):
         aggregated = df.groupby([TableColumn.CONTEXT, TableColumn.DATATYPE])[TableColumn.LOSS].sum()
         # => keys = tuple(context, datatype), values = float(loss)
 
-        res = {
-            f"{stage}_loss/total": rew_loss,
-            f"{stage}_loss/reward": rew_loss
-        }
+        res = {f"{stage}_loss/total": 0}
 
         for (ctx, dt), v in aggregated.items():
             res[f"{stage}_loss/{ctx}/{dt}"] = v
@@ -364,7 +361,7 @@ def train(
                 eval_buffer.load_samples(eval_dataloader)
 
             with timers["eval"]:
-                df_stage_eval, rew_loss_eval, eval_total_wait = eval_model_fn(
+                df_stage_eval, eval_total_wait = eval_model_fn(
                     logger=logger,
                     model=model,
                     loss_weights=feature_weights,
@@ -376,7 +373,7 @@ def train(
             df_stage_eval[TableColumn.STAGE] = "eval"
             df_stages = concat_dfs(df_stages, df_stage_eval)
 
-            wlog.update(**aggregate_losses("eval", df_stage_eval, rew_loss_eval))
+            wlog.update(**aggregate_losses("eval", df_stage_eval))
             wlog["eval_dataset/wait_time_s"] = eval_total_wait
 
             train_dataset_metrics = aggregate_metrics(train_metric_queue)
@@ -449,7 +446,7 @@ def train(
                 thread.start()
 
         with timers["train"]:
-            df_stage_train, rew_loss_train, train_total_wait = train_model_fn(
+            df_stage_train, train_total_wait = train_model_fn(
                 logger=logger,
                 model=model,
                 optimizer=optimizer,
@@ -466,7 +463,7 @@ def train(
         df_stage_train[TableColumn.STAGE] = "train"
         df_stages = concat_dfs(df_stages, df_stage_train)
 
-        wlog.update(**aggregate_losses("train", df_stage_train, rew_loss_train))
+        wlog.update(**aggregate_losses("train", df_stage_train))
         wlog["train_dataset/wait_time_s"] = train_total_wait
 
         accumulate_logs(wlog)

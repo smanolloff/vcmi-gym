@@ -19,7 +19,8 @@ env_kwargs = dict(
     max_steps=1000,
     random_heroes=1,
     random_obstacles=1,
-    swap_sides=1,
+    # swap_sides=1,
+    swap_sides=0,
     town_chance=30,
     warmachine_chance=40,
     random_stack_chance=65,
@@ -109,6 +110,7 @@ config = dict(
 )
 
 if os.getenv("VASTAI", None) == "1":
+
     config["wandb_log_interval_s"] = 60
     config["wandb_table_update_interval_s"] = 600
     config["wandb_table_log_interval_s"] = 3600

@@ -22,3 +22,4 @@ tmp/
 rl/models/
 rl/stats/
 .cache
+misc/vastai/.env

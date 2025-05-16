@@ -16,7 +16,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 export VASTAI_INSTANCE_ID=\${VAST_CONTAINERLABEL#*.}
-alias python=python3
+[ -e /usr/bin/python ] || ln -s python3 /usr/bin/python
 cd $WORKSPACE/vcmi-gym
 set -x
 EOF

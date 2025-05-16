@@ -11,6 +11,7 @@ gymnasium==0.29.1
 pygit2
 boto3
 pandas
+millify
 
 ray
 #ray[tune]
