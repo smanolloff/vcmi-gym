@@ -21,6 +21,7 @@ env_kwargs = dict(
     role="defender",
     town_chance=30,
     warmachine_chance=40,
+    random_stack_chance=65,
     random_terrain_chance=100,
     tight_formation_chance=20,
     allow_invalid_actions=True,
