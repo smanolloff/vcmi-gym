@@ -20,7 +20,6 @@ from .stats import Stats
 from .structured_logger import StructuredLogger
 from .timer import Timer
 from .wandb import setup_wandb
-from .weights import build_feature_weights
 
 from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
@@ -45,6 +44,7 @@ def train(
     dry_run,
     no_wandb,
     sample_only,
+    weights_builder,
     model_creator,
     buffer_creator,
     vcmi_dataloader_functor,
@@ -142,7 +142,11 @@ def train(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model_creator(device=device)
-    feature_weights = build_feature_weights(model, config["weights"])
+
+    if weights_builder is not None:
+        feature_weights = weights_builder(model, config["weights"])
+    else:
+        feature_weights = None
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -361,7 +365,7 @@ def train(
                 eval_buffer.load_samples(eval_dataloader)
 
             with timers["eval"]:
-                df_stage_eval, eval_total_wait = eval_model_fn(
+                df_stage_eval, eval_total_wait, eval_logdata = eval_model_fn(
                     logger=logger,
                     model=model,
                     loss_weights=feature_weights,
@@ -372,9 +376,9 @@ def train(
             # Mean loss for entire stage (1 row per attribute)
             df_stage_eval[TableColumn.STAGE] = "eval"
             df_stages = concat_dfs(df_stages, df_stage_eval)
-
             wlog.update(**aggregate_losses("eval", df_stage_eval))
             wlog["eval_dataset/wait_time_s"] = eval_total_wait
+            wlog.update(**eval_logdata)
 
             train_dataset_metrics = aggregate_metrics(train_metric_queue)
             if train_dataset_metrics:
@@ -446,7 +450,7 @@ def train(
                 thread.start()
 
         with timers["train"]:
-            df_stage_train, train_total_wait = train_model_fn(
+            df_stage_train, train_total_wait, train_logdata = train_model_fn(
                 logger=logger,
                 model=model,
                 optimizer=optimizer,
@@ -465,6 +469,7 @@ def train(
 
         wlog.update(**aggregate_losses("train", df_stage_train))
         wlog["train_dataset/wait_time_s"] = train_total_wait
+        wlog.update(**train_logdata)
 
         accumulate_logs(wlog)
 

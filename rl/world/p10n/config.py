@@ -13,15 +13,17 @@ import os
 #       and can be later uploaded via s3uploader.py
 #
 env_kwargs = dict(
-    opponent="BattleAI",
+    opponent="StupidAI",
     max_steps=1000,
     random_heroes=1,
     random_obstacles=1,
+    # swap_sides=1,
     swap_sides=0,
     town_chance=30,
     warmachine_chance=40,
-    random_terrain_chance=100,
+    random_stack_chance=65,
     tight_formation_chance=20,
+    random_terrain_chance=100,
     allow_invalid_actions=True,
     user_timeout=3600,
     vcmi_timeout=3600,
@@ -31,22 +33,22 @@ env_kwargs = dict(
 )
 
 config = dict(
-    name_template="{datetime}-{id}-v12-noswap-BattleAI",
-    out_dir_template="data/world/p10n",
-    wandb_group="action-prediction-model",
+    name_template="{datetime}-{id}-v12",
+    out_dir_template="data/world/t10n",
+    wandb_group="transition-model",
 
     env=dict(
         train=dict(
-            num_workers=1,
-            batch_size=100,  # buffer capacity = num_workers * batch_size
-            prefetch_factor=1,
-            kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
+            num_workers=0,  # debug with num_workers=0 + prefetch_factor=None
+            batch_size=4,  # buffer capacity = num_workers * batch_size
+            prefetch_factor=None,
+            kwargs=dict(env_kwargs, mapname="gym/A1.vmap")
         ),
         eval=dict(
             num_workers=1,
-            batch_size=50,  # buffer capacity = num_workers * batch_size
+            batch_size=4,  # buffer capacity = num_workers * batch_size
             prefetch_factor=1,
-            kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap"),
+            kwargs=dict(env_kwargs, mapname="gym/A1.vmap"),
         ),
     ),
 
@@ -69,7 +71,7 @@ config = dict(
         #         cache_dir=os.path.abspath("data/.s3_cache"),
         #         cached_files_max=None,
         #         num_workers=1,
-        #         batch_size=100,  # buffer capacity = num_workers * batch_size
+        #         batch_size=1000,  # buffer capacity = num_workers * batch_size
         #         prefetch_factor=1,
         #         pin_memory=False,       # causes hangs when enabled
         #         shuffle=False,
@@ -80,36 +82,48 @@ config = dict(
         #         cache_dir=os.path.abspath("data/.s3_cache"),
         #         cached_files_max=None,
         #         num_workers=1,
-        #         batch_size=100,  # buffer capacity = num_workers * batch_size
+        #         batch_size=1000,  # buffer capacity = num_workers * batch_size
         #         prefetch_factor=1,
         #         pin_memory=False,       # causes hangs when enabled
         #         shuffle=False,
         #     )
-        # )
+        # ),
     ),
 
     train=dict(
         accumulate_grad=False,  # makes 1 batch = entire buffer
-        batch_size=20,
+        batch_size=2,           # calculated dynamically
         learning_rate=1e-4,
         epochs=1,
     ),
     eval=dict(
-        interval_s=60,  # wandb_log will also be called here
-        batch_size=25,
-    )
+        interval_s=5,
+        batch_size=2,           # calculated dynamically
+    ),
+    wandb_log_interval_s=5,
+    wandb_table_update_interval_s=8,  # data will be added here (rows=2*NUM_ATTRS)
+    wandb_table_log_interval_s=20,    # table will be uploaded here (creates new W&B artifact version)
+    wandb_table_log=True,
 )
 
 if os.getenv("VASTAI", None) == "1":
+    config["wandb_log_interval_s"] = 60
+    config["wandb_table_update_interval_s"] = 600
+    config["wandb_table_log_interval_s"] = 3600
+
+    config["train"]["batch_size"] = 300
+    config["eval"]["batch_size"] = config["train"]["batch_size"]
+    config["eval"]["interval_s"] = 60
+
     if config.get("env", {}).get("train"):
         config["env"]["train"]["num_workers"] = 6
-        config["env"]["train"]["batch_size"] = 1000
+        config["env"]["train"]["prefetch_factor"] = 1
+        config["env"]["train"]["batch_size"] = config["train"]["batch_size"]
         config["env"]["train"]["kwargs"]["mapname"] = "gym/generated/4096/4x1024.vmap"
 
     if config.get("env", {}).get("eval"):
         config["env"]["eval"]["num_workers"] = 1
-        config["env"]["eval"]["batch_size"] = 5000
+        config["env"]["eval"]["prefetch_factor"] = 1
+        # XXX:same batch size as train, but only 1 worker (plenty of time between evals)
+        config["env"]["eval"]["batch_size"] = config["train"]["batch_size"] * config["env"]["train"]["num_workers"]
         config["env"]["eval"]["kwargs"]["mapname"] = "gym/generated/evaluation/8x512.vmap"
-
-    config["train"]["batch_size"] = 250
-    config["eval"]["batch_size"] = 500

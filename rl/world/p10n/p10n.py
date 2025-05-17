@@ -2,15 +2,17 @@ import torch
 import torch.nn as nn
 import math
 import enum
+import pandas as pd
 import contextlib
 
 from torch.nn.functional import cross_entropy
 
 from ..util.buffer_base import BufferBase
-from ..util.dataset_vcmi import Data, Context
-from ..util.misc import layer_init
-from ..util.obs_index import ObsIndex
+from ..util.dataset_vcmi import Data, Context, DataInstruction
+from ..util.misc import layer_init, safe_mean
+from ..util.obs_index import ObsIndex, Group
 from ..util.timer import Timer
+from ..util.misc import TableColumn
 
 from ..util.constants_v12 import (
     STATE_SIZE_GLOBAL,
@@ -40,13 +42,13 @@ class Prediction(enum.IntEnum):
 
 def vcmi_dataloader_functor():
     def mw(data: Data, ctx: Context):
-        # First transition is OUR state (the action is random for it)
-        # Last transition is OUR state (the action is always -1 there)
-        # => skip unless state is terminal (action=-1 stands for done=true)
-        if ctx.transition_id == 0 or (ctx.transition_id == ctx.num_transitions - 1 and not data.done):
-            return None
+        instruction = DataInstruction.USE
 
-        return data
+        if ctx.transition_id == 0 or (ctx.transition_id == ctx.num_transitions - 1 and not data.done):
+            instruction = DataInstruction.SKIP
+
+        return data, instruction
+
     return mw
 
 
@@ -126,14 +128,48 @@ class ActionPredictionModel(nn.Module):
         super().__init__()
         self.device = device
 
-        obsind = ObsIndex(device)
+        self.obs_index = ObsIndex(device)
 
-        self.abs_index = obsind.abs_index
-        self.rel_index_global = obsind.rel_index_global
-        self.rel_index_player = obsind.rel_index_player
-        self.rel_index_hex = obsind.rel_index_hex
+        self.abs_index = self.obs_index.abs_index
+        self.rel_index = self.obs_index.rel_index
 
-        # See notes in t10n/main.py
+        #
+        # ChatGPT notes regarding encoders:
+        #
+        # Continuous ([0,1]):
+        # Keep as-is (no normalization needed).
+        # No linear layer or activation required.
+        #
+        # Binary (0/1):
+        # Apply a linear layer to project to a small vector (e.g., Linear(1, d)).
+        # No activation needed before concatenation.
+        #
+        # Categorical:
+        # Use nn.Embedding(num_classes, d) for each feature.
+        #
+        # Concatenate all per-element features → final vector of shape (model_dim,).
+        #
+        # Pass to Transformer:
+        # Optionally use a linear layer after concatenation to unify dimensions
+        # (Linear(total_dim, model_dim)), especially if feature-specific dimensions vary.
+        #
+
+        #
+        # Further details:
+        #
+        # Continuous data:
+        # If your continuous inputs are already scaled to [0, 1], and you
+        # cannot compute global normalization, it is acceptable to use them
+        # without further normalization.
+        #
+        # Binary data:
+        # To process binary inputs, apply nn.Linear(1, d) to each feature if
+        # treating them separately, or nn.Linear(n, d) to the whole binary
+        # vector if treating them jointly.
+        #   binary_input = torch.tensor([[0., 1., 0., ..., 1.]])  # shape: (B, 30)
+        #   linear = nn.Linear(30, d)  # d = desired output dimension
+        #   output = linear(binary_input)  # shape: (B, d)
+
         emb_calc = lambda n: math.ceil(math.sqrt(n))
 
         self.encoder_action = nn.Embedding(N_ACTIONS, emb_calc(N_ACTIONS))
@@ -144,34 +180,42 @@ class ActionPredictionModel(nn.Module):
 
         # Continuous:
         # (B, n)
-        self.encoder_global_continuous = nn.Identity()
+        self.encoder_global_cont_abs = nn.Identity()
+        self.encoder_global_cont_rel = nn.Identity()
+
+        # Continuous (nulls):
+        # (B, n)
+        self.encoder_global_cont_nullbit = nn.Identity()
+        global_nullbit_size = len(self.rel_index[Group.GLOBAL][Group.CONT_NULLBIT])
+        if global_nullbit_size:
+            self.encoder_global_cont_nullbit = nn.LazyLinear(global_nullbit_size)
+            # No nonlinearity needed?
 
         # Binaries:
-        # (B, n)
-        self.encoder_global_binary = nn.Identity()
-        if self.abs_index["global"]["binary"].numel():
-            n_binary_features = len(self.abs_index["global"]["binary"])
-            self.encoder_global_binary = nn.LazyLinear(n_binary_features)
-            # No nonlinearity needed
+        # [(B, b1), (B, b2), ...]
+        self.encoders_global_binaries = nn.ModuleList([])
+        for ind in self.rel_index[Group.GLOBAL][Group.BINARIES]:
+            self.encoders_global_binaries.append(nn.LazyLinear(len(ind)))
+            # No nonlinearity needed?
 
         # Categoricals:
         # [(B, C1), (B, C2), ...]
         self.encoders_global_categoricals = nn.ModuleList([])
-        for ind in self.rel_index_global["categoricals"]:
+        for ind in self.rel_index[Group.GLOBAL][Group.CATEGORICALS]:
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_global_categoricals.append(cat_emb_size)
 
         # Thresholds:
         # [(B, T1), (B, T2), ...]
         self.encoders_global_thresholds = nn.ModuleList([])
-        for ind in self.rel_index_global["thresholds"]:
+        for ind in self.rel_index[Group.GLOBAL][Group.THRESHOLDS]:
             self.encoders_global_thresholds.append(nn.LazyLinear(len(ind)))
             # No nonlinearity needed?
 
         # Merge
-        z_size_global = 128
+        z_size_global = 256
         self.encoder_merged_global = nn.Sequential(
-            # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(z_size_global),
             nn.LeakyReLU(),
         )
@@ -183,32 +227,41 @@ class ActionPredictionModel(nn.Module):
 
         # Continuous per player:
         # (B, n)
-        self.encoder_player_continuous = nn.Identity()
+        self.encoder_player_cont_abs = nn.Identity()
+        self.encoder_player_cont_rel = nn.Identity()
+
+        # Continuous (nulls) per player:
+        # (B, n)
+        self.encoder_player_cont_nullbit = nn.Identity()
+        player_nullbit_size = len(self.rel_index[Group.PLAYER][Group.CONT_NULLBIT])
+        if player_nullbit_size:
+            self.encoder_player_cont_nullbit = nn.LazyLinear(player_nullbit_size)
+            # No nonlinearity needed?
 
         # Binaries per player:
-        # (B, n)
-        self.encoder_player_binary = nn.Identity()
-        if self.abs_index["player"]["binary"].numel():
-            n_binary_features = len(self.abs_index["player"]["binary"][0])
-            self.encoder_player_binary = nn.LazyLinear(n_binary_features)
+        # [(B, b1), (B, b2), ...]
+        self.encoders_player_binaries = nn.ModuleList([])
+        for ind in self.rel_index[Group.PLAYER][Group.BINARIES]:
+            self.encoders_player_binaries.append(nn.LazyLinear(len(ind)))
+            # No nonlinearity needed?
 
         # Categoricals per player:
         # [(B, C1), (B, C2), ...]
         self.encoders_player_categoricals = nn.ModuleList([])
-        for ind in self.rel_index_player["categoricals"]:
+        for ind in self.rel_index[Group.PLAYER][Group.CATEGORICALS]:
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_player_categoricals.append(cat_emb_size)
 
         # Thresholds per player:
         # [(B, T1), (B, T2), ...]
         self.encoders_player_thresholds = nn.ModuleList([])
-        for ind in self.rel_index_player["thresholds"]:
+        for ind in self.rel_index[Group.PLAYER][Group.THRESHOLDS]:
             self.encoders_player_thresholds.append(nn.LazyLinear(len(ind)))
 
         # Merge per player
-        z_size_player = 128
+        z_size_player = 256
         self.encoder_merged_player = nn.Sequential(
-            # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(z_size_player),
             nn.LeakyReLU(),
         )
@@ -220,39 +273,50 @@ class ActionPredictionModel(nn.Module):
 
         # Continuous per hex:
         # (B, n)
-        self.encoder_hex_continuous = nn.Identity()
+        self.encoder_hex_cont_abs = nn.Identity()
+        self.encoder_hex_cont_rel = nn.Identity()
+
+        # Continuous (nulls) per hex:
+        # (B, n)
+        self.encoder_hex_cont_nullbit = nn.Identity()
+        hex_nullbit_size = len(self.rel_index[Group.HEX][Group.CONT_NULLBIT])
+        if hex_nullbit_size:
+            self.encoder_hex_cont_nullbit = nn.LazyLinear(hex_nullbit_size)
+            # No nonlinearity needed?
 
         # Binaries per hex:
-        # (B, n)
-        if self.abs_index["hex"]["binary"].numel():
-            n_binary_features = len(self.abs_index["hex"]["binary"][0])
-            self.encoder_hex_binary = nn.LazyLinear(n_binary_features)
+        # [(B, b1), (B, b2), ...]
+        self.encoders_hex_binaries = nn.ModuleList([])
+        for ind in self.rel_index[Group.HEX][Group.BINARIES]:
+            self.encoders_hex_binaries.append(nn.LazyLinear(len(ind)))
+            # No nonlinearity needed?
 
         # Categoricals per hex:
         # [(B, C1), (B, C2), ...]
         self.encoders_hex_categoricals = nn.ModuleList([])
-        for ind in self.rel_index_hex["categoricals"]:
+        for ind in self.rel_index[Group.HEX][Group.CATEGORICALS]:
             cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
             self.encoders_hex_categoricals.append(cat_emb_size)
 
         # Thresholds per hex:
         # [(B, T1), (B, T2), ...]
         self.encoders_hex_thresholds = nn.ModuleList([])
-        for ind in self.rel_index_hex["thresholds"]:
+        for ind in self.rel_index[Group.HEX][Group.THRESHOLDS]:
             self.encoders_hex_thresholds.append(nn.LazyLinear(len(ind)))
 
         # Merge per hex
         z_size_hex = 512
         self.encoder_merged_hex = nn.Sequential(
-            # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
+            # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
             nn.LazyLinear(z_size_hex),
             nn.LeakyReLU(),
+            nn.Dropout(p=0.3)
         )
         # => (B, 165, Z_HEX)
 
         # Transformer (hexes only)
         self.transformer_hex = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=z_size_hex, nhead=8, batch_first=True),
+            nn.TransformerEncoderLayer(d_model=z_size_hex, nhead=8, dropout=0.3, batch_first=True),
             num_layers=6
         )
         # => (B, 165, Z_HEX)
@@ -262,7 +326,10 @@ class ActionPredictionModel(nn.Module):
         #
 
         # (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
-        self.aggregator = nn.LazyLinear(2048)
+        self.aggregator = nn.Sequential(
+            nn.LazyLinear(2048),
+            nn.LeakyReLU(),
+        )
         # => (B, Z_AGG)
 
         #
@@ -289,42 +356,60 @@ class ActionPredictionModel(nn.Module):
     def forward(self, obs):
         assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
 
-        global_continuous_in = obs[:, self.abs_index["global"]["continuous"]]
-        global_binary_in = obs[:, self.abs_index["global"]["binary"]]
-        global_categorical_ins = [obs[:, ind] for ind in self.abs_index["global"]["categoricals"]]
-        global_threshold_ins = [obs[:, ind] for ind in self.abs_index["global"]["thresholds"]]
-        global_continuous_z = self.encoder_global_continuous(global_continuous_in)
-        global_binary_z = self.encoder_global_binary(global_binary_in)
+        # torch.cat which returns empty tensor if tuple is empty
+        def torch_cat(tuple_of_tensors, **kwargs):
+            if len(tuple_of_tensors) == 0:
+                return torch.tensor([], device=self.device)
+            return torch.cat(tuple_of_tensors, **kwargs)
+
+        global_cont_abs_in = obs[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
+        global_cont_rel_in = obs[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]]
+        global_cont_nullbit_in = obs[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]]
+        global_binary_ins = [obs[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.BINARIES]]
+        global_categorical_ins = [obs[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.CATEGORICALS]]
+        global_threshold_ins = [obs[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.THRESHOLDS]]
+        global_cont_abs_z = self.encoder_global_cont_abs(global_cont_abs_in)
+        global_cont_rel_z = self.encoder_global_cont_rel(global_cont_rel_in)
+        global_cont_nullbit_z = self.encoder_global_cont_nullbit(global_cont_nullbit_in)
+        global_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_global_binaries, global_binary_ins)], dim=-1)
 
         # XXX: Embedding layers expect single-integer inputs
         #      e.g. for input with num_classes=4, instead of `[0,0,1,0]` it expects just `2`
-        global_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
-        global_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], dim=-1)
-        global_merged = torch.cat((global_continuous_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
+        global_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
+        global_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], dim=-1)
+        global_merged = torch_cat((global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
         z_global = self.encoder_merged_global(global_merged)
         # => (B, Z_GLOBAL)
 
-        player_continuous_in = obs[:, self.abs_index["player"]["continuous"]]
-        player_binary_in = obs[:, self.abs_index["player"]["binary"]]
-        player_categorical_ins = [obs[:, ind] for ind in self.abs_index["player"]["categoricals"]]
-        player_threshold_ins = [obs[:, ind] for ind in self.abs_index["player"]["thresholds"]]
-        player_continuous_z = self.encoder_player_continuous(player_continuous_in)
-        player_binary_z = self.encoder_player_binary(player_binary_in)
-        player_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
-        player_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], dim=-1)
-        player_merged = torch.cat((player_continuous_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
+        player_cont_abs_in = obs[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]]
+        player_cont_rel_in = obs[:, self.abs_index[Group.PLAYER][Group.CONT_REL]]
+        player_cont_nullbit_in = obs[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]]
+        player_binary_ins = [obs[:, ind] for ind in self.abs_index[Group.PLAYER][Group.BINARIES]]
+        player_categorical_ins = [obs[:, ind] for ind in self.abs_index[Group.PLAYER][Group.CATEGORICALS]]
+        player_threshold_ins = [obs[:, ind] for ind in self.abs_index[Group.PLAYER][Group.THRESHOLDS]]
+        player_cont_abs_z = self.encoder_player_cont_abs(player_cont_abs_in)
+        player_cont_rel_z = self.encoder_player_cont_rel(player_cont_rel_in)
+        player_cont_nullbit_z = self.encoder_player_cont_nullbit(player_cont_nullbit_in)
+        player_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_binaries, player_binary_ins)], dim=-1)
+        player_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
+        player_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], dim=-1)
+        player_merged = torch_cat((player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
         z_player = self.encoder_merged_player(player_merged)
         # => (B, 2, Z_PLAYER)
 
-        hex_continuous_in = obs[:, self.abs_index["hex"]["continuous"]]
-        hex_binary_in = obs[:, self.abs_index["hex"]["binary"]]
-        hex_categorical_ins = [obs[:, ind] for ind in self.abs_index["hex"]["categoricals"]]
-        hex_threshold_ins = [obs[:, ind] for ind in self.abs_index["hex"]["thresholds"]]
-        hex_continuous_z = self.encoder_hex_continuous(hex_continuous_in)
-        hex_binary_z = self.encoder_hex_binary(hex_binary_in)
-        hex_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
-        hex_threshold_z = torch.cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
-        hex_merged = torch.cat((hex_continuous_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
+        hex_cont_abs_in = obs[:, self.abs_index[Group.HEX][Group.CONT_ABS]]
+        hex_cont_rel_in = obs[:, self.abs_index[Group.HEX][Group.CONT_REL]]
+        hex_cont_nullbit_in = obs[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]]
+        hex_binary_ins = [obs[:, ind] for ind in self.abs_index[Group.HEX][Group.BINARIES]]
+        hex_categorical_ins = [obs[:, ind] for ind in self.abs_index[Group.HEX][Group.CATEGORICALS]]
+        hex_threshold_ins = [obs[:, ind] for ind in self.abs_index[Group.HEX][Group.THRESHOLDS]]
+        hex_cont_abs_z = self.encoder_hex_cont_abs(hex_cont_abs_in)
+        hex_cont_rel_z = self.encoder_hex_cont_rel(hex_cont_rel_in)
+        hex_cont_nullbit_z = self.encoder_hex_cont_nullbit(hex_cont_nullbit_in)
+        hex_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_binaries, hex_binary_ins)], dim=-1)
+        hex_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
+        hex_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
+        hex_merged = torch_cat((hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
         z_hex = self.encoder_merged_hex(hex_merged)
         z_hex = self.transformer_hex(z_hex)
         # => (B, 165, Z_HEX)
@@ -477,6 +562,38 @@ def compute_loss(action, logits_main, logits_hex):
     return loss_main, loss_hex, loss_hexaction
 
 
+def losses_to_rows(loss_main, loss_hex, loss_hexaction):
+    return [
+        {
+            TableColumn.ATTRIBUTE: "main",
+            TableColumn.CONTEXT: "general",
+            TableColumn.DATATYPE: "",
+            TableColumn.LOSS: loss_main.item()
+        },
+        {
+            TableColumn.ATTRIBUTE: "hex",
+            TableColumn.CONTEXT: "general",
+            TableColumn.DATATYPE: "",
+            TableColumn.LOSS: loss_hex.item()
+        },
+        {
+            TableColumn.ATTRIBUTE: "HEXACTION",
+            TableColumn.CONTEXT: "general",
+            TableColumn.DATATYPE: "",
+            TableColumn.LOSS: loss_hexaction.item()
+        }
+    ]
+
+
+# Aggregate batch losses into a *single* loss per attribute
+def rows_to_df(rows):
+    return pd.DataFrame(rows).groupby([
+        TableColumn.ATTRIBUTE,
+        TableColumn.CONTEXT,
+        TableColumn.DATATYPE
+    ], as_index=False)[TableColumn.LOSS].mean()
+
+
 def train_model(
     logger,
     model,
@@ -488,18 +605,14 @@ def train_model(
     epochs,
     batch_size,
     accumulate_grad,
-    wlog
 ):
-    model.train()
-    main_losses = []
-    hex_losses = []
-    hexaction_losses = []
-    total_losses = []
-    timer = Timer()
+    assert buffer.capacity % batch_size == 0, f"{buffer.capacity} % {batch_size} == 0"
 
     maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
-    assert buffer.capacity % batch_size == 0, f"{buffer.capacity} % {batch_size} == 0"
+    model.train()
+    timer = Timer()
+    obs_loss_rows = []
 
     if accumulate_grad:
         grad_steps = buffer.capacity // batch_size
@@ -516,13 +629,11 @@ def train_model(
                 loss_main, loss_hex, loss_hexaction = compute_loss(action, pred_logits_main, pred_logits_hex)
                 loss_tot = loss_main + loss_hex + loss_hexaction
 
-            main_losses.append(loss_main.item())
-            hex_losses.append(loss_hex.item())
-            hexaction_losses.append(loss_hexaction.item())
-            total_losses.append(loss_tot.item())
+            obs_loss_rows.extend(losses_to_rows(loss_main, loss_hex, loss_hexaction))
 
             if accumulate_grad:
                 if scaler:
+                    # XXX: loss_tot / grad_steps should be within autocast
                     scaler.scale(loss_tot / grad_steps).backward()
                 else:
                     (loss_tot / grad_steps).backward()
@@ -548,19 +659,7 @@ def train_model(
                 optimizer.step()
             optimizer.zero_grad()
 
-    main_loss = sum(main_losses) / len(main_losses)
-    hex_loss = sum(hex_losses) / len(hex_losses)
-    hexaction_loss = sum(hexaction_losses) / len(hexaction_losses)
-    total_loss = sum(total_losses) / len(total_losses)
-    total_wait = timer.peek()
-
-    wlog["train_loss/main"] = main_loss
-    wlog["train_loss/hex"] = hex_loss
-    wlog["train_loss/hexaction"] = hexaction_loss
-    wlog["train_loss/total"] = total_loss
-    wlog["train_dataset/wait_time_s"] = total_wait
-
-    return total_loss
+    return rows_to_df(obs_loss_rows), timer.peek(), {}
 
 
 def eval_model(
@@ -569,15 +668,10 @@ def eval_model(
     loss_weights,
     buffer,
     batch_size,
-    wlog
 ):
     model.eval()
-
-    main_losses = []
-    hex_losses = []
-    hexaction_losses = []
-    total_losses = []
     match_ratios = []
+    obs_loss_rows = []
     timer = Timer()
 
     timer.start()
@@ -591,28 +685,8 @@ def eval_model(
             match_ratios.append((pred_action == action).float().mean().item())
 
         loss_main, loss_hex, loss_hexaction = compute_loss(action, pred_logits_main, pred_logits_hex)
-        loss_tot = loss_main + loss_hex + loss_hexaction
-
-        main_losses.append(loss_main.item())
-        hex_losses.append(loss_hex.item())
-        hexaction_losses.append(loss_hexaction.item())
-        total_losses.append(loss_tot.item())
-
+        obs_loss_rows.extend(losses_to_rows(loss_main, loss_hex, loss_hexaction))
         timer.start()
     timer.stop()
 
-    main_loss = sum(main_losses) / len(main_losses)
-    hex_loss = sum(hex_losses) / len(hex_losses)
-    hexaction_loss = sum(hexaction_losses) / len(hexaction_losses)
-    total_loss = sum(total_losses) / len(total_losses)
-    total_wait = timer.peek()
-    match_ratio = sum(match_ratios) / len(match_ratios)
-
-    wlog["eval_loss/main"] = main_loss
-    wlog["eval_loss/hex"] = hex_loss
-    wlog["eval_loss/hexaction"] = hexaction_loss
-    wlog["eval_loss/total"] = total_loss
-    wlog["eval/greedy_match_ratio"] = match_ratio
-    wlog["eval_dataset/wait_time_s"] = total_wait
-
-    return total_loss
+    return rows_to_df(obs_loss_rows), timer.peek(), {"eval/greedy_match_ratio": safe_mean(match_ratios)}

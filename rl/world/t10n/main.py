@@ -3,7 +3,7 @@ import torch
 
 from . import t10n
 from . import symmetric
-from ..util.weights import build_feature_weights
+from .weights import build_feature_weights
 from ..util.train import train
 
 
@@ -191,6 +191,7 @@ if __name__ == "__main__":
             no_wandb=args.no_wandb,
             # sample_only=False,
             model_creator=mod.TransitionModel,
+            weights_builder=build_feature_weights,
             buffer_creator=mod.Buffer,
             vcmi_dataloader_functor=mod.vcmi_dataloader_functor,
             s3_dataloader_functor=None,

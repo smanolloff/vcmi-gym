@@ -174,6 +174,7 @@ if __name__ == "__main__":
             no_wandb=args.no_wandb,
             # sample_only=False,
             model_creator=p10n.ActionPredictionModel,
+            weights_builder=None,
             buffer_creator=p10n.Buffer,
             vcmi_dataloader_functor=p10n.vcmi_dataloader_functor,
             s3_dataloader_functor=None,

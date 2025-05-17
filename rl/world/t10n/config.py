@@ -110,7 +110,6 @@ config = dict(
 )
 
 if os.getenv("VASTAI", None) == "1":
-
     config["wandb_log_interval_s"] = 60
     config["wandb_table_update_interval_s"] = 600
     config["wandb_table_log_interval_s"] = 3600

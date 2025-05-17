@@ -834,7 +834,7 @@ def train_model(
                 optimizer.step()
             optimizer.zero_grad()
 
-    return rows_to_df(obs_loss_rows), timer.peek()
+    return rows_to_df(obs_loss_rows), timer.peek(), {}
 
 
 def eval_model(
@@ -856,8 +856,8 @@ def eval_model(
         with torch.no_grad():
             pred_obs = model(obs, action)
 
-        loss_tot, obs_losses, rew_loss = compute_losses(logger, model.abs_index, loss_weights, next_obs, next_rew, pred_obs, pred_rew)
+        loss_tot, obs_losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
         obs_loss_rows.extend(losses_to_rows(obs_losses, model.obs_index))
         timer.start()
 
-    return rows_to_df(obs_loss_rows), timer.peek()
+    return rows_to_df(obs_loss_rows), timer.peek(), {}
