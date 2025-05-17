@@ -47,7 +47,10 @@ fi
 
 tmux source-file ~/.tmux.conf
 
+set -a
 source /workspace/.env
+set +a
+
 cd /workspace
 
 export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)
@@ -117,11 +120,9 @@ cd $WORKSPACE/vcmi-gym
 set -x
 EOF
 
-source ~/.bashrc
-
-# Install tmux plugins
-tmux source ~/.tmux.conf || :
-~/.tmux/plugins/tpm/bin/install_plugins
+# does not work (fails with unbound variable)
+# i.e. better not use this tmux session anything else after init
+# source ~/.bashrc
 
 # APT setup (apt fails to resolve VCMI deps from some of the non-official mirrors)
 cat <<-EOF >/etc/apt/sources.list
@@ -210,4 +211,4 @@ cmake --build rel/ -- -j8
 
 # Mark as completed
 touch /workspace/.initialized
-vastai label $VASTAI_INSTANCE_ID ready
+vastai label instance $VASTAI_INSTANCE_ID ready

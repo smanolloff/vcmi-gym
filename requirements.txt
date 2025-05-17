@@ -35,6 +35,7 @@ torch==2.5.1
 #torch @ https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.3.1%2Bcpu.cxx11.abi-cp312-cp312-linux_x86_64.whl
 
 ipdb
+vastai
 
 #
 # Python's "torch" package is *not* compiled with CXX11 ABI flag by default.
