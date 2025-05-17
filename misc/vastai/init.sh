@@ -65,7 +65,7 @@ if [ "${#AWS_SECRET_KEY}" -ne 40 ]; then
     exit 1
 fi
 
-if [ "${#VCMI_ARCHIVE_KEY}" -ne 32 ]; then
+if [ "${#VCMI_ARCHIVE_KEY}" -ne 16 ]; then
     echo "Invalid VCMI_ARCHIVE_KEY."
     exit 1
 fi
