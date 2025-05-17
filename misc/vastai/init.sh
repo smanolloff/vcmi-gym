@@ -45,7 +45,9 @@ run '~/.tmux/plugins/tpm/tpm'
 EOF
 fi
 
-tmux source-file ~/.tmux.conf
+tmux source ~/.tmux.conf || :
+~/.tmux/plugins/tpm/bin/install_plugins
+
 
 set -a
 source /workspace/.env
@@ -112,6 +114,7 @@ alias gd='git diff'
 alias gco='git checkout'
 export AWS_ACCESS_KEY="$AWS_ACCESS_KEY"
 export AWS_SECRET_KEY="$AWS_SECRET_KEY"
+export WANDB_API_KEY='$WANDB_API_KEY'
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
@@ -208,6 +211,8 @@ cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 cmake --build rel/ -- -j8
+
+wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
 
 # Mark as completed
 touch /workspace/.initialized
