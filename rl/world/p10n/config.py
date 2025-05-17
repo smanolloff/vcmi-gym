@@ -13,17 +13,16 @@ import os
 #       and can be later uploaded via s3uploader.py
 #
 env_kwargs = dict(
-    opponent="StupidAI",
+    opponent="BattleAI",
     max_steps=1000,
     random_heroes=1,
     random_obstacles=1,
-    # swap_sides=1,
     swap_sides=0,
+    role="defender",
     town_chance=30,
     warmachine_chance=40,
-    random_stack_chance=65,
-    tight_formation_chance=20,
     random_terrain_chance=100,
+    tight_formation_chance=20,
     allow_invalid_actions=True,
     user_timeout=3600,
     vcmi_timeout=3600,
@@ -32,8 +31,9 @@ env_kwargs = dict(
     vcmi_loglevel_ai="error",
 )
 
+
 config = dict(
-    name_template="{datetime}-{id}-v12",
+    name_template="{datetime}-{id}-v12-defender",
     out_dir_template="data/world/p10n",
     wandb_group="action-prediction-model",
 
