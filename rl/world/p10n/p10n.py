@@ -329,6 +329,7 @@ class ActionPredictionModel(nn.Module):
         self.aggregator = nn.Sequential(
             nn.LazyLinear(2048),
             nn.LeakyReLU(),
+            nn.LayerNorm()  # NaN issue fix attempt #1
         )
         # => (B, Z_AGG)
 
