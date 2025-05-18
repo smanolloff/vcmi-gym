@@ -512,6 +512,18 @@ class ActionPredictionModel(nn.Module):
 def compute_loss(action, logits_main, logits_hex):
     assert all(action != 0), "Found retreat action: %s" % action
 
+    if not torch.isfinite(logits_main).all():
+        raise ValueError("Non-finite logits main logits: %s" % logits_main)
+
+    if not torch.isfinite(logits_hex).all():
+        raise ValueError("Non-finite hex logits: %s" % logits_hex)
+
+    # Although PyTorch’s log_softmax is numerically stable,
+    # if your model outputs logits on the order of 1e300 or more,
+    # intermediate operations can overflow, yielding NaN in the loss.
+    logits_main = logits_main.clamp(-1e6, 1e6)
+    logits_hex = logits_hex.clamp(-1e6, 1e6)
+
     # self.where(condition, y) is equivalent to torch.where(condition, self, y)
     target_main = (
         action

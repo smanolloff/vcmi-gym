@@ -407,7 +407,10 @@ def train(
             if now - last_checkpoint_at > config["checkpoint_interval_s"]:
                 last_checkpoint_at = now
 
-                if eval_loss_best is None:
+                if eval_loss == 0:
+                    # Initial baseline for resumed configs
+                    logger.warning("eval_loss is 0, likely due to NaN, will not save checkpoint")
+                elif eval_loss_best is None:
                     # Initial baseline for resumed configs
                     eval_loss_best = eval_loss
                     logger.info("No baseline for checkpoint yet (eval_loss=%f, eval_loss_best=None), setting it now" % (eval_loss))
@@ -472,6 +475,11 @@ def train(
         wlog.update(**train_logdata)
 
         accumulate_logs(wlog)
+
+        if wlog["train_loss/total"] == 0:
+            # Initial baseline for resumed configs
+            logger.warning("train_loss is 0, likely due to NaN")
+            # Wat do? Raise?
 
         if now - last_wandb_commit_log_at > config["wandb_log_interval_s"]:
             last_wandb_commit_log_at = now
