@@ -1,6 +1,6 @@
 import argparse
 
-from . import p10n_joint
+from . import p10n_nll
 from ..util.train import train
 
 from ..util.constants_v12 import (
@@ -38,13 +38,13 @@ if __name__ == "__main__":
         dry_run=args.dry_run,
         no_wandb=args.no_wandb,
         # sample_only=False,
-        model_creator=p10n_joint.ActionPredictionModel,
+        model_creator=p10n_nll.ActionPredictionModel,
         weights_builder=None,
-        buffer_creator=p10n_joint.Buffer,
-        vcmi_dataloader_functor=p10n_joint.vcmi_dataloader_functor,
+        buffer_creator=p10n_nll.Buffer,
+        vcmi_dataloader_functor=p10n_nll.vcmi_dataloader_functor,
         s3_dataloader_functor=None,
-        eval_model_fn=p10n_joint.eval_model,
-        train_model_fn=p10n_joint.train_model
+        eval_model_fn=p10n_nll.eval_model,
+        train_model_fn=p10n_nll.train_model
     )
 
     train(**dict(common_args, sample_only=False))
