@@ -3,6 +3,7 @@ import torch
 
 from . import t10n
 from . import symmetric
+from . import reward
 from .weights import build_feature_weights
 from ..util.train import train
 
@@ -173,6 +174,8 @@ if __name__ == "__main__":
         mod = t10n
     elif args.mod == "symmetric":
         mod = symmetric
+    elif args.mod == "reward":
+        mod = reward
     else:
         raise Exception("Unexpected mod: %s" % args.mod)
 
