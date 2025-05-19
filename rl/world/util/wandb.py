@@ -15,6 +15,7 @@ def setup_wandb(config, model, src_file):
 
     start_info = dict(
         git_head=str(git.head.target),
+        git_head_message=git[git.head.target].message,
         git_status={k: v.name for k, v in git.status().items()},
         timestamp=now.isoformat(timespec='milliseconds'),
         vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"),
@@ -58,5 +59,7 @@ def setup_wandb(config, model, src_file):
             art.add_file(temp_file.name, name="diff.patch")
             wandb.run.log_artifact(art)
 
+    # XXX: no "Model" will be shown in the W&B UI when .forward()
+    #       returns a non-tensor value (e.g. a tuple)
     wandb.watch(model, log="all", log_graph=True, log_freq=1000)
     return wandb
