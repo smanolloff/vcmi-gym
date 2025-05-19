@@ -329,7 +329,6 @@ class ActionPredictionModel(nn.Module):
         self.aggregator = nn.Sequential(
             nn.LazyLinear(2048),
             nn.LeakyReLU(),
-            nn.LayerNorm()  # NaN issue fix attempt #1
         )
         # => (B, Z_AGG)
 
@@ -512,6 +511,7 @@ class ActionPredictionModel(nn.Module):
 
 def compute_loss(action, logits_main, logits_hex):
     assert all(action != 0), "Found retreat action: %s" % action
+    device = logits_main.device
 
     if not torch.isfinite(logits_main).all():
         raise ValueError("Non-finite logits main logits: %s" % logits_main)
@@ -537,7 +537,7 @@ def compute_loss(action, logits_main, logits_hex):
     # Loss for MAIN action
     #
 
-    loss_main = cross_entropy(logits_main, target_main)
+    loss_main = cross_entropy(logits_main, target_main) / 3
 
     #
     # Loss for HEX actions (if any)
@@ -550,7 +550,7 @@ def compute_loss(action, logits_main, logits_hex):
 
     # Guard against NaN losses
     if actions_on_hex.numel() == 0:
-        return loss_main, torch.tensor(0.), torch.tensor(0.)
+        return loss_main, torch.tensor(0., device=device), torch.tensor(0., device=device)
 
     # logits_hex is (B, 165, 1 + N_HEX_ACTIONS)
     # The CE logits will be the score logit (1st logit) of each hex
@@ -561,7 +561,7 @@ def compute_loss(action, logits_main, logits_hex):
     # => (B', 165) of score logits
     target_hex_id = (action[actions_on_hex] - 2) // len(HEX_ACT_MAP)
     # (B') of hex_ids
-    loss_hex = cross_entropy(logits_hex_score, target_hex_id)
+    loss_hex = cross_entropy(logits_hex_score, target_hex_id) / 165
 
     # logits_hex is (B, 165, 1 + N_HEX_ACTIONS)
     # The CE logits will be the hexaction logits (>1st logit) of the target hex
@@ -570,7 +570,7 @@ def compute_loss(action, logits_main, logits_hex):
     # => (B', N_HEX_ACTIONS) of hexaction logits for the target hex
     target_hex_action = (action[actions_on_hex] - 2) % len(HEX_ACT_MAP)
     # (B') of hex_actions
-    loss_hexaction = cross_entropy(logits_hex_action, target_hex_action)
+    loss_hexaction = cross_entropy(logits_hex_action, target_hex_action) / 14
 
     return loss_main, loss_hex, loss_hexaction
 
