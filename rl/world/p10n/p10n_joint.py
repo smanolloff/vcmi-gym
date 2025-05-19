@@ -470,9 +470,10 @@ class ActionPredictionModel(nn.Module):
 
 def compute_loss(obs, mask, action, logits):
     assert all(action > 0), "Found invalid actions: %s" % action
-    mask_value = torch.tensor(torch.finfo(logits.dtype).min)
-    masked_logits = logits.masked_fill(~(mask.bool()), mask_value)
-    return cross_entropy(masked_logits, action)
+    # mask_value = torch.tensor(torch.finfo(logits.dtype).min)
+    # masked_logits = logits.masked_fill(~(mask.bool()), mask_value)
+    # return cross_entropy(masked_logits, action)
+    return cross_entropy(logits, action)
 
 
 def losses_to_rows(loss):
