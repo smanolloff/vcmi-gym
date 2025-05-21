@@ -22,7 +22,7 @@ import vcmi_gym
 import torch
 import logging
 
-from vcmi_gym.envs.v12.pyconnector import HEX_ACT_MAP, N_HEX_ACTIONS
+from vcmi_gym.envs.v12.pyconnector import N_ACTIONS, HEX_ACT_MAP, N_HEX_ACTIONS
 from rl.world.util.structured_logger import StructuredLogger
 from rl.world.util.dataset_vcmi import DatasetVCMI, Data, Context
 from rl.world.t10n.t10n import vcmi_dataloader_functor
@@ -51,10 +51,11 @@ def main():
         # swap_sides=1,
     )
 
+    num_workers = 5
     dataloader = torch.utils.data.DataLoader(
         DatasetVCMI(logger=logger, env_kwargs=env_kwargs, mw_functor=vcmi_dataloader_functor),
         batch_size=1000,
-        num_workers=10,
+        num_workers=num_workers,
         prefetch_factor=None
     )
 
@@ -64,20 +65,33 @@ def main():
     action_counters = torch.zeros(N_HEX_ACTIONS, dtype=torch.long)
     num_episodes = 0
     num_samples = 0
+    num_valid_actions = 0
+    min_valid_actions = N_ACTIONS
+    max_valid_actions = 0
 
     for _ in range(100):
         b = next(it)
         action_counters += torch.bincount((b.action - 2) % N_HEX_ACTIONS, minlength=N_HEX_ACTIONS)
         num_episodes += b.done.sum(0)
         num_samples += b.done.numel()
+        valid_actions = b.mask.sum(dim=1)
+        va_min = valid_actions.min()
+        va_max = valid_actions.max()
+        min_valid_actions = va_min if va_min < min_valid_actions else min_valid_actions
+        max_valid_actions = va_max if va_max < max_valid_actions else max_valid_actions
+        num_valid_actions += b.mask.sum()
 
     print("")
 
     num_seconds = time.time() - tstart
+    print("* Opponent: %s" % env_kwargs["opponent"])
+    print("* Workers: %d" % num_workers)
     print("* Total duration: %d seconds" % num_seconds)
     print("* Total samples: %d" % num_samples)
     print("* Total episodes: %d" % num_episodes)
+    print("* Valid actions: %d (mean), %d (min), %d (max)" % (num_valid_actions / (num_samples - num_episodes), va_min, va_max))
     print("* ep_len_mean: %d" % (num_samples / num_episodes) if num_episodes else float("nan"))
+    print("* num_valid_actions")
     print("* samples/s: %d" % (num_samples / num_seconds))
 
     assert action_counters.sum() == num_samples

@@ -1,36 +1,9 @@
 import re
 import torch
-from functools import partial
 
 from .world import WorldModel
 from .t10n import t10n
 from .p10n import p10n
-
-from .util.constants_v12 import (
-    GLOBAL_ATTR_MAP
-)
-
-IDX_BSAP_START = GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][1]
-IDX_BSAP_END = GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][2] + IDX_BSAP_START
-
-IDX_WINNER_START = GLOBAL_ATTR_MAP["BATTLE_WINNER"][1]
-IDX_WINNER_END = GLOBAL_ATTR_MAP["BATTLE_WINNER"][2] + IDX_WINNER_START
-
-# Attacker army: 1 phoenix
-# Defender army: 3 arrow towers + 8 stacks (incl. ballista)
-# => Transitions:
-#   1. Catapult
-#   2. 3x arrow tower (wait)
-#   3. Phoenix
-#   ---- transitions start:
-#   4. 8x stacks (wait)
-#   5. 8x stacks (act)
-#   6. 3x arrow tower (act)
-#   7. (new round) Catapult
-#   8. 3x arrow tower (wait)
-#   ---- transitions end
-#   = 23... (the "prediction" will likely be totally wrong)
-MAX_TRANSITIONS = 23
 
 
 def prepare(state, action, reward, headline):
@@ -76,10 +49,12 @@ if __name__ == "__main__":
         mapname="gym/generated/evaluation/8x512.vmap",
         opponent="BattleAI",
         swap_sides=0,
+        role="defender",
         # random_heroes=1,
         # random_obstacles=1,
         # town_chance=20,
         # warmachine_chance=30,
+        # random_stack_chance=65,
         # random_terrain_chance=100,
         # tight_formation_chance=30,
         conntype="thread"
@@ -126,7 +101,7 @@ if __name__ == "__main__":
 
         def do_dream(t10n_strat, p10n_strat):
             with torch.no_grad():
-                wm.full_transition(t(start_obs), t(start_act), t10n_strat, p10n_strat, callback=callback)
+                wm(t(start_obs), t(start_act), t10n_strat, p10n_strat, callback=callback)
 
         # Change in pdb to repeat same step
         # (e.g. to see "alternate dreams" when strategy is SAMPLES)
