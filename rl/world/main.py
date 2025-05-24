@@ -1,7 +1,8 @@
 import re
+import os
 import torch
 
-from .world import WorldModel
+from .world import ImaginationCoreModel
 from .t10n import t10n
 from .p10n import p10n
 
@@ -27,7 +28,7 @@ def prepare(state, action, reward, headline):
 
 def render_dream(dream):
     try:
-        ary_lines = [prepare(s, a, None, "Dream step %d:" % i) for i, (s, a) in enumerate(dream)]
+        ary_lines = [prepare(s, a, None, "Dream step %d:" % i) for i, (s, a) in enumerate(dream[1:])]
     except Exception:
         print("!!!!!!!!! ERRROR PREPARING !!!!!. TEMP RENDER:")
         ary_lines = [print("\n").join(prepare(s, a, None, "Dream step %d:" % i)) for i, (s, a) in enumerate(dream)]
@@ -40,11 +41,11 @@ def render_dream(dream):
 
 if __name__ == "__main__":
     dream = []
-    wm = WorldModel()
 
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
     from vcmi_gym.envs.v12.decoder.decoder import Decoder
 
+    oldcwd = os.getcwd()
     env = VcmiEnv(
         mapname="gym/generated/evaluation/8x512.vmap",
         opponent="BattleAI",
@@ -57,7 +58,16 @@ if __name__ == "__main__":
         # random_stack_chance=65,
         # random_terrain_chance=100,
         # tight_formation_chance=30,
-        conntype="thread"
+    )
+
+    assert env.role == "defender"
+    ic = ImaginationCoreModel(
+        side=1,
+        reward_step_fixed=env.reward_cfg.step_fixed,
+        reward_dmg_mult=env.reward_cfg.dmg_mult,
+        reward_term_mult=env.reward_cfg.term_mult,
+        transition_model_file=f"{oldcwd}/hauzybxn-model.pt",
+        action_prediction_model_file=f"{oldcwd}/ogyesvkb-model.pt",
     )
 
     t = lambda x: torch.as_tensor(x).unsqueeze(0)
@@ -78,6 +88,7 @@ if __name__ == "__main__":
 
     dream = []
     callback = lambda s, a: dream.append((s, a))
+    rewloss = torch.tensor(0.)
 
     for step in range(total_steps):
         if env.terminated or env.truncated:
@@ -89,8 +100,8 @@ if __name__ == "__main__":
 
         num_transitions = len(obs0["transitions"]["observations"])
 
-        if num_transitions != 4:
-            continue
+        # if num_transitions != 4:
+        #     continue
 
         env.render_transitions(add_regular_render=False)
         print("^ Transitions: %d" % num_transitions)
@@ -101,15 +112,20 @@ if __name__ == "__main__":
 
         def do_dream(t10n_strat, p10n_strat):
             with torch.no_grad():
-                wm(t(start_obs), t(start_act), t10n_strat, p10n_strat, callback=callback)
+                return ic(t(start_obs), t(start_act), t10n_strat, p10n_strat, callback=callback, obs0=obs0)
 
         # Change in pdb to repeat same step
         # (e.g. to see "alternate dreams" when strategy is SAMPLES)
         pdb_state = dict(repeat=False)
 
         dream.clear()
-        do_dream(t10n.Reconstruction.PROBS, p10n.Prediction.PROBS)
+        state, reward, done = do_dream(t10n.Reconstruction.GREEDY, p10n.Prediction.GREEDY)
         render_dream(dream)
+        print("Done: %s" % str([done, done.item()]))
+        print("Reward: %s" % str([rew, reward.item()]))
+        print("Reward loss: %f" % torch.nn.functional.mse_loss(torch.tensor(rew), reward[0]))
+        rewloss += torch.nn.functional.mse_loss(torch.tensor(rew), reward[0])
 
-        import ipdb; ipdb.set_trace()  # noqa
         print("")
+
+    print("Mean reward loss: %f" % (rewloss / total_steps))
