@@ -7,10 +7,12 @@ from .p10n import p10n_nll as p10n
 
 from .util.misc import layer_init
 from .util.constants_v12 import (
+    STATE_SIZE,
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     GLOBAL_ATTR_MAP,
     PLAYER_ATTR_MAP,
+    HEX_ATTR_MAP,
     N_ACTIONS,
 )
 
@@ -30,6 +32,13 @@ INDEX_PLAYER1_VALUE_LOST_NOW_REL = P_OFFSET1 + PLAYER_ATTR_MAP["VALUE_LOST_NOW_R
 INDEX_PLAYER0_VALUE_LOST_ACC_REL0 = P_OFFSET0 + PLAYER_ATTR_MAP["VALUE_LOST_ACC_REL0"][1]
 INDEX_PLAYER1_VALUE_LOST_ACC_REL0 = P_OFFSET1 + PLAYER_ATTR_MAP["VALUE_LOST_ACC_REL0"][1]
 
+# relative to hex
+INDEX_HEX_ACTION_MASK_START = HEX_ATTR_MAP["ACTION_MASK"][1]
+INDEX_HEX_ACTION_MASK_END = HEX_ATTR_MAP["ACTION_MASK"][2] + INDEX_HEX_ACTION_MASK_START
+
+INDEX_GLOBAL_ACTION_MASK_START = GLOBAL_ATTR_MAP["ACTION_MASK"][1]
+INDEX_GLOBAL_ACTION_MASK_END = GLOBAL_ATTR_MAP["ACTION_MASK"][2] + INDEX_GLOBAL_ACTION_MASK_START
+
 
 # Attacker army: 1 phoenix
 # Defender army: 3 arrow towers + 8 stacks (incl. ballista)
@@ -44,7 +53,7 @@ INDEX_PLAYER1_VALUE_LOST_ACC_REL0 = P_OFFSET1 + PLAYER_ATTR_MAP["VALUE_LOST_ACC_
 MAX_TRANSITIONS = 17
 
 
-class ImaginationCoreModel(nn.Module):
+class ImaginationCore(nn.Module):
     def __init__(
         self,
         side,
@@ -73,6 +82,7 @@ class ImaginationCoreModel(nn.Module):
 
         load_weights(self.transition_model, transition_model_file)
         load_weights(self.action_prediction_model, action_prediction_model_file)
+        self._layer_initialized = True  # prevents layer_init() from overwriting loaded weights
 
         assert PLAYER_ATTR_MAP["DMG_RECEIVED_NOW_REL"][2] == 1
         assert PLAYER_ATTR_MAP["VALUE_LOST_NOW_REL"][2] == 1
@@ -98,7 +108,15 @@ class ImaginationCoreModel(nn.Module):
         else:
             raise Exception("Unknown side: %s" % side)
 
-    def forward(self, initial_state, initial_action, t10n_strategy, p10n_strategy, callback=None, obs0=None):
+    def forward(
+        self,
+        initial_state,
+        initial_action,
+        t10n_strategy=t10n.Reconstruction.GREEDY,
+        p10n_strategy=p10n.Prediction.GREEDY,
+        callback=None,
+        obs0=None
+    ):
         initial_player = initial_state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(dim=1)
         # => (B)  # values 0=none, 1=red or 2=blue
         initial_winner = initial_state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(dim=1)
@@ -189,12 +207,6 @@ class ImaginationCoreModel(nn.Module):
                     # Rendering greedy is ok, samples is kind-of-ok => leave as-is
                     callback(state_in_progress[0].numpy(), action_in_progress.item())
 
-            # hexactions = action[action > 1]
-            # hexactions = hexactions[hexactions % 14] != 12
-            # if hexactions.numel() > 0:
-            #     import ipdb; ipdb.set_trace()  # noqa
-            #     pass
-
             s = state[idx_in_progress]
             reward[idx_in_progress] += 1000 * (
                 s[:, self.index_enemy_value_lost_now_rel] - s[:, self.index_my_value_lost_now_rel]
@@ -226,10 +238,14 @@ class ImaginationCoreModel(nn.Module):
         return state, reward, done
 
 
-# XXX: The mppo-style HexConv network arch could be used here
-class ModelFreeModel(nn.Module):
+class ObsProcessor(nn.Module):
     """
+    A shared network for model-free path and rollout encoder.
+    For VCMI observations, a "HexConv" network might fit well here.
+    (I2A paper):
     The model free path of the I2A consists of a CNN [...] without the FC layers.
+    [...]
+    The rollout encoder processes each frame [...] with another identically sized CNN.
     """
     def __init__(self):
         super().__init__()
@@ -248,48 +264,104 @@ class ModelFreeModel(nn.Module):
 
 
 class RolloutEncoder(nn.Module):
-    """
-    (I2A paper)
-    The rollout encoder processes each frame [...] with another identically sized CNN.
-    The output of this CNN is then concatenated with the reward prediction [...].
-    This feature is the input to an LSTM
-    """
-
-    def __init__(self, horizon=5):
+    def __init__(self, rollout_dim, horizon=5):
         super().__init__()
         self.horizon = horizon
-        self.imagination_core_model = ImaginationCoreModel()
-        self.obs_processor = ModelFreeModel()
+        self.imagination_core = ImaginationCore(
+            side=1,
+            reward_step_fixed=-1,
+            reward_dmg_mult=1,
+            reward_term_mult=1,
+            transition_model_file="/Users/simo/Projects/vcmi-gym/hauzybxn-model.pt",
+            action_prediction_model_file="/Users/simo/Projects/vcmi-gym/ogyesvkb-model.pt",
+        )
+
+        self.obs_processor = ObsProcessor()
+
+        """
+        (I2A paper, section 3.1):
+        We investigated several types of rollout policies [...] and found that
+        a particularly efficient strategy was to distill the imagination-augmented policy
+        into a [..] small model-free network πˆ(ot), and adding to the total loss a
+        cross entropy auxiliary loss between the imagination-augmented policy π(ot)
+        as computed on the current observation, and the policy πˆ(ot) as computed
+        on the same observation.
+        """
+        self.rollout_policy = nn.Sequential(
+            nn.LazyLinear(16),
+            nn.LeakyReLU(),
+            nn.LazyLinear(N_ACTIONS),
+        )
+
+        """
+        (I2A paper, section B.1, under "I2A"):
+        [...] an LSTM [...] used to process all [...] rollouts (one per action)
+        """
         self.lstm = nn.LSTM(
             input_size=1 + self.obs_processor.output_size,
-            hidden_size=32,
-            num_layers=1,
+            hidden_size=rollout_dim,
             batch_first=True,
-            dropout=0.1
+            # (I2A paper does not mention number of layers => assume 1)
+            # num_layers=2,
+            # dropout=0.2
         )
+
+    def get_action(self, obs):
+        hexes = obs[:, STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER:].unflatten(-1, [165, -1])
+        hex_masks_logits = hexes[:, :, INDEX_HEX_ACTION_MASK_START:INDEX_HEX_ACTION_MASK_END]
+        global_mask_logits = obs[:, INDEX_GLOBAL_ACTION_MASK_START:INDEX_GLOBAL_ACTION_MASK_END]
+
+        mask_logits = torch.cat((global_mask_logits, hex_masks_logits.flatten(start_dim=1)), dim=-1)
+        mask = mask_logits.sigmoid() > 0.5
+        # => (B, N_ACTIONS)
+
+        action_logits = self.rollout_policy(obs)
+        masked_logits = action_logits.masked_fill(~mask, -1e9)
+        probs = masked_logits.softmax(dim=-1)
+        # => (B, N_ACTIONS)
+
+        action = probs.multinomial(num_samples=1)
+        # => (B, 1)
+
+        return action.squeeze(1)
+        # => (B)
 
     def forward(self, obs, action):
         assert len(obs.shape) == 2
         B = obs.size(0)
         T = self.horizon
         r_obs = obs.new_zeros(B, T, obs.size(1))
-        r_rew = obs.new_zeros(B, T, 1)
+        r_rew = obs.new_zeros(B, T)
+        r_done = obs.new_zeros(B, T, dtype=torch.bool)
 
         first = True
         for t in range(T):
-            action = action if first else self.rollout_policy()
+            action = action if first else self.get_action(obs)
             first = False
-            obs, rew = self.imagination_core_model(obs, action)
+            obs, rew, done = self.imagination_core(obs, action)
             r_obs[:, t, :] = obs
-            r_rew[:, t, 0] = rew
-
-        lstm_in = torch.cat((
-            self.obs_processor(r_obs.flatten(end_dim=1)).unflatten(0, [B, T]),
-            rew.unsqueeze(-1)
-        ), dim=-1)
+            r_rew[:, t] = rew
+            r_done[:, t] = done
 
         """
-        (I2A paper)
+        (I2A paper, section B.1, under "I2A"):
+        The output [...] is then concatenated with the reward prediction
+        (single scalar broadcast into frame shape). This feature is the input
+        to an LSTM [...] used to process all [...] rollouts
+        """
+        lstm_in = torch.cat((
+            self.obs_processor(r_obs.flatten(end_dim=1)).unflatten(0, [B, T]),
+            r_rew.unsqueeze(-1)
+        ), dim=-1)
+        # => (B, T, self.lstm.input_size)
+
+        # Mask post-done states ("unshift" r_done)
+        lstm_mask = torch.zeros_like(r_done)
+        lstm_mask[:, 1:] = r_done[:, :-1]
+        lstm_in.masked_fill_(lstm_mask.unsqueeze(-1), 0)
+
+        """
+        (I2A paper, section 3.2):
         The features are fed to the LSTM in reverse order [...].
         The choice of forward, backward or bi-directional processing seems to have
         relatively little impact on the performance of the I2A [...].
@@ -301,16 +373,16 @@ class RolloutEncoder(nn.Module):
         Last hidden state (h_n): one vector per rollout: use for I2A’s rollout embedding.
         Output sequence (out): per-step vectors: use only if you need fine‐grained, time-wise features.
         """
+        # XXX: h_n is always (1, B, X)
+        return h_n.squeeze(0)
 
-        return h_n
 
-
-class ImaginationAggregatorModel(nn.Module):
+class ImaginationAggregator(nn.Module):
     def __init__(self, num_trajectories, horizon):
         super().__init__()
         self.num_trajectories = num_trajectories
         self.rollout_dim = 16
-        self.rollout_encoder = RolloutEncoder(horizon, self.rollout_dim)
+        self.rollout_encoder = RolloutEncoder(self.rollout_dim, horizon)
 
         # Attention-based aggregator
         self.query = nn.Parameter(torch.randn(1, 1, self.rollout_dim))
@@ -327,24 +399,55 @@ class ImaginationAggregatorModel(nn.Module):
         actions = torch.multinomial(probs, self.num_trajectories, replacement=replacement)
         # => (B, N)
 
-        rollouts = self.rollout_encoder(obs, actions)
+        actions = actions.flatten()
+        # => (B*N)
+
+        obs = obs.unsqueeze(1).expand([B, self.num_trajectories, -1]).flatten(end_dim=1)
+        # => (B*N, STATE_SIZE)
+
+        rollouts = self.rollout_encoder(obs, actions).unflatten(0, [B, -1])
         # => (B, N, X)
 
+        """
+        (I2A paper, Appendix B.1, under "I2A"):
+        The last output of the LSTM for all rollouts are concatenated into a
+        single vector `cia` of length 2560 for Sokoban, and 1280 on MiniPacman
+        """
+        # XXX: multi-head attention will be used instead of concatenation
+        # for a fixed-size output vector.
         q = self.query.expand(rollouts.size(0), 1, self.rollout_dim)
         attn_output, _ = self.mha(query=q, key=rollouts, value=rollouts)
-        # => (B,1,X)
+        # => (B, 1, X)
 
         return attn_output.squeeze(1)
         # => (B, X)
 
 
-class I2AModel(nn.Module):
-    def __init__(self, num_trajectories, horizon):
-        self.model_free_model = ModelFreeModel()
-        self.imagination_aggregator_model = ImaginationAggregatorModel(
+class I2A(nn.Module):
+    def __init__(self, num_trajectories, horizon, device=torch.device("cpu")):
+        super().__init__()
+        self.model_free_path = ObsProcessor()
+        self.imagination_aggregator = ImaginationAggregator(
             num_trajectories=num_trajectories,
             horizon=horizon,
         )
+
+        """
+        // XXX: The I2A paper is unclear regarding the FC layers.
+
+        (I2A paper, Section 3.2):
+        For the model-free path of the I2A, we chose a standard network of
+        convolutional layers plus one fully connected one. . We also use this
+        architecture on its own as a baseline agent.
+
+        (I2A paper, Appendix B.1, under "I2A"):
+        The model free path of the I2A consists of a CNN identical to one of
+        the standard model-free baseline (without the FC layers)
+
+        (I2A paper, Appendix B.1, under "Standard model-free baseline agent"):
+            * for MiniPacman: [...] the following FC layer has 256 units
+            * for Sokoban: [...] the following FC has 512 units
+        """
 
         self.body = nn.Sequential(
             nn.LazyLinear(16),
@@ -353,12 +456,19 @@ class I2AModel(nn.Module):
 
         self.action_head = nn.LazyLinear(N_ACTIONS)
         self.value_head = nn.LazyLinear(1)
+
+        # Init lazy layers
+        with torch.no_grad():
+            obs = torch.randn([3, STATE_SIZE])
+            mask = torch.randn([3, N_ACTIONS]) > 0
+            self.forward(obs, mask)
+
         layer_init(self)
 
-    def forward(self, obs, action_mask):
-        c_mf = self.model_free_model(obs, action_mask)
-        c_ia = self.imagination_aggregator_model(obs)
-        c = torch.cat((c_ia, c_mf), dim=1)
-        action_logits = self.action_head(c)
-        value = self.value_head(c)
+    def forward(self, obs, mask):
+        c_mf = self.model_free_path(obs)
+        c_ia = self.imagination_aggregator(obs, mask)
+        z = self.body(torch.cat((c_ia, c_mf), dim=1))
+        action_logits = self.action_head(z)
+        value = self.value_head(z)
         return action_logits, value

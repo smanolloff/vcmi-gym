@@ -17,10 +17,14 @@ class TableColumn:
 
 
 def layer_init(layer, gain=np.sqrt(2), bias_const=0.0):
+    layer._layer_initialized = True
     if isinstance(layer, torch.nn.Linear):
         torch.nn.init.orthogonal_(layer.weight, gain)
         torch.nn.init.constant_(layer.bias, bias_const)
     for mod in list(layer.modules())[1:]:
+        if getattr(mod, "_layer_initialized", False):
+            # This module will take care of its own initialization
+            continue
         layer_init(mod, gain, bias_const)
     return layer
 
