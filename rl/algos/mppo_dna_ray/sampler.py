@@ -87,6 +87,7 @@ class Sampler:
             self.rewards,
             self.dones,
             self.next_obs,
+            self.next_mask,
             self.next_done,
         )
 

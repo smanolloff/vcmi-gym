@@ -24,9 +24,6 @@ import json
 import string
 import argparse
 import copy
-import math
-from collections import OrderedDict
-from functools import partial
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -35,13 +32,13 @@ from collections import deque
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.mobile_optimizer import optimize_for_mobile
-
+# import tyro
 import warnings
 import ray
 
 from .. import common
-from .sampler import Sampler
+from ..mppo_dna_ray.sampler import Sampler
+from ...world.world import I2A
 
 ENVS = []  # debug
 
@@ -68,11 +65,11 @@ class EnvArgs:
     user_timeout: int = 30
     vcmi_timeout: int = 30
     boot_timeout: int = 30
-    conntype: str = "proc"
     random_heroes: int = 1
     random_obstacles: int = 1
     town_chance: int = 0
     warmachine_chance: int = 0
+    random_stack_chance: int = 0
     random_terrain_chance: int = 0
     tight_formation_chance: int = 0
     battlefield_pattern: str = ""
@@ -89,18 +86,21 @@ class EnvArgs:
 
 
 @dataclass
-class NetworkArgs:
-    z_size_global: int = 0
-    z_size_player: int = 0
-    z_size_hex: int = 0
-    heads: dict = field(default_factory=dict)
+class I2AKwargs:
+    i2a_fc_units: int = 16
+    num_trajectories: int = 5
+    rollout_dim: int = 16
+    rollout_policy_fc_units: int = 16
+    horizon: int = 3
+    obs_processor_output_size: int = 16
+    transition_model_file: str = "hauzybxn-model.pt"
+    action_prediction_model_file: str = "ogyesvkb-model.pt"
 
 
 @dataclass
 class State:
     seed: int = -1
     resumes: int = 0
-    map_swaps: int = 0  # DEPRECATED
     global_timestep: int = 0
     current_timestep: int = 0
     current_vstep: int = 0
@@ -201,7 +201,7 @@ class Args:
     env: EnvArgs = field(default_factory=lambda: EnvArgs())
     env_version: int = 0
     env_wrappers: list = field(default_factory=list)
-    network: NetworkArgs = field(default_factory=lambda: NetworkArgs())
+    i2a_kwargs: I2AKwargs = field(default_factory=lambda: I2AKwargs())
 
     def __post_init__(self):
         if not isinstance(self.env, EnvArgs):
@@ -214,8 +214,8 @@ class Args:
             self.lr_schedule_policy = ScheduleArgs(**self.lr_schedule_policy)
         if not isinstance(self.lr_schedule_distill, ScheduleArgs):
             self.lr_schedule_distill = ScheduleArgs(**self.lr_schedule_distill)
-        if not isinstance(self.network, NetworkArgs):
-            self.network = NetworkArgs(**self.network)
+        if not isinstance(self.i2a_kwargs, I2AKwargs):
+            self.i2a_kwargs = I2AKwargs(**self.i2a_kwargs)
 
         for a in ["distill", "policy", "value"]:
             if getattr(self, f"update_epochs_{a}") == 0:
@@ -233,569 +233,61 @@ class Args:
         common.coerce_dataclass_ints(self)
 
 
-# 1. Adds 1 hex of padding to the input
-#
-#               0 0 0 0
-#    1 2 3     0 1 2 3 0
-#     4 5 6 =>  0 4 5 6 0
-#    7 8 9     0 7 8 9 0
-#               0 0 0 0
-#
-# 2. Simulates a Conv2d with kernel_size=2, padding=1
-#
-#  For the above example (grid of 9 total hexes), this would result in:
-#
-#  1 => [0, 0, 0, 1, 2, 0, 4]
-#  2 => [0, 0, 1, 2, 3, 4, 5]
-#  3 => [0, 0, 2, 3, 0, 5, 6]
-#  4 => [1, 2, 0, 4, 5, 7, 8]
-#  ...
-#  9 => [5, 6, 8, 9, 0, 0, 0]
-#
-# Input: (B, ...) reshapeable to (B, Y, X, E)
-# Output: (B, 165, out_channels)
-#
-class HexConv(nn.Module):
-    def __init__(self, out_channels):
-        super().__init__()
-
-        padded_offsets0 = torch.tensor([-17, -16, -1, 0, 1, 17, 18])
-        padded_offsets1 = torch.tensor([-18, -17, -1, 0, 1, 16, 17])
-        padded_convinds = torch.zeros(11, 15, 7, dtype=int)
-
-        for y in range(1, 12):
-            for x in range(1, 16):
-                padded_hexind = y * 17 + x
-                padded_offsets = padded_offsets0 if y % 2 == 0 else padded_offsets1
-                padded_convinds[y-1, x-1] = padded_offsets + padded_hexind
-
-        self.register_buffer("padded_convinds", padded_convinds.flatten())
-        self.fc = nn.LazyLinear(out_features=out_channels)
-
-    def forward(self, x):
-        b, _, hexdim = x.shape
-        x = x.view(b, 11, 15, -1)
-        padded_x = x.new_zeros((b, 13, 17, hexdim))  # +2 hexes in X and Y coords
-        padded_x[:, 1:12, 1:16, :] = x
-        padded_x = padded_x.view(b, -1, hexdim)
-        fc_input = padded_x[:, self.padded_convinds, :].view(b, 165, -1)
-        return self.fc(fc_input)
-
-
-class HexConvResBlock(nn.Module):
-    def __init__(self, channels, depth=1, act={"t": "LeakyReLU"}):
-        super().__init__()
-
-        self.layers = []
-        for _ in range(depth):
-            self.layers.append((
-                HexConv(channels),
-                AgentNN.build_layer(act),
-                HexConv(channels),
-            ))
-
-    def forward(self, x):
-        assert x.is_contiguous
-        for conv1, act, conv2 in self.layers:
-            x = act(conv2(act(conv1(x))).add_(x))
-        return x
-
-
-class SelfAttention(nn.Module):
-    def __init__(self, edim, num_heads=1):
-        assert edim % num_heads == 0, f"{edim} % {num_heads} == 0"
-        super().__init__()
-        self.edim = edim
-        self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=num_heads, batch_first=True)
-
-    def forward(self, b_obs, b_masks=None):
-        assert len(b_obs.shape) == 3
-        assert b_obs.shape[2] == self.edim
-
-        if b_masks is None:
-            res, _ = self.mha(b_obs, b_obs, b_obs, need_weights=False)
-            return res
-        else:
-            assert len(b_masks.shape) == 3
-            assert b_masks.shape[0] == b_obs.shape[0], f"{b_masks.shape[0]} == {b_obs.shape[0]}"
-            assert b_masks.shape[1] == b_obs.shape[1], f"{b_masks.shape[1]} == {b_obs.shape[1]}"
-            assert b_masks.shape[1] == b_masks.shape[2], f"{b_masks.shape[1]} == {b_masks.shape[2]}"
-            b_obs = b_obs.flatten(start_dim=1, end_dim=2)
-            # => (B, 165, e)
-            res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
-            return res
-
-
 class AgentNN(nn.Module):
-    @staticmethod
-    def build_layer(spec):
-        kwargs = dict(spec)  # copy
-        t = kwargs.pop("t")
-        layer_cls = getattr(torch.nn, t, None) or globals()[t]
-        return layer_cls(**kwargs)
-
-    def __init__(self, network, dim_global, dim_players, dim_hexes, n_actions, device=torch.device("cpu")):
+    def __init__(self, args, device=torch.device("cpu")):
         super().__init__()
 
-        self.dims = {
-            "global": dim_global,
-            "players": dim_players,
-            "hexes": dim_hexes,
-            "obs": dim_global + dim_players + dim_hexes,
-            "player": dim_players // 2,
-            "hex": dim_hexes // 165,
-        }
+        # I2A's p10n worls only as defender
+        assert args.mapside == "defender"
 
-        self.n_actions = n_actions
+        self.i2a = I2A(
+            i2a_fc_units=args.i2a_kwargs.i2a_fc_units,
+            num_trajectories=args.i2a_kwargs.num_trajectories,
+            rollout_dim=args.i2a_kwargs.rollout_dim,
+            rollout_policy_fc_units=args.i2a_kwargs.rollout_policy_fc_units,
+            horizon=args.i2a_kwargs.horizon,
+            obs_processor_output_size=args.i2a_kwargs.obs_processor_output_size,
+            side=(args.mapside == "defender"),
+            reward_step_fixed=args.env.reward_step_fixed,
+            reward_dmg_mult=args.env.reward_dmg_mult,
+            reward_term_mult=args.env.reward_term_mult,
+            transition_model_file=args.i2a_kwargs.transition_model_file,
+            action_prediction_model_file=args.i2a_kwargs.action_prediction_model_file,
+            device=torch.device("cpu"),
+        )
+
         self.device = device
-        self._build_indices()
-
-        emb_calc = lambda n: math.ceil(math.sqrt(n))
-
-        #
-        # Global encoders
-        #
-
-        # Continuous:
-        # (B, n)
-        self.encoder_global_continuous = nn.Identity()
-
-        # Binaries:
-        # (B, n)
-        self.encoder_global_binary = nn.Identity()
-        if self.obs_index["global"]["binary"].numel():
-            n_binary_features = len(self.obs_index["global"]["binary"])
-            self.encoder_global_binary = nn.LazyLinear(n_binary_features)
-            # No nonlinearity needed
-
-        # Categoricals:
-        # [(B, C1), (B, C2), ...]
-        self.encoders_global_categoricals = nn.ModuleList([])
-        for ind in self.global_index["categoricals"]:
-            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
-            self.encoders_global_categoricals.append(cat_emb_size)
-
-        # Merge
-        self.encoder_merged_global = nn.Sequential(
-            # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
-            nn.LazyLinear(network.z_size_global),
-            nn.LeakyReLU(),
-        )
-        # => (B, Z_GLOBAL)
-
-        #
-        # Player encoders
-        #
-
-        # Continuous per player:
-        # (B, n)
-        self.encoder_player_continuous = nn.Identity()
-
-        # Binaries per player:
-        # (B, n)
-        self.encoder_player_binary = nn.Identity()
-        if self.obs_index["player"]["binary"].numel():
-            n_binary_features = len(self.obs_index["player"]["binary"][0])
-            self.encoder_player_binary = nn.LazyLinear(n_binary_features)
-
-        # Categoricals per player:
-        # [(B, C1), (B, C2), ...]
-        self.encoders_player_categoricals = nn.ModuleList([])
-        for ind in self.player_index["categoricals"]:
-            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
-            self.encoders_player_categoricals.append(cat_emb_size)
-
-        # Merge per player
-        self.encoder_merged_player = nn.Sequential(
-            # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
-            nn.LazyLinear(network.z_size_player),
-            nn.LeakyReLU(),
-        )
-        # => (B, 2, Z_PLAYER)
-
-        #
-        # Hex encoders
-        #
-
-        # Continuous per hex:
-        # (B, n)
-        self.encoder_hex_continuous = nn.Identity()
-
-        # Binaries per hex:
-        # (B, n)
-        if self.obs_index["hex"]["binary"].numel():
-            n_binary_features = len(self.obs_index["hex"]["binary"][0])
-            self.encoder_hex_binary = nn.LazyLinear(n_binary_features)
-
-        # Categoricals per hex:
-        # [(B, C1), (B, C2), ...]
-        self.encoders_hex_categoricals = nn.ModuleList([])
-        for ind in self.hex_index["categoricals"]:
-            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
-            self.encoders_hex_categoricals.append(cat_emb_size)
-
-        # Merge per hex
-        self.encoder_merged_hex = nn.Sequential(
-            # => (B, 165, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS)
-            nn.LazyLinear(network.z_size_hex),
-            nn.LeakyReLU(),
-        )
-        # => (B, 165, Z_HEX)
-
-        # Transformer (hexes only)
-        self.transformer_hex = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=network.z_size_hex, nhead=8, batch_first=True),
-            num_layers=6
-        )
-        # => (B, 165, Z_HEX)
-
-        #
-        # Aggregator
-        #
-
-        # (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
-        self.aggregator = nn.LazyLinear(2048)
-        # => (B, Z_AGG)
-
-        #
-        # Heads
-        #
-
-        self.actor = nn.LazyLinear(network.heads["actor"]["size"])
-        self.critic = nn.LazyLinear(network.heads["critic"]["size"])
-
         self.to(device)
 
-        # Init lazy layers
-        with torch.no_grad():
-            self.get_action_and_value(torch.randn([2, self.dims["obs"]], device=device), torch.ones([2, n_actions], device=device))
+    def forward(self, obs, mask):
+        return self.i2a(obs, mask)
 
-        common.layer_init(self.actor, gain=0.01)
-        common.layer_init(self.critic, gain=1.0)
+    def get_value(self, obs, mask):
+        _, value = self.i2a(obs, mask)
+        return value
 
-    def _build_indices(self):
-        self.global_index = {"continuous": [], "binary": [], "categoricals": []}
-        self.player_index = {"continuous": [], "binary": [], "categoricals": []}
-        self.hex_index = {"continuous": [], "binary": [], "categoricals": []}
-
-        GLOBAL_ATTR_MAP = OrderedDict([
-            ('BATTLE_SIDE', ('CATEGORICAL_STRICT_NULL', 0, 2, 1)),
-            ('BATTLE_WINNER', ('CATEGORICAL_EXPLICIT_NULL', 2, 3, 1)),
-            ('BFIELD_VALUE_START_ABS', ('EXPNORM_STRICT_NULL', 5, 1, 10000000)),
-            ('BFIELD_VALUE_NOW_ABS', ('EXPNORM_STRICT_NULL', 6, 1, 10000000)),
-            ('BFIELD_VALUE_NOW_REL0', ('LINNORM_STRICT_NULL', 7, 1, 1000)),
-            ('BFIELD_HP_START_ABS', ('EXPNORM_STRICT_NULL', 8, 1, 200000)),
-            ('BFIELD_HP_NOW_ABS', ('EXPNORM_STRICT_NULL', 9, 1, 200000)),
-            ('BFIELD_HP_NOW_REL0', ('LINNORM_STRICT_NULL', 10, 1, 1000))
-        ])
-
-        PLAYER_ATTR_MAP = OrderedDict([
-            ('BATTLE_SIDE', ('CATEGORICAL_STRICT_NULL', 0, 2, 1)),
-            ('ARMY_VALUE_NOW_ABS', ('EXPNORM_STRICT_NULL', 2, 1, 5000000)),
-            ('ARMY_VALUE_NOW_REL', ('LINNORM_STRICT_NULL', 3, 1, 1000)),
-            ('ARMY_VALUE_NOW_REL0', ('LINNORM_STRICT_NULL', 4, 1, 1000)),
-            ('ARMY_HP_NOW_ABS', ('EXPNORM_STRICT_NULL', 5, 1, 100000)),
-            ('ARMY_HP_NOW_REL', ('LINNORM_STRICT_NULL', 6, 1, 1000)),
-            ('ARMY_HP_NOW_REL0', ('LINNORM_STRICT_NULL', 7, 1, 1000)),
-            ('VALUE_KILLED_NOW_ABS', ('EXPNORM_STRICT_NULL', 8, 1, 5000000)),
-            ('VALUE_KILLED_NOW_REL', ('LINNORM_STRICT_NULL', 9, 1, 1000)),
-            ('VALUE_KILLED_ACC_ABS', ('EXPNORM_STRICT_NULL', 10, 1, 5000000)),
-            ('VALUE_KILLED_ACC_REL0', ('LINNORM_STRICT_NULL', 11, 1, 1000)),
-            ('VALUE_LOST_NOW_ABS', ('EXPNORM_STRICT_NULL', 12, 1, 5000000)),
-            ('VALUE_LOST_NOW_REL', ('LINNORM_STRICT_NULL', 13, 1, 1000)),
-            ('VALUE_LOST_ACC_ABS', ('EXPNORM_STRICT_NULL', 14, 1, 5000000)),
-            ('VALUE_LOST_ACC_REL0', ('LINNORM_STRICT_NULL', 15, 1, 1000)),
-            ('DMG_DEALT_NOW_ABS', ('EXPNORM_STRICT_NULL', 16, 1, 10000)),
-            ('DMG_DEALT_NOW_REL', ('LINNORM_STRICT_NULL', 17, 1, 1000)),
-            ('DMG_DEALT_ACC_ABS', ('EXPNORM_STRICT_NULL', 18, 1, 100000)),
-            ('DMG_DEALT_ACC_REL0', ('LINNORM_STRICT_NULL', 19, 1, 1000)),
-            ('DMG_RECEIVED_NOW_ABS', ('EXPNORM_STRICT_NULL', 20, 1, 10000)),
-            ('DMG_RECEIVED_NOW_REL', ('LINNORM_STRICT_NULL', 21, 1, 1000)),
-            ('DMG_RECEIVED_ACC_ABS', ('EXPNORM_STRICT_NULL', 22, 1, 100000)),
-            ('DMG_RECEIVED_ACC_REL0', ('LINNORM_STRICT_NULL', 23, 1, 1000))
-        ])
-
-        HEX_ATTR_MAP = OrderedDict([
-            ('Y_COORD', ('CATEGORICAL_STRICT_NULL', 0, 11, 10)),
-            ('X_COORD', ('CATEGORICAL_STRICT_NULL', 11, 15, 14)),
-            ('STATE_MASK', ('BINARY_STRICT_NULL', 26, 4, 15)),
-            ('ACTION_MASK', ('BINARY_ZERO_NULL', 30, 14, 16383)),
-            ('IS_REAR', ('CATEGORICAL_EXPLICIT_NULL', 44, 3, 1)),
-            ('STACK_SIDE', ('CATEGORICAL_EXPLICIT_NULL', 47, 3, 1)),
-            ('STACK_SLOT', ('CATEGORICAL_EXPLICIT_NULL', 50, 10, 8)),
-            ('STACK_QUANTITY', ('EXPNORM_EXPLICIT_NULL', 60, 2, 1500)),
-            ('STACK_ATTACK', ('EXPNORM_ZERO_NULL', 62, 1, 80)),
-            ('STACK_DEFENSE', ('EXPNORM_ZERO_NULL', 63, 1, 80)),
-            ('STACK_SHOTS', ('EXPNORM_ZERO_NULL', 64, 1, 32)),
-            ('STACK_DMG_MIN', ('EXPNORM_ZERO_NULL', 65, 1, 100)),
-            ('STACK_DMG_MAX', ('EXPNORM_ZERO_NULL', 66, 1, 100)),
-            ('STACK_HP', ('EXPNORM_ZERO_NULL', 67, 1, 1300)),
-            ('STACK_HP_LEFT', ('EXPNORM_ZERO_NULL', 68, 1, 1300)),
-            ('STACK_SPEED', ('EXPNORM_ZERO_NULL', 69, 1, 30)),
-            ('STACK_QUEUE', ('BINARY_ZERO_NULL', 70, 30, 1073741823)),
-            ('STACK_VALUE_ONE', ('EXPNORM_EXPLICIT_NULL', 100, 2, 180000)),
-            ('STACK_FLAGS1', ('BINARY_EXPLICIT_NULL', 102, 26, 33554431)),
-            ('STACK_FLAGS2', ('BINARY_EXPLICIT_NULL', 128, 16, 32767)),
-            ('STACK_VALUE_REL', ('LINNORM_EXPLICIT_NULL', 144, 2, 1000)),
-            ('STACK_VALUE_REL0', ('LINNORM_EXPLICIT_NULL', 146, 2, 1000)),
-            ('STACK_VALUE_KILLED_REL', ('LINNORM_EXPLICIT_NULL', 148, 2, 1000)),
-            ('STACK_VALUE_KILLED_ACC_REL0', ('LINNORM_EXPLICIT_NULL', 150, 2, 1000)),
-            ('STACK_VALUE_LOST_REL', ('LINNORM_EXPLICIT_NULL', 152, 2, 1000)),
-            ('STACK_VALUE_LOST_ACC_REL0', ('LINNORM_EXPLICIT_NULL', 154, 2, 1000)),
-            ('STACK_DMG_DEALT_REL', ('LINNORM_EXPLICIT_NULL', 156, 2, 1000)),
-            ('STACK_DMG_DEALT_ACC_REL0', ('LINNORM_EXPLICIT_NULL', 158, 2, 1000)),
-            ('STACK_DMG_RECEIVED_REL', ('LINNORM_EXPLICIT_NULL', 160, 2, 1000)),
-            ('STACK_DMG_RECEIVED_ACC_REL0', ('LINNORM_EXPLICIT_NULL', 162, 2, 1000))
-        ])
-
-        self._add_indices(GLOBAL_ATTR_MAP, self.global_index)
-        self._add_indices(PLAYER_ATTR_MAP, self.player_index)
-        self._add_indices(HEX_ATTR_MAP, self.hex_index)
-
-        for index in [self.global_index, self.player_index, self.hex_index]:
-            for type in ["continuous", "binary"]:
-                index[type] = torch.tensor(index[type], device=self.device)
-
-            index["categoricals"] = [torch.tensor(ind, device=self.device) for ind in index["categoricals"]]
-
-        self._build_obs_indices()
-
-    def _add_indices(self, attr_map, index):
-        i = 0
-
-        for attr, (enctype, offset, n, vmax) in attr_map.items():
-            length = n
-            if enctype.endswith("EXPLICIT_NULL"):
-                if not enctype.startswith("CATEGORICAL"):
-                    index["binary"].append(i)
-                    i += 1
-                    length -= 1
-            elif enctype.endswith("IMPLICIT_NULL"):
-                raise Exception("IMPLICIT_NULL is not supported")
-            elif enctype.endswith("MASKING_NULL"):
-                raise Exception("MASKING_NULL is not supported")
-            elif enctype.endswith("STRICT_NULL"):
-                pass
-            elif enctype.endswith("ZERO_NULL"):
-                pass
-            else:
-                raise Exception("Unexpected enctype: %s" % enctype)
-
-            t = None
-            if enctype.startswith("ACCUMULATING"):
-                t = "binary"
-            elif enctype.startswith("BINARY"):
-                t = "binary"
-            elif enctype.startswith("CATEGORICAL"):
-                t = "categorical"
-            elif enctype.startswith("EXPNORM"):
-                t = "continuous"
-            elif enctype.startswith("LINNORM"):
-                t = "continuous"
-            else:
-                raise Exception("Unexpected enctype: %s" % enctype)
-
-            if t == "categorical":
-                ind = []
-                index["categoricals"].append(ind)
-                for _ in range(length):
-                    ind.append(i)
-                    i += 1
-            else:
-                for _ in range(length):
-                    index[t].append(i)
-                    i += 1
-
-    # Index for extracting values from (batched) observation
-    # This is different than the other indexes:
-    # - self.hex_index contains *relative* indexes for 1 hex
-    # - self.obs_index["hex"] contains *absolute* indexes for all 165 hexes
-    def _build_obs_indices(self):
-        t = lambda ary: torch.tensor(ary, dtype=torch.int64, device=self.device)
-
-        # XXX: Discrete (or "noncontinuous") is a combination of binary + categoricals
-        #      where for direct extraction from obs
-        self.obs_index = {
-            "global": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
-            "player": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
-            "hex": {"continuous": t([]), "binary": t([]), "categoricals": [], "categorical": t([]), "discrete": t([])},
-        }
-
-        # Global
-
-        if self.global_index["continuous"].numel():
-            self.obs_index["global"]["continuous"] = self.global_index["continuous"]
-
-        if self.global_index["binary"].numel():
-            self.obs_index["global"]["binary"] = self.global_index["binary"]
-
-        if self.global_index["categoricals"]:
-            self.obs_index["global"]["categoricals"] = self.global_index["categoricals"]
-
-        self.obs_index["global"]["categorical"] = torch.cat(tuple(self.obs_index["global"]["categoricals"]), dim=0)
-
-        global_discrete = torch.zeros(0, dtype=torch.int64, device=self.device)
-        global_discrete = torch.cat((global_discrete, self.obs_index["global"]["binary"]), dim=0)
-        global_discrete = torch.cat((global_discrete, *self.obs_index["global"]["categoricals"]), dim=0)
-        self.obs_index["global"]["discrete"] = global_discrete
-
-        # Helper function to reduce code duplication
-        # Essentially replaces this:
-        # if len(model.player_index["binary"]):
-        #     ind = torch.zeros([2, len(model.player_index["binary"])], dtype=torch.int64)
-        #     for i in range(2):
-        #         offset = STATE_SIZE_GLOBAL + i*STATE_SIZE_ONE_PLAYER
-        #         ind[i, :] = model.player_index["binary"] + offset
-        #     obs_index["player"]["binary"] = ind
-        # if len(model.player_index["continuous"]):
-        #     ind = torch.zeros([2, len(model.player_index["continuous"])], dtype=torch.int64)
-        #     for i in range(2):
-        #         offset = STATE_SIZE_GLOBAL + i*STATE_SIZE_ONE_PLAYER
-        #         ind[i, :] = model.player_index["continuous"] + offset
-        #     obs_index["player"]["continuous"] = ind
-        # if len(model.player_index["categoricals"]):
-        #     for cat_ind in model.player_index["categoricals"]:
-        #         ind = torch.zeros([2, len(cat_ind)], dtype=torch.int64)
-        #         for i in range(2):
-        #             offset = STATE_SIZE_GLOBAL + i*STATE_SIZE_ONE_PLAYER
-        #             ind[i, :] = cat_ind + offset
-        #         obs_index["player"]["categoricals"].append(cat_ind)
-        # ...
-        # - `indexes` is an array of *relative* indexes for 1 element (e.g. hex)
-        def repeating_index(n, base_offset, repeating_offset, indexes):
-            if indexes.numel() == 0:
-                return torch.zeros([n, 0], dtype=torch.int64, device=self.device)
-            ind = torch.zeros([n, len(indexes)], dtype=torch.int64, device=self.device)
-            for i in range(n):
-                offset = base_offset + i*repeating_offset
-                ind[i, :] = indexes + offset
-
-            return ind
-
-        # Players (2)
-        repind_players = partial(
-            repeating_index,
-            2,
-            self.dims["global"],
-            self.dims["player"]
-        )
-
-        self.obs_index["player"]["continuous"] = repind_players(self.player_index["continuous"])
-        self.obs_index["player"]["binary"] = repind_players(self.player_index["binary"])
-        for cat_ind in self.player_index["categoricals"]:
-            self.obs_index["player"]["categoricals"].append(repind_players(cat_ind))
-
-        self.obs_index["player"]["categorical"] = torch.cat(tuple(self.obs_index["player"]["categoricals"]), dim=1)
-
-        player_discrete = torch.zeros([2, 0], dtype=torch.int64, device=self.device)
-        player_discrete = torch.cat((player_discrete, self.obs_index["player"]["binary"]), dim=1)
-        player_discrete = torch.cat((player_discrete, *self.obs_index["player"]["categoricals"]), dim=1)
-        self.obs_index["player"]["discrete"] = player_discrete
-
-        # Hexes (165)
-        repind_hexes = partial(
-            repeating_index,
-            165,
-            self.dims["global"] + self.dims["players"],
-            self.dims["hex"]
-        )
-
-        self.obs_index["hex"]["continuous"] = repind_hexes(self.hex_index["continuous"])
-        self.obs_index["hex"]["binary"] = repind_hexes(self.hex_index["binary"])
-        for cat_ind in self.hex_index["categoricals"]:
-            self.obs_index["hex"]["categoricals"].append(repind_hexes(cat_ind))
-        self.obs_index["hex"]["categorical"] = torch.cat(tuple(self.obs_index["hex"]["categoricals"]), dim=1)
-
-        hex_discrete = torch.zeros([165, 0], dtype=torch.int64, device=self.device)
-        hex_discrete = torch.cat((hex_discrete, self.obs_index["hex"]["binary"]), dim=1)
-        hex_discrete = torch.cat((hex_discrete, *self.obs_index["hex"]["categoricals"]), dim=1)
-        self.obs_index["hex"]["discrete"] = hex_discrete
-
-    def encode(self, obs):
-        assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
-
-        global_continuous_in = obs[:, self.obs_index["global"]["continuous"]]
-        global_binary_in = obs[:, self.obs_index["global"]["binary"]]
-        global_categorical_ins = [obs[:, ind] for ind in self.obs_index["global"]["categoricals"]]
-        global_continuous_z = self.encoder_global_continuous(global_continuous_in)
-        global_binary_z = self.encoder_global_binary(global_binary_in)
-
-        # XXX: Embedding layers expect single-integer inputs
-        #      e.g. for input with num_classes=4, instead of `[0,0,1,0]` it expects just `2`
-        global_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
-        global_merged = torch.cat((global_continuous_z, global_binary_z, global_categorical_z), dim=-1)
-        z_global = self.encoder_merged_global(global_merged)
-        # => (B, Z_GLOBAL)
-
-        player_continuous_in = obs[:, self.obs_index["player"]["continuous"]]
-        player_binary_in = obs[:, self.obs_index["player"]["binary"]]
-        player_categorical_ins = [obs[:, ind] for ind in self.obs_index["player"]["categoricals"]]
-        player_continuous_z = self.encoder_player_continuous(player_continuous_in)
-        player_binary_z = self.encoder_player_binary(player_binary_in)
-        player_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
-        player_merged = torch.cat((player_continuous_z, player_binary_z, player_categorical_z), dim=-1)
-        z_player = self.encoder_merged_player(player_merged)
-        # => (B, 2, Z_PLAYER)
-
-        hex_continuous_in = obs[:, self.obs_index["hex"]["continuous"]]
-        hex_binary_in = obs[:, self.obs_index["hex"]["binary"]]
-        hex_categorical_ins = [obs[:, ind] for ind in self.obs_index["hex"]["categoricals"]]
-        hex_continuous_z = self.encoder_hex_continuous(hex_continuous_in)
-        hex_binary_z = self.encoder_hex_binary(hex_binary_in)
-        hex_categorical_z = torch.cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
-        hex_merged = torch.cat((hex_continuous_z, hex_binary_z, hex_categorical_z), dim=-1)
-        z_hex = self.encoder_merged_hex(hex_merged)
-        z_hex = self.transformer_hex(z_hex)
-        # => (B, 165, Z_HEX)
-
-        mean_z_player = z_player.mean(dim=1)
-        mean_z_hex = z_hex.mean(dim=1)
-        z_agg = self.aggregator(torch.cat([z_global, mean_z_player, mean_z_hex], dim=-1))
-        # => (B, Z_AGG)
-
-        return z_agg
-
-    def get_value(self, x, attn_mask=None):
-        return self.critic(self.encode(x))
-
-    def get_action(self, x, mask, attn_mask=None, action=None, deterministic=False):
-        encoded = self.encode(x)
-        action_logits = self.actor(encoded)
+    def get_action(self, obs, mask, action=None, deterministic=False):
+        action_logits, value = self.i2a(obs, mask)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
                 action = torch.argmax(dist.probs, dim=1)
             else:
                 action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), dist
+        return action, dist.log_prob(action), dist.entropy(), value
 
-    def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
-        encoded = self.encode(x)
-        value = self.critic(encoded)
-        action_logits = self.actor(encoded)
-        dist = common.CategoricalMasked(logits=action_logits, mask=mask.bool())
+    def get_action_and_value(self, obs, mask, action=None, deterministic=False):
+        action_logits, value = self.i2a(obs, mask)
+        dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
                 action = torch.argmax(dist.probs, dim=1)
             else:
                 action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), dist, value
+        return action, dist.log_prob(action), dist.entropy(), value
 
-    # Inference (deterministic)
-    def predict(self, b_obs, b_mask):
-        with torch.no_grad():
-            b_obs = torch.as_tensor(b_obs)
-            b_mask = torch.as_tensor(b_mask)
-
-            # Return unbatched action if input was unbatched
-            if len(b_mask.shape) == 1:
-                b_obs = b_obs.unsqueeze(dim=0)
-                b_mask = b_mask.unsqueeze(dim=0)
-                b_env_action, _, _, _ = self.get_action(b_obs, b_mask, deterministic=True)
-                return b_env_action[0].cpu().item()
-            else:
-                b_env_action, _, _, _ = self.get_action(b_obs, b_mask, deterministic=True)
-                return b_env_action.cpu().numpy()
+    def predict(self, obs, mask):
+        raise NotImplementedError()
 
 
 class Agent(nn.Module):
@@ -814,7 +306,7 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "dim_global", "dim_players", "dim_hexes", "n_actions", "device_name", "state"]
+        attrs = ["args", "device_name", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
@@ -825,125 +317,23 @@ class Agent(nn.Module):
         torch.save(clean_agent, agent_file)
 
     @staticmethod
-    def jsave(agent, jagent_file):
-        print("Saving JIT agent to %s" % jagent_file)
-        raise NotImplementedError("jsave logic is outdated")
-        attrs = ["args", "dim_global", "dim_players", "dim_hexes", "state", "device_name"]
-        data = {k: agent.__dict__[k] for k in attrs}
-        clean_agent = agent.__class__(**data)
-        clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
-        clean_agent.NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
-        clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
-        clean_agent.optimizer_policy.load_state_dict(agent.optimizer_policy.state_dict())
-        clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
-        jagent = JitAgent()
-        jagent.env_version = clean_agent.env_version
-        jagent.dim_global = clean_agent.dim_global
-        jagent.dim_players = clean_agent.dim_players
-        jagent.dim_hexes = clean_agent.dim_hexes
-
-        # v3+
-        jagent.encoder_policy = clean_agent.NN_policy.encoder
-        jagent.encoder_value = clean_agent.NN_value.encoder
-
-        # common
-        jagent.actor = clean_agent.NN_policy.actor
-        jagent.critic = clean_agent.NN_value.critic
-
-        jagent_optimized = optimize_for_mobile(torch.jit.script(jagent), preserved_methods=["get_version", "predict", "get_value"])
-        jagent_optimized._save_for_lite_interpreter(jagent_file)
-
-    @staticmethod
     def load(agent_file, device_name="cpu"):
         print("Loading agent from %s (device_name: %s)" % (agent_file, device_name))
         return torch.load(agent_file, map_location=torch.device(device_name), weights_only=False)
 
-    def __init__(self, args, dim_global, dim_players, dim_hexes, n_actions, state=None, device_name="cpu"):
+    def __init__(self, args, state=None, device_name="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
         self._optimizer_state = None  # needed for save/load
-        self.dim_global = dim_global  # needed for save/load
-        self.dim_players = dim_players  # needed for save/load
-        self.dim_hexes = dim_hexes  # needed for save/load
-        self.n_actions = n_actions  # needed for save/load
         self.device_name = device_name
-        self.NN_value = AgentNN(args.network, dim_global, dim_players, dim_hexes, n_actions, torch.device(device_name))
-        self.NN_policy = AgentNN(args.network, dim_global, dim_players, dim_hexes, n_actions, torch.device(device_name))
+        self.NN_value = AgentNN(args, torch.device(device_name))
+        self.NN_policy = AgentNN(args, torch.device(device_name))
         self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
         self.optimizer_policy = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
         self.optimizer_distill = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
         self.predict = self.NN_policy.predict
         self.state = state or State()
-
-
-class JitAgent(nn.Module):
-    """ TorchScript version of Agent (inference only) """
-
-    def __init__(self):
-        super().__init__()
-        # XXX: these are overwritten after object is initialized
-        self.obs_splitter = nn.Identity()
-        self.encoder_policy = nn.Identity()
-        self.encoder_value = nn.Identity()
-        self.actor = nn.Identity()
-        self.critic = nn.Identity()
-        self.env_version = 0
-
-    # Inference
-    # XXX: attention is not handled here
-    @torch.jit.export
-    def predict(self, obs, mask, deterministic: bool = False) -> int:
-        b_obs = obs.unsqueeze(dim=0)
-        b_mask = mask.unsqueeze(dim=0)
-        encoded = self.encoder(b_obs)
-        action_logits = self.actor(encoded)
-        probs = self.categorical_masked(logits0=action_logits, mask=b_mask)
-
-        if deterministic:
-            action = torch.argmax(probs, dim=1)
-        else:
-            action = self.sample(probs, action_logits)
-
-        return action.int().item()
-
-    @torch.jit.export
-    def forward(self, obs) -> torch.Tensor:
-        b_obs = obs.unsqueeze(dim=0)
-        encoded = self.encoder(b_obs)
-
-        return torch.cat(dim=1, tensors=(self.actor(encoded), self.critic(encoded)))
-
-    @torch.jit.export
-    def get_value(self, obs) -> float:
-        b_obs = obs.unsqueeze(dim=0)
-        encoded = self.encoder(b_obs)
-        value = self.critic(encoded)
-        return value.float().item()
-
-    @torch.jit.export
-    def get_version(self) -> int:
-        return self.env_version
-
-    # Implement SerializableCategoricalMasked as a function
-    # (lite interpreted does not support instantiating the class)
-    @torch.jit.export
-    def categorical_masked(self, logits0: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits0.dtype)
-
-        # logits
-        logits1 = torch.where(mask, logits0, mask_value)
-        logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
-        probs = torch.nn.functional.softmax(logits, dim=-1)
-        return probs
-
-    @torch.jit.export
-    def sample(self, probs: torch.Tensor, action_logits: torch.Tensor) -> torch.Tensor:
-        num_events = action_logits.size()[-1]
-        probs_2d = probs.reshape(-1, num_events)
-        samples_2d = torch.multinomial(probs_2d, 1, True).T
-        batch_shape = action_logits.size()[:-1]
-        return samples_2d.reshape(batch_shape)
 
 
 def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda_policy, gae_lambda_value):
@@ -1070,22 +460,13 @@ def main(args):
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 10:
-        from vcmi_gym import VcmiEnv_v10 as VcmiEnv
+    if args.env_version == 12:
+        from vcmi_gym import VcmiEnv_v12 as VcmiEnv
     else:
         raise Exception("Unsupported env version: %d" % args.env_version)
 
-    obs_space = VcmiEnv.OBSERVATION_SPACE
-    act_space = VcmiEnv.ACTION_SPACE
-
-    dim_global = VcmiEnv.STATE_SIZE_GLOBAL
-    dim_players = 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
-    dim_hexes = VcmiEnv.STATE_SIZE_HEXES
-    n_actions = VcmiEnv.ACTION_SPACE.n
-    assert VcmiEnv.STATE_SIZE == dim_global + dim_players + dim_hexes
-
     if agent is None:
-        agent = Agent(args, dim_global, dim_players, dim_hexes, n_actions, device_name=device_name)
+        agent = Agent(args, device_name=device_name)
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -1132,7 +513,8 @@ def main(args):
 
         # print("Agent state: %s" % asdict(agent.state))
 
-        assert act_space.shape == ()
+        obs_space = VcmiEnv.OBSERVATION_SPACE
+        act_space = VcmiEnv.ACTION_SPACE
 
         # ALGO Logic: Storage setup
         device = torch.device(device_name)
@@ -1146,6 +528,7 @@ def main(args):
         rewards = torch.zeros((args.num_samplers, args.num_steps_per_sampler), device=device)
         dones = torch.zeros((args.num_samplers, args.num_steps_per_sampler), device=device)
         next_obs = torch.zeros((args.num_samplers,) + obs_space["observation"].shape, device=device)
+        next_mask = torch.zeros((args.num_samplers, act_space.n), device=device)
         next_done = torch.zeros(args.num_samplers, device=device)
 
         progress = 0
@@ -1164,7 +547,7 @@ def main(args):
             RemoteSampler = ray.remote(num_cpus=0.01)(Sampler)
 
         def NN_creator(device):
-            return AgentNN(args.network, dim_global, dim_players, dim_hexes, n_actions, device=device)
+            return AgentNN(args, device=device)
 
         def venv_creator():
             return common.create_venv(VcmiEnv, args)
@@ -1246,6 +629,7 @@ def main(args):
                         rewards[i],      # => (tw)
                         dones[i],        # => (tw)
                         next_obs[i],     # => (STATE_SIZE)
+                        next_mask[i],    # => (N_ACTIONS)
                         next_done[i],    # => (1)
                     ) = res
 
@@ -1274,9 +658,9 @@ def main(args):
 
             with torch.no_grad():
                 agent.eval()
-                values = agent.NN_value.get_value(obs.flatten(end_dim=1)).reshape(args.num_samplers, -1)
+                values = agent.NN_value.get_value(obs.flatten(end_dim=1), masks.flatten(end_dim=1)).reshape(args.num_samplers, -1)
                 # bootstrap value if not done
-                next_value = agent.NN_value.get_value(next_obs).flatten()
+                next_value = agent.NN_value.get_value(next_obs, next_mask).flatten()
 
                 advantages, returns = compute_advantages(
                     rewards,
@@ -1352,7 +736,7 @@ def main(args):
                         end = start + minibatch_size_value
                         mb_inds = b_inds[start:end]
 
-                        newvalue = agent.NN_value.get_value(b_obs[mb_inds])
+                        newvalue = agent.NN_value.get_value(b_obs[mb_inds], b_masks[mb_inds])
                         newvalue = newvalue.view(-1)
 
                         # Value loss
@@ -1380,7 +764,7 @@ def main(args):
                         # Compute policy and value targets
                         with torch.no_grad():
                             _, _, _, old_action_dist = old_NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds])
-                            value_target = agent.NN_value.get_value(b_obs[mb_inds])
+                            value_target = agent.NN_value.get_value(b_obs[mb_inds], b_masks[mb_inds])
 
                         _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(
                             b_obs[mb_inds],
@@ -1527,8 +911,8 @@ def main(args):
 
 def debug_config():
     return dict(
-        run_id="mppo-dna-debug",
-        group_id="mppo-dna-debug",
+        run_id="mppo-dna-i2a-debug",
+        group_id="mppo-dna-i2a-debug",
         loglevel="DEBUG",
         run_name_template="{datetime}-{id}",
         run_name=None,
@@ -1545,7 +929,7 @@ def debug_config():
         success_rate_target=None,
         ep_rew_mean_target=None,
         quit_on_target=False,
-        mapside="attacker",
+        mapside="defender",
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_old_saves=0,
@@ -1557,7 +941,7 @@ def debug_config():
         lr_schedule_value=ScheduleArgs(mode="const", start=0.0001),
         lr_schedule_policy=ScheduleArgs(mode="const", start=0.0001),
         lr_schedule_distill=ScheduleArgs(mode="const", start=0.0001),
-        num_steps_per_sampler=200,
+        num_steps_per_sampler=6,
         num_samplers=1,
         gamma=0.85,
         gae_lambda=0.9,
@@ -1583,7 +967,7 @@ def debug_config():
         seed=42,
         skip_wandb_init=False,
         skip_wandb_log_code=False,
-        envmaps=["gym/generated/4096/4x1024.vmap"],
+        envmaps=["gym/A1.vmap"],
         env=EnvArgs(
             random_terrain_chance=100,
             tight_formation_chance=0,
@@ -1601,23 +985,23 @@ def debug_config():
             reward_dmg_mult=1,
             reward_term_mult=1,
             swap_sides=0,
-            user_timeout=0,
-            vcmi_timeout=0,
-            boot_timeout=0,
-            conntype="thread"
+            user_timeout=600,
+            vcmi_timeout=600,
+            boot_timeout=300,
         ),
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
         env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
-        env_version=10,
-        network={
-            "z_size_global": 128,
-            "z_size_player": 128,
-            "z_size_hex": 512,
-            "heads": {
-                "actor": {"size": 2312},
-                "critic": {"size": 1}
-            }
-        }
+        env_version=12,
+        i2a_kwargs=dict(
+            i2a_fc_units=16,
+            num_trajectories=5,
+            rollout_dim=16,
+            rollout_policy_fc_units=16,
+            horizon=3,
+            obs_processor_output_size=16,
+            transition_model_file="hauzybxn-model.pt",
+            action_prediction_model_file="ogyesvkb-model.pt",
+        )
     )
 
 

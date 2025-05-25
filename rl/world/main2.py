@@ -1,4 +1,5 @@
 import torch
+import time
 
 from .world import I2A
 # from .t10n import t10n
@@ -24,7 +25,20 @@ if __name__ == "__main__":
     )
 
     assert env.role == "defender"
-    i2a = I2A(2, 3)
+    i2a = I2A(
+        i2a_fc_units=16,
+        num_trajectories=2,
+        rollout_dim=16,
+        rollout_policy_fc_units=16,
+        horizon=3,
+        obs_processor_output_size=16,
+        side=1,
+        reward_step_fixed=env.reward_cfg.step_fixed,
+        reward_dmg_mult=env.reward_cfg.dmg_mult,
+        reward_term_mult=env.reward_cfg.term_mult,
+        transition_model_file="hauzybxn-model.pt",
+        action_prediction_model_file="ogyesvkb-model.pt",
+    )
 
     env.reset()
     act = env.random_action()
@@ -35,6 +49,22 @@ if __name__ == "__main__":
     start_mask = torch.as_tensor(obs0["action_mask"]).unsqueeze(0)
 
     with torch.no_grad():
-        res = i2a(start_obs, start_mask)
-        import ipdb; ipdb.set_trace()  # noqa
-        print("")
+        t = time.time()
+        obs = start_obs
+        mask = start_mask
+
+        for i in range(50):
+            action_logits, value = i2a(obs, mask)
+            probs = action_logits.masked_fill(~mask, -1e9).softmax(dim=-1)
+            action = probs.multinomial(num_samples=1).squeeze(1)
+
+            obs0, rew, term, trunc, _info = env.step(action[0].item())
+            if term or trunc:
+                obs0, _info = env.reset()
+
+            obs = torch.as_tensor(obs0["observation"]).unsqueeze(0)
+            mask = torch.as_tensor(obs0["action_mask"]).unsqueeze(0)
+            print(".")
+
+        elapsed = time.time() - t
+        print("Elapsed: %s" % elapsed)

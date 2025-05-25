@@ -6,10 +6,12 @@ from .t10n import t10n
 from .p10n import p10n_nll as p10n
 
 from .util.misc import layer_init
+from .util.hexconv import HexConvResBlock
 from .util.constants_v12 import (
     STATE_SIZE,
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
+    STATE_SIZE_ONE_HEX,
     GLOBAL_ATTR_MAP,
     PLAYER_ATTR_MAP,
     HEX_ATTR_MAP,
@@ -60,8 +62,8 @@ class ImaginationCore(nn.Module):
         reward_step_fixed,
         reward_dmg_mult,
         reward_term_mult,
-        transition_model_file="hauzybxn-model.pt",
-        action_prediction_model_file="ogyesvkb-model.pt",
+        transition_model_file,
+        action_prediction_model_file,
         device=torch.device("cpu"),
     ):
         super().__init__()
@@ -143,9 +145,9 @@ class ImaginationCore(nn.Module):
             if i == 0:
                 current_player = initial_player
                 current_winner = initial_winner
-                done = initial_done
-                state = initial_state
-                state_logits = initial_state
+                done = initial_done.clone()
+                state = initial_state.clone()
+                state_logits = initial_state.clone()
                 idx_in_progress = torch.nonzero(~done, as_tuple=True)[0]
                 # => (B') of indexes
             else:
@@ -215,6 +217,13 @@ class ImaginationCore(nn.Module):
 
         if idx_in_progress.numel() > 0:
             print(f"WARNING: state still in progress after {MAX_TRANSITIONS} transitions")
+            import ipdb; ipdb.set_trace()  # noqa
+            from vcmi_gym.envs.v12.decoder.decoder import Decoder
+            bf0 = Decoder.decode(initial_state[idx_in_progress[0]].numpy())
+            bf = Decoder.decode(state[idx_in_progress[0]].numpy())
+            print("idx_in_progress: %s" % str(idx_in_progress))
+            print(bf0.render(initial_action[idx_in_progress[0]].item()))
+            print(bf.render(0))
 
         idx_for_fixed_reward = torch.nonzero(~initial_done, as_tuple=True)[0]
         reward[idx_for_fixed_reward] += self.reward_step_fixed
@@ -247,26 +256,67 @@ class ObsProcessor(nn.Module):
     [...]
     The rollout encoder processes each frame [...] with another identically sized CNN.
     """
-    def __init__(self):
+    def __init__(self, output_size):
         super().__init__()
-        self.output_size = 32
+        self.z_size_other = 64
+        self.z_size_hex = 32
+        self.output_size = output_size
 
-        self.network = nn.Sequential(
-            nn.LazyLinear(16),
+        self.encoder_other = nn.Sequential(
+            nn.LazyLinear(self.z_size_other),
+            nn.LeakyReLU()
+            # => (B, Z_OTHER)
+        )
+
+        self.encoder_hexes = nn.Sequential(
+            # => (B, 165*H)
+            nn.Unflatten(dim=1, unflattened_size=[165, STATE_SIZE_ONE_HEX]),
+            # => (B, 165, H)
+            HexConvResBlock(channels=STATE_SIZE_ONE_HEX, depth=3),
+            # => (B, 165, H)
+            nn.LazyLinear(out_features=self.z_size_hex),
             nn.LeakyReLU(),
-            nn.LazyLinear(16),
-            nn.LeakyReLU(),
-            nn.LazyLinear(self.output_size)
+            # => (B, 165, Z_HEX)
+            nn.Flatten(),
+            # => (B, 165*Z_HEX)
+        )
+
+        self.encoder_merged = nn.Sequential(
+            # => (B, Z_OTHER + 165*Z_HEX)
+            nn.LazyLinear(out_features=self.output_size),
+            nn.LeakyReLU()
+            # => (B, OUTPUT_SIZE)
         )
 
     def forward(self, obs):
-        return self.network(obs)
+        other, hexes = torch.split(obs, [STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER, 165*STATE_SIZE_ONE_HEX], dim=1)
+        z_other = self.encoder_other(other)
+        z_hexes = self.encoder_hexes(hexes)
+        merged = torch.cat((z_other, z_hexes), dim=1)
+        return self.encoder_merged(merged)
 
 
 class RolloutEncoder(nn.Module):
-    def __init__(self, rollout_dim, horizon=5):
+    def __init__(
+        self,
+        rollout_dim,
+        rollout_policy_fc_units,
+        horizon,
+        # Pass-through params (for ObsProcessor):
+        obs_processor_output_size,
+        # Pass-through params (for ImaginationCore):
+        side,
+        reward_step_fixed,
+        reward_dmg_mult,
+        reward_term_mult,
+        transition_model_file,
+        action_prediction_model_file,
+    ):
         super().__init__()
+        self.rollout_dim = rollout_dim
+        self.rollout_policy_fc_units = rollout_policy_fc_units
         self.horizon = horizon
+        self.obs_processor = ObsProcessor(obs_processor_output_size)
         self.imagination_core = ImaginationCore(
             side=1,
             reward_step_fixed=-1,
@@ -275,8 +325,6 @@ class RolloutEncoder(nn.Module):
             transition_model_file="/Users/simo/Projects/vcmi-gym/hauzybxn-model.pt",
             action_prediction_model_file="/Users/simo/Projects/vcmi-gym/ogyesvkb-model.pt",
         )
-
-        self.obs_processor = ObsProcessor()
 
         """
         (I2A paper, section 3.1):
@@ -288,7 +336,7 @@ class RolloutEncoder(nn.Module):
         on the same observation.
         """
         self.rollout_policy = nn.Sequential(
-            nn.LazyLinear(16),
+            nn.LazyLinear(self.rollout_policy_fc_units),
             nn.LeakyReLU(),
             nn.LazyLinear(N_ACTIONS),
         )
@@ -299,7 +347,7 @@ class RolloutEncoder(nn.Module):
         """
         self.lstm = nn.LSTM(
             input_size=1 + self.obs_processor.output_size,
-            hidden_size=rollout_dim,
+            hidden_size=self.rollout_dim,
             batch_first=True,
             # (I2A paper does not mention number of layers => assume 1)
             # num_layers=2,
@@ -378,15 +426,39 @@ class RolloutEncoder(nn.Module):
 
 
 class ImaginationAggregator(nn.Module):
-    def __init__(self, num_trajectories, horizon):
+    def __init__(
+        self,
+        num_trajectories,
+        # Pass-through params (for RolloutEncoder):
+        rollout_dim,
+        rollout_policy_fc_units,
+        horizon,
+        obs_processor_output_size,
+        side,
+        reward_step_fixed,
+        reward_dmg_mult,
+        reward_term_mult,
+        transition_model_file,
+        action_prediction_model_file,
+    ):
         super().__init__()
         self.num_trajectories = num_trajectories
-        self.rollout_dim = 16
-        self.rollout_encoder = RolloutEncoder(self.rollout_dim, horizon)
+        self.rollout_encoder = RolloutEncoder(
+            rollout_dim=rollout_dim,
+            rollout_policy_fc_units=rollout_policy_fc_units,
+            horizon=horizon,
+            obs_processor_output_size=obs_processor_output_size,
+            side=side,
+            reward_step_fixed=reward_step_fixed,
+            reward_dmg_mult=reward_dmg_mult,
+            reward_term_mult=reward_term_mult,
+            transition_model_file=transition_model_file,
+            action_prediction_model_file=action_prediction_model_file,
+        )
 
         # Attention-based aggregator
-        self.query = nn.Parameter(torch.randn(1, 1, self.rollout_dim))
-        self.mha = nn.MultiheadAttention(embed_dim=self.rollout_dim, num_heads=4, batch_first=True)
+        self.query = nn.Parameter(torch.randn(1, 1, self.rollout_encoder.rollout_dim))
+        self.mha = nn.MultiheadAttention(embed_dim=self.rollout_encoder.rollout_dim, num_heads=4, batch_first=True)
 
     def forward(self, obs, mask):
         B, A = mask.shape
@@ -396,13 +468,17 @@ class ImaginationAggregator(nn.Module):
         probs = mask.float() / valid_counts  # => (B, A)
         # 3) Sample N actions; replacement=True if min(valid_counts) < N
         replacement = (valid_counts.min().item() < self.num_trajectories)
+
+        # XXX: a runtime error "invalid multinomial distribution" will occur
+        #      when mask allows no action (e.g. when input obs is terminal)
         actions = torch.multinomial(probs, self.num_trajectories, replacement=replacement)
         # => (B, N)
 
         actions = actions.flatten()
         # => (B*N)
 
-        obs = obs.unsqueeze(1).expand([B, self.num_trajectories, -1]).flatten(end_dim=1)
+        # XXX: clone is required to allow proper gradient flow
+        obs = obs.unsqueeze(1).expand([B, self.num_trajectories, -1]).clone().flatten(end_dim=1)
         # => (B*N, STATE_SIZE)
 
         rollouts = self.rollout_encoder(obs, actions).unflatten(0, [B, -1])
@@ -415,7 +491,7 @@ class ImaginationAggregator(nn.Module):
         """
         # XXX: multi-head attention will be used instead of concatenation
         # for a fixed-size output vector.
-        q = self.query.expand(rollouts.size(0), 1, self.rollout_dim)
+        q = self.query.expand(rollouts.size(0), 1, self.rollout_encoder.rollout_dim)
         attn_output, _ = self.mha(query=q, key=rollouts, value=rollouts)
         # => (B, 1, X)
 
@@ -424,13 +500,39 @@ class ImaginationAggregator(nn.Module):
 
 
 class I2A(nn.Module):
-    def __init__(self, num_trajectories, horizon, device=torch.device("cpu")):
+    def __init__(
+        self,
+        i2a_fc_units,
+        # Pass-through params (for ImaginationAggregator):
+        num_trajectories,
+        rollout_dim,
+        rollout_policy_fc_units,
+        horizon,
+        obs_processor_output_size,
+        side,
+        reward_step_fixed,
+        reward_dmg_mult,
+        reward_term_mult,
+        transition_model_file,
+        action_prediction_model_file,
+        device=torch.device("cpu")
+    ):
         super().__init__()
-        self.model_free_path = ObsProcessor()
         self.imagination_aggregator = ImaginationAggregator(
             num_trajectories=num_trajectories,
+            rollout_dim=rollout_dim,
+            rollout_policy_fc_units=rollout_policy_fc_units,
             horizon=horizon,
+            obs_processor_output_size=obs_processor_output_size,
+            side=side,
+            reward_step_fixed=reward_step_fixed,
+            reward_dmg_mult=reward_dmg_mult,
+            reward_term_mult=reward_term_mult,
+            transition_model_file=transition_model_file,
+            action_prediction_model_file=action_prediction_model_file,
         )
+
+        self.model_free_path = ObsProcessor(self.imagination_aggregator.rollout_encoder.obs_processor.output_size)
 
         """
         // XXX: The I2A paper is unclear regarding the FC layers.
@@ -450,7 +552,7 @@ class I2A(nn.Module):
         """
 
         self.body = nn.Sequential(
-            nn.LazyLinear(16),
+            nn.LazyLinear(i2a_fc_units),
             nn.LeakyReLU()
         )
 
@@ -459,8 +561,8 @@ class I2A(nn.Module):
 
         # Init lazy layers
         with torch.no_grad():
-            obs = torch.randn([3, STATE_SIZE])
-            mask = torch.randn([3, N_ACTIONS]) > 0
+            obs = torch.randn([2, STATE_SIZE])
+            mask = torch.randn([2, N_ACTIONS]) > 0
             self.forward(obs, mask)
 
         layer_init(self)
