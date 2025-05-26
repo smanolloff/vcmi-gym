@@ -91,6 +91,7 @@ class ImaginationCore(nn.Module):
         def load_weights(model, file):
             model.load_state_dict(torch.load(file, weights_only=True, map_location=device), strict=True)
 
+        self.device = device
         self.side = side
         self.reward_step_fixed = torch.tensor(reward_step_fixed, dtype=torch.float32, device=device)
         self.reward_dmg_mult = torch.tensor(reward_dmg_mult, dtype=torch.float32, device=device)
@@ -179,10 +180,10 @@ class ImaginationCore(nn.Module):
 
         if debug:
             # Every batch will have different num_transitions
-            num_t = torch.zeros(B, dtype=torch.long)
-            action_hist = torch.zeros(B, MAX_TRANSITIONS, dtype=torch.long).fill_(-1)
-            done_hist = torch.zeros(B, MAX_TRANSITIONS, dtype=torch.long).fill_(-1)
-            state_hist = torch.zeros(B, MAX_TRANSITIONS, initial_state.size(1)).fill_(-1)
+            num_t = torch.zeros(B, dtype=torch.long, device=self.device)
+            action_hist = torch.zeros(B, MAX_TRANSITIONS, dtype=torch.long, device=self.device).fill_(-1)
+            done_hist = torch.zeros(B, MAX_TRANSITIONS, dtype=torch.long, device=self.device).fill_(-1)
+            state_hist = torch.zeros(B, MAX_TRANSITIONS, initial_state.size(1), device=self.device).fill_(-1)
             state_logits_hist = state_hist.clone()
 
             action_hist[:, 0] = initial_action
@@ -417,6 +418,7 @@ class RolloutEncoder(nn.Module):
         transition_model_file,
         action_prediction_model_file,
         reward_prediction_model_file,
+        device=torch.device("cpu"),
     ):
         super().__init__()
         self.rollout_dim = rollout_dim
@@ -431,6 +433,7 @@ class RolloutEncoder(nn.Module):
             transition_model_file=transition_model_file,
             action_prediction_model_file=action_prediction_model_file,
             reward_prediction_model_file=reward_prediction_model_file,
+            device=device,
         )
 
         """
@@ -557,6 +560,7 @@ class ImaginationAggregator(nn.Module):
         transition_model_file,
         action_prediction_model_file,
         reward_prediction_model_file,
+        device=torch.device("cpu"),
     ):
         super().__init__()
         self.num_trajectories = num_trajectories
@@ -572,6 +576,7 @@ class ImaginationAggregator(nn.Module):
             transition_model_file=transition_model_file,
             action_prediction_model_file=action_prediction_model_file,
             reward_prediction_model_file=reward_prediction_model_file,
+            device=device,
         )
 
         # Attention-based aggregator
@@ -650,6 +655,7 @@ class I2A(nn.Module):
             transition_model_file=transition_model_file,
             action_prediction_model_file=action_prediction_model_file,
             reward_prediction_model_file=reward_prediction_model_file,
+            device=device,
         )
 
         self.model_free_path = ObsProcessor(self.imagination_aggregator.rollout_encoder.obs_processor.output_size)

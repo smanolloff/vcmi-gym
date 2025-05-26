@@ -431,8 +431,6 @@ def setup_wandb(args, model, src_file):
             art.add_file(temp_file.name, name="diff.patch")
             wandb.run.log_artifact(art)
 
-    # XXX: no "Model" will be shown in the W&B UI when .forward()
-    #       returns a non-tensor value (e.g. a tuple)
     wandb.watch(model, log="all", log_graph=True, log_freq=1000)
     return wandb
 

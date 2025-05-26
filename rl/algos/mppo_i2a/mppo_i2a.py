@@ -223,7 +223,7 @@ class AgentNN(nn.Module):
             transition_model_file=args.i2a_kwargs.transition_model_file,
             action_prediction_model_file=args.i2a_kwargs.action_prediction_model_file,
             reward_prediction_model_file=args.i2a_kwargs.reward_prediction_model_file,
-            device=torch.device("cpu"),
+            device=device,
         )
 
         self.device = device
@@ -237,7 +237,7 @@ class AgentNN(nn.Module):
         return value
 
     def get_action(self, obs, mask, action=None, deterministic=False):
-        action_logits, value = self.i2a(obs, mask, debug=True)
+        action_logits, value = self.i2a(obs, mask)  # , debug=True)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
@@ -430,7 +430,7 @@ def main(args):
     try:
         if args.wandb_project:
             import wandb
-            common.setup_wandb(args, agent.NN.state_dict(), __file__, watch=True)
+            common.setup_wandb(args, agent.NN, __file__)
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
