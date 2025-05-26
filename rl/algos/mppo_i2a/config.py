@@ -34,7 +34,6 @@ config = dict(
     clip_vloss=True,
     max_grad_norm=1,
     weight_decay=0.05,
-    distill_beta=1.0,
 
     rollouts_per_log=10,
     loglevel="DEBUG",
@@ -52,17 +51,10 @@ config = dict(
     out_dir_template="data/{group_id}",
     opponent_load_file=None,
     opponent_sbm_probs=[1, 0, 0],
-    lr_schedule_value=dict(mode="const", start=0),  # use lr_schedule
-    lr_schedule_policy=dict(mode="const", start=0),  # use lr_schedule
-    lr_schedule_distill=dict(mode="const", start=0),  # use lr_schedule
-    gae_lambda_policy=0.95,  # use gae_lambda
-    gae_lambda_value=0.95,  # use gae_lambda
-    num_minibatches_value=0,  # use num_minibatches
-    num_minibatches_policy=0,  # use num_minibatches
-    num_minibatches_distill=0,  # use num_minibatches
-    update_epochs_value=0,  # use update_epochs
-    update_epochs_policy=0,  # use update_epochs
-    update_epochs_distill=0,  # use update_epochs
+    lr_schedule=dict(mode="const", start=0),
+    gae_lambda=0.95,
+    num_minibatches=0,
+    update_epochs=0,
     target_kl=None,
     logparams={},
     cfg_file=None,
@@ -96,12 +88,12 @@ config = dict(
     env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
     env_version=12,
     i2a_kwargs=dict(
-        i2a_fc_units=16,
-        num_trajectories=5,
-        rollout_dim=16,
-        rollout_policy_fc_units=16,
+        i2a_fc_units=1024,
+        num_trajectories=10,
+        rollout_dim=1024,
+        rollout_policy_fc_units=1024,
         horizon=3,
-        obs_processor_output_size=16,
+        obs_processor_output_size=2048,
         transition_model_file="hauzybxn-model.pt",
         action_prediction_model_file="ogyesvkb-model.pt",
         reward_prediction_model_file="aexhrgez-model.pt",
