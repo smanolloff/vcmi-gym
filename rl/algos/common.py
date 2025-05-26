@@ -25,6 +25,9 @@ import pathlib
 import numpy as np
 import yaml
 import json
+import pygit2
+import tempfile
+from datetime import datetime
 from functools import partial
 
 import dataclasses
@@ -375,62 +378,63 @@ def maybe_resume(agent_cls, args, device_name="cpu"):
     return agent, args
 
 
-def setup_wandb(args, agent, src_file, watch=True):
+def setup_wandb(args, model, src_file):
     import wandb
 
-    if args.skip_wandb_init:
-        wandb.run.tags = args.tags
+    git = pygit2.Repository(os.path.dirname(__file__))
+    now = datetime.utcnow()
+    patch = git.diff().patch
+
+    start_info = dict(
+        git_head=str(git.head.target),
+        git_head_message=git[git.head.target].message,
+        git_status={k: v.name for k, v in git.status().items()},
+        timestamp=now.isoformat(timespec='milliseconds'),
+        vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"),
+    )
+
+    if patch:
+        start_info.update(git_is_dirty=True, git_diff_artifact="gitdiff-%d" % now.timestamp())
     else:
-        wandb.init(
-            project=args.wandb_project,
-            group=args.group_id,
-            name=args.run_name or args.run_id,
-            id=args.run_id,
-            notes=args.notes,
-            tags=args.tags,
-            resume="must" if args.resume else "never",
-            # resume="allow",  # XXX: reuse id for insta-failed runs
-            config=dataclasses.asdict(args),
-            sync_tensorboard=False,
-            save_code=False,  # code saved manually below
-            allow_val_change=args.resume,
-            settings=wandb.Settings(_disable_stats=True, _disable_meta=True),  # disable System/ stats
-        )
+        start_info.update(git_is_dirty=False)
 
-    # https://docs.wandb.ai/ref/python/run#log_code
-    # XXX: "path" is relative to `root`
-    #      but args.cfg_file is relative to vcmi-gym ROOT dir
-    src_file = pathlib.Path(src_file)
-    this_file = pathlib.Path(__file__)
-    rl_root = this_file.parent.parent
-    cfg_file = pathlib.Path(args.cfg_file) if args.cfg_file else None
+    wandb.init(
+        project="vcmi-gym",
+        group=args.group_id,
+        name=args.run_name or args.run_id,
+        id=args.run_id,
+        resume="must" if args.resume else "never",
+        # resume="allow",  # XXX: reuse id for insta-failed runs
+        config=dataclasses.asdict(args),
+        sync_tensorboard=False,
+        save_code=False,  # code saved manually below
+        allow_val_change=args.resume,
+        # settings=wandb.Settings(_disable_stats=True),  # disable System/ stats
+    )
 
-    def code_include_fn(path):
-        p = pathlib.Path(path).absolute()
+    start_infos = wandb.config.get("_start_infos", [])
+    start_infos.append(start_info)
+    # Store VastAI instance ID separately (outside of the array) for UI convenience
+    wandb.config.update(dict(vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"), _start_infos=start_infos), allow_val_change=True)
 
-        res = (
-            p.samefile(this_file)
-            or p.samefile(src_file)
-            or p.samefile(rl_root / "wandb" / "requirements.txt")
-            or p.samefile(rl_root / "wandb" / "requirements.lock")
-            or (cfg_file and p.samefile(cfg_file))
-        )
+    # Must be after wandb.init
+    if start_info["git_is_dirty"]:
+        art = wandb.Artifact(name=start_info["git_diff_artifact"], type="text")
+        art.description = f"Git diff for HEAD@{start_info['git_head']} from {start_info['timestamp']}"
+        with tempfile.NamedTemporaryFile(mode='w+', delete=True) as temp_file:
+            art.metadata["timestsamp"] = start_info["timestamp"]
+            art.metadata["head"] = start_info["git_head"]
+            temp_file.write(f"# Head: {start_info['git_head']}\n")
+            temp_file.write(f"# Timestamp: {start_info['timestamp']}\n")
+            temp_file.write(patch)
+            temp_file.flush()
+            art.add_file(temp_file.name, name="diff.patch")
+            wandb.run.log_artifact(art)
 
-        # print("Should include %s: %s" % (path, res))
-        return res
-
-    if not args.skip_wandb_log_code:
-        wandb.run.log_code(root=rl_root, include_fn=code_include_fn)
-
-    # XXX: this will blow up with algos like MPPO-DNA which have many NNs
-    #      However, no model is logged at all if using just `agent`
-    #      => proper fix would be to accept a list of NNs and call wandb.watch
-    #         on each of them
-    if watch:
-        net = getattr(agent, "NN", getattr(agent, "NN_policy"))
-        return wandb.watch(net, log="all", log_graph=True, log_freq=1000)
-    else:
-        return None
+    # XXX: no "Model" will be shown in the W&B UI when .forward()
+    #       returns a non-tensor value (e.g. a tuple)
+    wandb.watch(model, log="all", log_graph=True, log_freq=1000)
+    return wandb
 
 
 def schedule_fn(schedule):

@@ -23,7 +23,6 @@ import time
 import json
 import string
 import argparse
-import copy
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from typing import Optional
@@ -431,7 +430,7 @@ def main(args):
     try:
         if args.wandb_project:
             import wandb
-            common.setup_wandb(args, agent, __file__, watch=True)
+            common.setup_wandb(args, agent.NN.state_dict(), __file__, watch=True)
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
