@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =============================================================================
-# This file contains a modified version of CleanRL's PPO-DNA implementation:
-# https://github.com/vwxyzjn/cleanrl/blob/caabea4c5b856f429baa2af8bc973d4994d4c330/cleanrl/ppo_dna_atari_envpool.py
+# This file contains a modified version of CleanRL's PPO implementation:
+# https://github.com/vwxyzjn/cleanrl/blob/e421c2e50b81febf639fced51a69e2602593d50d/cleanrl/ppo.py
 import os
 import sys
 import random
@@ -161,35 +161,23 @@ class Args:
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
 
-    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())  # used if nn-specific lr_schedule["start"] is 0
-    lr_schedule_value: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
-    lr_schedule_policy: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
-    lr_schedule_distill: ScheduleArgs = field(default_factory=lambda: ScheduleArgs(start=0))
+    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
     clip_coef: float = 0.2
     clip_vloss: bool = False
-    distill_beta: float = 1.0
     ent_coef: float = 0.01
     vf_coef: float = 1.2   # not used
-    gae_lambda: float = 0.95  # used if nn-specific gae_lambda is 0
-    gae_lambda_policy: float = 0
-    gae_lambda_value: float = 0
+    gae_lambda: float = 0.95
     gamma: float = 0.99
     max_grad_norm: float = 0.5
     norm_adv: bool = True
     envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4x1024.vmap"])
 
-    num_minibatches: int = 4  # used if nn-specific num_minibatches is 0
-    num_minibatches_distill: int = 0
-    num_minibatches_policy: int = 0
-    num_minibatches_value: int = 0
+    num_minibatches: int = 4
     num_steps_per_sampler: int = 128
     num_samplers: int = 1
     stats_buffer_size: int = 100
 
-    update_epochs: int = 4   # used if nn-specific update_epochs is 0
-    update_epochs_distill: int = 0
-    update_epochs_policy: int = 0
-    update_epochs_value: int = 0
+    update_epochs: int = 4
     weight_decay: float = 0.0
     target_kl: float = None
 
@@ -209,27 +197,8 @@ class Args:
             self.env = EnvArgs(**self.env)
         if not isinstance(self.lr_schedule, ScheduleArgs):
             self.lr_schedule = ScheduleArgs(**self.lr_schedule)
-        if not isinstance(self.lr_schedule_value, ScheduleArgs):
-            self.lr_schedule_value = ScheduleArgs(**self.lr_schedule_value)
-        if not isinstance(self.lr_schedule_policy, ScheduleArgs):
-            self.lr_schedule_policy = ScheduleArgs(**self.lr_schedule_policy)
-        if not isinstance(self.lr_schedule_distill, ScheduleArgs):
-            self.lr_schedule_distill = ScheduleArgs(**self.lr_schedule_distill)
         if not isinstance(self.i2a_kwargs, I2AKwargs):
             self.i2a_kwargs = I2AKwargs(**self.i2a_kwargs)
-
-        for a in ["distill", "policy", "value"]:
-            if getattr(self, f"update_epochs_{a}") == 0:
-                setattr(self, f"update_epochs_{a}", self.update_epochs)
-
-            if getattr(self, f"num_minibatches_{a}") == 0:
-                setattr(self, f"num_minibatches_{a}", self.num_minibatches)
-
-            if a != "distill" and getattr(self, f"gae_lambda_{a}") == 0:
-                setattr(self, f"gae_lambda_{a}", self.gae_lambda)
-
-            if getattr(self, f"lr_schedule_{a}").start == 0:
-                setattr(self, f"lr_schedule_{a}", self.lr_schedule)
 
         common.coerce_dataclass_ints(self)
 
@@ -269,7 +238,7 @@ class AgentNN(nn.Module):
         return value
 
     def get_action(self, obs, mask, action=None, deterministic=False):
-        action_logits, value = self.i2a(obs, mask)
+        action_logits, value = self.i2a(obs, mask, debug=True)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
@@ -286,7 +255,7 @@ class AgentNN(nn.Module):
                 action = torch.argmax(dist.probs, dim=1)
             else:
                 action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), dist, value
+        return action, dist.log_prob(action), dist.entropy(), value
 
     def predict(self, obs, mask):
         raise NotImplementedError()
@@ -311,11 +280,8 @@ class Agent(nn.Module):
         attrs = ["args", "device_name", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
-        clean_agent.NN_value.load_state_dict(agent.NN_value.state_dict(), strict=True)
-        clean_agent.NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
-        clean_agent.optimizer_value.load_state_dict(agent.optimizer_value.state_dict())
-        clean_agent.optimizer_policy.load_state_dict(agent.optimizer_policy.state_dict())
-        clean_agent.optimizer_distill.load_state_dict(agent.optimizer_distill.state_dict())
+        clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
+        clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
         torch.save(clean_agent, agent_file)
 
     @staticmethod
@@ -329,16 +295,13 @@ class Agent(nn.Module):
         self.env_version = args.env_version
         self._optimizer_state = None  # needed for save/load
         self.device_name = device_name
-        self.NN_value = AgentNN(args, torch.device(device_name))
-        self.NN_policy = AgentNN(args, torch.device(device_name))
-        self.optimizer_value = torch.optim.AdamW(self.NN_value.parameters(), eps=1e-5)
-        self.optimizer_policy = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
-        self.optimizer_distill = torch.optim.AdamW(self.NN_policy.parameters(), eps=1e-5)
-        self.predict = self.NN_policy.predict
+        self.NN = AgentNN(args, torch.device(device_name))
+        self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
+        self.predict = self.NN.predict
         self.state = state or State()
 
 
-def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda_policy, gae_lambda_value):
+def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda):
     # Must be time-major
     # (num_workers, num_wsteps) => (num_wsteps, num_workers)
     rewards = rewards.swapaxes(0, 1)
@@ -351,10 +314,8 @@ def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae
     #      `rewards` is currently non-contigouos due to the swapaxes opereation
     #      `advantages` has the same mem layout and is also non-contiguous now
     #      ...but the returned value (after one more swap) is contiguous :)
-    advantages_policy = torch.zeros_like(rewards)
-    advantages_value = torch.zeros_like(rewards)
-    lastgaelam_policy = 0
-    lastgaelam_value = 0
+    advantages = torch.zeros_like(rewards)
+    lastgaelam = 0
     for t in reversed(range(total_steps)):
         if t == total_steps - 1:
             nextnonterminal = 1.0 - next_done
@@ -363,10 +324,9 @@ def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae
             nextnonterminal = 1.0 - dones[t + 1]
             nextvalues = values[t + 1]
         delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
-        advantages_policy[t] = lastgaelam_policy = delta + gamma * gae_lambda_policy * nextnonterminal * lastgaelam_policy
-        advantages_value[t] = lastgaelam_value = delta + gamma * gae_lambda_value * nextnonterminal * lastgaelam_value
-    returns_value = advantages_value + values
-    return advantages_policy.swapaxes(0, 1), returns_value.swapaxes(0, 1)
+        advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+    returns = advantages + values
+    return advantages.swapaxes(0, 1), returns.swapaxes(0, 1)
 
 
 def main(args):
@@ -387,7 +347,6 @@ def main(args):
         rollouts_total = args.vsteps_total // num_steps
 
     # Re-initialize to prevent errors from newly introduced args when loading/resuming
-    # TODO: handle removed args
     args = Args(**vars(args))
 
     if os.getenv("NO_WANDB") == "true":
@@ -407,21 +366,13 @@ def main(args):
     LOG.info("Args: %s" % printargs)
     LOG.info("Out dir: %s" % args.out_dir)
 
-    lr_schedule_fn_value = common.schedule_fn(args.lr_schedule_value)
-    lr_schedule_fn_policy = common.schedule_fn(args.lr_schedule_policy)
-    lr_schedule_fn_distill = common.schedule_fn(args.lr_schedule_distill)
+    lr_schedule_fn = common.schedule_fn(args.lr_schedule)
 
-    batch_size_policy = int(num_steps)
-    batch_size_value = int(num_steps)
-    batch_size_distill = int(num_steps)
+    batch_size = int(num_steps)
 
-    assert batch_size_policy % args.num_minibatches_policy == 0, f"{batch_size_policy} % {args.num_minibatches_policy} == 0"
-    assert batch_size_value % args.num_minibatches_value == 0, f"{batch_size_value} % {args.num_minibatches_value} == 0"
-    assert batch_size_distill % args.num_minibatches_distill == 0, f"{batch_size_distill} % {args.num_minibatches_distill} == 0"
+    assert batch_size % args.num_minibatches == 0, f"{batch_size} % {args.num_minibatches} == 0"
 
-    minibatch_size_policy = int(batch_size_policy // args.num_minibatches_policy)
-    minibatch_size_value = int(batch_size_value // args.num_minibatches_value)
-    minibatch_size_distill = int(batch_size_distill // args.num_minibatches_distill)
+    minibatch_size = int(batch_size // args.num_minibatches)
 
     save_ts = None
     permasave_ts = None
@@ -504,7 +455,6 @@ def main(args):
                 "params/clip_vloss": "clip_vloss",
                 "params/max_grad_norm": "max_grad_norm",
                 "params/weight_decay": "weight_decay",
-                "params/distill_beta": "distill_beta",
             }
 
         common.log_params(args, wandb_log)
@@ -541,12 +491,15 @@ def main(args):
         sampler_device_name = device_name
         sampler_device = torch.device(sampler_device_name)
 
-        ray.init(num_cpus=1)
 
-        if sampler_device_name == "cuda":
-            RemoteSampler = ray.remote(num_cpus=0.01, num_gpus=0.01)(Sampler)
-        else:
-            RemoteSampler = ray.remote(num_cpus=0.01)(Sampler)
+
+
+        # ray.init(num_cpus=1)
+
+        # if sampler_device_name == "cuda":
+        #     RemoteSampler = ray.remote(num_cpus=0.01, num_gpus=0.01)(Sampler)
+        # else:
+        #     RemoteSampler = ray.remote(num_cpus=0.01)(Sampler)
 
         def NN_creator(device):
             return AgentNN(args, device=device)
@@ -563,18 +516,17 @@ def main(args):
                 sampler_device_name
             )
 
-        # s = Sampler(
-        #     0,
-        #     NN_creator,
-        #     venv_creator,
-        #     args.num_steps_per_sampler,
-        #     args.gamma,
-        #     args.gae_lambda_policy,
-        #     args.gae_lambda_value,
-        #     sampler_device_name
-        # )
+        s = Sampler(
+            0,
+            NN_creator,
+            venv_creator,
+            args.num_steps_per_sampler,
+            sampler_device_name
+        )
 
-        # s.sample()
+        while True:
+            s.sample()
+            print(".")
         # import ipdb; ipdb.set_trace()  # noqa
 
         LOG.info("[main] init %d samplers" % args.num_samplers)
@@ -585,8 +537,6 @@ def main(args):
             "sample": common.Timer(),
             "set_weights": common.Timer(),
             "train": common.Timer(),
-            "value_optimization": common.Timer(),
-            "policy_distillation": common.Timer(),
             "save": common.Timer(),
 
         }
@@ -602,15 +552,13 @@ def main(args):
             else:
                 progress = 0
 
-            agent.optimizer_value.param_groups[0]["lr"] = lr_schedule_fn_value(progress)
-            agent.optimizer_policy.param_groups[0]["lr"] = lr_schedule_fn_policy(progress)
-            agent.optimizer_distill.param_groups[0]["lr"] = lr_schedule_fn_distill(progress)
+            agent.optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
 
             ep_count = 0
 
             # LOG.debug("Set weights...")
             with timers["set_weights"]:
-                ref = ray.put({k: v.to(sampler_device) for k, v in agent.NN_policy.state_dict().items()})
+                ref = ray.put({k: v.to(sampler_device) for k, v in agent.NN.state_dict().items()})
                 ray.get([s.set_weights.remote(ref) for s in samplers])
 
             with timers["sample"]:
@@ -660,9 +608,15 @@ def main(args):
 
             with torch.no_grad():
                 agent.eval()
-                values = agent.NN_value.get_value(obs.flatten(end_dim=1), masks.flatten(end_dim=1)).reshape(args.num_samplers, -1)
-                # bootstrap value if not done
-                next_value = agent.NN_value.get_value(next_obs, next_mask).flatten()
+
+                # Add next_obs to use as bootstrapped value if not done
+                # (avoid doing two separate forward passes)
+                obs1 = torch.cat((obs.flatten(end_dim=1), next_obs), dim=0)
+                masks1 = torch.cat((masks.flatten(end_dim=1), next_mask), dim=0)
+                values1 = agent.NN.get_value(obs1, masks1)
+
+                values = values1[:-1, ...].unflatten(0, [args.num_samplers, -1])
+                next_value = values1[-1, ...]
 
                 advantages, returns = compute_advantages(
                     rewards,
@@ -671,8 +625,7 @@ def main(args):
                     next_done,
                     next_value,
                     args.gamma,
-                    args.gae_lambda_policy,
-                    args.gae_lambda_value,
+                    args.gae_lambda,
                 )
 
             # flatten the batch (workers, worker_samples, *) => (num_steps, *)
@@ -684,19 +637,18 @@ def main(args):
             b_returns = returns.flatten(end_dim=1)
             b_values = values.flatten(end_dim=1)
 
-            b_inds = np.arange(batch_size_policy)
+            b_inds = np.arange(batch_size)
             clipfracs = []
 
-            # Policy network optimization
             with timers["train"]:
                 agent.train()
-                for epoch in range(args.update_epochs_policy):
+                for epoch in range(args.update_epochs):
                     np.random.shuffle(b_inds)
-                    for start in range(0, batch_size_policy, minibatch_size_policy):
-                        end = start + minibatch_size_policy
+                    for start in range(0, batch_size, minibatch_size):
+                        end = start + minibatch_size
                         mb_inds = b_inds[start:end]
 
-                        _, newlogprob, entropy, _ = agent.NN_policy.get_action(
+                        _, newlogprob, entropy, newvalue = agent.NN.get_action_and_value(
                             b_obs[mb_inds],
                             b_masks[mb_inds],
                             action=b_actions[mb_inds],
@@ -719,69 +671,35 @@ def main(args):
                         pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - args.clip_coef, 1 + args.clip_coef)
                         pg_loss = torch.max(pg_loss1, pg_loss2).mean()
 
+                        # Value loss
+                        newvalue = newvalue.view(-1)
+                        if args.clip_vloss:
+                            v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
+                            v_clipped = b_values[mb_inds] + torch.clamp(
+                                newvalue - b_values[mb_inds],
+                                -args.clip_coef,
+                                args.clip_coef,
+                            )
+                            v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
+                            v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                            v_loss = 0.5 * v_loss_max.mean()
+                        else:
+                            # XXX: SIMO: SB3 does not multiply by 0.5 here
+                            #            (ie. SB3's vf_coef is essentially x2)
+                            v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+
                         entropy_loss = entropy.mean()
                         policy_loss = pg_loss - args.ent_coef * entropy_loss
+                        value_loss = v_loss * args.vf_coef
+                        loss = policy_loss + value_loss
 
-                        agent.optimizer_policy.zero_grad()
-                        policy_loss.backward()
-                        nn.utils.clip_grad_norm_(agent.NN_policy.parameters(), args.max_grad_norm)
-                        agent.optimizer_policy.step()
+                        agent.optimizer.zero_grad()
+                        loss.backward()
+                        nn.utils.clip_grad_norm_(agent.NN.parameters(), args.max_grad_norm)
+                        agent.optimizer.step()
 
                     if args.target_kl is not None and approx_kl > args.target_kl:
                         break
-
-            # Value network optimization
-            with timers["value_optimization"]:
-                for epoch in range(args.update_epochs_value):
-                    np.random.shuffle(b_inds)
-                    for start in range(0, batch_size_value, minibatch_size_value):
-                        end = start + minibatch_size_value
-                        mb_inds = b_inds[start:end]
-
-                        newvalue = agent.NN_value.get_value(b_obs[mb_inds], b_masks[mb_inds])
-                        newvalue = newvalue.view(-1)
-
-                        # Value loss
-                        v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
-
-                        agent.optimizer_value.zero_grad()
-                        v_loss.backward()
-                        nn.utils.clip_grad_norm_(agent.NN_value.parameters(), args.max_grad_norm)
-                        agent.optimizer_value.step()
-
-            # Value network to policy network distillation
-            with timers["policy_distillation"]:
-                agent.NN_policy.zero_grad(True)  # don't clone gradients
-
-                old_NN_policy = copy.deepcopy(agent.NN_policy).to(device)
-                # old_NN_policy = AgentNN(args.network, agent.dim_other, agent.dim_hexes, agent.n_actions, agent.NN_policy.device)
-                # old_NN_policy.load_state_dict(agent.NN_policy.state_dict(), strict=True)
-
-                old_NN_policy.eval()
-                for epoch in range(args.update_epochs_distill):
-                    np.random.shuffle(b_inds)
-                    for start in range(0, batch_size_distill, minibatch_size_distill):
-                        end = start + minibatch_size_distill
-                        mb_inds = b_inds[start:end]
-                        # Compute policy and value targets
-                        with torch.no_grad():
-                            _, _, _, old_action_dist = old_NN_policy.get_action(b_obs[mb_inds], b_masks[mb_inds])
-                            value_target = agent.NN_value.get_value(b_obs[mb_inds], b_masks[mb_inds])
-
-                        _, _, _, new_action_dist, new_value = agent.NN_policy.get_action_and_value(
-                            b_obs[mb_inds],
-                            b_masks[mb_inds],
-                        )
-
-                        # Distillation loss
-                        policy_kl_loss = torch.distributions.kl_divergence(old_action_dist, new_action_dist).mean()
-                        value_loss = 0.5 * (new_value.view(-1) - value_target).square().mean()
-                        distill_loss = value_loss + args.distill_beta * policy_kl_loss
-
-                        agent.optimizer_distill.zero_grad()
-                        distill_loss.backward()
-                        nn.utils.clip_grad_norm_(agent.NN_policy.parameters(), args.max_grad_norm)
-                        agent.optimizer_distill.step()
 
             y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
             var_y = np.var(y_true)
@@ -809,12 +727,10 @@ def main(args):
                 wlog["rollout/ep_success_rate"] = ep_is_success_mean
 
             wlog = dict(wlog, **{
-                "params/policy_learning_rate": agent.optimizer_policy.param_groups[0]["lr"],
-                "params/value_learning_rate": agent.optimizer_value.param_groups[0]["lr"],
-                "params/distill_learning_rate": agent.optimizer_distill.param_groups[0]["lr"],
+                "params/learning_rate": agent.optimizer.param_groups[0]["lr"],
                 "losses/value_loss": v_loss.item(),
                 "losses/policy_loss": pg_loss.item(),
-                "losses/distill_loss": distill_loss.item(),
+                "losses/total_loss": loss.item(),
                 "losses/entropy": entropy_loss.item(),
                 "losses/old_approx_kl": old_approx_kl.item(),
                 "losses/approx_kl": approx_kl.item(),
@@ -871,7 +787,7 @@ def main(args):
                     ep_is_success_mean,
                     value_loss.item(),
                     policy_loss.item(),
-                    distill_loss.item()
+                    loss.item()
                 ))
 
             agent.state.current_rollout += 1
@@ -913,8 +829,8 @@ def main(args):
 
 def debug_config():
     return dict(
-        run_id="mppo-dna-i2a-debug",
-        group_id="mppo-dna-i2a-debug",
+        run_id="mppo-i2a-debug",
+        group_id="mppo-i2a-debug",
         loglevel="DEBUG",
         run_name_template="{datetime}-{id}",
         run_name=None,
@@ -940,29 +856,17 @@ def debug_config():
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.0001),
-        lr_schedule_value=ScheduleArgs(mode="const", start=0.0001),
-        lr_schedule_policy=ScheduleArgs(mode="const", start=0.0001),
-        lr_schedule_distill=ScheduleArgs(mode="const", start=0.0001),
         num_steps_per_sampler=6,
         num_samplers=1,
         gamma=0.85,
         gae_lambda=0.9,
-        gae_lambda_policy=0.95,
-        gae_lambda_value=0.95,
         num_minibatches=2,
-        num_minibatches_value=2,
-        num_minibatches_policy=2,
-        num_minibatches_distill=2,
         update_epochs=2,
-        update_epochs_value=2,
-        update_epochs_policy=2,
-        update_epochs_distill=2,
         norm_adv=True,
         clip_coef=0.5,
         clip_vloss=True,
         ent_coef=0.05,
         max_grad_norm=1,
-        distill_beta=1.0,
         target_kl=None,
         logparams={},
         cfg_file=None,
@@ -970,6 +874,7 @@ def debug_config():
         skip_wandb_init=False,
         skip_wandb_log_code=False,
         envmaps=["gym/A1.vmap"],
+        # envmaps=["gym/generated/evaluation/8x512.vmap"],
         env=EnvArgs(
             random_terrain_chance=100,
             tight_formation_chance=0,
