@@ -60,6 +60,12 @@ assert HEX_ATTR_MAP["STACK_SIDE"][2] == 3  # N/A, P0, P1
 INDEX_HEX_STACK_SIDE_PLAYER0 = HEX_ATTR_MAP["STACK_SIDE"][1] + 1
 INDEX_HEX_STACK_SIDE_PLAYER1 = HEX_ATTR_MAP["STACK_SIDE"][1] + 2
 
+assert HEX_ATTR_MAP["STACK_FLAGS1"][0].endswith("_ZERO_NULL")
+INDEX_HEX_STACK_IS_ACTIVE = HEX_ATTR_MAP["STACK_FLAGS1"][1]  # 1st flag = IS_ACTIVE
+
+assert HEX_ATTR_MAP["STACK_QUEUE"][0].endswith("_ZERO_NULL")
+INDEX_HEX_STACK_STACK_QUEUE = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1st bit = currently active
+
 
 # Attacker army: 1 phoenix
 # Defender army: 3 arrow towers + 8 stacks (incl. ballista)
@@ -71,7 +77,8 @@ INDEX_HEX_STACK_SIDE_PLAYER1 = HEX_ATTR_MAP["STACK_SIDE"][1] + 2
 #   5. 8x stacks (act)
 #   ---- transitions end
 #   = 16... (the "prediction" will likely be totally wrong)
-MAX_TRANSITIONS = 17
+# This is quite a rare case, though. 8 seems insufficient.. go with 10
+MAX_TRANSITIONS = 12
 
 
 class ImaginationCore(nn.Module):
@@ -219,6 +226,7 @@ class ImaginationCore(nn.Module):
                 state_logits_in_progress = state_logits[idx_in_progress]
 
                 # check in_progress states for alternate win conditions
+                # NOTE: this will probably not work if state is just probs (and not reconstructed)
                 state_hexes_in_progress = state_in_progress[:, HEXES_OFFSET:].unflatten(1, [165, -1])
                 # a.k.a. not(VALUE_ABS_P0 > 0 and VALUE_REL_P0 > 0 AND ANY(HEX_STACK_SIDE_P0 > 0))
                 p0_alive = (
@@ -227,14 +235,14 @@ class ImaginationCore(nn.Module):
                     & (state_hexes_in_progress[:, :, INDEX_HEX_STACK_SIDE_PLAYER0].sum(dim=1) > 0)
                 )
                 idx_p0_dead = (~p0_alive).nonzero().unique()
-                # => (B'') of indexes where P0 is actually dead
+                # => (B'') of indexes where P0 looks pretty dead
                 p1_alive = (
                     (state_in_progress[:, INDEX_PLAYER1_ARMY_VALUE_NOW_ABS] > 0)
                     & (state_in_progress[:, INDEX_PLAYER1_ARMY_VALUE_NOW_REL] > 0)
                     & (state_hexes_in_progress[:, :, INDEX_HEX_STACK_SIDE_PLAYER1].sum(dim=1) > 0)
                 )
                 idx_p1_dead = (~p1_alive).nonzero().unique()
-                # => (B'') of indexes where P1 is actually dead
+                # => (B'') of indexes where P1 looks pretty dead
 
                 # Given idx_in_progress=[0,2,5,7] and idx_p0_dead=[1,3]
                 # => real_idx_p0_dead=[2,7]
@@ -324,10 +332,10 @@ class ImaginationCore(nn.Module):
                 from vcmi_gym.envs.v12.decoder.decoder import Decoder
 
                 def decode(b, t):
-                    return Decoder.decode(state_hist[b, t].numpy())
+                    return Decoder.decode(state_hist[b, t].cpu().numpy())
 
                 def render(b, t):
-                    print(decode(b, t).render(action_hist[b, t]))
+                    print(decode(b, t).render(action_hist[b, t].item()))
 
                 import ipdb; ipdb.set_trace()  # noqa
                 print("")
@@ -337,7 +345,6 @@ class ImaginationCore(nn.Module):
         # => calculate them instead
         idx_for_step_and_term_reward = torch.nonzero(done & ~initial_done, as_tuple=True)[0]
         s = state[idx_for_step_and_term_reward]  # don't use -1 (= MAX_TRANSITIONS)
-        import ipdb; ipdb.set_trace()  # noqa
         reward[idx_for_step_and_term_reward] += 1000 * (
             s[:, self.index_enemy_value_lost_now_rel] - s[:, self.index_my_value_lost_now_rel]
             + self.reward_dmg_mult * (s[:, self.index_enemy_dmg_received_now_rel] - s[:, self.index_my_dmg_received_now_rel])

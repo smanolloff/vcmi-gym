@@ -21,12 +21,12 @@ import os
 import time
 import re
 import importlib
-import pathlib
 import numpy as np
 import yaml
 import json
 import pygit2
 import tempfile
+from types import SimpleNamespace
 from datetime import datetime
 from functools import partial
 
@@ -211,6 +211,71 @@ def create_venv(env_cls, args, seeds=None):
     vec_env = gym.vector.SyncVectorEnv(funcs)
 
     vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env, deque_size=args.stats_buffer_size)
+
+    return vec_env
+
+
+def create_async_venv(env_cls, args):
+    assert args.mapside in ["attacker", "defender"]
+
+    assert len(args.opponent_sbm_probs) == 3
+    if args.opponent_sbm_probs[2]:
+        assert os.path.isfile(args.opponent_load_file)
+
+    pid = os.getpid()
+    dummy_env = SimpleNamespace(
+        metadata={'render_modes': ['ansi', 'rgb_array'], 'render_fps': 30},
+        render_mode='ansi',
+        action_space=env_cls.ACTION_SPACE,
+        observation_space=env_cls.OBSERVATION_SPACE["observation"],
+        close=lambda: None
+    )
+
+    def env_creator(i):
+        # AsyncVectorEnv creates a dummy_env() just to get some metadata
+        # this causes VCMI dirty pid error for envs spawned in sub-processes
+        if os.getpid() == pid:
+            return dummy_env
+
+        sbm = ["MMAI_SCRIPT_SUMMONER", "BattleAI", "MMAI_MODEL"]
+        sbm_probs = torch.tensor(args.opponent_sbm_probs, dtype=torch.float)
+
+        dist = Categorical(sbm_probs)
+        opponent = sbm[dist.sample()]
+        mapname = args.envmaps[i % len(args.envmaps)]
+
+        if opponent == "MMAI_MODEL":
+            assert args.opponent_load_file, "opponent_load_file is required for MMAI_MODEL"
+
+        env_kwargs = dict(
+            dataclasses.asdict(args.env),
+            seed=np.random.randint(2**31),
+            mapname=mapname,
+            role=args.mapside,
+            opponent=opponent,
+            opponent_model=args.opponent_load_file,
+        )
+
+        for a in env_kwargs.pop("deprecated_args", ["deprecated_args_names_here"]):
+            env_kwargs.pop(a, None)
+
+        print("Env kwargs (env.%d): %s" % (i, env_kwargs))
+
+        res = env_cls(**env_kwargs)
+
+        for wrapper in args.env_wrappers:
+            wrapper_mod = importlib.import_module(wrapper["module"])
+            wrapper_cls = getattr(wrapper_mod, wrapper["cls"])
+            res = wrapper_cls(res, **wrapper.get("kwargs", {}))
+
+        res = gym.wrappers.RecordEpisodeStatistics(res, buffer_length=args.stats_buffer_size)
+        return res
+
+    assert args.num_envs > 1, f"create_async_venv() expects args.num_envs > 1 (got: {args.num_envs}); use create_venv() instead"
+
+    funcs = [partial(env_creator, i) for i in range(args.num_envs)]
+    if args.num_envs > 1:
+        vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
 
     return vec_env
 

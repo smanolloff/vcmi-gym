@@ -20,8 +20,8 @@ config = dict(
     save_every=600,
     max_old_saves=0,
 
-    num_samplers=2,
-    num_steps_per_sampler=200,  # num_steps = num_steps_per_sampler * num_samplers
+    num_envs=2,
+    num_steps_per_env=200,  # num_steps = num_steps_per_sampler * num_samplers
     num_minibatches=2,
     update_epochs=2,
 

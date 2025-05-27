@@ -6,7 +6,8 @@
 numpy
 pyyaml
 wandb
-gymnasium==0.29.1
+#gymnasium==0.29.1
+gymnasium==1.1.1
 #onnx-pytorch
 pygit2
 boto3

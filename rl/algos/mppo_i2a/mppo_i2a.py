@@ -33,10 +33,8 @@ import torch
 import torch.nn as nn
 # import tyro
 import warnings
-import ray
 
 from .. import common
-from ..mppo_dna_ray.sampler import Sampler
 from ...world.i2a import I2A
 
 ENVS = []  # debug
@@ -172,8 +170,8 @@ class Args:
     envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4x1024.vmap"])
 
     num_minibatches: int = 4
-    num_steps_per_sampler: int = 128
-    num_samplers: int = 1
+    num_steps_per_env: int = 128
+    num_envs: int = 1
     stats_buffer_size: int = 100
 
     update_epochs: int = 4
@@ -337,7 +335,7 @@ def main(args):
     assert isinstance(args, Args)
 
     agent, args = common.maybe_resume(Agent, args, device_name=device_name)
-    num_steps = args.num_steps_per_sampler * args.num_samplers
+    num_steps = args.num_steps_per_env * args.num_envs
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
@@ -464,72 +462,34 @@ def main(args):
 
         # print("Agent state: %s" % asdict(agent.state))
 
-        obs_space = VcmiEnv.OBSERVATION_SPACE
-        act_space = VcmiEnv.ACTION_SPACE
+        venv = common.create_async_venv(VcmiEnv, args)
+
+        obs_space = venv.single_observation_space
+        act_space = venv.single_action_space
 
         # ALGO Logic: Storage setup
         device = torch.device(device_name)
-        obs = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + obs_space["observation"].shape, device=device)
-        logprobs = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
-        actions = torch.zeros((args.num_samplers, args.num_steps_per_sampler) + act_space.shape, device=device)
-        masks = torch.zeros((args.num_samplers, args.num_steps_per_sampler, act_space.n), dtype=torch.bool, device=device)  # XXX: must use torch.bool (for CategoricalMasked)
-        advantages = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
-        returns = torch.zeros(args.num_samplers, args.num_steps_per_sampler, device=device)
+        obs = torch.zeros((args.num_steps_per_env, args.num_envs) + obs_space.shape, device=device)
+        logprobs = torch.zeros(args.num_steps_per_env, args.num_envs, device=device)
+        actions = torch.zeros((args.num_steps_per_env, args.num_envs) + act_space.shape, device=device)
+        masks = torch.zeros((args.num_steps_per_env, args.num_envs, act_space.n), dtype=torch.bool, device=device)  # XXX: must use torch.bool (for CategoricalMasked)
+        advantages = torch.zeros(args.num_steps_per_env, args.num_envs, device=device)
+        returns = torch.zeros(args.num_steps_per_env, args.num_envs, device=device)
 
-        rewards = torch.zeros((args.num_samplers, args.num_steps_per_sampler), device=device)
-        dones = torch.zeros((args.num_samplers, args.num_steps_per_sampler), device=device)
-        next_obs = torch.zeros((args.num_samplers,) + obs_space["observation"].shape, device=device)
-        next_mask = torch.zeros((args.num_samplers, act_space.n), device=device)
-        next_done = torch.zeros(args.num_samplers, device=device)
+        rewards = torch.zeros((args.num_steps_per_env, args.num_envs), device=device)
+        dones = torch.zeros((args.num_steps_per_env, args.num_envs), device=device)
+        values = torch.zeros((args.num_steps_per_env, args.num_envs), device=device)
+        next_obs = torch.as_tensor(venv.reset()[0], device=device)
+        next_mask = torch.as_tensor(np.array(venv.call("action_mask")), device=device)
+        next_done = torch.zeros(args.num_envs, device=device)
 
         progress = 0
         map_rollouts = 0
         start_time = time.time()
         global_start_second = agent.state.global_second
 
-        sampler_device_name = device_name
-        sampler_device = torch.device(sampler_device_name)
-
-
-
-
-        # ray.init(num_cpus=1)
-
-        # if sampler_device_name == "cuda":
-        #     RemoteSampler = ray.remote(num_cpus=0.01, num_gpus=0.01)(Sampler)
-        # else:
-        #     RemoteSampler = ray.remote(num_cpus=0.01)(Sampler)
-
-        def NN_creator(device):
-            return AgentNN(args, device=device)
-
         def venv_creator():
             return common.create_venv(VcmiEnv, args)
-
-        def remote_sampler_creator(sampler_id):
-            return RemoteSampler.remote(
-                sampler_id,
-                NN_creator,
-                venv_creator,
-                args.num_steps_per_sampler,
-                sampler_device_name
-            )
-
-        s = Sampler(
-            0,
-            NN_creator,
-            venv_creator,
-            args.num_steps_per_sampler,
-            sampler_device_name
-        )
-
-        while True:
-            s.sample()
-            print(".")
-        # import ipdb; ipdb.set_trace()  # noqa
-
-        LOG.info("[main] init %d samplers" % args.num_samplers)
-        samplers = [remote_sampler_creator(i) for i in range(args.num_samplers)]
 
         timers = {
             "all": common.Timer(),
@@ -555,79 +515,62 @@ def main(args):
 
             ep_count = 0
 
-            # LOG.debug("Set weights...")
-            with timers["set_weights"]:
-                ref = ray.put({k: v.to(sampler_device) for k, v in agent.NN.state_dict().items()})
-                ray.get([s.set_weights.remote(ref) for s in samplers])
-
+            # XXX: eval during experience collection
+            agent.eval()
             with timers["sample"]:
-                # LOG.debug("Call samplers...")
-                futures = [s.sample.remote() for s in samplers]
+                for step in range(0, args.num_steps_per_env):
+                    obs[step] = next_obs
+                    dones[step] = next_done
+                    masks[step] = next_mask
 
-                # LOG.debug("Gather results...")
-                for i in range(len(futures)):
-                    done, futures = ray.wait(futures, num_returns=1)
-                    res, stats = ray.get(done[0])
+                    with torch.no_grad():
+                        action, logprob, _, value = agent.NN.get_action_and_value(next_obs, next_mask)
+                        values[step] = value.flatten()
+                    actions[step] = action
+                    logprobs[step] = logprob
 
-                    # tw = timesteps per worker
-                    (
-                        obs[i],          # => (tw, STATE_SIZE)
-                        logprobs[i],     # => (tw)
-                        actions[i],      # => (tw)
-                        masks[i],        # => (tw, N_ACTIONS)
-                        rewards[i],      # => (tw)
-                        dones[i],        # => (tw)
-                        next_obs[i],     # => (STATE_SIZE)
-                        next_mask[i],    # => (N_ACTIONS)
-                        next_done[i],    # => (1)
-                    ) = res
+                    next_obs, reward, terminations, truncations, infos = venv.step(action.cpu().numpy())
+                    next_done = np.logical_or(terminations, truncations)
+                    rewards[step] = torch.as_tensor(reward, device=device).view(-1)
+                    next_obs = torch.as_tensor(next_obs, device=device)
+                    next_done = torch.as_tensor(next_done, device=device, dtype=torch.float32)
+                    next_mask = torch.as_tensor(np.array(venv.call("action_mask")), device=device)
 
-                    (
-                        s_seconds,
-                        s_episodes,
-                        s_ep_net_value,
-                        s_ep_is_success,
-                        s_ep_return,
-                        s_ep_length
-                    ) = stats
+                    # See notes/gym_vector.txt
+                    if "_final_info" in infos:
+                        done_ids = np.flatnonzero(infos["_final_info"])
+                        final_infos = infos["final_info"]
+                        agent.state.ep_net_value_queue.append(final_infos["net_value"][done_ids])
+                        agent.state.ep_is_success_queue.append(final_infos["is_success"][done_ids])
+                        agent.state.ep_rew_queue.append(final_infos["episode"]["r"][done_ids])
+                        agent.state.ep_length_queue.append(final_infos["episode"]["l"][done_ids])
+                        agent.state.current_episode += len(done_ids)
+                        agent.state.global_episode += len(done_ids)
+                        ep_count += len(done_ids)
 
-                    agent.state.ep_net_value_queue.append(s_ep_net_value)
-                    agent.state.ep_is_success_queue.append(s_ep_is_success)
-                    agent.state.ep_rew_queue.append(s_ep_return)
-                    agent.state.ep_length_queue.append(s_ep_length)
-                    agent.state.current_episode += s_episodes
-                    agent.state.global_episode += s_episodes
-                    ep_count += s_episodes
-
-                    agent.state.current_vstep += args.num_steps_per_sampler
-                    agent.state.current_timestep += args.num_steps_per_sampler
-                    agent.state.global_timestep += args.num_steps_per_sampler
+                    agent.state.current_vstep += args.num_steps_per_env
+                    agent.state.current_timestep += args.num_steps_per_env
+                    agent.state.global_timestep += args.num_steps_per_env
                     agent.state.current_second = int(time.time() - start_time)
                     agent.state.global_second = global_start_second + agent.state.current_second
 
+            # bootstrap value if not done
             with torch.no_grad():
-                agent.eval()
+                next_value = agent.NN.get_value(next_obs, next_mask).reshape(1, -1)
+                advantages = torch.zeros_like(rewards, device=device)
+                lastgaelam = 0
+                for t in reversed(range(args.num_steps_per_env)):
+                    if t == args.num_steps_per_env - 1:
+                        nextnonterminal = 1.0 - next_done
+                        nextvalues = next_value
+                    else:
+                        nextnonterminal = 1.0 - dones[t + 1]
+                        nextvalues = values[t + 1]
+                    delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
+                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
+                returns = advantages + values
 
-                # Add next_obs to use as bootstrapped value if not done
-                # (avoid doing two separate forward passes)
-                obs1 = torch.cat((obs.flatten(end_dim=1), next_obs), dim=0)
-                masks1 = torch.cat((masks.flatten(end_dim=1), next_mask), dim=0)
-                values1 = agent.NN.get_value(obs1, masks1)
-
-                values = values1[:-1, ...].unflatten(0, [args.num_samplers, -1])
-                next_value = values1[-1, ...]
-
-                advantages, returns = compute_advantages(
-                    rewards,
-                    dones,
-                    values,
-                    next_done,
-                    next_value,
-                    args.gamma,
-                    args.gae_lambda,
-                )
-
-            # flatten the batch (workers, worker_samples, *) => (num_steps, *)
+            # flatten the batch (num_envs, env_samples, *) => (num_steps, *)
             b_obs = obs.flatten(end_dim=1)
             b_logprobs = logprobs.flatten(end_dim=1)
             b_actions = actions.flatten(end_dim=1)
@@ -808,8 +751,8 @@ def main(args):
 
     finally:
         common.maybe_save(0, 10e9, args, agent)
-        if "samplers" in locals():
-            ray.get([s.shutdown.remote() for s in samplers])
+        if "venv" in locals():
+            venv.close()
 
     # Needed by PBT to save model after iteration ends
     # XXX: limit returned mean reward to only the rollouts in this iteration
@@ -855,8 +798,8 @@ def debug_config():
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.0001),
-        num_steps_per_sampler=6,
-        num_samplers=1,
+        num_steps_per_env=5,
+        num_envs=2,
         gamma=0.85,
         gae_lambda=0.9,
         num_minibatches=2,
