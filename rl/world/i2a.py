@@ -241,7 +241,7 @@ class ImaginationCore(nn.Module):
                 real_idx_p0_dead = idx_in_progress[idx_p0_dead]
                 real_idx_p1_dead = idx_in_progress[idx_p1_dead]
 
-                if debug and real_idx_p0_dead.numel() > 0 or real_idx_p1_dead.numel() > 0:
+                if debug and (real_idx_p0_dead.numel() > 0 or real_idx_p1_dead.numel() > 0):
                     print("ALTERNATE WINCON")
                     import ipdb; ipdb.set_trace()  # noqa
                     pass
@@ -337,6 +337,7 @@ class ImaginationCore(nn.Module):
         # => calculate them instead
         idx_for_step_and_term_reward = torch.nonzero(done & ~initial_done, as_tuple=True)[0]
         s = state[idx_for_step_and_term_reward]  # don't use -1 (= MAX_TRANSITIONS)
+        import ipdb; ipdb.set_trace()  # noqa
         reward[idx_for_step_and_term_reward] += 1000 * (
             s[:, self.index_enemy_value_lost_now_rel] - s[:, self.index_my_value_lost_now_rel]
             + self.reward_dmg_mult * (s[:, self.index_enemy_dmg_received_now_rel] - s[:, self.index_my_dmg_received_now_rel])
@@ -685,10 +686,12 @@ class I2A(nn.Module):
         self.action_head = nn.LazyLinear(N_ACTIONS)
         self.value_head = nn.LazyLinear(1)
 
+        self.to(device)
+
         # Init lazy layers
         with torch.no_grad():
-            obs = torch.randn([2, STATE_SIZE])
-            mask = torch.randn([2, N_ACTIONS]) > 0
+            obs = torch.randn([2, STATE_SIZE], device=device)
+            mask = torch.randn([2, N_ACTIONS], device=device) > 0
             self.forward(obs, mask)
 
         layer_init(self)

@@ -87,6 +87,23 @@ vastai label instance $VASTAI_INSTANCE_ID initializing
 # An alias will not work in non-login shells
 [ -e /usr/bin/python ] || ln -s python3 /usr/bin/python
 
+if ! [ -d aws ]; then
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    ./aws/install
+    mkdir ~/.aws
+    cat <<-EOF >>~/.aws/credentials
+[default]
+aws_access_key_id = $AWS_ACCESS_KEY
+aws_secret_access_key = $AWS_SECRET_KEY
+EOF
+    cat <<-EOF >>~/.aws/config
+[default]
+region = eu-north-1
+output = json
+EOF
+fi
+
 git clone --branch dev --single-branch https://github.com/smanolloff/vcmi-gym.git
 cd vcmi-gym
 
