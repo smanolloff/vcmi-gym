@@ -229,6 +229,7 @@ cmake -S . -B rel -Wno-dev \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 cmake --build rel/ -- -j8
 
+cd ../../
 wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
 
 # Mark as completed

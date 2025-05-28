@@ -12,7 +12,7 @@ config = dict(
     # overwrite     # must use the default ([]) for new runs
 
     run_name_template="{datetime}-{id}",
-    group_id="mppo_dna_i2a",
+    group_id="mppo_i2a",
 
     agent_load_file=None,
     # agent_load_file="data/mppo_dna_ray/hktcyplj-agent-1743934056.pt",

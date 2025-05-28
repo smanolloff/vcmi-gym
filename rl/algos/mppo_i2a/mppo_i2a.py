@@ -540,17 +540,17 @@ def main(args):
                     if "_final_info" in infos:
                         done_ids = np.flatnonzero(infos["_final_info"])
                         final_infos = infos["final_info"]
-                        agent.state.ep_net_value_queue.append(final_infos["net_value"][done_ids])
-                        agent.state.ep_is_success_queue.append(final_infos["is_success"][done_ids])
-                        agent.state.ep_rew_queue.append(final_infos["episode"]["r"][done_ids])
-                        agent.state.ep_length_queue.append(final_infos["episode"]["l"][done_ids])
+                        agent.state.ep_net_value_queue.extend(final_infos["net_value"][done_ids])
+                        agent.state.ep_is_success_queue.extend(final_infos["is_success"][done_ids])
+                        agent.state.ep_rew_queue.extend(final_infos["episode"]["r"][done_ids])
+                        agent.state.ep_length_queue.extend(final_infos["episode"]["l"][done_ids])
                         agent.state.current_episode += len(done_ids)
                         agent.state.global_episode += len(done_ids)
                         ep_count += len(done_ids)
 
-                    agent.state.current_vstep += args.num_steps_per_env
-                    agent.state.current_timestep += args.num_steps_per_env
-                    agent.state.global_timestep += args.num_steps_per_env
+                    agent.state.current_vstep += 1
+                    agent.state.current_timestep += args.num_envs
+                    agent.state.global_timestep += args.num_envs
                     agent.state.current_second = int(time.time() - start_time)
                     agent.state.global_second = global_start_second + agent.state.current_second
 
