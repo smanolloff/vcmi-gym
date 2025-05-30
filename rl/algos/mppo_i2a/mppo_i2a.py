@@ -396,28 +396,16 @@ def prepare_wandb_log(
     train_sample_stats,
     eval_sample_stats,
 ):
-    wlog = {
-        "params/learning_rate": optimizer.param_groups[0]["lr"],
-        "global/global_num_timesteps": state.global_timestep,
-        "global/global_num_seconds": state.global_second,
-        "global/num_rollouts": state.current_rollout,
-        "global/num_timesteps": state.current_timestep,
-        "global/num_seconds": state.current_second,
-        "global/num_episode": state.current_episode,
-        "train/value_loss": train_stats.v_loss,
-        "train/policy_loss": train_stats.pg_loss,
-        "train/total_loss": train_stats.loss,
-        "train/entropy": train_stats.entropy_loss,
-        "train/approx_kl": train_stats.approx_kl,
-        "train/clipfrac": train_stats.clipfrac,
-        "train/explained_var": train_stats.explained_var,
-        "train/ep_value_mean_100": safe_mean(state.rollout_net_value_queue_100),
-        "train/ep_value_mean_1000": safe_mean(state.rollout_net_value_queue_1000),
-        "train/ep_rew_mean_100": safe_mean(state.rollout_rew_queue_100),
-        "train/ep_rew_mean_1000": safe_mean(state.rollout_rew_queue_1000),
-        "train/ep_success_rate_100": safe_mean(state.rollout_is_success_queue_100),
-        "train/ep_success_rate_1000": safe_mean(state.rollout_is_success_queue_1000),
-    }
+    wlog = {}
+
+    if eval_sample_stats.num_episodes > 0:
+        wlog.update({
+            "eval/ep_rew_mean": eval_sample_stats.ep_rew_mean,
+            "eval/ep_value_mean": eval_sample_stats.ep_value_mean,
+            "eval/ep_len_mean": eval_sample_stats.ep_len_mean,
+            "eval/ep_success_rate": eval_sample_stats.ep_is_success_mean,
+            "eval/ep_count": eval_sample_stats.num_episodes,
+        })
 
     if train_sample_stats.num_episodes > 0:
         state.rollout_rew_queue_100.append(train_sample_stats.ep_rew_mean)
@@ -434,14 +422,28 @@ def prepare_wandb_log(
             "train/ep_count": train_sample_stats.num_episodes,
         })
 
-    if eval_sample_stats.num_episodes > 0:
-        wlog.update({
-            "eval/ep_rew_mean": eval_sample_stats.ep_rew_mean,
-            "eval/ep_value_mean": eval_sample_stats.ep_value_mean,
-            "eval/ep_len_mean": eval_sample_stats.ep_len_mean,
-            "eval/ep_success_rate": eval_sample_stats.ep_is_success_mean,
-            "eval/ep_count": eval_sample_stats.num_episodes,
-        })
+    wlog.update({
+        "train/value_loss": train_stats.v_loss,
+        "train/policy_loss": train_stats.pg_loss,
+        "train/total_loss": train_stats.loss,
+        "train/entropy": train_stats.entropy_loss,
+        "train/approx_kl": train_stats.approx_kl,
+        "train/clipfrac": train_stats.clipfrac,
+        "train/explained_var": train_stats.explained_var,
+        "train/ep_value_mean_100": safe_mean(state.rollout_net_value_queue_100),
+        "train/ep_value_mean_1000": safe_mean(state.rollout_net_value_queue_1000),
+        "train/ep_rew_mean_100": safe_mean(state.rollout_rew_queue_100),
+        "train/ep_rew_mean_1000": safe_mean(state.rollout_rew_queue_1000),
+        "train/ep_success_rate_100": safe_mean(state.rollout_is_success_queue_100),
+        "train/ep_success_rate_1000": safe_mean(state.rollout_is_success_queue_1000),
+        "global/global_num_timesteps": state.global_timestep,
+        "global/global_num_seconds": state.global_second,
+        "global/num_rollouts": state.current_rollout,
+        "global/num_timesteps": state.current_timestep,
+        "global/num_seconds": state.current_second,
+        "global/num_episode": state.current_episode,
+        "params/learning_rate": optimizer.param_groups[0]["lr"],
+    })
 
     return wlog
 
@@ -467,7 +469,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         print(f"Saving new config to: {f.name}")
         json.dump(config, f, indent=4)
 
-    assert config["checkpoint"]["interval_s"] > config["eval"]["interval_s"]
+    # assert config["checkpoint"]["interval_s"] > config["eval"]["interval_s"]
     assert config["checkpoint"]["permanent_interval_s"] > config["eval"]["interval_s"]
 
     checkpoint_config = dig(config, "checkpoint")
@@ -512,7 +514,10 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    scaler = torch.amp.GradScaler() if device.type == "cuda" else None
+
+    # TODO: on cuda, the scaler results in errors -- fix them
+    # scaler = torch.amp.GradScaler() if device.type == "cuda" else None
+    scaler = None
 
     if resume_config:
         load_checkpoint(
@@ -644,7 +649,6 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
             )
 
         # Checkpoint only if we have eval stats
-        print("%ss / %s" % (config["checkpoint"]["interval_s"], eval_sample_stats.num_episodes > 0))
         if checkpoint_timer.peek() > config["checkpoint"]["interval_s"] and eval_sample_stats.num_episodes > 0:
             checkpoint_timer.reset(start=True)
             eval_net_value = eval_sample_stats.ep_value_mean

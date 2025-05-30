@@ -33,7 +33,7 @@ config = dict(
     wandb_log_interval_s=60,
 
     checkpoint=dict(
-        interval_s=900,  # NOTE: checked only after eval
+        interval_s=0,  # use 0 to checkpoint on each eval
         permanent_interval_s=6*3600,  # 6h (use int(2e9) to disable)
         optimize_local_storage=False,
         s3=dict(
@@ -43,19 +43,19 @@ config = dict(
     ),
     eval=dict(
         env=dict(
-            num_envs=50,
+            num_envs=10,
             kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap")
         ),
-        num_vsteps=50,
-        interval_s=900,
+        num_vsteps=500,
+        interval_s=1800,
     ),
     train=dict(
         env=dict(
-            num_envs=25,
+            num_envs=40,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
-        num_vsteps=50,  # num_steps = num_vsteps * num_envs
-        num_minibatches=2,
+        num_vsteps=40,  # num_steps = num_vsteps * num_envs
+        num_minibatches=50,
         update_epochs=3,
 
         gamma=0.85,

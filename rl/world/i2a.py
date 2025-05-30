@@ -301,11 +301,11 @@ class ImaginationCore(nn.Module):
             # Transition to next state:
             if p10n_strategy == p10n.Prediction.PROBS:
                 action_probs_in_progress = action_probs_in_progress[idx_in_progress_valid_action]
-                state_logits[idx_in_progress] = self.transition_model.forward_probs(state_in_progress, action_probs_in_progress)
-                reward[idx_in_progress] += self.reward_prediction_model.forward_probs(state_in_progress, action_probs_in_progress)
+                state_logits[idx_in_progress] = self.transition_model.forward_probs(state_in_progress, action_probs_in_progress).float()
+                reward[idx_in_progress] += self.reward_prediction_model.forward_probs(state_in_progress, action_probs_in_progress).float()
             else:
-                state_logits[idx_in_progress] = self.transition_model(state_in_progress, action_in_progress)
-                reward[idx_in_progress] += self.reward_prediction_model(state_in_progress, action_in_progress)
+                state_logits[idx_in_progress] = self.transition_model(state_in_progress, action_in_progress).float()
+                reward[idx_in_progress] += self.reward_prediction_model(state_in_progress, action_in_progress).float()
 
             state[idx_in_progress] = self.transition_model.reconstruct(state_logits[idx_in_progress], strategy=t10n_strategy)
 

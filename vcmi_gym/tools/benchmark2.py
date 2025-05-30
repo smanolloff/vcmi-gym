@@ -51,7 +51,7 @@ def main():
         # swap_sides=1,
     )
 
-    num_workers = 5
+    num_workers = 10
     dataloader = torch.utils.data.DataLoader(
         DatasetVCMI(logger=logger, env_kwargs=env_kwargs, mw_functor=vcmi_dataloader_functor),
         batch_size=1000,
