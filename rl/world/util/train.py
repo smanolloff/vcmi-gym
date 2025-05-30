@@ -408,7 +408,6 @@ def train(
                 last_checkpoint_at = now
 
                 if eval_loss == 0:
-                    # Initial baseline for resumed configs
                     logger.warning("eval_loss is 0, likely due to NaN, will not save checkpoint")
                 elif eval_loss_best is None:
                     # Initial baseline for resumed configs

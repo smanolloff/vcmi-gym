@@ -38,18 +38,22 @@ def bench_vector_env(env_kwargs, num_envs, total_steps):
     funcs = [env_creator for _ in range(num_envs)]
     venv = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
 
+    allvalid = 0
     for _ in range(total_steps):
-        venv.step(venv.call("random_action"))
+        obs, rew, term, trunc, info = venv.step(venv.call("random_action"))
+        allvalid += sum([m.sum() for m in venv.call("action_mask")])
 
+    print("Mean valid actions: %d" % (allvalid / (num_envs * total_steps)))
 
 def main():
     num_envs = int(sys.argv[1])
     total_vsteps = 1000
 
     env_kwargs = dict(
-        mapname="gym/generated/4096/4096-6stack-100K-01.vmap",
-        random_heroes=0,
-        random_obstacles=0,
+        # mapname="gym/generated/4096/4x1024.vmap",
+        mapname="gym/generated/4096/4x1024.vmap",
+        random_heroes=1,
+        random_obstacles=1,
         opponent="StupidAI",
         max_steps=1000,
         # swap_sides=1,

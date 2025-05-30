@@ -6,6 +6,7 @@ import numpy as np
 import time
 import threading
 import json
+import copy
 import boto3
 import botocore.exceptions
 from boto3.s3.transfer import TransferConfig
@@ -21,21 +22,7 @@ def init_s3_client():
     )
 
 
-def load_local_or_s3_checkpoint(
-    logger,
-    dry_run,
-    checkpoint_s3_config,
-    optimize_local_storage,
-    device,
-    out_dir,
-    run_id,
-    what,
-    torch_obj,
-    **load_kwargs
-):
-    filename = "%s/%s-%s.pt" % (out_dir, run_id, what)
-    logger.info(f"Load {what} from {filename}")
-
+def _s3_download(logger, dry_run, s3_config, filename):
     if os.path.exists(f"{filename}~"):
         if os.path.exists(filename):
             msg = f"Lockfile for {filename} still exists => deleting local (corrupted) file"
@@ -48,25 +35,44 @@ def load_local_or_s3_checkpoint(
             os.unlink(f"{filename}~")
 
     # Download is OK even if --dry-run is given (nothing overwritten)
-    if checkpoint_s3_config and not os.path.exists(filename):
+    if s3_config and not os.path.exists(filename):
         logger.debug("Local file does not exist, try S3")
 
-        s3_filename = f"{checkpoint_s3_config['s3_dir']}/{os.path.basename(filename)}"
-        logger.info(f"Download s3://{checkpoint_s3_config['bucket_name']}/{s3_filename} ...")
+        s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
+        logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
 
         if os.path.exists(f"{filename}.tmp"):
             os.unlink(f"{filename}.tmp")
-        init_s3_client().download_file(checkpoint_s3_config["bucket_name"], s3_filename, f"{filename}.tmp")
+        init_s3_client().download_file(s3_config["bucket_name"], s3_filename, f"{filename}.tmp")
         shutil.move(f"{filename}.tmp", filename)
-    torch_obj.load_state_dict(torch.load(filename, weights_only=True, map_location=device), **load_kwargs)
 
+
+def _cleanup(logger, dry_run, optimize_local_storage, filename):
     if not dry_run and not optimize_local_storage:
         backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
         logger.debug(f"Backup resumed model weights as {backname}")
         shutil.copy2(filename, backname)
 
 
-def save_checkpoint(
+# Merge b into a, optionally preventing new keys; does not mutate inputs
+def deepmerge(a: dict, b: dict, in_place=False, allow_new=True, update_existing=True, path=[]):
+    if len(path) == 0 and not in_place:
+        a = copy.deepcopy(a)
+
+    for key in b:
+        if key in a:
+            if isinstance(a[key], dict) and isinstance(b[key], dict):
+                deepmerge(a[key], b[key], in_place, allow_new, update_existing, path + [str(key)])
+            elif update_existing and a[key] != b[key]:
+                a[key] = b[key]
+        elif allow_new:
+            a[key] = b[key]
+        else:
+            raise KeyError(key)
+    return a
+
+
+def load_checkpoint(
     logger,
     dry_run,
     model,
@@ -76,9 +82,64 @@ def save_checkpoint(
     run_id,
     optimize_local_storage,
     s3_config,
+    device,
+    state=None,  # object with .to_json() and .from_json(string)
+):
+    prefix = run_id
+    f_model = os.path.join(out_dir, f"{prefix}-model.pt")
+    f_optimizer = os.path.join(out_dir, f"{prefix}-optimizer.pt")
+    f_scaler = os.path.join(out_dir, f"{prefix}-scaler.pt")
+    f_state = os.path.join(out_dir, f"{prefix}-state.json")
+
+    logger.info(dict(
+        event="Loading checkpoint...",
+        model=f_model,
+        optimizer=f_optimizer,
+        scaler=f_scaler,
+        state=f_state,
+    ))
+
+    _s3_download(logger, dry_run, s3_config, f_model)
+    model.load_state_dict(torch.load(f_model, weights_only=True, map_location=device), strict=True)
+    _cleanup(logger, dry_run, optimize_local_storage, f_model)
+
+    _s3_download(logger, dry_run, s3_config, f_optimizer)
+    optimizer.load_state_dict(torch.load(f_optimizer, weights_only=True, map_location=device))
+    _cleanup(logger, dry_run, optimize_local_storage, f_optimizer)
+
+    if scaler:
+        try:
+            _s3_download(logger, dry_run, s3_config, f_scaler)
+        except botocore.exceptions.ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                logger.warn("WARNING: scaler weights not found (maybe the model was trained on CPU only?)")
+            else:
+                raise
+        scaler.load_state_dict(torch.load(f_scaler, weights_only=True, map_location=device))
+        _cleanup(logger, dry_run, optimize_local_storage, f_scaler)
+
+    if state:
+        assert callable(state.to_json) and callable(state.from_json)
+        _s3_download(logger, dry_run, s3_config, f_state)
+        with open(f_state, "r") as f:
+            state.from_json(f.read())
+        _cleanup(logger, dry_run, optimize_local_storage, f_state)
+
+
+def save_checkpoint(
+    logger,
+    dry_run,
+    model,
+    optimizer,
+    scaler,
+    state,  # object with .to_json() and .from_json(string)
+    out_dir,
+    run_id,
+    optimize_local_storage,
+    s3_config,
     uploading_event,
     permanent=False,
-    config=None
+    config=None,
 ):
     if permanent:
         assert config, "config is also needed for permanent checkpoints"
@@ -89,17 +150,23 @@ def save_checkpoint(
     f_model = os.path.join(out_dir, f"{prefix}-model.pt")
     f_optimizer = os.path.join(out_dir, f"{prefix}-optimizer.pt")
     f_scaler = os.path.join(out_dir, f"{prefix}-scaler.pt")
+    f_state = os.path.join(out_dir, f"{prefix}-state.json")
 
     msg = dict(
         event="Saving checkpoint...",
         model=f_model,
         optimizer=f_optimizer,
         scaler=f_scaler,
+        state=f_state,
     )
 
     files = [f_model, f_optimizer]
     if scaler:
         files.append(f_scaler)
+
+    if state:
+        assert callable(state.to_json) and callable(state.from_json)
+        files.append(f_state)
 
     if uploading_event.is_set():
         logger.warn("Still uploading previous checkpoint, will not save this one locally or to S3")
@@ -134,6 +201,10 @@ def save_checkpoint(
             torch.save(optimizer.state_dict(), f_optimizer)
             if scaler:
                 torch.save(scaler.state_dict(), f_scaler)
+            if state:
+                with open(os.path.join(out_dir, f_state), "w") as f:
+                    logger.debug(f"Saving state to: {f.name}")
+                    f.write(state.to_json())
 
             os.unlink(f"{f_model}~")
             os.unlink(f"{f_optimizer}~")

@@ -12,8 +12,8 @@ class Timer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
 
-    def reset(self):
-        self._is_running = False
+    def reset(self, start=False):
+        self._is_running = start
         self._time_total = 0.0
         self._started_at = 0.0
 

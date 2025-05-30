@@ -481,7 +481,10 @@ class RolloutEncoder(nn.Module):
         mask = mask_logits.sigmoid() > 0.5
         # => (B, N_ACTIONS)
 
-        action_logits = self.rollout_policy(obs)
+        # The rollout_policy is trained separately
+        # (distilled from the I2A policy) => no grad needed here
+        with torch.no_grad():
+            action_logits = self.rollout_policy(obs)
         masked_logits = action_logits.masked_fill(~mask, -1e9)
         probs = masked_logits.softmax(dim=-1)
         # => (B, N_ACTIONS)
@@ -500,10 +503,8 @@ class RolloutEncoder(nn.Module):
         r_rew = obs.new_zeros(B, T)
         r_done = obs.new_zeros(B, T, dtype=torch.bool)
 
-        first = True
         for t in range(T):
-            action = action if first else self.get_action(obs)
-            first = False
+            action = action if t == 0 else self.get_action(obs)
 
             with torch.no_grad():
                 obs, rew, done = self.imagination_core(
@@ -666,6 +667,7 @@ class I2A(nn.Module):
             device=device,
         )
 
+        self.device = device
         self.model_free_path = ObsProcessor(self.imagination_aggregator.rollout_encoder.obs_processor.output_size)
 
         """

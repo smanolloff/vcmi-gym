@@ -1,91 +1,79 @@
-# XXX:
-# A/ To RESUME a run, set `agent_load_file` here
-#
-# B/ To LOAD a file into a NEW run, pass "--resume <json_file>"
-#   * `agent_load_file` will be overwritten
-#   * change config values by editing the JSON file
-#     NOTE: specify the changed arg NAMES in `overwrite`, e.g. ["env.max_steps"]
+import os
+
+env_kwargs = dict(
+    random_stack_chance=0,
+    role="defender",
+    random_terrain_chance=100,
+    tight_formation_chance=0,
+    max_steps=500,
+    vcmi_loglevel_global="error",
+    vcmi_loglevel_ai="error",
+    vcmienv_loglevel="WARN",
+    random_heroes=1,
+    random_obstacles=1,
+    town_chance=10,
+    warmachine_chance=40,
+    mana_min=0,
+    mana_max=0,
+    reward_step_fixed=-1,
+    reward_dmg_mult=1,
+    reward_term_mult=1,
+    swap_sides=0,
+    user_timeout=600,
+    vcmi_timeout=600,
+    boot_timeout=300,
+)
 
 config = dict(
-    # run_id        # always auto
-    # resume        # must use the default (False) for new runs
-    # overwrite     # must use the default ([]) for new runs
+    name_template="{datetime}-{id}-v12",
+    out_dir_template="data/world/mppo-i2a",
 
-    run_name_template="{datetime}-{id}",
-    group_id="mppo_i2a",
+    # XXX: s3_dir's "{wandb_group}" substring will be replaced with this value
+    wandb_group="mppo-i2a",
+    wandb_log_interval_s=60,
 
-    agent_load_file=None,
-    # agent_load_file="data/mppo_dna_ray/hktcyplj-agent-1743934056.pt",
-
-    save_every=600,
-    max_old_saves=0,
-
-    num_envs=2,
-    num_steps_per_env=200,  # num_steps = num_steps_per_sampler * num_samplers
-    num_minibatches=2,
-    update_epochs=2,
-
-    gamma=0.85,
-    gae_lambda=0.9,
-    ent_coef=0.05,
-    clip_coef=0.5,
-    lr_schedule=dict(mode="const", start=0.0001),
-    norm_adv=True,
-    clip_vloss=True,
-    max_grad_norm=1,
-    weight_decay=0.05,
-
-    rollouts_per_log=10,
-    loglevel="DEBUG",
-    run_name=None,
-    trial_id=None,
-    wandb_project="vcmi-gym",
-    notes=None,
-    vsteps_total=0,
-    seconds_total=0,
-    success_rate_target=None,
-    ep_rew_mean_target=None,
-    quit_on_target=False,
-    mapside="defender",
-    permasave_every=int(2e9),  # disable with int(2e9), which is always > time.time()
-    out_dir_template="data/{group_id}",
-    opponent_load_file=None,
-    opponent_sbm_probs=[1, 0, 0],
-    target_kl=None,
-    logparams={},
-    cfg_file=None,
-    seed=42,
-    skip_wandb_init=False,
-    skip_wandb_log_code=False,
-    envmaps=["gym/generated/4096/4x1024.vmap"],
-    env=dict(
-        random_stack_chance=0,
-        random_terrain_chance=100,
-        tight_formation_chance=0,
-        max_steps=500,
-        vcmi_loglevel_global="error",
-        vcmi_loglevel_ai="error",
-        vcmienv_loglevel="WARN",
-        random_heroes=1,
-        random_obstacles=1,
-        town_chance=10,
-        warmachine_chance=40,
-        mana_min=0,
-        mana_max=0,
-        reward_step_fixed=-1,
-        reward_dmg_mult=1,
-        reward_term_mult=1,
-        swap_sides=0,
-        user_timeout=600,
-        vcmi_timeout=600,
-        boot_timeout=300,
+    checkpoint=dict(
+        interval_s=900,  # NOTE: checked only after eval
+        permanent_interval_s=6*3600,  # 6h (use int(2e9) to disable)
+        optimize_local_storage=False,
+        s3=dict(
+            bucket_name="vcmi-gym",
+            s3_dir="{wandb_group}/models"
+        ),
     ),
-    # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
-    env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
-    env_version=12,
-    i2a_kwargs=dict(
+    eval=dict(
+        env=dict(
+            num_envs=50,
+            kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap")
+        ),
+        num_vsteps=50,
+        interval_s=900,
+    ),
+    train=dict(
+        env=dict(
+            num_envs=25,
+            kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
+        ),
+        num_vsteps=50,  # num_steps = num_vsteps * num_envs
+        num_minibatches=2,
+        update_epochs=3,
+
+        gamma=0.85,
+        gae_lambda=0.9,
+        ent_coef=0.05,
+        clip_coef=0.5,
+        learning_rate=1e-4,
+        vf_coef=1.0,
+        norm_adv=True,
+        clip_vloss=True,
+        target_kl=None,
+        max_grad_norm=1,
+        weight_decay=0.05,
+        distill_lambda=1.0,
+    ),
+    model=dict(
         i2a_fc_units=1024,
-        num_trajectories=10,
+        num_trajectories=20,  # valid actions are ~65 on average... (25 for peasant)
         rollout_dim=1024,
         rollout_policy_fc_units=1024,
         horizon=3,
@@ -93,5 +81,27 @@ config = dict(
         transition_model_file="hauzybxn-model.pt",
         action_prediction_model_file="ogyesvkb-model.pt",
         reward_prediction_model_file="aexhrgez-model.pt",
-    )
+    ),
 )
+
+config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].replace("{wandb_group}", config["wandb_group"])
+
+# Debug
+if os.getenv("VASTAI", None) != "1":
+    config["train"]["num_vsteps"] = 4
+    config["train"]["env"]["num_envs"] = 1
+    config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
+    config["eval"]["num_vsteps"] = 50
+    config["eval"]["env"]["num_envs"] = 1
+    config["eval"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
+    config["eval"]["interval_s"] = 10
+    config["wandb_log_interval_s"] = 5
+    config["checkpoint"]["interval_s"] = 11
+    config["model"].update(
+        i2a_fc_units=16,
+        num_trajectories=1,  # valid actions are ~65 on average... (25 for peasant)
+        rollout_dim=16,
+        rollout_policy_fc_units=16,
+        horizon=2,
+        obs_processor_output_size=16,
+    )
