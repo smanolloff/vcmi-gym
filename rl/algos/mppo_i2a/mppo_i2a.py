@@ -169,7 +169,7 @@ def create_venv(env_kwargs, num_envs):
     return vec_env
 
 
-def collect_samples(model, venv, num_vsteps, storage, maybe_autocast):
+def collect_samples(logger, model, venv, num_vsteps, storage, maybe_autocast):
     assert not torch.is_grad_enabled()
 
     stats = SampleStats()
@@ -183,22 +183,23 @@ def collect_samples(model, venv, num_vsteps, storage, maybe_autocast):
     num_envs = storage.obs.size(1)
     assert num_envs == venv.num_envs
 
-    for step in range(0, num_vsteps):
-        storage.obs[step] = storage.next_obs
-        storage.dones[step] = storage.next_done
-        storage.masks[step] = storage.next_mask
+    for vstep in range(0, num_vsteps):
+        logger.debug("(train) vstep: %d" % vstep)
+        storage.obs[vstep] = storage.next_obs
+        storage.dones[vstep] = storage.next_done
+        storage.masks[vstep] = storage.next_mask
 
         with maybe_autocast:
             action_logits, value = model(storage.next_obs, storage.next_mask)
             action, logprob, _ = process_action_logits(action_logits, storage.next_mask)
 
-        storage.values[step] = value.flatten()
-        storage.actions[step] = action
-        storage.logprobs[step] = logprob
+        storage.values[vstep] = value.flatten()
+        storage.actions[vstep] = action
+        storage.logprobs[vstep] = logprob
 
         next_obs, reward, terminations, truncations, infos = venv.step(action.cpu().numpy())
         next_done = np.logical_or(terminations, truncations)
-        storage.rewards[step] = torch.as_tensor(reward, device=device).view(-1)
+        storage.rewards[vstep] = torch.as_tensor(reward, device=device).view(-1)
         storage.next_obs = torch.as_tensor(next_obs, device=device)
         storage.next_done = torch.as_tensor(next_done, dtype=torch.float32, device=device)
         storage.next_mask = torch.as_tensor(np.array(venv.call("action_mask")), device=device)
@@ -241,7 +242,8 @@ def eval_model(logger, model, venv, num_vsteps):
 
     obs, _ = venv.reset()
 
-    for step in range(0, num_vsteps):
+    for vstep in range(0, num_vsteps):
+        logger.debug("(eval) vstep: %d" % vstep)
         obs = t(obs)
         mask = t(np.array(venv.call("action_mask")))
 
@@ -308,8 +310,10 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
     clipfracs = []
 
     for epoch in range(train_config["update_epochs"]):
+        logger.debug("(train) epoch: %d" % epoch)
         np.random.shuffle(b_inds)
-        for start in range(0, batch_size, minibatch_size):
+        for i, start in enumerate(range(0, batch_size, minibatch_size)):
+            logger.debug("(train) minibatch: %d" % i)
             end = start + minibatch_size
             mb_inds = b_inds[start:end]
 
@@ -501,9 +505,9 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     torch.backends.cudnn.benchmark = True
 
     train_venv = create_venv(train_config["env"]["kwargs"], train_config["env"]["num_envs"])
-    logger.info("Initialized %d train envs" % train_venv.num_envs)
+    logger.debug("Initialized %d train envs" % train_venv.num_envs)
     eval_venv = create_venv(eval_config["env"]["kwargs"], eval_config["env"]["num_envs"])
-    logger.info("Initialized %d train envs" % eval_venv.num_envs)
+    logger.debug("Initialized %d train envs" % eval_venv.num_envs)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_envs = train_config["env"]["num_envs"]
@@ -533,11 +537,15 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    logger.info("Initialized I2A model and optimizer")
+    logger.debug("Initialized I2A model and optimizer")
 
     # TODO: on cuda, the scaler results in errors -- fix them
-    # scaler = torch.amp.GradScaler() if device.type == "cuda" else None
-    scaler = None
+    if device.type == "cuda":
+        logger.warning("Not initializing scaler (TODO)")
+        # scaler = torch.amp.GradScaler()
+        scaler = None
+    else:
+        scaler = None
 
     if resume_config:
         load_checkpoint(
@@ -646,6 +654,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
             model.eval()
             with torch.no_grad():
                 train_sample_stats = collect_samples(
+                    logger=logger,
                     model=model,
                     venv=train_venv,
                     num_vsteps=train_config["num_vsteps"],
