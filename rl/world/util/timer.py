@@ -13,9 +13,13 @@ class Timer:
         self.stop()
 
     def reset(self, start=False):
-        self._is_running = start
+        if start:
+            self._is_running = True
+            self._started_at = time.perf_counter()
+        else:
+            self._is_running = False
+            self._started_at = 0.0
         self._time_total = 0.0
-        self._started_at = 0.0
 
     def start(self):
         if self._is_running:

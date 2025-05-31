@@ -20,9 +20,9 @@ import torch
 import vcmi_gym
 
 
-def get_action(model, obs):
+def get_action(env, obs, model):
     if model is None:
-        return np.random.choice(np.where(obs["action_mask"])[0])
+        return env.random_action()
 
     raise NotImplementedError("model prediction on v5 env")
     # return model.predict(
@@ -32,13 +32,15 @@ def get_action(model, obs):
 
 
 def main():
-    total_steps = 1000
-    env = vcmi_gym.VcmiEnv_v10(
-        "gym/generated/4096/4096-6stack-100K-01.vmap",
-        random_heroes=0,
-        random_obstacles=0,
-        conntype="thread",
-        opponent="StupidAI",
+    total_steps = 10000
+    env = vcmi_gym.VcmiEnv_v12(
+        #"gym/generated/4096/4096-6stack-100K-01.vmap",
+        "gym/generated/4096/4x1024.vmap",
+        random_heroes=1,
+        random_obstacles=100,
+        warmachine_chance=40,
+        town_chance=10,
+        opponent="BattleAI",
         max_steps=1000,
         # swap_sides=1,
     )
@@ -79,6 +81,8 @@ def main():
     # JIT torch model (~5% faster)
     #model = torch.jit.load("rl/models/Attacker model:v7/jit-agent.pt")
 
+    num_transitions = torch.zeros(20, dtype=torch.long)
+
     try:
         if model:
             actor = model.actor if isinstance(model, torch.jit._script.RecursiveScriptModule) else model.NN.actor
@@ -87,6 +91,8 @@ def main():
                 env = vcmi_gym.LegacyActionSpaceWrapper(env)
 
         while steps < total_steps:
+            num_transitions[min(19, len(obs["transitions"]["observations"]))] += 1
+
             if term or trunc:
                 assert not was_term
                 was_term = two_users
@@ -107,7 +113,7 @@ def main():
                     tmpresets += 1
                 obs, info = env.reset()
             else:
-                act = get_action(model, obs)
+                act = get_action(env, obs, model)
                 obs, _, term, trunc, info = env.step(act)
 
             # reset is also a "step" (aka. a round-trip to VCMI)
@@ -134,6 +140,11 @@ def main():
         print("* Total time: %.2f seconds" % s)
         print("* Total steps: %d" % steps)
         print("* Total resets: %d" % resets)
+
+        print("Transitions:")
+        for i, t in enumerate(num_transitions):
+            print("%d: %.1f%% (%d)" % (i, 100 * t / sum(num_transitions), t))
+
     finally:
         env.close()
 

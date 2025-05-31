@@ -67,20 +67,6 @@ assert HEX_ATTR_MAP["STACK_QUEUE"][0].endswith("_ZERO_NULL")
 INDEX_HEX_STACK_STACK_QUEUE = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1st bit = currently active
 
 
-# Attacker army: 1 phoenix
-# Defender army: 3 arrow towers + 8 stacks (incl. ballista)
-# NOTE: tent, catapult & arrow towers are excluded from the transitions
-# => Transitions:
-#   1. Phoenix
-#   ---- transitions start:
-#   4. 8x stacks (wait)
-#   5. 8x stacks (act)
-#   ---- transitions end
-#   = 16... (the "prediction" will likely be totally wrong)
-# This is quite a rare case, though. 8 seems insufficient.. go with 10
-MAX_TRANSITIONS = 12
-
-
 class ImaginationCore(nn.Module):
     def __init__(
         self,
@@ -88,6 +74,7 @@ class ImaginationCore(nn.Module):
         reward_step_fixed,
         reward_dmg_mult,
         reward_term_mult,
+        max_transitions,
         transition_model_file,
         action_prediction_model_file,
         reward_prediction_model_file,
@@ -103,6 +90,8 @@ class ImaginationCore(nn.Module):
         self.reward_step_fixed = torch.tensor(reward_step_fixed, dtype=torch.float32, device=device)
         self.reward_dmg_mult = torch.tensor(reward_dmg_mult, dtype=torch.float32, device=device)
         self.reward_term_mult = torch.tensor(reward_term_mult, dtype=torch.float32, device=device)
+        self.max_transitions = max_transitions
+        self.num_truncations = 0
 
         self.transition_model = t10n.TransitionModel(device)
         self.transition_model.eval()
@@ -188,17 +177,18 @@ class ImaginationCore(nn.Module):
         if debug:
             # Every batch will have different num_transitions
             num_t = torch.zeros(B, dtype=torch.long, device=self.device)
-            action_hist = torch.zeros(B, MAX_TRANSITIONS, dtype=torch.long, device=self.device).fill_(-1)
-            done_hist = torch.zeros(B, MAX_TRANSITIONS, dtype=torch.long, device=self.device).fill_(-1)
-            state_hist = torch.zeros(B, MAX_TRANSITIONS, initial_state.size(1), device=self.device).fill_(-1)
+            action_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
+            done_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
+            state_hist = torch.zeros(B, self.max_transitions, initial_state.size(1), device=self.device).fill_(-1)
             state_logits_hist = state_hist.clone()
-
             action_hist[:, 0] = initial_action
             done_hist[:, 0] = initial_done
             state_hist[:, 0, :] = initial_state
             state_logits_hist[:, 0, :] = initial_state
 
-        for t in range(0, MAX_TRANSITIONS-1):
+        # Initial transition is always the input observation
+        # => max-1 transitions to predict
+        for t in range(0, self.max_transitions-1):
             if t == 0:
                 current_player = initial_player
                 current_winner = initial_winner
@@ -326,7 +316,8 @@ class ImaginationCore(nn.Module):
                     callback(state_in_progress[0].numpy(), action_in_progress.item())
 
         if idx_in_progress.numel() > 0:
-            print(f"WARNING: state still in progress after {MAX_TRANSITIONS} transitions")
+            self.num_truncations += idx_in_progress.numel()
+            print(f"WARNING: state still in progress after {self.max_transitions} transitions")
 
             if debug:
                 from vcmi_gym.envs.v12.decoder.decoder import Decoder
@@ -423,6 +414,7 @@ class RolloutEncoder(nn.Module):
         reward_step_fixed,
         reward_dmg_mult,
         reward_term_mult,
+        max_transitions,
         transition_model_file,
         action_prediction_model_file,
         reward_prediction_model_file,
@@ -438,6 +430,7 @@ class RolloutEncoder(nn.Module):
             reward_step_fixed=reward_step_fixed,
             reward_dmg_mult=reward_dmg_mult,
             reward_term_mult=reward_term_mult,
+            max_transitions=max_transitions,
             transition_model_file=transition_model_file,
             action_prediction_model_file=action_prediction_model_file,
             reward_prediction_model_file=reward_prediction_model_file,
@@ -566,6 +559,7 @@ class ImaginationAggregator(nn.Module):
         reward_step_fixed,
         reward_dmg_mult,
         reward_term_mult,
+        max_transitions,
         transition_model_file,
         action_prediction_model_file,
         reward_prediction_model_file,
@@ -582,6 +576,7 @@ class ImaginationAggregator(nn.Module):
             reward_step_fixed=reward_step_fixed,
             reward_dmg_mult=reward_dmg_mult,
             reward_term_mult=reward_term_mult,
+            max_transitions=max_transitions,
             transition_model_file=transition_model_file,
             action_prediction_model_file=action_prediction_model_file,
             reward_prediction_model_file=reward_prediction_model_file,
@@ -645,6 +640,7 @@ class I2A(nn.Module):
         reward_step_fixed,
         reward_dmg_mult,
         reward_term_mult,
+        max_transitions,
         transition_model_file,
         action_prediction_model_file,
         reward_prediction_model_file,
@@ -661,6 +657,7 @@ class I2A(nn.Module):
             reward_step_fixed=reward_step_fixed,
             reward_dmg_mult=reward_dmg_mult,
             reward_term_mult=reward_term_mult,
+            max_transitions=max_transitions,
             transition_model_file=transition_model_file,
             action_prediction_model_file=action_prediction_model_file,
             reward_prediction_model_file=reward_prediction_model_file,

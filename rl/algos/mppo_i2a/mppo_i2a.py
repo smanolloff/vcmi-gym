@@ -118,6 +118,7 @@ class SampleStats:
     ep_value_mean: float = 0.0
     ep_is_success_mean: float = 0.0
     num_episodes: int = 0
+    num_transition_truncations: int = 0
 
 
 def process_action_logits(action_logits, action_mask, action=None, deterministic=False):
@@ -163,6 +164,7 @@ def create_venv(env_kwargs, num_envs):
     #     vec_env = gym.vector.SyncVectorEnv(funcs, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
 
     vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+    vec_env.reset()
 
     return vec_env
 
@@ -173,6 +175,9 @@ def collect_samples(model, venv, num_vsteps, storage, maybe_autocast):
     stats = SampleStats()
 
     device = storage.device
+
+    model_ic = model.imagination_aggregator.rollout_encoder.imagination_core
+    truncs_start = model_ic.num_truncations
 
     assert num_vsteps == storage.obs.size(0)
     num_envs = storage.obs.size(1)
@@ -214,6 +219,9 @@ def collect_samples(model, venv, num_vsteps, storage, maybe_autocast):
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
 
+    truncs = model_ic.num_truncations
+    stats.num_transition_truncations = truncs - truncs_start
+
     # bootstrap value if not done
     with maybe_autocast:
         _, next_value = model(storage.next_obs, storage.next_mask)
@@ -226,6 +234,8 @@ def eval_model(model, venv, num_vsteps):
     assert not torch.is_grad_enabled()
 
     stats = SampleStats()
+    model_ic = model.imagination_aggregator.rollout_encoder.imagination_core
+    truncs_start = model_ic.num_truncations
 
     t = lambda x: torch.as_tensor(x, device=model.device)
 
@@ -255,6 +265,9 @@ def eval_model(model, venv, num_vsteps):
         stats.ep_len_mean /= stats.num_episodes
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
+
+    truncs = model_ic.num_truncations
+    stats.num_transition_truncations = truncs - truncs_start
 
     return stats
 
@@ -405,6 +418,7 @@ def prepare_wandb_log(
             "eval/ep_len_mean": eval_sample_stats.ep_len_mean,
             "eval/ep_success_rate": eval_sample_stats.ep_is_success_mean,
             "eval/ep_count": eval_sample_stats.num_episodes,
+            "eval/transition_truncations": eval_sample_stats.num_transition_truncations,
         })
 
     if train_sample_stats.num_episodes > 0:
@@ -420,6 +434,7 @@ def prepare_wandb_log(
             "train/ep_len_mean": train_sample_stats.ep_len_mean,
             "train/ep_success_rate": train_sample_stats.ep_is_success_mean,
             "train/ep_count": train_sample_stats.num_episodes,
+            "train/transition_truncations": train_sample_stats.num_transition_truncations,
         })
 
     wlog.update({
@@ -446,6 +461,7 @@ def prepare_wandb_log(
     })
 
     return wlog
+
 
 def main(config, resume_config, loglevel, dry_run, no_wandb):
     if resume_config:
@@ -507,6 +523,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         reward_step_fixed=train_config["env"]["kwargs"]["reward_step_fixed"],
         reward_dmg_mult=train_config["env"]["kwargs"]["reward_dmg_mult"],
         reward_term_mult=train_config["env"]["kwargs"]["reward_term_mult"],
+        max_transitions=model_config["max_transitions"],
         transition_model_file=model_config["transition_model_file"],
         action_prediction_model_file=model_config["action_prediction_model_file"],
         reward_prediction_model_file=model_config["reward_prediction_model_file"],

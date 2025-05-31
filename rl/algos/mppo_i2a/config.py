@@ -81,6 +81,22 @@ config = dict(
         transition_model_file="hauzybxn-model.pt",
         action_prediction_model_file="ogyesvkb-model.pt",
         reward_prediction_model_file="aexhrgez-model.pt",
+
+        # Num transitions after 10K steps on:
+        #   (4x1024, defender, vs. BattleAI, swap=0, heroes=1, obst=100, mach=40, town=10, stack=0):
+        #
+        # 1: 1.8% (180)             // no action (~50% of resets, where we are first)
+        # 2: 39.0% (3899)           // no enemy action
+        # 3: 31.9% (3192)           // 1 enemy action
+        # 4: 10.7% (1067)           // ...
+        # --------------- = 83%
+        # 5: 6.4% (637)
+        # 6: 3.7% (365)
+        # 7: 2.5% (249)
+        # 8: 1.6% (156)
+        # 9: 0.9% (87)
+        # 10+: < 1%
+        max_transitions=5,
     ),
 )
 
@@ -89,6 +105,8 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 # Debug
 if os.getenv("VASTAI", None) != "1":
     config["train"]["num_vsteps"] = 4
+    config["train"]["num_minibatches"] = 2
+    config["train"]["update_epochs"] = 1
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     config["eval"]["num_vsteps"] = 50
