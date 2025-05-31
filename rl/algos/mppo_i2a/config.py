@@ -51,9 +51,11 @@ config = dict(
     ),
     train=dict(
         env=dict(
+            # XXX: more venvs = more efficient GPU usage (B=num_envs)
             num_envs=40,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
+        # XXX: ep_len_mean=30... try to capture AT LEAST 1 episode per env
         num_vsteps=40,  # num_steps = num_vsteps * num_envs
         num_minibatches=50,
         update_epochs=3,

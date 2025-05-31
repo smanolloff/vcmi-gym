@@ -501,7 +501,9 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     torch.backends.cudnn.benchmark = True
 
     train_venv = create_venv(train_config["env"]["kwargs"], train_config["env"]["num_envs"])
+    logger.info("Initialized %d train envs" % train_venv.num_envs)
     eval_venv = create_venv(eval_config["env"]["kwargs"], eval_config["env"]["num_envs"])
+    logger.info("Initialized %d train envs" % eval_venv.num_envs)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_envs = train_config["env"]["num_envs"]
@@ -531,6 +533,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    logger.info("Initialized I2A model and optimizer")
 
     # TODO: on cuda, the scaler results in errors -- fix them
     # scaler = torch.amp.GradScaler() if device.type == "cuda" else None
@@ -610,12 +613,14 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
 
     eval_timer = Timer()
     eval_timer.start()
+    eval_timer._started_at = 0  # force first trigger
     checkpoint_timer = Timer()
     checkpoint_timer.start()
     permanent_checkpoint_timer = Timer()
     permanent_checkpoint_timer.start()
     wandb_log_commit_timer = Timer()
     wandb_log_commit_timer.start()
+    wandb_log_commit_timer._started_at = 0  # force first trigger
 
     while True:
         [v.reset(start=(k == "all")) for k, v in timers.items()]
