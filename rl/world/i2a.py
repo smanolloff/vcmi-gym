@@ -317,7 +317,7 @@ class ImaginationCore(nn.Module):
 
         if idx_in_progress.numel() > 0:
             self.num_truncations += idx_in_progress.numel()
-            print(f"WARNING: state still in progress after {self.max_transitions} transitions")
+            # print(f"WARNING: state still in progress after {self.max_transitions} transitions")
 
             if debug:
                 from vcmi_gym.envs.v12.decoder.decoder import Decoder

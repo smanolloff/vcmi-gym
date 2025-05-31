@@ -622,6 +622,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
 
         # Evaluate first (for a baseline when resuming with modified params)
         if eval_timer.peek() > eval_config["interval_s"]:
+            logger.info("Time for eval")
             eval_timer.reset(start=True)
 
             with timers["eval"]:
@@ -667,6 +668,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
 
         # Checkpoint only if we have eval stats
         if checkpoint_timer.peek() > config["checkpoint"]["interval_s"] and eval_sample_stats.num_episodes > 0:
+            logger.info("Time for a checkpoint")
             checkpoint_timer.reset(start=True)
             eval_net_value = eval_sample_stats.ep_value_mean
 
@@ -726,6 +728,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         accumulate_logs(wlog)
 
         if wandb_log_commit_timer.peek() > config["wandb_log_interval_s"]:
+            logger.info("Time for wandb log")
             wandb_log_commit_timer.reset(start=True)
             wlog.update(aggregate_logs())
             wlog.update(timer_stats(timers))
