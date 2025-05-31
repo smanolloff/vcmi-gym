@@ -230,7 +230,7 @@ def collect_samples(model, venv, num_vsteps, storage, maybe_autocast):
     return stats
 
 
-def eval_model(model, venv, num_vsteps):
+def eval_model(logger, model, venv, num_vsteps):
     assert not torch.is_grad_enabled()
 
     stats = SampleStats()
@@ -272,7 +272,7 @@ def eval_model(model, venv, num_vsteps):
     return stats
 
 
-def train_model(model, optimizer, scaler, storage, train_config, maybe_autocast):
+def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_autocast):
     assert torch.is_grad_enabled()
 
     # compute advantages
@@ -634,6 +634,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
                 model.eval()
                 with torch.no_grad():
                     eval_sample_stats = eval_model(
+                        logger=logger,
                         model=model,
                         venv=eval_venv,
                         num_vsteps=eval_config["num_vsteps"],
@@ -663,6 +664,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         with timers["train"]:
             model.train()
             train_stats = train_model(
+                logger=logger,
                 model=model,
                 optimizer=optimizer,
                 scaler=scaler,
