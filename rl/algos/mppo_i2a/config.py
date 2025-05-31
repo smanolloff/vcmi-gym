@@ -19,9 +19,9 @@ env_kwargs = dict(
     reward_dmg_mult=1,
     reward_term_mult=1,
     swap_sides=0,
-    user_timeout=600,
-    vcmi_timeout=600,
-    boot_timeout=300,
+    user_timeout=1800,
+    vcmi_timeout=60,
+    boot_timeout=30,
 )
 
 config = dict(
@@ -43,22 +43,23 @@ config = dict(
     ),
     eval=dict(
         env=dict(
-            num_envs=10,
+            num_envs=40,
             kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap")
         ),
-        num_vsteps=500,
+        num_vsteps=100,
         interval_s=1800,
     ),
     train=dict(
         env=dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
+            # XXX: 50 envs ~= 30G RAM
             num_envs=40,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         # XXX: ep_len_mean=30... try to capture AT LEAST 1 episode per env
         num_vsteps=40,  # num_steps = num_vsteps * num_envs
         num_minibatches=50,
-        update_epochs=3,
+        update_epochs=1,
 
         gamma=0.85,
         gae_lambda=0.9,
@@ -111,7 +112,7 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["update_epochs"] = 1
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    config["eval"]["num_vsteps"] = 50
+    config["eval"]["num_vsteps"] = 10
     config["eval"]["env"]["num_envs"] = 1
     config["eval"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     config["eval"]["interval_s"] = 10

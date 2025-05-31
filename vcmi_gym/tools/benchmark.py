@@ -32,7 +32,7 @@ def get_action(env, obs, model):
 
 
 def main():
-    total_steps = 10000
+    total_steps = 1000
     env = vcmi_gym.VcmiEnv_v12(
         #"gym/generated/4096/4096-6stack-100K-01.vmap",
         "gym/generated/4096/4x1024.vmap",

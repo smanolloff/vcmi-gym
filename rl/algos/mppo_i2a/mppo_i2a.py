@@ -128,7 +128,7 @@ def process_action_logits(action_logits, action_mask, action=None, deterministic
             action = torch.argmax(dist.probs, dim=1)
         else:
             action = dist.sample()
-    return action, dist.log_prob(action), dist.entropy()
+    return action, dist
 
 
 def create_venv(env_kwargs, num_envs):
@@ -191,11 +191,11 @@ def collect_samples(logger, model, venv, num_vsteps, storage, maybe_autocast):
 
         with maybe_autocast:
             action_logits, value = model(storage.next_obs, storage.next_mask)
-            action, logprob, _ = process_action_logits(action_logits, storage.next_mask)
+            action, dist = process_action_logits(action_logits, storage.next_mask)
 
         storage.values[vstep] = value.flatten()
         storage.actions[vstep] = action
-        storage.logprobs[vstep] = logprob
+        storage.logprobs[vstep] = dist.log_prob(action)
 
         next_obs, reward, terminations, truncations, infos = venv.step(action.cpu().numpy())
         next_done = np.logical_or(terminations, truncations)
@@ -248,7 +248,7 @@ def eval_model(logger, model, venv, num_vsteps):
         mask = t(np.array(venv.call("action_mask")))
 
         action_logits, value = model(obs, mask)
-        action, _, _ = process_action_logits(action_logits, mask)
+        action, _ = process_action_logits(action_logits, mask)
 
         obs, rew, term, trunc, info = venv.step(action.cpu().numpy())
 
@@ -298,7 +298,7 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
     # flatten the batch (num_envs, env_samples, *) => (num_steps, *)
     b_obs = storage.obs.flatten(end_dim=1)
     b_logprobs = storage.logprobs.flatten(end_dim=1)
-    b_actions = storage.actions.flatten(end_dim=1)
+    b_actions = storage.actions.flatten(end_dim=1).long()
     b_masks = storage.masks.flatten(end_dim=1)
     b_advantages = storage.advantages.flatten(end_dim=1)
     b_returns = storage.returns.flatten(end_dim=1)
@@ -316,16 +316,18 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
             logger.debug("(train) minibatch: %d" % i)
             end = start + minibatch_size
             mb_inds = b_inds[start:end]
+            mb_actions = b_actions[mb_inds]
+            mb_masks = b_masks[mb_inds]
 
             with maybe_autocast:
-                newlogits, newvalue = model(b_obs[mb_inds], b_masks[mb_inds])
-                _, newlogprob, newentropy = process_action_logits(
+                newlogits, newvalue = model(b_obs[mb_inds], mb_masks)
+                _, newdist = process_action_logits(
                     newlogits,
-                    b_masks[mb_inds],
-                    action=b_actions.long()[mb_inds]
+                    mb_masks,
+                    action=mb_actions
                 )
 
-            logratio = newlogprob - b_logprobs[mb_inds]
+            logratio = newdist.log_prob(mb_actions) - b_logprobs[mb_inds]
             ratio = logratio.exp()
 
             with torch.no_grad():
@@ -359,7 +361,7 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
                 #            (ie. SB3's vf_coef is essentially x2)
                 v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-            entropy_loss = newentropy.mean()
+            entropy_loss = newdist.entropy().mean()
             policy_loss = pg_loss - train_config["ent_coef"] * entropy_loss
             value_loss = v_loss * train_config["vf_coef"]
 
@@ -371,9 +373,17 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
             // => detach `logit`
             """
             rp_logits = model.imagination_aggregator.rollout_encoder.rollout_policy(b_obs[mb_inds])
-            distill_loss = F.cross_entropy(rp_logits, newlogits.detach())
+            rp_dist = common.CategoricalMasked(logits=rp_logits, mask=mb_masks)
+            rp_log_probs = rp_dist.logits.log_softmax(dim=-1)
 
-            loss = policy_loss + value_loss + distill_loss
+            # XXX: newdist.logits is already masked
+            teacher_log_probs = newdist.logits.log_softmax(dim=-1)
+            teacher_probs = teacher_log_probs.exp().detach()
+
+            distill_loss = F.kl_div(rp_log_probs, teacher_probs, reduction='batchmean')
+            import ipdb; ipdb.set_trace()  # noqa
+
+            loss = policy_loss + value_loss + distill_loss * train_config["distill_lambda"]
 
             if scaler:
                 scaler.scale(loss).backward()
@@ -397,6 +407,7 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
     return TrainStats(
         v_loss=v_loss.item(),
         pg_loss=pg_loss.item(),
+        distill_loss=distill_loss.item(),
         loss=loss.item(),
         entropy_loss=entropy_loss.item(),
         approx_kl=approx_kl.item(),
@@ -444,7 +455,7 @@ def prepare_wandb_log(
     wlog.update({
         "train/value_loss": train_stats.v_loss,
         "train/policy_loss": train_stats.pg_loss,
-        "train/total_loss": train_stats.loss,
+        "train/distill_loss": train_stats.distill_loss,
         "train/entropy": train_stats.entropy_loss,
         "train/approx_kl": train_stats.approx_kl,
         "train/clipfrac": train_stats.clipfrac,
@@ -507,7 +518,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     train_venv = create_venv(train_config["env"]["kwargs"], train_config["env"]["num_envs"])
     logger.debug("Initialized %d train envs" % train_venv.num_envs)
     eval_venv = create_venv(eval_config["env"]["kwargs"], eval_config["env"]["num_envs"])
-    logger.debug("Initialized %d train envs" % eval_venv.num_envs)
+    logger.debug("Initialized %d eval envs" % eval_venv.num_envs)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_envs = train_config["env"]["num_envs"]
