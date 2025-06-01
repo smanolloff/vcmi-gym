@@ -478,7 +478,7 @@ class RolloutEncoder(nn.Module):
         # (distilled from the I2A policy) => no grad needed here
         with torch.no_grad():
             action_logits = self.rollout_policy(obs)
-        masked_logits = action_logits.masked_fill(~mask, -1e9)
+        masked_logits = action_logits.masked_fill(~mask, -torch.finfo(action_logits.dtype).min)
         probs = masked_logits.softmax(dim=-1)
         # => (B, N_ACTIONS)
 
