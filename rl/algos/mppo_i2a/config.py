@@ -73,6 +73,8 @@ config = dict(
         max_grad_norm=1,
         weight_decay=0.05,
         distill_lambda=1.0,
+
+        torch_autocast=True,
     ),
     model=dict(
         i2a_fc_units=1024,
@@ -112,7 +114,7 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["update_epochs"] = 1
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    config["eval"]["num_vsteps"] = 10
+    config["eval"]["num_vsteps"] = 2
     config["eval"]["env"]["num_envs"] = 1
     config["eval"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     config["eval"]["interval_s"] = 10

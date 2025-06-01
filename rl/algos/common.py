@@ -81,15 +81,15 @@ class CategoricalMasked(Categorical):
         assert mask is not None
         self.mask = mask
         self.mask_value = torch.tensor(torch.finfo(logits.dtype).min, dtype=logits.dtype)
-        logits = torch.where(self.mask, logits, self.mask_value)
-        super().__init__(logits=logits)
+        masked_logits = logits.masked_fill(~mask, self.mask_value)
+        super().__init__(logits=masked_logits)
 
     def entropy(self):
         # Highly negative logits don't result in 0 probs, so we must replace
         # with 0s to ensure 0 contribution to the distribution's entropy
         p_log_p = self.logits * self.probs
-        p_log_p = torch.where(self.mask, p_log_p, torch.tensor(0, dtype=p_log_p.dtype, device=p_log_p.device))
-        return -p_log_p.sum(-1)
+        masked_p_log_p = p_log_p.masked_fill_(~self.mask, torch.tensor(0, dtype=p_log_p.dtype, device=p_log_p.device))
+        return -masked_p_log_p.sum(-1)
 
 
 class SerializableCategoricalMasked:

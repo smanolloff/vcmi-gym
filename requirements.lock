@@ -1,24 +1,35 @@
 #
 # XXX: ALWAYS save a lock file when modifying requirements:
 #     pip3 freeze -r requirements.txt > requirements.lock
-numpy==1.26.4
+numpy==2.2.6
 PyYAML==6.0.2
-wandb==0.18.5
-gymnasium==0.28.1
-onnx-pytorch==0.1.5
-pygit2==1.16.0
+wandb==0.19.11
+#gymnasium==0.29.1
+gymnasium==1.1.1
+#onnx-pytorch
+pygit2==1.18.0
+boto3==1.38.27
+pandas==2.2.3
+millify==0.1.1
+torchviz==0.0.3
 
-ray==2.38.0
+ray==2.46.0
+#ray[tune]
+#ray[rllib]==2.38.0
+#ray[default]==2.38.0
 # ray's DreamerV3 is tf-only
-tensorflow==2.14.0
-tensorflow-probability==0.22.1
+#tensorflow
+#tensorflow_probability==0.22.1
 # Nightly ray builds
 #ray @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
 #ray[tune] @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
+#torch_geometric==2.7.0
 # Manually uncomment one of the torch packages -- see comment below
-#torch==2.4.1
+torch==2.7.0
+# XXX: there seems to be a better way now, see https://stackoverflow.com/a/78723182
 #torch @ https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.3.1%2Bcpu.cxx11.abi-cp312-cp312-linux_x86_64.whl
 ipdb==0.13.13
+vastai==0.2.8
 # Python's "torch" package is *not* compiled with CXX11 ABI flag by default.
 # - on macOS there is no issue (CXX11 ABI is not used there)
 # - on linux, VCMI is CXX11 ABI, and torch are incompatible, so a special cxx11.abi version of torch is needed
@@ -47,6 +58,7 @@ asttokens==2.4.1
 astunparse==1.6.2
 async-timeout==4.0.3
 attrs==23.1.0
+botocore==1.38.27
 build==1.0.3
 cachetools==5.3.2
 certifi==2023.11.17
@@ -56,7 +68,6 @@ click==8.1.7
 cloudpickle==3.0.0
 coloredlogs==15.0.1
 colorful==0.5.6
-contourpy==1.2.0
 cycler==0.12.1
 Cython==3.0.4
 decorator==5.1.1
@@ -81,7 +92,6 @@ google-auth==2.23.3
 google-auth-oauthlib==1.0.0
 google-pasta==0.2.0
 googleapis-common-protos==1.65.0
-GPy==1.10.0
 graphviz==0.20.3
 grpcio==1.59.2
 h5py==3.10.0
@@ -94,6 +104,7 @@ ipython==8.28.0
 jax-jumpy==1.0.0
 jedi==0.19.1
 Jinja2==3.1.3
+jmespath==1.0.1
 joblib==1.3.2
 json5==0.9.14
 jsonschema==4.19.2
@@ -107,7 +118,6 @@ lz4==4.3.3
 Markdown==3.5.1
 markdown-it-py==3.0.0
 MarkupSafe==2.1.4
-matplotlib==3.8.2
 matplotlib-inline==0.1.7
 mdit-py-plugins==0.4.2
 mdurl==0.1.2
@@ -124,10 +134,7 @@ opencensus==0.11.4
 opencensus-context==0.1.3
 opt-einsum==3.3.0
 packaging==23.2
-pandas==2.2.0
-paramz==0.9.5
 parso==0.8.4
-pdpp==0.4.8
 pexpect==4.9.0
 pillow==10.2.0
 pip-tools==7.3.0
@@ -143,7 +150,7 @@ psutil==5.9.7
 ptyprocess==0.7.0
 pure_eval==0.2.3
 py-spy==0.4.0
-pyarrow==13.0.0
+pyarrow==20.0.0
 pyasn1==0.5.0
 pyasn1-modules==0.3.0
 pycparser==2.22
@@ -156,17 +163,13 @@ pyproject_hooks==1.0.0
 pytest==8.2.0
 python-dateutil==2.8.2
 pytz==2023.3.post1
-questionary==2.0.1
 referencing==0.30.2
 requests==2.31.0
 requests-oauthlib==1.3.1
 rich==13.6.0
 rpds-py==0.10.6
 rsa==4.9
-sb3-contrib==2.1.0
-scikit-image==0.24.0
-scikit-learn==1.3.2
-scipy==1.11.3
+s3transfer==0.13.0
 sentry-sdk==2.17.0
 setproctitle==1.3.3
 shellingham==1.5.4
@@ -174,26 +177,25 @@ shtab==1.6.5
 six==1.16.0
 smart-open==7.0.5
 smmap==5.0.1
-stable-baselines3==2.1.0
 stack-data==0.6.3
-sympy==1.12
+sympy==1.14.0
 tensorboard==2.14.0
 tensorboard-data-server==0.7.2
 tensorboardX==2.6.2.2
+tensorflow==2.14.0
 tensorflow-estimator==2.14.0
 tensorflow-io-gcs-filesystem==0.34.0
 tensorflow-macos==2.14.0
+tensorflow-probability==0.22.1
 termcolor==2.4.0
 textual==0.85.2
 threadpoolctl==3.2.0
 tifffile==2024.9.20
 tomli==2.0.1
-torch==2.4.1
-torchvision==0.19.1
 tqdm==4.66.1
 traitlets==5.14.3
 typer==0.12.5
-typing_extensions==4.9.0
+typing_extensions==4.13.2
 tyro==0.7.3
 tzdata==2023.4
 uc-micro-py==1.0.3

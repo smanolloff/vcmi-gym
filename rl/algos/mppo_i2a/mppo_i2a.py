@@ -102,10 +102,11 @@ class TensorStorage:
 
 @dataclass
 class TrainStats:
-    v_loss: float
-    pg_loss: float
-    loss: float
+    value_loss: float
+    policy_loss: float
     entropy_loss: float
+    distill_loss: float
+    loss: float
     approx_kl: float
     clipfrac: float
     explained_var: float
@@ -119,16 +120,6 @@ class SampleStats:
     ep_is_success_mean: float = 0.0
     num_episodes: int = 0
     num_transition_truncations: int = 0
-
-
-def process_action_logits(action_logits, action_mask, action=None, deterministic=False):
-    dist = common.CategoricalMasked(logits=action_logits, mask=action_mask)
-    if action is None:
-        if deterministic:
-            action = torch.argmax(dist.probs, dim=1)
-        else:
-            action = dist.sample()
-    return action, dist
 
 
 def create_venv(env_kwargs, num_envs):
@@ -169,7 +160,7 @@ def create_venv(env_kwargs, num_envs):
     return vec_env
 
 
-def collect_samples(logger, model, venv, num_vsteps, storage, maybe_autocast):
+def collect_samples(logger, model, venv, num_vsteps, storage):
     assert not torch.is_grad_enabled()
 
     stats = SampleStats()
@@ -189,9 +180,9 @@ def collect_samples(logger, model, venv, num_vsteps, storage, maybe_autocast):
         storage.dones[vstep] = storage.next_done
         storage.masks[vstep] = storage.next_mask
 
-        with maybe_autocast:
-            action_logits, value = model(storage.next_obs, storage.next_mask)
-            action, dist = process_action_logits(action_logits, storage.next_mask)
+        action_logits, value = model(storage.next_obs, storage.next_mask)
+        dist = common.CategoricalMasked(logits=action_logits, mask=storage.next_mask)
+        action = dist.sample()
 
         storage.values[vstep] = value.flatten()
         storage.actions[vstep] = action
@@ -199,7 +190,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage, maybe_autocast):
 
         next_obs, reward, terminations, truncations, infos = venv.step(action.cpu().numpy())
         next_done = np.logical_or(terminations, truncations)
-        storage.rewards[vstep] = torch.as_tensor(reward, device=device).view(-1)
+        storage.rewards[vstep] = torch.as_tensor(reward, device=device).flatten()
         storage.next_obs = torch.as_tensor(next_obs, device=device)
         storage.next_done = torch.as_tensor(next_done, dtype=torch.float32, device=device)
         storage.next_mask = torch.as_tensor(np.array(venv.call("action_mask")), device=device)
@@ -224,9 +215,8 @@ def collect_samples(logger, model, venv, num_vsteps, storage, maybe_autocast):
     stats.num_transition_truncations = truncs - truncs_start
 
     # bootstrap value if not done
-    with maybe_autocast:
-        _, next_value = model(storage.next_obs, storage.next_mask)
-        storage.next_value = next_value.reshape(1, -1)
+    _, next_value = model(storage.next_obs, storage.next_mask)
+    storage.next_value = next_value.reshape(1, -1)
 
     return stats
 
@@ -248,7 +238,8 @@ def eval_model(logger, model, venv, num_vsteps):
         mask = t(np.array(venv.call("action_mask")))
 
         action_logits, value = model(obs, mask)
-        action, _ = process_action_logits(action_logits, mask)
+        dist = common.CategoricalMasked(logits=action_logits, mask=mask)
+        action = dist.sample()
 
         obs, rew, term, trunc, info = venv.step(action.cpu().numpy())
 
@@ -274,8 +265,11 @@ def eval_model(logger, model, venv, num_vsteps):
     return stats
 
 
-def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_autocast):
+def train_model(logger, model, optimizer, autocast_ctx, scaler, storage, train_config):
     assert torch.is_grad_enabled()
+
+    # XXX: this always returns False for CPU https://github.com/pytorch/pytorch/issues/110966
+    # assert torch.is_autocast_enabled()
 
     # compute advantages
     with torch.no_grad():
@@ -309,6 +303,11 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
     b_inds = np.arange(batch_size)
     clipfracs = []
 
+    p_losses = torch.zeros(train_config["num_minibatches"])
+    e_losses = torch.zeros(train_config["num_minibatches"])
+    v_losses = torch.zeros(train_config["num_minibatches"])
+    d_losses = torch.zeros(train_config["num_minibatches"])
+
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train) epoch: %d" % epoch)
         np.random.shuffle(b_inds)
@@ -316,18 +315,15 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
             logger.debug("(train) minibatch: %d" % i)
             end = start + minibatch_size
             mb_inds = b_inds[start:end]
+            mb_obs = b_obs[mb_inds]
             mb_actions = b_actions[mb_inds]
             mb_masks = b_masks[mb_inds]
+            mb_logprobs = b_logprobs[mb_inds]
 
-            with maybe_autocast:
-                newlogits, newvalue = model(b_obs[mb_inds], mb_masks)
-                _, newdist = process_action_logits(
-                    newlogits,
-                    mb_masks,
-                    action=mb_actions
-                )
+            newlogits, newvalue = model(mb_obs, mb_masks)
+            newdist = common.CategoricalMasked(logits=newlogits, mask=mb_masks)
 
-            logratio = newdist.log_prob(mb_actions) - b_logprobs[mb_inds]
+            logratio = newdist.log_prob(mb_actions) - mb_logprobs
             ratio = logratio.exp()
 
             with torch.no_grad():
@@ -342,7 +338,7 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
             # Policy loss
             pg_loss1 = -mb_advantages * ratio
             pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - train_config["clip_coef"], 1 + train_config["clip_coef"])
-            pg_loss = torch.max(pg_loss1, pg_loss2).mean()
+            p_loss = torch.max(pg_loss1, pg_loss2).mean()
 
             # Value loss
             newvalue = newvalue.view(-1)
@@ -361,9 +357,7 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
                 #            (ie. SB3's vf_coef is essentially x2)
                 v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-            entropy_loss = newdist.entropy().mean()
-            policy_loss = pg_loss - train_config["ent_coef"] * entropy_loss
-            value_loss = v_loss * train_config["vf_coef"]
+            e_loss = newdist.entropy().mean()
 
             """
             (I2A paper, Supplementary matierial, Section A)
@@ -375,27 +369,30 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
             rp_logits = model.imagination_aggregator.rollout_encoder.rollout_policy(b_obs[mb_inds])
             rp_dist = common.CategoricalMasked(logits=rp_logits, mask=mb_masks)
             rp_log_probs = rp_dist.logits.log_softmax(dim=-1)
-
-            # XXX: newdist.logits is already masked
             teacher_log_probs = newdist.logits.log_softmax(dim=-1)
             teacher_probs = teacher_log_probs.exp().detach()
+            d_loss = F.kl_div(rp_log_probs, teacher_probs, reduction='batchmean')
 
-            distill_loss = F.kl_div(rp_log_probs, teacher_probs, reduction='batchmean')
-            import ipdb; ipdb.set_trace()  # noqa
+            p_losses[i] = p_loss.detach()
+            e_losses[i] = e_loss.detach()
+            v_losses[i] = v_loss.detach()
+            d_losses[i] = d_loss.detach()
 
-            loss = policy_loss + value_loss + distill_loss * train_config["distill_lambda"]
+            loss = (
+                p_loss
+                - (e_loss * train_config["ent_coef"])
+                + (v_loss * train_config["vf_coef"])
+                + (d_loss * train_config["distill_lambda"])
+            )
 
-            if scaler:
+            with autocast_ctx(False):
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)  # needed for clip_grad_norm
                 nn.utils.clip_grad_norm_(model.parameters(), train_config["max_grad_norm"])
                 scaler.step(optimizer)
                 scaler.update()
-            else:
-                loss.backward()
-                optimizer.step()
 
-            optimizer.zero_grad()
+                optimizer.zero_grad()
 
         if train_config["target_kl"] is not None and approx_kl > train_config["target_kl"]:
             break
@@ -405,11 +402,11 @@ def train_model(logger, model, optimizer, scaler, storage, train_config, maybe_a
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
     return TrainStats(
-        v_loss=v_loss.item(),
-        pg_loss=pg_loss.item(),
-        distill_loss=distill_loss.item(),
+        value_loss=v_losses.mean().item(),
+        policy_loss=p_losses.mean().item(),
+        entropy_loss=e_losses.mean().item(),
+        distill_loss=d_losses.mean().item(),
         loss=loss.item(),
-        entropy_loss=entropy_loss.item(),
         approx_kl=approx_kl.item(),
         clipfrac=float(np.mean(clipfracs)),
         explained_var=float(explained_var),
@@ -453,10 +450,10 @@ def prepare_wandb_log(
         })
 
     wlog.update({
-        "train/value_loss": train_stats.v_loss,
-        "train/policy_loss": train_stats.pg_loss,
+        "train/value_loss": train_stats.value_loss,
+        "train/policy_loss": train_stats.policy_loss,
+        "train/entropy_loss": train_stats.entropy_loss,
         "train/distill_loss": train_stats.distill_loss,
-        "train/entropy": train_stats.entropy_loss,
         "train/approx_kl": train_stats.approx_kl,
         "train/clipfrac": train_stats.clipfrac,
         "train/explained_var": train_stats.explained_var,
@@ -548,15 +545,49 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    logger.debug("Initialized I2A model and optimizer")
 
-    # TODO: on cuda, the scaler results in errors -- fix them
-    if device.type == "cuda":
-        logger.warning("Not initializing scaler (TODO)")
-        # scaler = torch.amp.GradScaler()
-        scaler = None
+    if train_config["torch_autocast"]:
+        autocast_ctx = lambda enabled: torch.autocast(device.type, enabled=enabled)
+        scaler = torch.GradScaler(device.type, enabled=True)
     else:
-        scaler = None
+        # No-op autocast and scaler
+        autocast_ctx = contextlib.nullcontext
+        scaler = torch.GradScaler(device.type, enabled=False)
+
+    logger.debug("Initialized I2A model and optimizer (autocast=%s)" % train_config["torch_autocast"])
+
+    """
+    XXX: debug code block for torch autocast+no_grad transformer matmul error
+    with autocast_ctx(enabled=True):
+        # TEST
+        from ...world.t10n import t10n
+        from ...world.p10n import p10n
+        from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
+        env = VcmiEnv()
+        obs_ = env.reset()[0]
+        test_obs = torch.as_tensor(obs_["observation"]).unsqueeze(0)
+        test_mask = torch.as_tensor(obs_["action_mask"]).unsqueeze(0)
+
+        print("================ TESTS START ============")
+        test_action = torch.tensor([1]).long()
+
+        # fail:
+        # res = model(test_obs, test_mask)
+
+        # fail:
+        res = model.imagination_aggregator(test_obs, test_mask, t10n.Reconstruction.GREEDY, p10n.Prediction.GREEDY)
+
+        # res = model.imagination_aggregator.rollout_encoder(test_obs, test_action, t10n.Reconstruction.GREEDY, p10n.Prediction.GREEDY)
+
+        # ok:
+        # res = model.imagination_aggregator.rollout_encoder.imagination_core.transition_model(test_obs, test_action)
+
+        # test_transformer_input = torch.randn([1, 165, 512])
+        # model.imagination_aggregator.rollout_encoder.imagination_core.transition_model.transformer_hex(test_transformer_input)
+
+        import ipdb; ipdb.set_trace()  # noqa
+        pass
+    """
 
     if resume_config:
         load_checkpoint(
@@ -618,7 +649,6 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     # during training, we simply check if the event is set and optionally skip the upload
     # Non-bloking, but uploads may be skipped (checkpoint uploads)
     uploading_event = threading.Event()
-    maybe_autocast = torch.amp.autocast(device.type) if scaler else contextlib.nullcontext()
 
     timers = {
         "all": Timer(),
@@ -661,17 +691,15 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         else:
             eval_sample_stats = SampleStats()
 
-        with timers["sample"]:
-            model.eval()
-            with torch.no_grad():
-                train_sample_stats = collect_samples(
-                    logger=logger,
-                    model=model,
-                    venv=train_venv,
-                    num_vsteps=train_config["num_vsteps"],
-                    storage=storage,
-                    maybe_autocast=maybe_autocast
-                )
+        model.eval()
+        with timers["sample"], torch.no_grad(), autocast_ctx(True):
+            train_sample_stats = collect_samples(
+                logger=logger,
+                model=model,
+                venv=train_venv,
+                num_vsteps=train_config["num_vsteps"],
+                storage=storage,
+            )
 
         state.current_vstep += train_config["num_vsteps"]
         state.current_timestep += train_config["num_vsteps"] * num_envs
@@ -681,16 +709,16 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         state.current_second = int(timers["sample"].peek())
         state.global_second += int(timers["all"].peek())
 
-        with timers["train"]:
-            model.train()
+        model.train()
+        with timers["train"], autocast_ctx(True):
             train_stats = train_model(
                 logger=logger,
                 model=model,
                 optimizer=optimizer,
+                autocast_ctx=autocast_ctx,
                 scaler=scaler,
                 storage=storage,
                 train_config=train_config,
-                maybe_autocast=maybe_autocast,
             )
 
         # Checkpoint only if we have eval stats

@@ -15,7 +15,7 @@ from datetime import datetime
 from .dataset_s3 import DatasetS3
 from .dataset_vcmi import DatasetVCMI
 from .misc import TableColumn, dig, aggregate_metrics, timer_stats, safe_mean
-from .persistence import load_local_or_s3_checkpoint, save_checkpoint, save_buffer_async
+from .persistence import load_checkpoint, save_checkpoint, save_buffer_async
 from .stats import Stats
 from .structured_logger import StructuredLogger
 from .timer import Timer
@@ -150,10 +150,7 @@ def train(
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-    if device.type == "cuda":
-        scaler = torch.amp.GradScaler()
-    else:
-        scaler = None
+    scaler = torch.amp.GradScaler()
 
     optimize_local_storage = config.get("s3", {}).get("optimize_local_storage")
 
@@ -211,29 +208,21 @@ def train(
     stats = Stats(model, device=device)
 
     if resume_config:
-        load_checkpoint = partial(
-            load_local_or_s3_checkpoint,
-            logger,
-            dry_run,
-            checkpoint_s3_config,
-            optimize_local_storage,
-            device,
-            config["run"]["out_dir"],
-            run_id,
+        load_checkpoint(
+            logger=logger,
+            dry_run=dry_run,
+            model=model,
+            optimizer=optimizer,
+            scaler=scaler,
+            out_dir=config["run"]["out_dir"],
+            run_id=run_id,
+            optimize_local_storage=optimize_local_storage,
+            s3_config=checkpoint_s3_config,
+            device=device,
         )
 
-        load_checkpoint("model", model, strict=True)
-        load_checkpoint("optimizer", optimizer)
         optimizer.param_groups[0]["lr"] = learning_rate
 
-        if scaler:
-            try:
-                load_checkpoint("scaler", scaler)
-            except botocore.exceptions.ClientError as e:
-                if e.response["Error"]["Code"] == "404":
-                    logger.warn("WARNING: scaler weights not found (maybe the model was trained on CPU only?)")
-                else:
-                    raise
 
     if no_wandb:
         from unittest.mock import Mock

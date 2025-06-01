@@ -784,7 +784,7 @@ def train_model(
 ):
     assert buffer.capacity % batch_size == 0, f"{buffer.capacity} % {batch_size} == 0"
 
-    maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
+    maybe_autocast = torch.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
     model.train()
     timer = Timer()

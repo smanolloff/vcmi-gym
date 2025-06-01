@@ -498,7 +498,6 @@ class RolloutEncoder(nn.Module):
 
         for t in range(T):
             action = action if t == 0 else self.get_action(obs)
-
             with torch.no_grad():
                 obs, rew, done = self.imagination_core(
                     initial_state=obs,
@@ -508,9 +507,9 @@ class RolloutEncoder(nn.Module):
                     debug=debug,
                 )
 
-                r_obs[:, t, :] = obs
-                r_rew[:, t] = rew
-                r_done[:, t] = done
+            r_obs[:, t, :] = obs
+            r_rew[:, t] = rew
+            r_done[:, t] = done
 
         """
         (I2A paper, section B.1, under "I2A"):
