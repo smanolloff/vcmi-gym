@@ -499,6 +499,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
 
     # assert config["checkpoint"]["interval_s"] > config["eval"]["interval_s"]
     assert config["checkpoint"]["permanent_interval_s"] > config["eval"]["interval_s"]
+    assert config["train"]["env"]["kwargs"]["user_timeout"] >= 2 * config["eval"]["interval_s"]
 
     checkpoint_config = dig(config, "checkpoint")
     train_config = dig(config, "train")
@@ -642,7 +643,6 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         "train_config/norm_adv": int(train_config["norm_adv"]),
         "train_config/clip_vloss": int(train_config["clip_vloss"]),
         "train_config/max_grad_norm": train_config["max_grad_norm"],
-        "train_config/weight_decay": train_config["weight_decay"],
         "train_config/distill_lambda": train_config["distill_lambda"],
     }, commit=False)
 

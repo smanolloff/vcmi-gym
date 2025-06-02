@@ -19,7 +19,7 @@ env_kwargs = dict(
     reward_dmg_mult=1,
     reward_term_mult=1,
     swap_sides=0,
-    user_timeout=1800,
+    user_timeout=3600,
     vcmi_timeout=60,
     boot_timeout=30,
 )
@@ -33,8 +33,8 @@ config = dict(
     wandb_log_interval_s=60,
 
     checkpoint=dict(
-        interval_s=0,  # use 0 to checkpoint on each eval
-        permanent_interval_s=6*3600,  # 6h (use int(2e9) to disable)
+        interval_s=3600,
+        permanent_interval_s=12*3600,  # disable with int(2e9)
         optimize_local_storage=False,
         s3=dict(
             bucket_name="vcmi-gym",
@@ -71,15 +71,14 @@ config = dict(
         clip_vloss=True,
         target_kl=None,
         max_grad_norm=1,
-        weight_decay=0.05,
         distill_lambda=1.0,
 
-        torch_autocast=True,
+        torch_autocast=False,
     ),
     model=dict(
         i2a_fc_units=1024,
         num_trajectories=20,  # valid actions are ~65 on average... (25 for peasant)
-        rollout_dim=1024,
+        rollout_dim=512,
         rollout_policy_fc_units=1024,
         horizon=3,
         obs_processor_output_size=2048,
