@@ -173,10 +173,10 @@ class ImaginationCore(nn.Module):
         #     # tm = self.transition_model
         #     tm = debugtransition
         B = initial_state.size(0)
+        num_t = torch.zeros(B, dtype=torch.long)
 
         if debug:
             # Every batch will have different num_transitions
-            num_t = torch.zeros(B, dtype=torch.long, device=self.device)
             action_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
             done_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
             state_hist = torch.zeros(B, self.max_transitions, initial_state.size(1), device=self.device).fill_(-1)
@@ -298,13 +298,13 @@ class ImaginationCore(nn.Module):
                 reward[idx_in_progress] += self.reward_prediction_model(state_in_progress, action_in_progress).float()
 
             state[idx_in_progress] = self.transition_model.reconstruct(state_logits[idx_in_progress], strategy=t10n_strategy)
+            num_t[idx_in_progress] += 1
 
             if debug:
                 done_hist[idx_in_progress, t] = done[idx_in_progress].long()
                 action_hist[idx_in_progress, t] = action_in_progress.long()
                 state_hist[idx_in_progress, t+1, :] = state[idx_in_progress]
                 state_logits_hist[idx_in_progress, t+1, :] = state_logits[idx_in_progress]
-                num_t[idx_in_progress] += 1
 
             if callback:
                 if t10n_strategy == t10n.Reconstruction.PROBS:
@@ -349,7 +349,7 @@ class ImaginationCore(nn.Module):
             # Latest state should have no action
             callback(state[0].numpy(), -1)
 
-        return state, reward, done
+        return state, reward, done, num_t
 
 
 class ObsProcessor(nn.Module):
@@ -419,8 +419,11 @@ class RolloutEncoder(nn.Module):
         action_prediction_model_file,
         reward_prediction_model_file,
         device=torch.device("cpu"),
+        debug_render=False,
     ):
         super().__init__()
+        self.debug_render = debug_render
+
         self.rollout_dim = rollout_dim
         self.rollout_policy_fc_units = rollout_policy_fc_units
         self.horizon = horizon
@@ -471,35 +474,99 @@ class RolloutEncoder(nn.Module):
         global_mask_logits = obs[:, INDEX_GLOBAL_ACTION_MASK_START:INDEX_GLOBAL_ACTION_MASK_END]
 
         mask_logits = torch.cat((global_mask_logits, hex_masks_logits.flatten(start_dim=1)), dim=-1)
-        mask = mask_logits.sigmoid() > 0.5
+        mask = mask_logits > 0
+        mask[:, 0] = False
         # => (B, N_ACTIONS)
 
         # The rollout_policy is trained separately
         # (distilled from the I2A policy) => no grad needed here
         with torch.no_grad():
             action_logits = self.rollout_policy(obs)
-        masked_logits = action_logits.masked_fill(~mask, -torch.finfo(action_logits.dtype).min)
+        masked_logits = action_logits.masked_fill(~mask, torch.finfo(action_logits.dtype).min)
         probs = masked_logits.softmax(dim=-1)
         # => (B, N_ACTIONS)
 
         action = probs.multinomial(num_samples=1)
         # => (B, 1)
 
-        return action.squeeze(1)
-        # => (B)
+        return action.squeeze(1), mask
+        # => (B), (B, N_ACTIONS)
 
-    def forward(self, obs, action, t10n_strategy, p10n_strategy, debug=False):
+    def render_step(self, state, action, mask, reward, done, headline):
+        from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
+        from vcmi_gym.envs.v12.decoder.decoder import Decoder
+        import re
+        bf = Decoder.decode(state)
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        rewtxt = "" if reward is None else "Reward: %s" % round(reward, 2)
+        rewtxt += " (DONE)" if done else ""
+        render = {}
+        render["bf_lines"] = bf.render_battlefield()[0][:-1]
+        render["bf_len"] = [len(l) for l in render["bf_lines"]]
+        render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
+        render["bf_maxlen"] = max(render["bf_len"])
+        render["bf_maxprintlen"] = max(render["bf_printlen"])
+        render["bf_lines"].insert(0, rewtxt.ljust(render["bf_maxprintlen"]))
+        render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+        render["bf_lines"].insert(0, headline)
+        render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
+        render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
+        render["bf_lines"].append(VcmiEnv.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
+
+        action_texts = [VcmiEnv.action_text(a, bf=bf) for a in mask.nonzero()[0]]
+        short_actions = []
+        for at in action_texts:
+            m = re.match(r"Action (\d+): (.+) \(y=(\d+) x=(\d+)\)", at)
+            if m:
+                short = "%s:%s(%s,%s)" % m.groups()
+            else:
+                assert at == "Action 1: Wait", at
+                short = "1:WAIT"
+
+            short_actions.append(short)
+
+        return render["bf_lines"], " ".join(short_actions)
+
+    def render_dream(self, start_obs, start_act, start_mask, dream):
+        al, ml = self.render_step(start_obs, start_act, start_mask, None, False, "Dream start")
+        ary_lines = [al]
+        mask_lines = [ml]
+
+        for i, (s, a, m, r, d) in enumerate(dream):
+            al, ml = self.render_step(s, a, m, r, d, "Dream step %d:" % i)
+            ary_lines.append(al)
+            mask_lines.append(ml)
+
+        print("")
+        print("\n".join([(" → ".join(rowlines)) for rowlines in zip(*ary_lines)]))
+        for i, ml in enumerate(mask_lines):
+            print("Step %d mask: %s" % (i, ml))
+        print("")
+
+    def forward(self, obs, action, mask, t10n_strategy, p10n_strategy, debug=False, render=False):
         assert len(obs.shape) == 2
         B = obs.size(0)
         T = self.horizon
-        r_obs = obs.new_zeros(B, T, obs.size(1))
-        r_rew = obs.new_zeros(B, T)
-        r_done = obs.new_zeros(B, T, dtype=torch.bool)
+        bt_obs = obs.new_zeros(B, T, obs.size(1))
+        bt_rew = obs.new_zeros(B, T)
+        bt_done = obs.new_zeros(B, T, dtype=torch.bool)
+
+        if self.debug_render:
+            start_obs = obs.detach()
+            start_act = action.detach()
+            start_mask = mask.detach()
+            bt_act = action.new_zeros(B, T)
+            bt_mask = torch.zeros(B, T, N_ACTIONS)
 
         for t in range(T):
-            action = action if t == 0 else self.get_action(obs)
+            if t > 0:
+                action, mask = self.get_action(obs)
+                if self.debug_render:
+                    bt_act[:, t-1] = action
+                    bt_mask[:, t-1] = mask
+
             with torch.no_grad():
-                obs, rew, done = self.imagination_core(
+                obs, rew, done, _length = self.imagination_core(
                     initial_state=obs,
                     initial_action=action,
                     t10n_strategy=t10n_strategy,
@@ -507,9 +574,26 @@ class RolloutEncoder(nn.Module):
                     debug=debug,
                 )
 
-            r_obs[:, t, :] = obs
-            r_rew[:, t] = rew
-            r_done[:, t] = done
+            bt_obs[:, t, :] = obs
+            bt_rew[:, t] = rew
+            bt_done[:, t] = done
+
+        if self.debug_render:
+            bt_act[:, T-1] = -1
+            print("==========================================================")
+            print("==========================================================")
+            print("==========================================================")
+
+            for b in range(B):
+                print("------------------------------------------------------")
+                self.render_dream(
+                    start_obs[b].numpy(),
+                    start_act[b].item(),
+                    start_mask[b].numpy(),
+                    [[bt_obs[b, t].numpy(), bt_act[b, t].item(), bt_mask[b, t].numpy(), bt_rew[b, t].item(), bt_done[b, t].item()] for t in range(T)]
+                )
+                import ipdb; ipdb.set_trace()  # noqa
+                pass
 
         """
         (I2A paper, section B.1, under "I2A"):
@@ -518,14 +602,14 @@ class RolloutEncoder(nn.Module):
         to an LSTM [...] used to process all [...] rollouts
         """
         lstm_in = torch.cat((
-            self.obs_processor(r_obs.flatten(end_dim=1)).unflatten(0, [B, T]),
-            r_rew.unsqueeze(-1)
+            self.obs_processor(bt_obs.flatten(end_dim=1)).unflatten(0, [B, T]),
+            bt_rew.unsqueeze(-1)
         ), dim=-1)
         # => (B, T, self.lstm.input_size)
 
-        # Mask post-done states ("unshift" r_done)
-        lstm_mask = torch.zeros_like(r_done)
-        lstm_mask[:, 1:] = r_done[:, :-1]
+        # Mask post-done states ("unshift" bt_done)
+        lstm_mask = torch.zeros_like(bt_done)
+        lstm_mask[:, 1:] = bt_done[:, :-1]
         lstm_in.masked_fill_(lstm_mask.unsqueeze(-1), 0)
 
         """
@@ -563,6 +647,7 @@ class ImaginationAggregator(nn.Module):
         action_prediction_model_file,
         reward_prediction_model_file,
         device=torch.device("cpu"),
+        debug_render=False,
     ):
         super().__init__()
         self.num_trajectories = num_trajectories
@@ -580,6 +665,7 @@ class ImaginationAggregator(nn.Module):
             action_prediction_model_file=action_prediction_model_file,
             reward_prediction_model_file=reward_prediction_model_file,
             device=device,
+            debug_render=debug_render,
         )
 
         # Attention-based aggregator
@@ -607,7 +693,7 @@ class ImaginationAggregator(nn.Module):
         obs = obs.unsqueeze(1).expand([B, self.num_trajectories, -1]).clone().flatten(end_dim=1)
         # => (B*N, STATE_SIZE)
 
-        rollouts = self.rollout_encoder(obs, actions, t10n_strategy, p10n_strategy, debug).unflatten(0, [B, -1])
+        rollouts = self.rollout_encoder(obs, actions, mask, t10n_strategy, p10n_strategy, debug).unflatten(0, [B, -1])
         # => (B, N, X)
 
         """
@@ -647,7 +733,8 @@ class I2A(nn.Module):
         transition_model_file,
         action_prediction_model_file,
         reward_prediction_model_file,
-        device=torch.device("cpu")
+        device=torch.device("cpu"),
+        debug_render=False,
     ):
         super().__init__()
         self.imagination_aggregator = ImaginationAggregator(
@@ -665,6 +752,7 @@ class I2A(nn.Module):
             action_prediction_model_file=action_prediction_model_file,
             reward_prediction_model_file=reward_prediction_model_file,
             device=device,
+            debug_render=debug_render,
         )
 
         self.device = device
@@ -701,6 +789,7 @@ class I2A(nn.Module):
         with torch.no_grad():
             obs = torch.randn([2, STATE_SIZE], device=device)
             mask = torch.randn([2, N_ACTIONS], device=device) > 0
+            mask[:, 0] = False
             self.forward(obs, mask)
 
         layer_init(self)

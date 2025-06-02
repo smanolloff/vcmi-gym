@@ -541,7 +541,7 @@ class TransitionModel(nn.Module):
 
         elif strategy == Reconstruction.GREEDY:
             def reconstruct_binary(logits):
-                return (logits.sigmoid() > 0.5).float()
+                return (logits > 0).float()
 
             def reconstruct_categorical(logits):
                 return F.one_hot(logits.argmax(dim=-1), num_classes=logits.shape[-1]).float()

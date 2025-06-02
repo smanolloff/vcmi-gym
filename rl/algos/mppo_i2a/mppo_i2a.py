@@ -543,6 +543,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         action_prediction_model_file=model_config["action_prediction_model_file"],
         reward_prediction_model_file=model_config["reward_prediction_model_file"],
         device=device,
+        debug_render=False,
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -660,9 +661,6 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     timers["all"].start()
     eval_net_value_best = None
 
-    eval_timer = Timer()
-    eval_timer.start()
-    eval_timer._started_at = 0  # force first trigger
     checkpoint_timer = Timer()
     checkpoint_timer.start()
     permanent_checkpoint_timer = Timer()
@@ -670,6 +668,10 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     wandb_log_commit_timer = Timer()
     wandb_log_commit_timer.start()
     wandb_log_commit_timer._started_at = 0  # force first trigger
+    eval_timer = Timer()
+    eval_timer.start()
+    if config["eval"]["at_script_start"]:
+        eval_timer._started_at = 0  # force first trigger
 
     while True:
         [v.reset(start=(k == "all")) for k, v in timers.items()]
