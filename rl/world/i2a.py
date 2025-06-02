@@ -617,12 +617,16 @@ class ImaginationAggregator(nn.Module):
         """
         # XXX: multi-head attention will be used instead of concatenation
         # for a fixed-size output vector.
-        q = self.query.expand(rollouts.size(0), 1, self.rollout_encoder.rollout_dim)
-        attn_output, _ = self.mha(query=q, key=rollouts, value=rollouts)
+        # q = self.query.expand(rollouts.size(0), 1, self.rollout_encoder.rollout_dim)
+        # attn_output, _ = self.mha(query=q, key=rollouts, value=rollouts)
         # => (B, 1, X)
 
-        return attn_output.squeeze(1)
+        # return attn_output.squeeze(1)
         # => (B, X)
+
+        return rollouts.flatten(start_dim=1)
+        # => (B, N*X)
+        # where N=num_trajectories, X=rollout_dim
 
 
 class I2A(nn.Module):
