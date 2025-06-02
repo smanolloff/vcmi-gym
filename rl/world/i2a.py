@@ -173,7 +173,7 @@ class ImaginationCore(nn.Module):
         #     # tm = self.transition_model
         #     tm = debugtransition
         B = initial_state.size(0)
-        num_t = torch.zeros(B, dtype=torch.long)
+        num_t = torch.zeros(B, dtype=torch.long, device=self.device)
 
         if debug:
             # Every batch will have different num_transitions
