@@ -607,10 +607,12 @@ class RolloutEncoder(nn.Module):
         ), dim=-1)
         # => (B, T, self.lstm.input_size)
 
-        # Mask post-done states ("unshift" bt_done)
+        # Build a mask that stays True for every t ≥ the first done in that row
+        # (so that when done=1 at time i, we mask i+1, i+2, …)
+        post_term = bt_done.cumsum(dim=1) > 0  # (B, T) of flags where t >= (first done)
         lstm_mask = torch.zeros_like(bt_done)
         lstm_mask[:, 1:] = bt_done[:, :-1]
-        lstm_in.masked_fill_(lstm_mask.unsqueeze(-1), 0)
+        lstm_in.masked_fill_(post_term.unsqueeze(-1), 0)
 
         """
         (I2A paper, section 3.2):

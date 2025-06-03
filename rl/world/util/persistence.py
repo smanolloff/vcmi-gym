@@ -196,6 +196,8 @@ def save_checkpoint(
             pathlib.Path(f"{f_optimizer}~").touch()
             if scaler:
                 pathlib.Path(f"{f_scaler}~").touch()
+            if state:
+                pathlib.Path(f"{f_state}~").touch()
 
             torch.save(model.state_dict(), f_model)
             torch.save(optimizer.state_dict(), f_optimizer)
@@ -203,13 +205,14 @@ def save_checkpoint(
                 torch.save(scaler.state_dict(), f_scaler)
             if state:
                 with open(os.path.join(out_dir, f_state), "w") as f:
-                    logger.debug(f"Saving state to: {f.name}")
                     f.write(state.to_json())
 
             os.unlink(f"{f_model}~")
             os.unlink(f"{f_optimizer}~")
             if scaler:
                 os.unlink(f"{f_scaler}~")
+            if state:
+                os.unlink(f"{f_state}~")
         else:
             # Use temporary files to ensure the original one is always good
             # even if the .save is interrupted
@@ -219,11 +222,16 @@ def save_checkpoint(
             torch.save(optimizer.state_dict(), f"{f_optimizer}.tmp")
             if scaler:
                 torch.save(scaler.state_dict(), f"{f_scaler}.tmp")
+            if state:
+                with open(os.path.join(out_dir, f"{f_state}.tmp"), "w") as f:
+                    f.write(state.to_json())
 
             shutil.move(f"{f_model}.tmp", f_model)
             shutil.move(f"{f_optimizer}.tmp", f_optimizer)
             if scaler:
                 shutil.move(f"{f_scaler}.tmp", f_scaler)
+            if state:
+                shutil.move(f"{f_state}.tmp", f_state)
 
     if not s3_config:
         return
