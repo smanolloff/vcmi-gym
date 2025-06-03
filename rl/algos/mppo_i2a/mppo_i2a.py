@@ -673,71 +673,90 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     if config["eval"]["at_script_start"]:
         eval_timer._started_at = 0  # force first trigger
 
-    while True:
-        [v.reset(start=(k == "all")) for k, v in timers.items()]
+    try:
+        while True:
+            [v.reset(start=(k == "all")) for k, v in timers.items()]
 
-        # Evaluate first (for a baseline when resuming with modified params)
-        if eval_timer.peek() > eval_config["interval_s"]:
-            logger.info("Time for eval")
-            eval_timer.reset(start=True)
+            # Evaluate first (for a baseline when resuming with modified params)
+            if eval_timer.peek() > eval_config["interval_s"]:
+                logger.info("Time for eval")
+                eval_timer.reset(start=True)
 
-            with timers["eval"]:
-                model.eval()
-                with torch.no_grad():
-                    eval_sample_stats = eval_model(
-                        logger=logger,
-                        model=model,
-                        venv=eval_venv,
-                        num_vsteps=eval_config["num_vsteps"],
-                    )
-        else:
-            eval_sample_stats = SampleStats()
-
-        model.eval()
-        with timers["sample"], torch.no_grad(), autocast_ctx(True):
-            train_sample_stats = collect_samples(
-                logger=logger,
-                model=model,
-                venv=train_venv,
-                num_vsteps=train_config["num_vsteps"],
-                storage=storage,
-            )
-
-        state.current_vstep += train_config["num_vsteps"]
-        state.current_timestep += train_config["num_vsteps"] * num_envs
-        state.global_timestep += train_config["num_vsteps"] * num_envs
-        state.current_episode += train_sample_stats.num_episodes
-        state.global_episode += train_sample_stats.num_episodes
-        state.current_second = int(timers["sample"].peek())
-        state.global_second += int(timers["all"].peek())
-
-        model.train()
-        with timers["train"], autocast_ctx(True):
-            train_stats = train_model(
-                logger=logger,
-                model=model,
-                optimizer=optimizer,
-                autocast_ctx=autocast_ctx,
-                scaler=scaler,
-                storage=storage,
-                train_config=train_config,
-            )
-
-        # Checkpoint only if we have eval stats
-        if checkpoint_timer.peek() > config["checkpoint"]["interval_s"] and eval_sample_stats.num_episodes > 0:
-            logger.info("Time for a checkpoint")
-            checkpoint_timer.reset(start=True)
-            eval_net_value = eval_sample_stats.ep_value_mean
-
-            if eval_net_value_best is None:
-                # Initial baseline for resumed configs
-                eval_net_value_best = eval_net_value
-                logger.info("No baseline for checkpoint yet (eval_net_value=%f, eval_net_value_best=None), setting it now" % eval_net_value)
-            elif eval_net_value < eval_net_value_best:
-                logger.info("Bad checkpoint (eval_net_value=%f, eval_net_value_best=%f), will skip it" % (eval_net_value, eval_net_value_best))
+                with timers["eval"]:
+                    model.eval()
+                    with torch.no_grad():
+                        eval_sample_stats = eval_model(
+                            logger=logger,
+                            model=model,
+                            venv=eval_venv,
+                            num_vsteps=eval_config["num_vsteps"],
+                        )
             else:
-                logger.info("Good checkpoint (eval_net_value=%f, eval_net_value_best=%f), will save it" % (eval_net_value, eval_net_value_best))
-                eval_net_value_best = eval_net_value
+                eval_sample_stats = SampleStats()
+
+            model.eval()
+            with timers["sample"], torch.no_grad(), autocast_ctx(True):
+                train_sample_stats = collect_samples(
+                    logger=logger,
+                    model=model,
+                    venv=train_venv,
+                    num_vsteps=train_config["num_vsteps"],
+                    storage=storage,
+                )
+
+            state.current_vstep += train_config["num_vsteps"]
+            state.current_timestep += train_config["num_vsteps"] * num_envs
+            state.global_timestep += train_config["num_vsteps"] * num_envs
+            state.current_episode += train_sample_stats.num_episodes
+            state.global_episode += train_sample_stats.num_episodes
+            state.current_second = int(timers["sample"].peek())
+            state.global_second += int(timers["all"].peek())
+
+            model.train()
+            with timers["train"], autocast_ctx(True):
+                train_stats = train_model(
+                    logger=logger,
+                    model=model,
+                    optimizer=optimizer,
+                    autocast_ctx=autocast_ctx,
+                    scaler=scaler,
+                    storage=storage,
+                    train_config=train_config,
+                )
+
+            # Checkpoint only if we have eval stats
+            if checkpoint_timer.peek() > config["checkpoint"]["interval_s"] and eval_sample_stats.num_episodes > 0:
+                logger.info("Time for a checkpoint")
+                checkpoint_timer.reset(start=True)
+                eval_net_value = eval_sample_stats.ep_value_mean
+
+                if eval_net_value_best is None:
+                    # Initial baseline for resumed configs
+                    eval_net_value_best = eval_net_value
+                    logger.info("No baseline for checkpoint yet (eval_net_value=%f, eval_net_value_best=None), setting it now" % eval_net_value)
+                elif eval_net_value < eval_net_value_best:
+                    logger.info("Bad checkpoint (eval_net_value=%f, eval_net_value_best=%f), will skip it" % (eval_net_value, eval_net_value_best))
+                else:
+                    logger.info("Good checkpoint (eval_net_value=%f, eval_net_value_best=%f), will save it" % (eval_net_value, eval_net_value_best))
+                    eval_net_value_best = eval_net_value
+                    thread = threading.Thread(target=save_checkpoint, kwargs=dict(
+                        logger=logger,
+                        dry_run=dry_run,
+                        model=model,
+                        optimizer=optimizer,
+                        scaler=scaler,
+                        state=state,
+                        out_dir=config["run"]["out_dir"],
+                        run_id=run_id,
+                        optimize_local_storage=checkpoint_config["optimize_local_storage"],
+                        s3_config=checkpoint_config["s3"],
+                        uploading_event=uploading_event
+                    ))
+                    thread.start()
+
+            if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:
+                permanent_checkpoint_timer.reset(start=True)
+                logger.info("Time for a permanent checkpoint")
                 thread = threading.Thread(target=save_checkpoint, kwargs=dict(
                     logger=logger,
                     dry_run=dry_run,
@@ -749,54 +768,52 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
                     run_id=run_id,
                     optimize_local_storage=checkpoint_config["optimize_local_storage"],
                     s3_config=checkpoint_config["s3"],
-                    uploading_event=uploading_event
+                    uploading_event=threading.Event(),  # never skip this upload
+                    permanent=True,
+                    config=config,
                 ))
                 thread.start()
 
-        if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:
-            permanent_checkpoint_timer.reset(start=True)
-            logger.info("Time for a permanent checkpoint")
-            thread = threading.Thread(target=save_checkpoint, kwargs=dict(
-                logger=logger,
-                dry_run=dry_run,
+            wlog = prepare_wandb_log(
                 model=model,
                 optimizer=optimizer,
-                scaler=scaler,
                 state=state,
-                out_dir=config["run"]["out_dir"],
-                run_id=run_id,
-                optimize_local_storage=checkpoint_config["optimize_local_storage"],
-                s3_config=checkpoint_config["s3"],
-                uploading_event=threading.Event(),  # never skip this upload
-                permanent=True,
-                config=config,
-            ))
-            thread.start()
+                train_stats=train_stats,
+                train_sample_stats=train_sample_stats,
+                eval_sample_stats=eval_sample_stats,
+            )
 
-        wlog = prepare_wandb_log(
+            accumulate_logs(wlog)
+
+            if wandb_log_commit_timer.peek() > config["wandb_log_interval_s"]:
+                logger.info("Time for wandb log")
+                wandb_log_commit_timer.reset(start=True)
+                wlog.update(aggregate_logs())
+                wlog.update(timer_stats(timers))
+                wandb.log(wlog, commit=True)
+
+            logger.info(wlog)
+
+        ret_rew = safe_mean(list(state.rollout_rew_queue_1000)[-min(300, state.current_rollout):])
+        ret_value = safe_mean(list(state.rollout_net_value_queue_1000)[-min(300, state.current_rollout):])
+
+        return ret_rew, ret_value
+    finally:
+        save_checkpoint(
+            logger=logger,
+            dry_run=dry_run,
             model=model,
             optimizer=optimizer,
+            scaler=scaler,
             state=state,
-            train_stats=train_stats,
-            train_sample_stats=train_sample_stats,
-            eval_sample_stats=eval_sample_stats,
+            out_dir=config["run"]["out_dir"],
+            run_id=run_id,
+            optimize_local_storage=checkpoint_config["optimize_local_storage"],
+            s3_config=None,
+            uploading_event=threading.Event(),  # never skip this upload
+            permanent=True,
+            config=config,
         )
-
-        accumulate_logs(wlog)
-
-        if wandb_log_commit_timer.peek() > config["wandb_log_interval_s"]:
-            logger.info("Time for wandb log")
-            wandb_log_commit_timer.reset(start=True)
-            wlog.update(aggregate_logs())
-            wlog.update(timer_stats(timers))
-            wandb.log(wlog, commit=True)
-
-        logger.info(wlog)
-
-    ret_rew = safe_mean(list(state.rollout_rew_queue_1000)[-min(300, state.current_rollout):])
-    ret_value = safe_mean(list(state.rollout_net_value_queue_1000)[-min(300, state.current_rollout):])
-
-    return ret_rew, ret_value
 
 
 if __name__ == "__main__":
