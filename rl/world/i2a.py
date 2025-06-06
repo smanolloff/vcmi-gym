@@ -18,6 +18,22 @@ from .util.constants_v12 import (
     N_ACTIONS,
 )
 
+from .util.timer import Timer
+
+TIMER_ALL = Timer()
+TIMERS = {
+    "ia": Timer(),
+    "ic": Timer(),
+    "ic.p10n": Timer(),
+    "ic.t10n": Timer(),
+    "ic.rew": Timer(),
+    "ic.t10n.reconstruct": Timer(),
+    "lstm": Timer(),
+    "mf": Timer(),
+    "re": Timer(),
+    "re.get_action": Timer(),
+}
+
 INDEX_BSAP_START = GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][1]
 INDEX_BSAP_END = GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][2] + INDEX_BSAP_START
 assert GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][2] == 3  # N/A, P0, P1
@@ -268,11 +284,12 @@ class ImaginationCore(nn.Module):
                     action_probs_in_progress = F.one_hot(action_in_progress, num_classes=N_ACTIONS).float()
                 idx_in_progress_valid_action = idx_in_progress
             else:
-                if p10n_strategy == p10n.Prediction.PROBS:
-                    action_probs_in_progress = self.action_prediction_model.predict_(state_in_progress, strategy=p10n_strategy)
-                    action_in_progress = action_probs_in_progress.argmax(dim=1)
-                else:
-                    action_in_progress = self.action_prediction_model.predict_(state_in_progress, strategy=p10n_strategy)
+                with TIMERS["ic.p10n"]:
+                    if p10n_strategy == p10n.Prediction.PROBS:
+                        action_probs_in_progress = self.action_prediction_model.predict_(state_in_progress, strategy=p10n_strategy)
+                        action_in_progress = action_probs_in_progress.argmax(dim=1)
+                    else:
+                        action_in_progress = self.action_prediction_model.predict_(state_in_progress, strategy=p10n_strategy)
 
                 # p10n predicts -1 when it believes battle has ended
                 # => some of the "in_progress" states will have a reset action
@@ -291,13 +308,18 @@ class ImaginationCore(nn.Module):
             # Transition to next state:
             if p10n_strategy == p10n.Prediction.PROBS:
                 action_probs_in_progress = action_probs_in_progress[idx_in_progress_valid_action]
-                state_logits[idx_in_progress] = self.transition_model.forward_probs(state_in_progress, action_probs_in_progress).float()
-                reward[idx_in_progress] += self.reward_prediction_model.forward_probs(state_in_progress, action_probs_in_progress).float()
+                with TIMERS["ic.t10n"]:
+                    state_logits[idx_in_progress] = self.transition_model.forward_probs(state_in_progress, action_probs_in_progress).float()
+                with TIMERS["ic.rew"]:
+                    reward[idx_in_progress] += self.reward_prediction_model.forward_probs(state_in_progress, action_probs_in_progress).float()
             else:
-                state_logits[idx_in_progress] = self.transition_model(state_in_progress, action_in_progress).float()
-                reward[idx_in_progress] += self.reward_prediction_model(state_in_progress, action_in_progress).float()
+                with TIMERS["ic.t10n"]:
+                    state_logits[idx_in_progress] = self.transition_model(state_in_progress, action_in_progress).float()
+                with TIMERS["ic.rew"]:
+                    reward[idx_in_progress] += self.reward_prediction_model(state_in_progress, action_in_progress).float()
 
-            state[idx_in_progress] = self.transition_model.reconstruct(state_logits[idx_in_progress], strategy=t10n_strategy)
+            with TIMERS["ic.t10n.reconstruct"]:
+                state[idx_in_progress] = self.transition_model.reconstruct(state_logits[idx_in_progress], strategy=t10n_strategy)
             num_t[idx_in_progress] += 1
 
             if debug:
@@ -560,19 +582,21 @@ class RolloutEncoder(nn.Module):
 
         for t in range(T):
             if t > 0:
-                action, mask = self.get_action(obs)
+                with TIMERS["re.get_action"]:
+                    action, mask = self.get_action(obs)
                 if self.debug_render:
                     bt_act[:, t-1] = action
                     bt_mask[:, t-1] = mask
 
             with torch.no_grad():
-                obs, rew, done, _length = self.imagination_core(
-                    initial_state=obs,
-                    initial_action=action,
-                    t10n_strategy=t10n_strategy,
-                    p10n_strategy=p10n_strategy,
-                    debug=debug,
-                )
+                with TIMERS["ic"]:
+                    obs, rew, done, _length = self.imagination_core(
+                        initial_state=obs,
+                        initial_action=action,
+                        t10n_strategy=t10n_strategy,
+                        p10n_strategy=p10n_strategy,
+                        debug=debug,
+                    )
 
             bt_obs[:, t, :] = obs
             bt_rew[:, t] = rew
@@ -620,7 +644,8 @@ class RolloutEncoder(nn.Module):
         The choice of forward, backward or bi-directional processing seems to have
         relatively little impact on the performance of the I2A [...].
         """
-        _out, (h_n, _c_n) = self.lstm(lstm_in.flip(1))
+        with TIMERS["lstm"]:
+            _out, (h_n, _c_n) = self.lstm(lstm_in.flip(1))
 
         """
         (Chat GPT; no info in paper)
@@ -695,8 +720,9 @@ class ImaginationAggregator(nn.Module):
         obs = obs.unsqueeze(1).expand([B, self.num_trajectories, -1]).clone().flatten(end_dim=1)
         # => (B*N, STATE_SIZE)
 
-        rollouts = self.rollout_encoder(obs, actions, mask, t10n_strategy, p10n_strategy, debug).unflatten(0, [B, -1])
-        # => (B, N, X)
+        with TIMERS["re"]:
+            rollouts = self.rollout_encoder(obs, actions, mask, t10n_strategy, p10n_strategy, debug).unflatten(0, [B, -1])
+            # => (B, N, X)
 
         """
         (I2A paper, Appendix B.1, under "I2A"):
@@ -804,9 +830,20 @@ class I2A(nn.Module):
         p10n_strategy=p10n.Prediction.GREEDY,
         debug=False,
     ):
-        c_mf = self.model_free_path(obs, debug)
-        c_ia = self.imagination_aggregator(obs, mask, t10n_strategy, p10n_strategy, debug)
-        z = self.body(torch.cat((c_ia, c_mf), dim=1))
-        action_logits = self.action_head(z)
-        value = self.value_head(z)
+        with TIMER_ALL:
+            with TIMERS["mf"]:
+                c_mf = self.model_free_path(obs, debug)
+            with TIMERS["ia"]:
+                c_ia = self.imagination_aggregator(obs, mask, t10n_strategy, p10n_strategy, debug)
+            z = self.body(torch.cat((c_ia, c_mf), dim=1))
+            action_logits = self.action_head(z)
+            value = self.value_head(z)
+
+        print("=========================")
+        print("Timers:")
+        for k, v in TIMERS.items():
+            print("%s: %.2f" % (k, v.peek() / TIMER_ALL.peek()))
+            v.reset()
+        TIMER_ALL.reset()
+
         return action_logits, value

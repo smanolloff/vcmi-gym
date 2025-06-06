@@ -69,7 +69,7 @@ class State:
         return json.dumps(j, indent=4, sort_keys=False)
 
     def from_json(self, j):
-        for k, v in json.loads(j):
+        for k, v in json.loads(j).items():
             attr = getattr(self, k)
             self.k = deque(v, maxlen=attr.maxlen) if isinstance(attr, deque) else v
 
@@ -609,7 +609,8 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         # lr is lost after loading weights
         optimizer.param_groups[0]["lr"] = learning_rate
 
-        state["resumes"] += 1
+        state.resumes += 1
+        logger.info("Resumes: %d" % state.resumes)
 
     if no_wandb:
         from unittest.mock import Mock
