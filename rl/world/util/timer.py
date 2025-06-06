@@ -1,8 +1,10 @@
 import time
+import torch
 
 
 class Timer:
     def __init__(self):
+        self._cuda = torch.cuda.is_available()
         self.reset()
 
     def __enter__(self):
@@ -12,7 +14,13 @@ class Timer:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
 
+    def _maybe_synchronize(self):
+        if self._cuda:
+            # wait for cuda async operations to complete
+            torch.cuda.synchronize()
+
     def reset(self, start=False):
+        self._maybe_synchronize()
         if start:
             self._is_running = True
             self._started_at = time.perf_counter()
@@ -30,6 +38,7 @@ class Timer:
 
     def stop(self):
         # print("========== STOPPING")
+        self._maybe_synchronize()
         if not self._is_running:
             print("WARNING: timer already stopped")
         self._is_running = False

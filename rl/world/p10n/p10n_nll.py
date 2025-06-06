@@ -5,6 +5,8 @@ import enum
 import pandas as pd
 import contextlib
 
+import collections
+
 import torch.nn.functional as F
 
 from ..util.buffer_base import BufferBase
@@ -431,9 +433,9 @@ class ActionPredictionModel(nn.Module):
 
         return main_out, hex_out
 
-    def _predict_probs(self, obs, logits):
+    def _predict_probs(self, logits):
         main_logits, hex_logits = logits
-        B = obs.shape[0]
+        B = logits.shape[0]
 
         probs_main_action = main_logits.softmax(dim=-1)
         # => (B, len(MainAction)) of MainAction probs
@@ -462,8 +464,12 @@ class ActionPredictionModel(nn.Module):
         # assert probs.sum(dim=1) == 1, probs.sum()
         return probs
 
-    def _predict_action(self, obs, logits, strategy):
+    def _predict_action(self, logits, strategy, timers):
         main_logits, hex_logits = logits
+        # main_logits is (B, 3)
+        # hex_logits is (B, 165, 15)
+
+        B = main_logits.size(0)
 
         if strategy == Prediction.GREEDY:
             def pick(x):
@@ -474,34 +480,94 @@ class ActionPredictionModel(nn.Module):
                 probs_2d = x.softmax(dim=-1).view(-1, num_classes)
                 return torch.multinomial(probs_2d, num_samples=1).view(x.shape[:-1])
 
-        action_main = pick(main_logits)
+        with timers["p10n.predict.0"]:
+            action_main = pick(main_logits)
         # => (B) of MainAction values
 
-        hex_id = pick(hex_logits[:, :, 0])
+        with timers["p10n.predict.1"]:
+            hex_id = pick(hex_logits[:, :, 0])
         # => (B) of Hex ids
 
-        # arange as the B index since hex_id contains B values (ranging 0..164)
-        hex_action = pick(hex_logits[torch.arange(hex_id.shape[0]), hex_id, 1:])
+        # ======================
+        # SLOW VERSION:
+        # ----------------------
+        # # arange as the B index since hex_id contains B values (ranging 0..164)
+        # hex_action0 = pick(hex_logits[torch.arange(hex_id.shape[0]), hex_id, 1:])
+        # ----------------------
+        # FAST VERSION:
+        # ----------------------
+        # 1a) find which “hex‐row” to pick
+        with timers["p10n.predict.2"]:
+            hex_id = hex_logits[:, :, 0].argmax(dim=1)                              # (B,)
+
+        # 1b) slice off the “action‐dimension” submatrix of size 14
+        with timers["p10n.predict.3"]:
+            hex_logits_1 = hex_logits[:, :, 1:]                                     # (B,165,14)
+
+        # 1c) build an index‐tensor shaped (B,1,14) that tells gather() which row to grab
+        with timers["p10n.predict.4"]:
+            idx = hex_id.view(B, 1, 1).expand(-1, 1, hex_logits_1.size(-1))         # (B,1,14)
+
+        # 1d) gather in one go: result is (B,1,14), then squeeze to (B,14)
+        with timers["p10n.predict.5"]:
+            row_logits = hex_logits_1.gather(dim=1, index=idx).squeeze(1)           # (B,14)
+
+        # 1e) pick the argmax over those 14
+        with timers["p10n.predict.6"]:
+            hex_action = row_logits.argmax(dim=1)                                   # (B,)
         # => (B) of hex actions for the predicted hex ids
+        # ======================
 
         # Action = 2 + hex_id * N_ACTIONS + hex_action
-        action_calc = 2 + hex_id * len(HEX_ACT_MAP) + hex_action
+        with timers["p10n.predict.7"]:
+            action_calc = 2 + hex_id * len(HEX_ACT_MAP) + hex_action
 
-        return (
-            action_main
-            .where(action_main != MainAction.RESET, -1)         # RESET => -1 (e.g. done=True)
-            .where(action_main != MainAction.WAIT, 1)           # WAIT => 1
-            .where(action_main != MainAction.HEX, action_calc)  # HEX => calc
-        )
+        # ======================
+        # SLOW VERSION:
+        # ----------------------
+        # action0 = (
+        #     action_main
+        #     .where(action_main != MainAction.RESET, -1)         # RESET => -1 (e.g. done=True)
+        #     .where(action_main != MainAction.WAIT, 1)           # WAIT => 1
+        #     .where(action_main != MainAction.HEX, action_calc)  # HEX => calc
+        # )
+        # ----------------------
+        # FAST VERSION:
+        # ----------------------
+        # start from action_calc for all "HEX" cases,
+        # but we'll overwrite the others in‐place:
+        with timers["p10n.predict.8"]:
+            action = action_calc.clone()                                # (B,)
 
-    def predict_(self, obs, logits=None, strategy=Prediction.GREEDY):
-        if logits is None:
-            logits = self.forward(obs)
+        # mask out RESET => -1
+        with timers["p10n.predict.9"]:
+            mask_reset = action_main == MainAction.RESET                # (B,) boolean
+            action[mask_reset] = -1
 
-        if strategy == Prediction.PROBS:
-            return self._predict_probs(obs, logits)
-        else:
-            return self._predict_action(obs, logits, strategy)
+        # mask out WAIT => +1
+        with timers["p10n.predict.10"]:
+            mask_wait = action_main == MainAction.WAIT                  # (B,) boolean
+            action[mask_wait] = 1
+
+        with timers["p10n.predict.11"]:
+            action = torch.where(
+                action_main != MainAction.HEX,  # condition: if so, pick action_main
+                action_main,                    # True‐branch
+                action                          # False‐branch: keep action_calc
+            )
+
+        return action
+
+    def predict_(self, obs, logits=None, strategy=Prediction.GREEDY, timers=None):
+        with timers["p10n.forward"]:
+            if logits is None:
+                logits = self.forward(obs)
+
+        with timers["p10n.predict"]:
+            if strategy == Prediction.PROBS:
+                return self._predict_probs(logits)
+            else:
+                return self._predict_action(logits, strategy, timers)
 
     def predict(self, obs, strategy=Prediction.GREEDY):
         with torch.no_grad():

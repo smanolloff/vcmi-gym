@@ -180,7 +180,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         storage.dones[vstep] = storage.next_done
         storage.masks[vstep] = storage.next_mask
 
-        action_logits, value = model(storage.next_obs, storage.next_mask)
+        action_logits, value = model(storage.next_obs, storage.next_mask, debug=False)
         dist = common.CategoricalMasked(logits=action_logits, mask=storage.next_mask)
         action = dist.sample()
 

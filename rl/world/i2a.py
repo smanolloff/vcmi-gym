@@ -20,19 +20,9 @@ from .util.constants_v12 import (
 
 from .util.timer import Timer
 
+from collections import defaultdict
 TIMER_ALL = Timer()
-TIMERS = {
-    "ia": Timer(),
-    "ic": Timer(),
-    "ic.p10n": Timer(),
-    "ic.t10n": Timer(),
-    "ic.rew": Timer(),
-    "ic.t10n.reconstruct": Timer(),
-    "lstm": Timer(),
-    "mf": Timer(),
-    "re": Timer(),
-    "re.get_action": Timer(),
-}
+TIMERS = defaultdict(lambda: Timer())
 
 INDEX_BSAP_START = GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][1]
 INDEX_BSAP_END = GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][2] + INDEX_BSAP_START
@@ -166,212 +156,271 @@ class ImaginationCore(nn.Module):
         obs0=None,
         debug=False
     ):
-        initial_player = initial_state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(dim=1)
-        # => (B)  # values 0=none, 1=red or 2=blue
-        initial_winner = initial_state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(dim=1)
-        # => (B)  # values 0=none, 1=red or 2=blue
-        initial_done = (initial_player == 0) | (initial_winner > 0)
-        # => (B) of done flags
+        with TIMERS["ic.0"]:
+            initial_player = initial_state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(dim=1)
+            # => (B)  # values 0=none, 1=red or 2=blue
+            initial_winner = initial_state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(dim=1)
+            # => (B)  # values 0=none, 1=red or 2=blue
+            initial_terminated = (initial_player == 0) | (initial_winner > 0)
+            # => (B) of done flags
 
-        if callback:
-            callback(initial_state[0].numpy(), initial_action[0].item())
+            if callback:
+                callback(initial_state[0].numpy(), initial_action[0].item())
 
-        action = initial_action
-        reward = initial_state.new_zeros(initial_state.size(0))
-        # => (B) of rewards
+            action = initial_action
+            reward = initial_state.new_zeros(initial_state.size(0))
+            # => (B) of rewards
 
-        # Use to to simulate 100% accurate prediction
-        # if debug and obs0:
-        #     debugstate = {"i": 0}
-        #     def debugtransition(*args, **kwargs):
-        #         debugstate["i"] += 1
-        #         return torch.as_tensor(obs0["transitions"]["observations"][debugstate["i"]]).unsqueeze(0).clone()
-        #     # tm = self.transition_model
-        #     tm = debugtransition
-        B = initial_state.size(0)
-        num_t = torch.zeros(B, dtype=torch.long, device=self.device)
+            final_state = initial_state.clone()
 
-        if debug:
-            # Every batch will have different num_transitions
-            action_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
-            done_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
-            state_hist = torch.zeros(B, self.max_transitions, initial_state.size(1), device=self.device).fill_(-1)
-            state_logits_hist = state_hist.clone()
-            action_hist[:, 0] = initial_action
-            done_hist[:, 0] = initial_done
-            state_hist[:, 0, :] = initial_state
-            state_logits_hist[:, 0, :] = initial_state
+            # Use to to simulate 100% accurate prediction
+            # if debug and obs0:
+            #     debugstate = {"i": 0}
+            #     def debugtransition(*args, **kwargs):
+            #         debugstate["i"] += 1
+            #         return torch.as_tensor(obs0["transitions"]["observations"][debugstate["i"]]).unsqueeze(0).clone()
+            #     # tm = self.transition_model
+            #     tm = debugtransition
+            B = initial_state.size(0)
+            num_t = torch.zeros(B, dtype=torch.long, device=self.device)
+
+            if debug:
+                # Every batch will have different num_transitions
+                action_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
+                terminated_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
+                finished_hist = torch.zeros(B, self.max_transitions, dtype=torch.long, device=self.device).fill_(-1)
+                state_hist = torch.zeros(B, self.max_transitions, initial_state.size(1), device=self.device).fill_(-1)
+                state_logits_hist = state_hist.clone()
+                action_hist[:, 0] = initial_action
+                terminated_hist[:, 0] = initial_terminated
+                finished_hist[:, 0] = initial_terminated
+                state_hist[:, 0, :] = initial_state
+                state_logits_hist[:, 0, :] = initial_state
 
         # Initial transition is always the input observation
         # => max-1 transitions to predict
         for t in range(0, self.max_transitions-1):
-            if t == 0:
-                current_player = initial_player
-                current_winner = initial_winner
-                action = initial_action.clone()
-                done = initial_done.clone()
-                state = initial_state.clone()
-                state_logits = initial_state.clone()
+            with TIMERS["ic.1"]:
+                if t == 0:
+                    with TIMERS["ic.1.1"]:
+                        # XXX:
+                        #   terminated -- episode ended
+                        #   finished -- episode OR transition ended
+                        #   *_now -- same as above, but it happened this `t`
+                        current_player = initial_player
+                        current_winner = initial_winner
+                        action = initial_action.clone()
+                        terminated_now = initial_terminated.clone()
+                        finished_now = initial_terminated.clone()
+                        terminated = initial_terminated.clone()
+                        finished = initial_terminated.clone()
+                        state = initial_state.clone()
+                        state_logits = initial_state.clone()
+                else:
+                    with TIMERS["ic.1.2"]:
+                        # state is (B, 28114)
+                        # state_logits is (B, 28114)
+                        current_player = state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(dim=1)
+                        current_winner = state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(dim=1)
+                        terminated_now = ~finished & ((current_player == 0) | (current_winner > 0))
+                        finished_now = terminated_now | (current_player != initial_player)
 
-                idx_in_progress = torch.nonzero(~done, as_tuple=True)[0]
-                # => (B') of indexes
-            else:
-                current_player = state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(dim=1)
-                current_winner = state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(dim=1)
+                        terminated |= terminated_now
+                        finished |= finished_now
 
-                done = (current_player == 0) | (current_winner > 0)
+                        if finished_now.all():
+                            # Since we always update all entries in `state`
+                            # (even finished ones) through t10n and p10n,
+                            # make sure to assign only those finished *now*
+                            # XXX: must do this only if breaking from the loop,
+                            #      otherwise they will re-assigned again later
+                            if finished_now.any():
+                                final_state[finished_now] = state[finished_now]
+                            break
 
-                # More transitions are needed as long as the other player is active
-                idx_in_progress = torch.nonzero(~done & (current_player != initial_player), as_tuple=True)[0]
-                # => (B') of indexes
+                    with TIMERS["ic.1.3"]:
+                        # check non-finished states for alternate win conditions
+                        # NOTE: this will probably not work if state is just probs (and not reconstructed)
+                        state_hexes = state[:, HEXES_OFFSET:].unflatten(1, [165, -1])
 
-                if idx_in_progress.numel() == 0:
+                        # a.k.a. not(finished) AND not(alive)
+                        #   (alive means having value > 0 + at least 1 stack)
+                        p0_dead_mask = ~finished & ~(
+                            (state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_ABS] > 0)
+                            & (state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_REL] > 0)
+                            & (state_hexes[:, :, INDEX_HEX_STACK_SIDE_PLAYER0].sum(dim=1) > 0)
+                        )
+                        # => (B) bool mask (True means P0 looks dead)
+
+                        p1_dead_mask = ~finished & ~(
+                            (state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_ABS] > 0)
+                            & (state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_REL] > 0)
+                            & (state_hexes[:, :, INDEX_HEX_STACK_SIDE_PLAYER1].sum(dim=1) > 0)
+                        )
+                        # => (B) bool mask (True means P1 looks dead)
+
+                    with TIMERS["ic.1.4"]:
+                        if debug and (p0_dead_mask | p1_dead_mask).any():
+                            print("ALTERNATE WINCON")
+                            import ipdb; ipdb.set_trace()  # noqa
+                            pass
+
+                        terminated_now |= (p0_dead_mask | p1_dead_mask)
+                        finished_now |= terminated_now
+
+                        terminated |= terminated_now
+                        finished |= finished_now
+
+                        # Set active player to NA and mark winners
+                        state[terminated_now, INDEX_BSAP_PLAYER_NA] = 1
+                        state[p0_dead_mask, INDEX_WINNER_PLAYER1] = 1
+                        state[p1_dead_mask, INDEX_BSAP_PLAYER_NA] = 1
+
+                if finished.all():
+                    # XXX: must do this only if breaking from the loop (see comment above)
+                    if finished_now.any():
+                        final_state[finished_now] = state[finished_now]
                     break
 
-                state_in_progress = state[idx_in_progress]
-                state_logits_in_progress = state_logits[idx_in_progress]
-
-                # check in_progress states for alternate win conditions
-                # NOTE: this will probably not work if state is just probs (and not reconstructed)
-                state_hexes_in_progress = state_in_progress[:, HEXES_OFFSET:].unflatten(1, [165, -1])
-                # a.k.a. not(VALUE_ABS_P0 > 0 and VALUE_REL_P0 > 0 AND ANY(HEX_STACK_SIDE_P0 > 0))
-                p0_alive = (
-                    (state_in_progress[:, INDEX_PLAYER0_ARMY_VALUE_NOW_ABS] > 0)
-                    & (state_in_progress[:, INDEX_PLAYER0_ARMY_VALUE_NOW_REL] > 0)
-                    & (state_hexes_in_progress[:, :, INDEX_HEX_STACK_SIDE_PLAYER0].sum(dim=1) > 0)
-                )
-                idx_p0_dead = (~p0_alive).nonzero().unique()
-                # => (B'') of indexes where P0 looks pretty dead
-                p1_alive = (
-                    (state_in_progress[:, INDEX_PLAYER1_ARMY_VALUE_NOW_ABS] > 0)
-                    & (state_in_progress[:, INDEX_PLAYER1_ARMY_VALUE_NOW_REL] > 0)
-                    & (state_hexes_in_progress[:, :, INDEX_HEX_STACK_SIDE_PLAYER1].sum(dim=1) > 0)
-                )
-                idx_p1_dead = (~p1_alive).nonzero().unique()
-                # => (B'') of indexes where P1 looks pretty dead
-
-                # Given idx_in_progress=[0,2,5,7] and idx_p0_dead=[1,3]
-                # => real_idx_p0_dead=[2,7]
-                real_idx_p0_dead = idx_in_progress[idx_p0_dead]
-                real_idx_p1_dead = idx_in_progress[idx_p1_dead]
-
-                if debug and (real_idx_p0_dead.numel() > 0 or real_idx_p1_dead.numel() > 0):
-                    print("ALTERNATE WINCON")
-                    import ipdb; ipdb.set_trace()  # noqa
-                    pass
-
-                # Mark winners and set active player to NA
-                state[real_idx_p0_dead, INDEX_WINNER_PLAYER1] = 1
-                state[real_idx_p0_dead, INDEX_BSAP_PLAYER_NA] = 1
-
-                state[real_idx_p1_dead, INDEX_WINNER_PLAYER0] = 1
-                state[real_idx_p1_dead, INDEX_BSAP_PLAYER_NA] = 1
-
-                # Re-evaluate which batches are done
-                done[real_idx_p0_dead] = True
-                done[real_idx_p1_dead] = True
-                idx_in_progress = torch.nonzero(~done & (current_player != initial_player), as_tuple=True)[0]
-
-            state_in_progress = state[idx_in_progress]
-            state_logits_in_progress = state_logits[idx_in_progress]
-
-            if idx_in_progress.numel() == 0:
-                break
-
-            if t == 0:
-                action_in_progress = action[idx_in_progress]
-                if p10n_strategy == p10n.Prediction.PROBS:
-                    action_probs_in_progress = F.one_hot(action_in_progress, num_classes=N_ACTIONS).float()
-                idx_in_progress_valid_action = idx_in_progress
-            else:
-                with TIMERS["ic.p10n"]:
+            with TIMERS["ic.2"]:
+                if t == 0:
                     if p10n_strategy == p10n.Prediction.PROBS:
-                        action_probs_in_progress = self.action_prediction_model.predict_(state_in_progress, strategy=p10n_strategy)
-                        action_in_progress = action_probs_in_progress.argmax(dim=1)
+                        action_probs = F.one_hot(action, num_classes=N_ACTIONS).float()
+                else:
+                    with TIMERS["ic.2.p10n"]:
+                        if p10n_strategy == p10n.Prediction.PROBS:
+                            action_probs[~finished] = self.action_prediction_model.predict_(state[~finished], strategy=p10n_strategy)
+                            action[~finished] = action_probs.argmax(dim=1)
+                        else:
+                            action[~finished] = self.action_prediction_model.predict_(state[~finished], strategy=p10n_strategy, timers=TIMERS)
+
+                    with TIMERS["ic.2.dead2"]:
+                        # p10n predicts -1 when it believes battle has ended
+                        # => treat this as an additional alt termination condition
+                        # To determine who died, we must compare the army values...
+                        terminated_by_action = ~finished & (action == -1)
+
+                        p0_dead_mask = (
+                            terminated_by_action
+                            & (state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_REL] < state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_REL])
+                        )
+
+                        p1_dead_mask = terminated_by_action & (~p0_dead_mask)
+
+                        if debug and terminated_by_action.any():
+                            print("ALTERNATE WINCON")
+                            import ipdb; ipdb.set_trace()  # noqa
+                            pass
+
+                        # Mark winners and set active player to NA
+                        state[p0_dead_mask, INDEX_WINNER_PLAYER1] = 1
+                        state[p1_dead_mask, INDEX_BSAP_PLAYER_NA] = 1
+                        state[terminated_by_action, INDEX_BSAP_PLAYER_NA] = 1
+
+                        terminated_now |= terminated_by_action
+                        finished_now |= terminated_now
+
+                        terminated |= terminated_now
+                        finished |= finished_now
+
+                        if finished.all():
+                            # XXX: must do this only if breaking from the loop (see comment above)
+                            if finished_now.any():
+                                final_state[finished_now] = state[finished_now]
+                            break
+
+            with TIMERS["ic.3"]:
+                # Transition to next state:
+                if p10n_strategy == p10n.Prediction.PROBS:
+                    with TIMERS["ic.3.t10n"]:
+                        state_logits[~finished] = self.transition_model.forward_probs(state[~finished], action_probs[~finished]).float()
+                    with TIMERS["ic.3.rew"]:
+                        reward[~finished] += self.reward_prediction_model.forward_probs(state[~finished], action_probs[~finished]).float()
+                else:
+                    with TIMERS["ic.3.t10n"]:
+                        state_logits[~finished] = self.transition_model(state[~finished], action[~finished]).float()
+                    with TIMERS["ic.3.rew"]:
+                        reward[~finished] += self.reward_prediction_model(state[~finished], action[~finished]).float()
+
+                with TIMERS["ic.3.t10n.reconstruct"]:
+                    state[~finished] = self.transition_model.reconstruct(state_logits[~finished], strategy=t10n_strategy)
+
+            with TIMERS["ic.4.1"]:
+                # num_t[~finished] += 1  # SLOW
+                num_t += (~finished).to(num_t.dtype)
+
+            with TIMERS["ic.4.2"]:
+                if debug:
+                    terminated_hist[:, t] = terminated
+                    finished_hist[:, t] = finished
+                    action_hist[:, t] = action.long()
+                    state_hist[:, t+1, :] = state
+                    state_logits_hist[:, t+1, :] = state_logits
+
+            with TIMERS["ic.4.3"]:
+                if callback:
+                    if t10n_strategy == t10n.Reconstruction.PROBS:
+                        # Rendering probs will likely fail => collapse first
+                        greedy = self.transition_model.reconstruct(state_logits, strategy=t10n.Reconstruction.GREEDY)
+                        callback(greedy[0].numpy(), action[0].item())
                     else:
-                        action_in_progress = self.action_prediction_model.predict_(state_in_progress, strategy=p10n_strategy)
+                        # Rendering greedy is ok, samples is kind-of-ok => leave as-is
+                        callback(state[0].numpy(), action[0].item())
 
-                # p10n predicts -1 when it believes battle has ended
-                # => some of the "in_progress" states will have a reset action
-                # (must filter them out)
-                idx_in_progress_valid_action = (action_in_progress != -1).nonzero(as_tuple=True)[0]
-                # ^ indexes of `idx_in_progress`
-                # e.g. if B=10
-                # and idx_in_progress = [2, 3]              // means B=2 and B=3 are in progress
-                # and idx_in_progress_valid_action = [0]    // means B=2 has valid action
+        # TODO: ideally, here we should check for alt winconns again
+        #       for cases where env finished exactly after MAX_TRANSITIONS
+        #       (a very edge case though)
 
-                idx_in_progress = idx_in_progress[idx_in_progress_valid_action]
-                state_in_progress = state_in_progress[idx_in_progress_valid_action]
-                state_logits_in_progress = state_logits_in_progress[idx_in_progress_valid_action]
-                action_in_progress = action_in_progress[idx_in_progress_valid_action]
+        with TIMERS["ic.5"]:
+            if debug and (num_t < t).any():
+                # means we broke out of loop without updating *_hist
+                terminated_hist[:, t] = terminated
+                finished_hist[:, t] = finished
+                action_hist[:, t] = action.long()
+                state_hist[:, t+1, :] = state
+                state_logits_hist[:, t+1, :] = state_logits
 
-            # Transition to next state:
-            if p10n_strategy == p10n.Prediction.PROBS:
-                action_probs_in_progress = action_probs_in_progress[idx_in_progress_valid_action]
-                with TIMERS["ic.t10n"]:
-                    state_logits[idx_in_progress] = self.transition_model.forward_probs(state_in_progress, action_probs_in_progress).float()
-                with TIMERS["ic.rew"]:
-                    reward[idx_in_progress] += self.reward_prediction_model.forward_probs(state_in_progress, action_probs_in_progress).float()
-            else:
-                with TIMERS["ic.t10n"]:
-                    state_logits[idx_in_progress] = self.transition_model(state_in_progress, action_in_progress).float()
-                with TIMERS["ic.rew"]:
-                    reward[idx_in_progress] += self.reward_prediction_model(state_in_progress, action_in_progress).float()
+            num_truncated = (~finished).sum()
 
-            with TIMERS["ic.t10n.reconstruct"]:
-                state[idx_in_progress] = self.transition_model.reconstruct(state_logits[idx_in_progress], strategy=t10n_strategy)
-            num_t[idx_in_progress] += 1
+            if num_truncated > 0:
+                self.num_truncations += num_truncated
+                # print(f"WARNING: state still in progress after {self.max_transitions} transitions")
 
-            if debug:
-                done_hist[idx_in_progress, t] = done[idx_in_progress].long()
-                action_hist[idx_in_progress, t] = action_in_progress.long()
-                state_hist[idx_in_progress, t+1, :] = state[idx_in_progress]
-                state_logits_hist[idx_in_progress, t+1, :] = state_logits[idx_in_progress]
+                if debug:
+                    from vcmi_gym.envs.v12.decoder.decoder import Decoder
+
+                    def decode(b, t):
+                        return Decoder.decode(state_hist[b, t].cpu().numpy())
+
+                    def render(b, t):
+                        print(decode(b, t).render(action_hist[b, t].item()))
+
+                    import ipdb; ipdb.set_trace()  # noqa
+                    print("")
+
+            # Give one final step reward + a term reward
+            # (the reward_prediction_model cannot predict terminal rewards)
+            #
+            # NOTE: excluding initial_finished states i.e. states which finished
+            #       in prev dream phases and already have term rewards
+            term_this_dream_phase = terminated & (~initial_terminated)
+            if term_this_dream_phase.any():
+                s = state[term_this_dream_phase]
+                reward[term_this_dream_phase] += 1000 * (
+                    s[:, self.index_enemy_value_lost_now_rel] - s[:, self.index_my_value_lost_now_rel]
+                    + self.reward_dmg_mult * (s[:, self.index_enemy_dmg_received_now_rel] - s[:, self.index_my_dmg_received_now_rel])
+                    + self.reward_term_mult * (s[:, self.index_enemy_value_lost_acc_rel0] - s[:, self.index_my_value_lost_acc_rel0])
+                )
+
+            if t10n_strategy == t10n.Reconstruction.PROBS:
+                with TIMERS["ic.5.t10n.reconstruct"]:
+                    state = self.transition_model.reconstruct(state_logits, strategy=t10n.Reconstruction.GREEDY)
 
             if callback:
-                if t10n_strategy == t10n.Reconstruction.PROBS:
-                    # Rendering probs will likely fail => collapse first
-                    greedy = self.transition_model.reconstruct(state_logits_in_progress, strategy=t10n.Reconstruction.GREEDY)
-                    callback(greedy[0].numpy(), action_in_progress.item())
-                else:
-                    # Rendering greedy is ok, samples is kind-of-ok => leave as-is
-                    callback(state_in_progress[0].numpy(), action_in_progress.item())
+                # Latest state should have no action
+                callback(state[0].numpy(), -1)
 
-        if idx_in_progress.numel() > 0:
-            self.num_truncations += idx_in_progress.numel()
-            # print(f"WARNING: state still in progress after {self.max_transitions} transitions")
-
-            if debug:
-                from vcmi_gym.envs.v12.decoder.decoder import Decoder
-
-                def decode(b, t):
-                    return Decoder.decode(state_hist[b, t].cpu().numpy())
-
-                def render(b, t):
-                    print(decode(b, t).render(action_hist[b, t].item()))
-
-                import ipdb; ipdb.set_trace()  # noqa
-                print("")
-
-        # Give one final step reward + a term reward for states that are NOW done
-        # The reward_prediction_model cannot predict terminal rewards
-        # => calculate them instead
-        idx_for_step_and_term_reward = torch.nonzero(done & ~initial_done, as_tuple=True)[0]
-        s = state[idx_for_step_and_term_reward]  # don't use -1 (= MAX_TRANSITIONS)
-        reward[idx_for_step_and_term_reward] += 1000 * (
-            s[:, self.index_enemy_value_lost_now_rel] - s[:, self.index_my_value_lost_now_rel]
-            + self.reward_dmg_mult * (s[:, self.index_enemy_dmg_received_now_rel] - s[:, self.index_my_dmg_received_now_rel])
-            + self.reward_term_mult * (s[:, self.index_enemy_value_lost_acc_rel0] - s[:, self.index_my_value_lost_acc_rel0])
-        )
-
-        if t10n_strategy == t10n.Reconstruction.PROBS:
-            state = self.transition_model.reconstruct(state_logits, strategy=t10n.Reconstruction.GREEDY)
-
-        if callback:
-            # Latest state should have no action
-            callback(state[0].numpy(), -1)
-
-        return state, reward, done, num_t
+        return state, reward, terminated, num_t
 
 
 class ObsProcessor(nn.Module):
@@ -839,11 +888,12 @@ class I2A(nn.Module):
             action_logits = self.action_head(z)
             value = self.value_head(z)
 
-        print("=========================")
-        print("Timers:")
-        for k, v in TIMERS.items():
-            print("%s: %.2f" % (k, v.peek() / TIMER_ALL.peek()))
-            v.reset()
-        TIMER_ALL.reset()
+        # print("=========================")
+        # print("Timers:")
+        # for k, v in TIMERS.items():
+        #     print("%-30s%ss" % (("%s: %.3f" % (k, v.peek() / TIMER_ALL.peek())), round(v.peek(), 2)))
+        #     v.reset()
+        # print("ALL: %ss" % TIMER_ALL.peek())
+        # TIMER_ALL.reset()
 
         return action_logits, value
