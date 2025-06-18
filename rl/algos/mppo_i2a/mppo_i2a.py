@@ -23,7 +23,7 @@ from rl.world.util.structured_logger import StructuredLogger
 from rl.world.util.persistence import load_checkpoint, save_checkpoint
 from rl.world.util.wandb import setup_wandb
 from rl.world.util.timer import Timer
-from rl.world.util.misc import dig, timer_stats, safe_mean
+from rl.world.util.misc import dig, interval_stats, safe_mean
 
 from .. import common
 from ...world.i2a import I2A
@@ -111,7 +111,7 @@ class SimpleModel(nn.Module):
         self.device = torch.device("cpu")
 
         self.z_size_other = 64
-        self.z_size_hex = 32
+        self.z_size_hex = 16
         self.output_size = output_size
 
         self.encoder_other = nn.Sequential(
@@ -507,6 +507,7 @@ def prepare_wandb_log(
         })
 
     wlog.update({
+        "train/learning_rate": optimizer.param_groups[0]["lr"],
         "train/value_loss": train_stats.value_loss,
         "train/policy_loss": train_stats.policy_loss,
         "train/entropy_loss": train_stats.entropy_loss,
@@ -526,7 +527,6 @@ def prepare_wandb_log(
         "global/num_timesteps": state.current_timestep,
         "global/num_seconds": state.current_second,
         "global/num_episode": state.current_episode,
-        "params/learning_rate": optimizer.param_groups[0]["lr"],
     })
 
     return wlog
@@ -604,6 +604,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     # )
     model = SimpleModel(1024)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer.param_groups[0].setdefault("initial_lr", learning_rate)
 
     if train_config["torch_autocast"]:
         autocast_ctx = lambda enabled: torch.autocast(device.type, enabled=enabled)
@@ -731,9 +732,31 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     if config["eval"]["at_script_start"]:
         eval_timer._started_at = 0  # force first trigger
 
+    lr_schedule_timer = Timer()
+    lr_schedule_timer.start()
+
+    assert train_config["lr_scheduler_min_value"] < train_config["learning_rate"]
+
+    lr_schedule = torch.optim.lr_scheduler.StepLR(
+        optimizer,
+        step_size=1,
+        gamma=train_config["lr_scheduler_step_mult"],
+        last_epoch=max(state.global_second//train_config["lr_scheduler_interval_s"] - 1)
+    )
+
+    clamp_lr = lambda: max(optimizer.param_groups[0]["lr"], train_config["lr_scheduler_min_value"])
+    optimizer.param_groups[0]["lr"] = clamp_lr()
+
     try:
         while True:
             [v.reset(start=(k == "all")) for k, v in timers.items()]
+
+            logger.info("LR: %s" % optimizer.param_groups[0]['lr'])
+            if lr_schedule_timer.peek() > train_config["lr_scheduler_interval_s"]:
+                lr_schedule_timer.reset(start=True)
+                lr_schedule.step()
+                optimizer.param_groups[0]["lr"] = clamp_lr()
+                logger.info("New learning_rate: %s" % optimizer.param_groups[0]['lr'])
 
             # Evaluate first (for a baseline when resuming with modified params)
             if eval_timer.peek() > eval_config["interval_s"]:
@@ -847,7 +870,8 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
                 logger.info("Time for wandb log")
                 wandb_log_commit_timer.reset(start=True)
                 wlog.update(aggregate_logs())
-                wlog.update(timer_stats(timers))
+                wlog.update(interval_stats(timers))
+                wlog["train/learning_rate"] = optimizer.param_groups[0]['lr']
                 wandb.log(wlog, commit=True)
 
             logger.info(wlog)

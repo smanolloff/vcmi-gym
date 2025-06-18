@@ -4,16 +4,16 @@ env_kwargs = dict(
     random_stack_chance=0,
     role="defender",
     opponent="StupidAI",
-    random_terrain_chance=100,
+    random_terrain_chance=0,
     tight_formation_chance=0,
     max_steps=500,
     vcmi_loglevel_global="error",
     vcmi_loglevel_ai="error",
     vcmienv_loglevel="WARN",
-    random_heroes=1,
-    random_obstacles=1,
-    town_chance=10,
-    warmachine_chance=40,
+    random_heroes=0,
+    random_obstacles=0,
+    town_chance=0,
+    warmachine_chance=0,
     mana_min=0,
     mana_max=0,
     reward_step_fixed=-1,
@@ -63,11 +63,15 @@ config = dict(
         num_minibatches=50,
         update_epochs=1,
 
+        learning_rate=1e-3,
+        lr_scheduler_interval_s=5,  # use 1e9 to disable
+        lr_scheduler_step_mult=0.8,    # => 1e-4...1e-5 in 10 steps
+        lr_scheduler_min_value=5e-4,
+
         gamma=0.85,
         gae_lambda=0.9,
         ent_coef=0.05,
         clip_coef=0.5,
-        learning_rate=1e-4,
         vf_coef=0.5,
         norm_adv=True,
         clip_vloss=True,
@@ -110,7 +114,7 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 
 # Debug
 if os.getenv("VASTAI", None) != "1":
-    config["train"]["num_vsteps"] = 200
+    config["train"]["num_vsteps"] = 256
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 1
     config["train"]["env"]["num_envs"] = 1
