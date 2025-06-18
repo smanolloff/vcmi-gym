@@ -35,12 +35,6 @@ import warnings
 
 from .. import common
 
-ENVS = []  # debug
-
-
-def render():
-    print(ENVS[0].render())
-
 
 @dataclass
 class ScheduleArgs:
@@ -53,20 +47,17 @@ class ScheduleArgs:
 
 @dataclass
 class EnvArgs:
-    encoding_type: str = ""  # DEPRECATED
     max_steps: int = 500
     vcmi_loglevel_global: str = "error"
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
-    sparse_info: bool = True
-    consecutive_error_reward_factor: Optional[int] = None  # DEPRECATED
     user_timeout: int = 30
     vcmi_timeout: int = 30
     boot_timeout: int = 30
-    conntype: str = "proc"
     random_heroes: int = 1
     random_obstacles: int = 1
     town_chance: int = 0
+    random_stack_chance: int = 0,
     warmachine_chance: int = 0
     random_terrain_chance: int = 0
     tight_formation_chance: int = 0
@@ -77,13 +68,6 @@ class EnvArgs:
     reward_dmg_mult: int = 1
     reward_term_mult: int = 1
     swap_sides: int = 0
-    true_rng: bool = True  # DEPRECATED
-    deprecated_args: list[dict] = field(default_factory=lambda: [
-        "encoding_type",
-        "consecutive_error_reward_factor",
-        "sparse_info",
-        "true_rng"
-    ])
 
     def __post_init__(self):
         common.coerce_dataclass_ints(self)
@@ -160,6 +144,8 @@ class Args:
     save_every: int = 3600  # seconds; retention (see max_saves)
     max_saves: int = 3
     out_dir_template: str = "data/{group_id}/{run_id}"
+    out_dir: str = ""
+    out_dir_abs: str = ""  # auto-expanded on start
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
@@ -365,7 +351,7 @@ class AgentNN(nn.Module):
 
         # Init lazy layers
         with torch.no_grad():
-            self.get_action_and_value(torch.randn([1, dim_other + dim_hexes]), torch.ones([1, 1322], dtype=torch.bool))
+            self.get_action_and_value(torch.randn([1, dim_other + dim_hexes]), torch.ones([1, 2312], dtype=torch.bool))
 
         common.layer_init(self.actor, gain=0.01)
         common.layer_init(self.critic, gain=1.0)
@@ -583,6 +569,9 @@ def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae
 
 
 def main(args):
+    args.out_dir = args.out_dir_template.format(group_id=args.group_id, run_id=args.run_id)
+    args.out_dir_abs = os.path.abspath(args.out_dir)
+
     LOG = logging.getLogger("mppo_dna")
     LOG.setLevel(args.loglevel)
 
@@ -590,7 +579,11 @@ def main(args):
 
     assert isinstance(args, Args)
 
-    agent, args = common.maybe_resume(Agent, args, device=device)
+    agent, args = common.maybe_resume(Agent, args, device_name=device.type)
+
+    # update out_dir (may have changed after load)
+    args.out_dir = args.out_dir_template.format(group_id=args.group_id, run_id=args.run_id)
+    args.out_dir_abs = os.path.abspath(args.out_dir)
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
@@ -673,10 +666,8 @@ def main(args):
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 8:
-        from vcmi_gym import VcmiEnv_v8 as VcmiEnv
-    else:
-        raise Exception("Unsupported env version: %d" % args.env_version)
+    assert args.env_version == 12
+    from vcmi_gym import VcmiEnv_v12 as VcmiEnv
 
     obs_space = VcmiEnv.OBSERVATION_SPACE
     act_space = VcmiEnv.ACTION_SPACE
@@ -698,13 +689,9 @@ def main(args):
     try:
         seeds = [np.random.randint(2**31) for i in range(args.num_envs)]
         envs = common.create_venv(VcmiEnv, args, seeds)
-        [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
 
         agent.state.seed = seed
 
-        # these are used by gym's RecordEpisodeStatistics wrapper
-        envs.return_queue = agent.state.ep_rew_queue
-        envs.length_queue = agent.state.ep_length_queue
         if args.wandb_project:
             import wandb
             common.setup_wandb(args, agent, __file__, watch=False)
@@ -767,9 +754,10 @@ def main(args):
             agent.optimizer_policy.param_groups[0]["lr"] = lr_schedule_fn_policy(progress)
             agent.optimizer_distill.param_groups[0]["lr"] = lr_schedule_fn_distill(progress)
 
+            episode_count = 0
+
             # XXX: eval during experience collection
             agent.eval()
-            import ipdb; ipdb.set_trace()  # noqa
 
             # tstart = time.time()
             for step in range(0, args.num_steps):
@@ -809,14 +797,16 @@ def main(args):
                 # https://github.com/DLR-RM/stable-baselines3/pull/658
 
                 # See notes/gym_vector.txt
-                for final_info, has_final_info in zip(infos.get("final_info", []), infos.get("_final_info", [])):
-                    # "final_info" must be None if "has_final_info" is False
-                    if has_final_info:
-                        assert final_info is not None, "has_final_info=True, but final_info=None"
-                        agent.state.ep_net_value_queue.append(final_info["net_value"])
-                        agent.state.ep_is_success_queue.append(final_info["is_success"])
-                        agent.state.current_episode += 1
-                        agent.state.global_episode += 1
+                if "_final_info" in infos:
+                    done_ids = np.flatnonzero(infos["_final_info"])
+                    final_infos = infos["final_info"]
+                    agent.state.ep_rew_queue.extend(final_infos["episode"]["r"][done_ids])
+                    agent.state.ep_length_queue.extend(final_infos["episode"]["r"][done_ids])
+                    agent.state.ep_net_value_queue.extend(final_infos["net_value"][done_ids])
+                    agent.state.ep_is_success_queue.extend(final_infos["is_success"][done_ids])
+                    agent.state.current_episode += 1
+                    agent.state.global_episode += 1
+                    episode_count += 1
 
                 agent.state.current_vstep += 1
                 agent.state.current_timestep += num_envs
@@ -959,8 +949,9 @@ def main(args):
             ep_rew_mean = common.safe_mean(agent.state.ep_rew_queue)
             ep_value_mean = common.safe_mean(agent.state.ep_net_value_queue)
             ep_is_success_mean = common.safe_mean(agent.state.ep_is_success_queue)
+            ep_length_mean = common.safe_mean(agent.state.ep_length_queue)
 
-            if envs.episode_count > 0:
+            if episode_count > 0:
                 assert ep_rew_mean is not np.nan
                 assert ep_value_mean is not np.nan
                 assert ep_is_success_mean is not np.nan
@@ -982,10 +973,9 @@ def main(args):
             wandb_log({"losses/approx_kl": approx_kl.item()})
             wandb_log({"losses/clipfrac": np.mean(clipfracs)})
             wandb_log({"losses/explained_variance": explained_var})
-            wandb_log({"rollout/ep_count": envs.episode_count})
-            wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
+            wandb_log({"rollout/ep_count": episode_count})
 
-            if envs.episode_count > 0:
+            if episode_count > 0:
                 assert ep_rew_mean is not np.nan
                 assert ep_value_mean is not np.nan
                 assert ep_is_success_mean is not np.nan
@@ -999,6 +989,7 @@ def main(args):
                 wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
                 wandb_log({"rollout/ep_value_mean": ep_value_mean})
                 wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
+                wandb_log({"rollout/ep_len_mean": ep_length_mean})
 
             wandb_log({"rollout100/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_100)})
             wandb_log({"rollout1000/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_1000)})
@@ -1010,8 +1001,6 @@ def main(args):
             wandb_log({"global/num_timesteps": agent.state.current_timestep})
             wandb_log({"global/num_seconds": agent.state.current_second})
             wandb_log({"global/num_episode": agent.state.current_episode})
-
-            envs.episode_count = 0
 
             if rollouts_total:
                 wandb_log({"global/progress": progress})
@@ -1054,11 +1043,11 @@ def main(args):
                 ))
 
             agent.state.current_rollout += 1
-            save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
+            save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent)
             # print("TRAIN TIME: %.2f" % (time.time() - tstart))
 
     finally:
-        common.maybe_save(0, 10e9, args, agent, out_dir)
+        common.maybe_save(0, 10e9, args, agent)
         if "envs" in locals():
             envs.close()
 
@@ -1079,10 +1068,10 @@ def main(args):
 
 def debug_args():
     return Args(
-        "mppo_dna-test",
-        "mppo_dna-test",
-        loglevel=logging.DEBUG,
+        run_id="mppo_dna-test",
+        group_id="mppo_dna-test",
         run_name=None,
+        loglevel=logging.DEBUG,
         trial_id=None,
         wandb_project=None,
         resume=False,
@@ -1104,14 +1093,14 @@ def debug_args():
         max_saves=0,
         out_dir_template="data/mppo_dna-test/mppo_dna-test",
         opponent_load_file=None,
-        opponent_sbm_probs=[0, 1, 0],
+        opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
-        lr_schedule=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule=ScheduleArgs(mode="const", start=0.0001),
+        lr_schedule_value=ScheduleArgs(mode="const", start=0.0001),
+        lr_schedule_policy=ScheduleArgs(mode="const", start=0.0001),
+        lr_schedule_distill=ScheduleArgs(mode="const", start=0.0001),
         num_envs=1,
-        num_steps=8,
+        num_steps=256,
         gamma=0.8,
         gae_lambda=0.9,
         gae_lambda_policy=0.95,
@@ -1142,10 +1131,12 @@ def debug_args():
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
             vcmienv_loglevel="WARN",
-            sparse_info=True,
             random_heroes=0,
             random_obstacles=0,
+            random_terrain_chance=0,
+            tight_formation_chance=0,
             town_chance=0,
+            random_stack_chance=0,
             warmachine_chance=0,
             mana_min=0,
             mana_max=0,
@@ -1156,11 +1147,13 @@ def debug_args():
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
-            conntype="thread"
         ),
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
-        env_wrappers=[dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper")],
-        env_version=8,
+        env_wrappers=[
+            dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper"),
+            dict(module="gymnasium.wrappers", cls="RecordEpisodeStatistics")
+        ],
+        env_version=12,
         network={
             "encoder_other": [
                 # => (B, 26)
@@ -1170,7 +1163,7 @@ def debug_args():
             ],
             "encoder_hexes": [
                 # => (B, 165*H)
-                dict(t="Unflatten", dim=1, unflattened_size=[165, 101]),
+                dict(t="Unflatten", dim=1, unflattened_size=[165, 170]),
                 # => (B, 165, H)
 
                 # #
@@ -1186,7 +1179,7 @@ def debug_args():
                 #
                 # HexConv (variant B: residual conv)
                 #
-                {"t": "HexConvResBlock", "channels": 101, "depth": 7},
+                {"t": "HexConvResBlock", "channels": 170, "depth": 3},
 
                 #
                 # HexConv COMMON
@@ -1199,11 +1192,11 @@ def debug_args():
                 # => (B, 5280)
             ],
             "encoder_merged": [
-                {"t": "LazyLinear", "out_features": 128},
+                {"t": "LazyLinear", "out_features": 1024},
                 {"t": "LeakyReLU"},
                 # => (B, 1024)
             ],
-            "actor": {"t": "LazyLinear", "out_features": 1322},
+            "actor": {"t": "LazyLinear", "out_features": 2312},
             "critic": {"t": "LazyLinear", "out_features": 1}
         }
     )

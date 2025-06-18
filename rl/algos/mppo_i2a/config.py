@@ -3,6 +3,7 @@ import os
 env_kwargs = dict(
     random_stack_chance=0,
     role="defender",
+    opponent="StupidAI",
     random_terrain_chance=100,
     tight_formation_chance=0,
     max_steps=500,
@@ -74,7 +75,7 @@ config = dict(
         max_grad_norm=1,
         distill_lambda=1.0,
 
-        torch_autocast=False,
+        torch_autocast=True,
     ),
     model=dict(
         i2a_fc_units=1024,
@@ -109,17 +110,17 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 
 # Debug
 if os.getenv("VASTAI", None) != "1":
-    config["train"]["num_vsteps"] = 4
-    config["train"]["num_minibatches"] = 2
+    config["train"]["num_vsteps"] = 200
+    config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 1
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    config["eval"]["num_vsteps"] = 2
+    config["eval"]["num_vsteps"] = 5000
     config["eval"]["env"]["num_envs"] = 1
     config["eval"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    config["eval"]["interval_s"] = 10
-    config["wandb_log_interval_s"] = 5
-    config["checkpoint"]["interval_s"] = 11
+    config["eval"]["interval_s"] = 60
+    config["wandb_log_interval_s"] = 10
+    config["checkpoint"]["interval_s"] = 2e9
     config["model"].update(
         i2a_fc_units=16,
         num_trajectories=1,  # valid actions are ~65 on average... (25 for peasant)

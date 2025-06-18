@@ -100,6 +100,59 @@ class TensorStorage:
         self.device = device
 
 
+# XXX: DEBUG: TEST SIMPLE MODEL FREE ONLY
+from rl.world.util.hexconv import HexConvResBlock
+from rl.world.util.constants_v12 import STATE_SIZE_GLOBAL, STATE_SIZE_ONE_PLAYER, STATE_SIZE_ONE_HEX, N_ACTIONS
+HEXES_OFFSET = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
+
+class SimpleModel(nn.Module):
+    def __init__(self, output_size):
+        super().__init__()
+        self.device = torch.device("cpu")
+
+        self.z_size_other = 64
+        self.z_size_hex = 32
+        self.output_size = output_size
+
+        self.encoder_other = nn.Sequential(
+            nn.LazyLinear(self.z_size_other),
+            nn.LeakyReLU()
+            # => (B, Z_OTHER)
+        )
+
+        self.encoder_hexes = nn.Sequential(
+            # => (B, 165*H)
+            nn.Unflatten(dim=1, unflattened_size=[165, STATE_SIZE_ONE_HEX]),
+            # => (B, 165, H)
+            HexConvResBlock(channels=STATE_SIZE_ONE_HEX, depth=3),
+            # => (B, 165, H)
+            nn.LazyLinear(out_features=self.z_size_hex),
+            nn.LeakyReLU(),
+            # => (B, 165, Z_HEX)
+            nn.Flatten(),
+            # => (B, 165*Z_HEX)
+        )
+
+        self.encoder_merged = nn.Sequential(
+            # => (B, Z_OTHER + 165*Z_HEX)
+            nn.LazyLinear(out_features=self.output_size),
+            nn.LeakyReLU()
+            # => (B, OUTPUT_SIZE)
+        )
+
+        self.action_head = nn.LazyLinear(N_ACTIONS)
+        self.value_head = nn.LazyLinear(1)
+
+    def forward(self, obs, _mask, debug=False):
+        other, hexes = torch.split(obs, [HEXES_OFFSET, 165*STATE_SIZE_ONE_HEX], dim=1)
+        z_other = self.encoder_other(other)
+        z_hexes = self.encoder_hexes(hexes)
+        merged = torch.cat((z_other, z_hexes), dim=1)
+        action_logits = self.action_head(merged)
+        value = self.value_head(merged)
+        return action_logits, value
+
+
 @dataclass
 class TrainStats:
     value_loss: float
@@ -167,8 +220,8 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
 
     device = storage.device
 
-    model_ic = model.imagination_aggregator.rollout_encoder.imagination_core
-    truncs_start = model_ic.num_truncations
+    # model_ic = model.imagination_aggregator.rollout_encoder.imagination_core
+    # truncs_start = model_ic.num_truncations
 
     assert num_vsteps == storage.obs.size(0)
     num_envs = storage.obs.size(1)
@@ -211,8 +264,9 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
 
-    truncs = model_ic.num_truncations
-    stats.num_transition_truncations = truncs - truncs_start
+    # XXX: DEBUG: TEST SIMPLE MODEL FREE ONLY
+    # truncs = model_ic.num_truncations
+    # stats.num_transition_truncations = truncs - truncs_start
 
     # bootstrap value if not done
     _, next_value = model(storage.next_obs, storage.next_mask)
@@ -225,8 +279,8 @@ def eval_model(logger, model, venv, num_vsteps):
     assert not torch.is_grad_enabled()
 
     stats = SampleStats()
-    model_ic = model.imagination_aggregator.rollout_encoder.imagination_core
-    truncs_start = model_ic.num_truncations
+    # model_ic = model.imagination_aggregator.rollout_encoder.imagination_core
+    # truncs_start = model_ic.num_truncations
 
     t = lambda x: torch.as_tensor(x, device=model.device)
 
@@ -259,8 +313,9 @@ def eval_model(logger, model, venv, num_vsteps):
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
 
-    truncs = model_ic.num_truncations
-    stats.num_transition_truncations = truncs - truncs_start
+    # XXX: DEBUG: TEST SIMPLE MODEL FREE ONLY
+    # truncs = model_ic.num_truncations
+    # stats.num_transition_truncations = truncs - truncs_start
 
     return stats
 
@@ -303,10 +358,10 @@ def train_model(logger, model, optimizer, autocast_ctx, scaler, storage, train_c
     b_inds = np.arange(batch_size)
     clipfracs = []
 
-    p_losses = torch.zeros(train_config["num_minibatches"])
-    e_losses = torch.zeros(train_config["num_minibatches"])
-    v_losses = torch.zeros(train_config["num_minibatches"])
-    d_losses = torch.zeros(train_config["num_minibatches"])
+    policy_losses = torch.zeros(train_config["num_minibatches"])
+    entropy_losses = torch.zeros(train_config["num_minibatches"])
+    value_losses = torch.zeros(train_config["num_minibatches"])
+    distill_losses = torch.zeros(train_config["num_minibatches"])
 
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train) epoch: %d" % epoch)
@@ -338,7 +393,7 @@ def train_model(logger, model, optimizer, autocast_ctx, scaler, storage, train_c
             # Policy loss
             pg_loss1 = -mb_advantages * ratio
             pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - train_config["clip_coef"], 1 + train_config["clip_coef"])
-            p_loss = torch.max(pg_loss1, pg_loss2).mean()
+            policy_loss = torch.max(pg_loss1, pg_loss2).mean()
 
             # Value loss
             newvalue = newvalue.view(-1)
@@ -351,38 +406,40 @@ def train_model(logger, model, optimizer, autocast_ctx, scaler, storage, train_c
                 )
                 v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
                 v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                v_loss = 0.5 * v_loss_max.mean()
+                value_loss = 0.5 * v_loss_max.mean()
             else:
                 # XXX: SIMO: SB3 does not multiply by 0.5 here
                 #            (ie. SB3's vf_coef is essentially x2)
-                v_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
+                value_loss = 0.5 * ((newvalue - b_returns[mb_inds]) ** 2).mean()
 
-            e_loss = newdist.entropy().mean()
+            entropy_loss = newdist.entropy().mean()
 
-            """
-            (I2A paper, Supplementary matierial, Section A)
-            [...] we do not backpropagate gradients of ldist wrt. to the
-            parameters of the rollout policy through the behavioral
-            policy [...]
-            // => detach `logit`
-            """
-            rp_logits = model.imagination_aggregator.rollout_encoder.rollout_policy(b_obs[mb_inds])
-            rp_dist = common.CategoricalMasked(logits=rp_logits, mask=mb_masks)
-            rp_log_probs = rp_dist.logits.log_softmax(dim=-1)
-            teacher_log_probs = newdist.logits.log_softmax(dim=-1)
-            teacher_probs = teacher_log_probs.exp().detach()
-            d_loss = F.kl_div(rp_log_probs, teacher_probs, reduction='batchmean')
+            # """
+            # (I2A paper, Supplementary matierial, Section A)
+            # [...] we do not backpropagate gradients of ldist wrt. to the
+            # parameters of the rollout policy through the behavioral
+            # policy [...]
+            # // => detach `logit`
+            # """
+            # rp_logits = model.imagination_aggregator.rollout_encoder.rollout_policy(b_obs[mb_inds])
+            # rp_dist = common.CategoricalMasked(logits=rp_logits, mask=mb_masks)
+            # rp_log_probs = rp_dist.logits.log_softmax(dim=-1)
+            # teacher_log_probs = newdist.logits.log_softmax(dim=-1)
+            # teacher_probs = teacher_log_probs.exp().detach()
+            # distill_loss = F.kl_div(rp_log_probs, teacher_probs, reduction='batchmean')
+            # XXX: DEBUG: TEST SIMPLE MODEL FREE ONLY
+            distill_loss = torch.zeros_like(entropy_loss)
 
-            p_losses[i] = p_loss.detach()
-            e_losses[i] = e_loss.detach()
-            v_losses[i] = v_loss.detach()
-            d_losses[i] = d_loss.detach()
+            policy_losses[i] = policy_loss.detach()
+            entropy_losses[i] = entropy_loss.detach()
+            value_losses[i] = value_loss.detach()
+            distill_losses[i] = distill_loss.detach()
 
             loss = (
-                p_loss
-                - (e_loss * train_config["ent_coef"])
-                + (v_loss * train_config["vf_coef"])
-                + (d_loss * train_config["distill_lambda"])
+                policy_loss
+                - (entropy_loss * train_config["ent_coef"])
+                + (value_loss * train_config["vf_coef"])
+                + (distill_loss * train_config["distill_lambda"])
             )
 
             with autocast_ctx(False):
@@ -402,10 +459,10 @@ def train_model(logger, model, optimizer, autocast_ctx, scaler, storage, train_c
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
     return TrainStats(
-        value_loss=v_losses.mean().item(),
-        policy_loss=p_losses.mean().item(),
-        entropy_loss=e_losses.mean().item(),
-        distill_loss=d_losses.mean().item(),
+        value_loss=value_losses.mean().item(),
+        policy_loss=policy_losses.mean().item(),
+        entropy_loss=entropy_losses.mean().item(),
+        distill_loss=distill_losses.mean().item(),
         loss=loss.item(),
         approx_kl=approx_kl.item(),
         clipfrac=float(np.mean(clipfracs)),
@@ -527,25 +584,25 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     state = State()
 
     model_config = dig(config, "model")
-    model = I2A(
-        i2a_fc_units=model_config["i2a_fc_units"],
-        num_trajectories=model_config["num_trajectories"],
-        rollout_dim=model_config["rollout_dim"],
-        rollout_policy_fc_units=model_config["rollout_policy_fc_units"],
-        horizon=model_config["horizon"],
-        obs_processor_output_size=model_config["obs_processor_output_size"],
-        side=(train_config["env"]["kwargs"]["role"] == "defender"),
-        reward_step_fixed=train_config["env"]["kwargs"]["reward_step_fixed"],
-        reward_dmg_mult=train_config["env"]["kwargs"]["reward_dmg_mult"],
-        reward_term_mult=train_config["env"]["kwargs"]["reward_term_mult"],
-        max_transitions=model_config["max_transitions"],
-        transition_model_file=model_config["transition_model_file"],
-        action_prediction_model_file=model_config["action_prediction_model_file"],
-        reward_prediction_model_file=model_config["reward_prediction_model_file"],
-        device=device,
-        debug_render=False,
-    )
-
+    # model = I2A(
+    #     i2a_fc_units=model_config["i2a_fc_units"],
+    #     num_trajectories=model_config["num_trajectories"],
+    #     rollout_dim=model_config["rollout_dim"],
+    #     rollout_policy_fc_units=model_config["rollout_policy_fc_units"],
+    #     horizon=model_config["horizon"],
+    #     obs_processor_output_size=model_config["obs_processor_output_size"],
+    #     side=(train_config["env"]["kwargs"]["role"] == "defender"),
+    #     reward_step_fixed=train_config["env"]["kwargs"]["reward_step_fixed"],
+    #     reward_dmg_mult=train_config["env"]["kwargs"]["reward_dmg_mult"],
+    #     reward_term_mult=train_config["env"]["kwargs"]["reward_term_mult"],
+    #     max_transitions=model_config["max_transitions"],
+    #     transition_model_file=model_config["transition_model_file"],
+    #     action_prediction_model_file=model_config["action_prediction_model_file"],
+    #     reward_prediction_model_file=model_config["reward_prediction_model_file"],
+    #     device=device,
+    #     debug_render=False,
+    # )
+    model = SimpleModel(1024)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
     if train_config["torch_autocast"]:

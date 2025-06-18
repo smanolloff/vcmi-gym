@@ -29,6 +29,8 @@ import tempfile
 from types import SimpleNamespace
 from datetime import datetime
 from functools import partial
+from types import SimpleNamespace
+from functools import partial
 
 import dataclasses
 from torch.distributions.categorical import Categorical
@@ -151,7 +153,21 @@ def create_venv(env_cls, args, seeds=None):
     if args.opponent_sbm_probs[2]:
         assert os.path.isfile(args.opponent_load_file)
 
+    # AsyncVectorEnv creates a dummy_env() in the main process just to
+    # extract metadata, which causes VCMI init pid error afterwards
+    pid = os.getpid()
+    dummy_env = SimpleNamespace(
+        metadata={'render_modes': ['ansi', 'rgb_array'], 'render_fps': 30},
+        render_mode='ansi',
+        action_space=env_cls.ACTION_SPACE,
+        observation_space=env_cls.OBSERVATION_SPACE["observation"],
+        close=lambda: None
+    )
+
     def env_creator(i):
+        if os.getpid() == pid:
+            return dummy_env
+
         sbm = ["MMAI_SCRIPT_SUMMONER", "BattleAI", "MMAI_MODEL"]
         sbm_probs = torch.tensor(args.opponent_sbm_probs, dtype=torch.float)
 
@@ -162,32 +178,16 @@ def create_venv(env_cls, args, seeds=None):
         if opponent == "MMAI_MODEL":
             assert args.opponent_load_file, "opponent_load_file is required for MMAI_MODEL"
 
+        assert args.env_version == 12
+
         env_kwargs = dict(
             dataclasses.asdict(args.env),
             seed=np.random.randint(2**31),
             mapname=mapname,
+            role=args.mapside,
+            opponent=opponent,
+            opponent_model=args.opponent_load_file,
         )
-
-        if args.env_version >= 4:
-            env_kwargs = dict(
-                env_kwargs,
-                role=args.mapside,
-                opponent=opponent,
-                opponent_model=args.opponent_load_file,
-            )
-        elif args.env_version == 3:
-            env_kwargs = dict(
-                env_kwargs,
-                attacker=opponent,
-                defender=opponent,
-                attacker_model=args.opponent_load_file,
-                defender_model=args.opponent_load_file,
-            )
-            env_kwargs[args.mapside] = "MMAI_USER"
-            env_kwargs.pop("conntype", None)
-            env_kwargs.pop("reward_dynamic_scaling", None)
-        else:
-            raise Exception("Unexpected env version: %s" % args.env_version)
 
         for a in env_kwargs.pop("deprecated_args", ["encoding_type"]):
             env_kwargs.pop(a, None)
@@ -208,9 +208,8 @@ def create_venv(env_cls, args, seeds=None):
     #     vec_env = gym.vector.AsyncVectorEnv(funcs)
     # else:
     funcs = [partial(env_creator, 0)]
-    vec_env = gym.vector.SyncVectorEnv(funcs)
-
-    vec_env = gym.wrappers.RecordEpisodeStatistics(vec_env, deque_size=args.stats_buffer_size)
+    vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+    vec_env.reset()
 
     return vec_env
 
