@@ -50,8 +50,9 @@ class DatasetVCMI(IterableDataset):
         self.metric_queue = metric_queue
         self.metric_report_interval = metric_report_interval
         self.metric_reported_at = time.time()
-        self.timer_all = Timer()
-        self.timer_idle = Timer()
+        # cuda sync must not be called here from within the dataloader
+        self.timer_all = Timer(cuda_sync=False)
+        self.timer_idle = Timer(cuda_sync=False)
         self.mw_functor = mw_functor or noop_functor
 
         print("Env kwargs: %s" % self.env_kwargs)

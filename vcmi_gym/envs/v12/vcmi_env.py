@@ -76,6 +76,7 @@ class RewardConfig(NamedTuple):
     step_fixed: float
     dmg_mult: float
     term_mult: float
+    relval_mult: float
 
 
 class VcmiEnv(gym.Env):
@@ -146,6 +147,7 @@ class VcmiEnv(gym.Env):
         reward_step_fixed: float = -1,
         reward_dmg_mult: float = 1,
         reward_term_mult: float = 1,
+        reward_relval_mult: float = 1,
         nostart: bool = False
     ):
         assert vcmi_loglevel_global in self.__class__.VCMI_LOGLEVELS
@@ -173,6 +175,7 @@ class VcmiEnv(gym.Env):
             step_fixed=float(reward_step_fixed),
             dmg_mult=float(reward_dmg_mult),
             term_mult=float(reward_term_mult),
+            relval_mult=float(reward_relval_mult),
         )
 
         self.logger = log.get_logger("VcmiEnv-v12", vcmienv_loglevel)
@@ -550,7 +553,7 @@ class VcmiEnv(gym.Env):
 
         return (
             cfg.step_fixed
-            + net_value
+            + net_value * cfg.relval_mult
             + net_dmg * cfg.dmg_mult
             + term_rew * cfg.term_mult
         )

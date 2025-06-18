@@ -20,7 +20,6 @@ import sys
 import random
 import logging
 import time
-import copy
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
@@ -64,9 +63,10 @@ class EnvArgs:
     battlefield_pattern: str = ""
     mana_min: int = 0
     mana_max: int = 0
-    reward_step_fixed: int = -1
-    reward_dmg_mult: int = 1
-    reward_term_mult: int = 1
+    reward_step_fixed: float = -1
+    reward_dmg_mult: float = 1
+    reward_term_mult: float = 1
+    reward_relval_mult: float = 1
     swap_sides: int = 0
 
     def __post_init__(self):
@@ -528,7 +528,7 @@ def main(args):
     args.out_dir = args.out_dir_template.format(group_id=args.group_id, run_id=args.run_id)
     args.out_dir_abs = os.path.abspath(args.out_dir)
 
-    LOG = logging.getLogger("mppo_dna")
+    LOG = logging.getLogger("mppo")
     LOG.setLevel(args.loglevel)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -558,7 +558,7 @@ def main(args):
 
     # Logger
     if not any(LOG.handlers):
-        formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.group_id}/{args.run_id}] %(message)s")
+        formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.run_id}] %(message)s")
         formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
         formatter.default_msec_format = None
         loghandler = logging.StreamHandler()
@@ -709,6 +709,10 @@ def main(args):
             agent_value.optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
 
             episode_count = 0
+            agent_policy.state.ep_rew_queue.clear()
+            agent_policy.state.ep_length_queue.clear()
+            agent_policy.state.ep_net_value_queue.clear()
+            agent_policy.state.ep_is_success_queue.clear()
 
             # XXX: eval during experience collection
             agent_policy.eval()
@@ -953,9 +957,8 @@ def main(args):
                     "global/global_num_seconds": agent_policy.state.global_second
                 }, commit=True)  # commit on final log line
 
-                LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f losses=%.1f|%.1f" % (
+                LOG.debug("rollout=%d rew=%.2f val=%.2f success=%.2f loss=%.1f|%.1f" % (
                     agent_policy.state.current_rollout,
-                    agent_policy.state.current_vstep,
                     ep_rew_mean,
                     ep_value_mean,
                     ep_is_success_mean,
@@ -989,8 +992,8 @@ def main(args):
 
 def debug_args():
     return Args(
-        run_id="mppo_dna-test",
-        group_id="mppo_dna-test",
+        run_id="mppo-test",
+        group_id="mppo-test",
         run_name=None,
         loglevel=logging.DEBUG,
         trial_id=None,
@@ -1012,7 +1015,7 @@ def debug_args():
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
         max_saves=0,
-        out_dir_template="data/mppo_dna-test/mppo_dna-test",
+        out_dir_template="data/mppo-test/mppo-test",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
@@ -1049,9 +1052,14 @@ def debug_args():
             warmachine_chance=0,
             mana_min=0,
             mana_max=0,
-            reward_step_fixed=-1,
-            reward_dmg_mult=1,
-            reward_term_mult=1,
+            # reward_step_fixed=-1,
+            # reward_dmg_mult=1,
+            # reward_term_mult=1,
+            # reward_relval_mult=1,
+            reward_step_fixed=-0.01,
+            reward_dmg_mult=0.01,
+            reward_term_mult=0.01,
+            reward_relval_mult=0.01,
             swap_sides=0,
             user_timeout=0,
             vcmi_timeout=0,

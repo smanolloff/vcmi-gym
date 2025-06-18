@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn.functional as F
 
 from rl.world.util.structured_logger import StructuredLogger
 from rl.world.util.persistence import load_checkpoint, save_checkpoint
@@ -26,7 +26,7 @@ from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, timer_stats, safe_mean
 
 from .. import common
-from ...world.i2a import I2A
+# from ...world.i2a import I2A
 
 
 if os.getenv("PYDEBUG", None) == "1":
@@ -98,6 +98,59 @@ class TensorStorage:
         self.returns = torch.zeros(s, e, device=device)
 
         self.device = device
+
+
+# XXX: DEBUG: TEST SIMPLE MODEL FREE ONLY
+from rl.world.util.hexconv import HexConvResBlock
+from rl.world.util.constants_v12 import STATE_SIZE_GLOBAL, STATE_SIZE_ONE_PLAYER, STATE_SIZE_ONE_HEX, N_ACTIONS
+HEXES_OFFSET = STATE_SIZE_GLOBAL + 2*STATE_SIZE_ONE_PLAYER
+
+class SimpleModel(nn.Module):
+    def __init__(self, output_size):
+        super().__init__()
+        self.device = torch.device("cpu")
+
+        self.z_size_other = 64
+        self.z_size_hex = 16
+        self.output_size = output_size
+
+        self.encoder_other = nn.Sequential(
+            nn.LazyLinear(self.z_size_other),
+            nn.LeakyReLU()
+            # => (B, Z_OTHER)
+        )
+
+        self.encoder_hexes = nn.Sequential(
+            # => (B, 165*H)
+            nn.Unflatten(dim=1, unflattened_size=[165, STATE_SIZE_ONE_HEX]),
+            # => (B, 165, H)
+            HexConvResBlock(channels=STATE_SIZE_ONE_HEX, depth=3),
+            # => (B, 165, H)
+            nn.LazyLinear(out_features=self.z_size_hex),
+            nn.LeakyReLU(),
+            # => (B, 165, Z_HEX)
+            nn.Flatten(),
+            # => (B, 165*Z_HEX)
+        )
+
+        self.encoder_merged = nn.Sequential(
+            # => (B, Z_OTHER + 165*Z_HEX)
+            nn.LazyLinear(out_features=self.output_size),
+            nn.LeakyReLU()
+            # => (B, OUTPUT_SIZE)
+        )
+
+        self.action_head = nn.LazyLinear(N_ACTIONS)
+        self.value_head = nn.LazyLinear(1)
+
+    def forward(self, obs, _mask, debug=False):
+        other, hexes = torch.split(obs, [HEXES_OFFSET, 165*STATE_SIZE_ONE_HEX], dim=1)
+        z_other = self.encoder_other(other)
+        z_hexes = self.encoder_hexes(hexes)
+        merged = torch.cat((z_other, z_hexes), dim=1)
+        action_logits = self.action_head(merged)
+        value = self.value_head(merged)
+        return action_logits, value
 
 
 @dataclass
@@ -211,6 +264,10 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
 
+    # XXX: DEBUG: TEST SIMPLE MODEL FREE ONLY
+    # truncs = model_ic.num_truncations
+    # stats.num_transition_truncations = truncs - truncs_start
+
     # bootstrap value if not done
     _, next_value = model(storage.next_obs, storage.next_mask)
     storage.next_value = next_value.reshape(1, -1)
@@ -222,8 +279,8 @@ def eval_model(logger, model, venv, num_vsteps):
     assert not torch.is_grad_enabled()
 
     stats = SampleStats()
-    model_ic = model.imagination_aggregator.rollout_encoder.imagination_core
-    truncs_start = model_ic.num_truncations
+    # model_ic = model.imagination_aggregator.rollout_encoder.imagination_core
+    # truncs_start = model_ic.num_truncations
 
     t = lambda x: torch.as_tensor(x, device=model.device)
 
@@ -256,8 +313,9 @@ def eval_model(logger, model, venv, num_vsteps):
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
 
-    truncs = model_ic.num_truncations
-    stats.num_transition_truncations = truncs - truncs_start
+    # XXX: DEBUG: TEST SIMPLE MODEL FREE ONLY
+    # truncs = model_ic.num_truncations
+    # stats.num_transition_truncations = truncs - truncs_start
 
     return stats
 
@@ -363,12 +421,14 @@ def train_model(logger, model, optimizer, autocast_ctx, scaler, storage, train_c
             # policy [...]
             # // => detach `logit`
             # """
-            rp_logits = model.imagination_aggregator.rollout_encoder.rollout_policy(b_obs[mb_inds])
-            rp_dist = common.CategoricalMasked(logits=rp_logits, mask=mb_masks)
-            rp_log_probs = rp_dist.logits.log_softmax(dim=-1)
-            teacher_log_probs = newdist.logits.log_softmax(dim=-1)
-            teacher_probs = teacher_log_probs.exp().detach()
-            distill_loss = F.kl_div(rp_log_probs, teacher_probs, reduction='batchmean')
+            # rp_logits = model.imagination_aggregator.rollout_encoder.rollout_policy(b_obs[mb_inds])
+            # rp_dist = common.CategoricalMasked(logits=rp_logits, mask=mb_masks)
+            # rp_log_probs = rp_dist.logits.log_softmax(dim=-1)
+            # teacher_log_probs = newdist.logits.log_softmax(dim=-1)
+            # teacher_probs = teacher_log_probs.exp().detach()
+            # distill_loss = F.kl_div(rp_log_probs, teacher_probs, reduction='batchmean')
+            # XXX: DEBUG: TEST SIMPLE MODEL FREE ONLY
+            distill_loss = torch.zeros_like(entropy_loss)
 
             policy_losses[i] = policy_loss.detach()
             entropy_losses[i] = entropy_loss.detach()
@@ -524,24 +584,25 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     state = State()
 
     model_config = dig(config, "model")
-    model = I2A(
-        i2a_fc_units=model_config["i2a_fc_units"],
-        num_trajectories=model_config["num_trajectories"],
-        rollout_dim=model_config["rollout_dim"],
-        rollout_policy_fc_units=model_config["rollout_policy_fc_units"],
-        horizon=model_config["horizon"],
-        obs_processor_output_size=model_config["obs_processor_output_size"],
-        side=(train_config["env"]["kwargs"]["role"] == "defender"),
-        reward_step_fixed=train_config["env"]["kwargs"]["reward_step_fixed"],
-        reward_dmg_mult=train_config["env"]["kwargs"]["reward_dmg_mult"],
-        reward_term_mult=train_config["env"]["kwargs"]["reward_term_mult"],
-        max_transitions=model_config["max_transitions"],
-        transition_model_file=model_config["transition_model_file"],
-        action_prediction_model_file=model_config["action_prediction_model_file"],
-        reward_prediction_model_file=model_config["reward_prediction_model_file"],
-        device=device,
-        debug_render=False,
-    )
+    # model = I2A(
+    #     i2a_fc_units=model_config["i2a_fc_units"],
+    #     num_trajectories=model_config["num_trajectories"],
+    #     rollout_dim=model_config["rollout_dim"],
+    #     rollout_policy_fc_units=model_config["rollout_policy_fc_units"],
+    #     horizon=model_config["horizon"],
+    #     obs_processor_output_size=model_config["obs_processor_output_size"],
+    #     side=(train_config["env"]["kwargs"]["role"] == "defender"),
+    #     reward_step_fixed=train_config["env"]["kwargs"]["reward_step_fixed"],
+    #     reward_dmg_mult=train_config["env"]["kwargs"]["reward_dmg_mult"],
+    #     reward_term_mult=train_config["env"]["kwargs"]["reward_term_mult"],
+    #     max_transitions=model_config["max_transitions"],
+    #     transition_model_file=model_config["transition_model_file"],
+    #     action_prediction_model_file=model_config["action_prediction_model_file"],
+    #     reward_prediction_model_file=model_config["reward_prediction_model_file"],
+    #     device=device,
+    #     debug_render=False,
+    # )
+    model = SimpleModel(1024)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     optimizer.param_groups[0].setdefault("initial_lr", learning_rate)
 
@@ -690,7 +751,6 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         while True:
             [v.reset(start=(k == "all")) for k, v in timers.items()]
 
-            logger.debug("learning_rate: %s" % optimizer.param_groups[0]['lr'])
             if lr_schedule_timer.peek() > train_config["lr_scheduler_interval_s"]:
                 lr_schedule_timer.reset(start=True)
                 lr_schedule.step()

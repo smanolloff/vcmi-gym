@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =============================================================================
-# This file contains a modified version of CleanRL's PPO implementation:
-# https://github.com/vwxyzjn/cleanrl/blob/e421c2e50b81febf639fced51a69e2602593d50d/cleanrl/ppo.py
+# This file contains a modified version of CleanRL's PPO-DNA implementation:
+# https://github.com/vwxyzjn/cleanrl/blob/caabea4c5b856f429baa2af8bc973d4994d4c330/cleanrl/ppo_dna_atari_envpool.py
 import os
 import sys
 import random
@@ -24,20 +24,15 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 from collections import deque
 
-import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.mobile_optimizer import optimize_for_mobile
+
 # import tyro
 import warnings
 
 from .. import common
-
-ENVS = []  # debug
-
-
-def render():
-    print(ENVS[0].render())
 
 
 @dataclass
@@ -52,32 +47,27 @@ class ScheduleArgs:
 @dataclass
 class EnvArgs:
     max_steps: int = 500
-    reward_dmg_factor: int = 5
     vcmi_loglevel_global: str = "error"
     vcmi_loglevel_ai: str = "error"
     vcmienv_loglevel: str = "WARN"
-    sparse_info: bool = True
-    step_reward_fixed: int = 0
-    step_reward_frac: float = 0
-    step_reward_mult: int = 1
-    term_reward_mult: int = 0
     user_timeout: int = 30
     vcmi_timeout: int = 30
     boot_timeout: int = 30
-    conntype: str = "proc"
     random_heroes: int = 1
     random_obstacles: int = 1
     town_chance: int = 0
+    random_stack_chance: int = 0,
     warmachine_chance: int = 0
+    random_terrain_chance: int = 0
+    tight_formation_chance: int = 0
+    battlefield_pattern: str = ""
     mana_min: int = 0
     mana_max: int = 0
+    reward_step_fixed: float = -1
+    reward_dmg_mult: float = 1
+    reward_term_mult: float = 1
+    reward_relval_mult: float = 1
     swap_sides: int = 0
-    reward_clip_tanh_army_frac: int = 1
-    reward_army_value_ref: int = 0
-    true_rng: bool = True  # DEPRECATED
-    deprecated_args: list[dict] = field(default_factory=lambda: [
-        "true_rng"
-    ])
 
     def __post_init__(self):
         common.coerce_dataclass_ints(self)
@@ -86,10 +76,9 @@ class EnvArgs:
 @dataclass
 class NetworkArgs:
     attention: dict = field(default_factory=dict)
-    features_extractor1_misc: list[dict] = field(default_factory=list)
-    features_extractor1_stacks: list[dict] = field(default_factory=list)
-    features_extractor1_hexes: list[dict] = field(default_factory=list)
-    features_extractor2: list[dict] = field(default_factory=list)
+    encoder_other: list[dict] = field(default_factory=list)
+    encoder_hexes: list[dict] = field(default_factory=list)
+    encoder_merged: list[dict] = field(default_factory=list)
     actor: dict = field(default_factory=dict)
     critic: dict = field(default_factory=dict)
 
@@ -98,6 +87,7 @@ class NetworkArgs:
 class State:
     seed: int = -1
     resumes: int = 0
+    map_swaps: int = 0  # DEPRECATED
     global_timestep: int = 0
     current_timestep: int = 0
     current_vstep: int = 0
@@ -147,29 +137,37 @@ class Args:
     success_rate_target: Optional[float] = None
     ep_rew_mean_target: Optional[float] = None
     quit_on_target: bool = False
-    mapside: str = "attacker"
+    mapside: str = "both"
+    mapmask: str = ""  # DEPRECATED
+    randomize_maps: bool = False
     permasave_every: int = 7200  # seconds; no retention
     save_every: int = 3600  # seconds; retention (see max_saves)
     max_saves: int = 3
     out_dir_template: str = "data/{group_id}/{run_id}"
+    out_dir: str = ""
+    out_dir_abs: str = ""  # auto-expanded on start
 
     opponent_load_file: Optional[str] = None
     opponent_sbm_probs: list = field(default_factory=lambda: [1, 0, 0])
-    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())
-    weight_decay: float = 0.0
-    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4x1024.vmap"])
-    num_steps: int = 128
-    gamma: float = 0.99
-    stats_buffer_size: int = 100
-    gae_lambda: float = 0.95
-    num_minibatches: int = 4
-    update_epochs: int = 4
-    norm_adv: bool = True
+
+    lr_schedule: ScheduleArgs = field(default_factory=lambda: ScheduleArgs())  # used if nn-specific lr_schedule["start"] is 0
     clip_coef: float = 0.2
     clip_vloss: bool = False
     ent_coef: float = 0.01
-    vf_coef: float = 0.5
+    vf_coef: float = 1.2   # not used
+    gae_lambda: float = 0.95  # used if nn-specific gae_lambda is 0
+    gamma: float = 0.99
     max_grad_norm: float = 0.5
+    norm_adv: bool = True
+    num_envs: int = 1
+    envmaps: list = field(default_factory=lambda: ["gym/generated/4096/4x1024.vmap"])
+
+    num_minibatches: int = 4  # used if nn-specific num_minibatches is 0
+    num_steps: int = 128
+    stats_buffer_size: int = 100
+
+    update_epochs: int = 4   # used if nn-specific update_epochs is 0
+    weight_decay: float = 0.0
     target_kl: float = None
 
     logparams: dict = field(default_factory=dict)
@@ -194,32 +192,72 @@ class Args:
         common.coerce_dataclass_ints(self)
 
 
-class ChanFirst(nn.Module):
-    def forward(self, x):
-        return x.permute(0, 3, 1, 2)
-
-
-class Split(nn.Module):
-    def __init__(self, split_size, dim):
+# 1. Adds 1 hex of padding to the input
+#
+#               0 0 0 0
+#    1 2 3     0 1 2 3 0
+#     4 5 6 =>  0 4 5 6 0
+#    7 8 9     0 7 8 9 0
+#               0 0 0 0
+#
+# 2. Simulates a Conv2d with kernel_size=2, padding=1
+#
+#  For the above example (grid of 9 total hexes), this would result in:
+#
+#  1 => [0, 0, 0, 1, 2, 0, 4]
+#  2 => [0, 0, 1, 2, 3, 4, 5]
+#  3 => [0, 0, 2, 3, 0, 5, 6]
+#  4 => [1, 2, 0, 4, 5, 7, 8]
+#  ...
+#  9 => [5, 6, 8, 9, 0, 0, 0]
+#
+# Input: (B, ...) reshapeable to (B, Y, X, E)
+# Output: (B, 165, out_channels)
+#
+class HexConv(nn.Module):
+    def __init__(self, out_channels):
         super().__init__()
-        self.split_size = split_size
-        self.dim = dim
+
+        padded_offsets0 = torch.tensor([-17, -16, -1, 0, 1, 17, 18])
+        padded_offsets1 = torch.tensor([-18, -17, -1, 0, 1, 16, 17])
+        padded_convinds = torch.zeros(11, 15, 7, dtype=int)
+
+        for y in range(1, 12):
+            for x in range(1, 16):
+                padded_hexind = y * 17 + x
+                padded_offsets = padded_offsets0 if y % 2 == 0 else padded_offsets1
+                padded_convinds[y-1, x-1] = padded_offsets + padded_hexind
+
+        self.register_buffer("padded_convinds", padded_convinds.flatten())
+        self.fc = nn.LazyLinear(out_features=out_channels)
 
     def forward(self, x):
-        return torch.split(x, self.split_size, self.dim)
+        b, _, hexdim = x.shape
+        x = x.view(b, 11, 15, -1)
+        padded_x = x.new_zeros((b, 13, 17, hexdim))  # +2 hexes in X and Y coords
+        padded_x[:, 1:12, 1:16, :] = x
+        padded_x = padded_x.view(b, -1, hexdim)
+        fc_input = padded_x[:, self.padded_convinds, :].view(b, 165, -1)
+        return self.fc(fc_input)
 
 
-class ResBlock(nn.Module):
-    def __init__(self, channels, activation="LeakyReLU"):
+class HexConvResBlock(nn.Module):
+    def __init__(self, channels, depth=1, act={"t": "LeakyReLU"}):
         super().__init__()
-        self.block = nn.Sequential(
-            common.layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1)),
-            getattr(nn, activation)(),
-            common.layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
-        )
+
+        self.layers = []
+        for _ in range(depth):
+            self.layers.append((
+                HexConv(channels),
+                AgentNN.build_layer(act),
+                HexConv(channels),
+            ))
 
     def forward(self, x):
-        return x + self.block(x)
+        assert x.is_contiguous
+        for conv1, act, conv2 in self.layers:
+            x = act(conv2(act(conv1(x))).add_(x))
+        return x
 
 
 class SelfAttention(nn.Module):
@@ -227,17 +265,20 @@ class SelfAttention(nn.Module):
         assert edim % num_heads == 0, f"{edim} % {num_heads} == 0"
         super().__init__()
         self.edim = edim
-        self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=1, batch_first=True)
+        self.mha = nn.MultiheadAttention(embed_dim=edim, num_heads=num_heads, batch_first=True)
 
     def forward(self, b_obs, b_masks=None):
         assert len(b_obs.shape) == 3
-        assert b_obs.shape[2] == self.edim, f"wrong obs shape: {b_obs.shape} (edim={self.edim})"
+        assert b_obs.shape[2] == self.edim
 
         if b_masks is None:
             res, _ = self.mha(b_obs, b_obs, b_obs, need_weights=False)
             return res
         else:
-            assert b_masks.shape == (b_masks.shape[0], 165, 165), f"wrong b_masks shape: {b_masks.shape} != ({b_masks.shape[0]}, 165, 165)"
+            assert len(b_masks.shape) == 3
+            assert b_masks.shape[0] == b_obs.shape[0], f"{b_masks.shape[0]} == {b_obs.shape[0]}"
+            assert b_masks.shape[1] == b_obs.shape[1], f"{b_masks.shape[1]} == {b_obs.shape[1]}"
+            assert b_masks.shape[1] == b_masks.shape[2], f"{b_masks.shape[1]} == {b_masks.shape[2]}"
             b_obs = b_obs.flatten(start_dim=1, end_dim=2)
             # => (B, 165, e)
             res, _ = self.mha(b_obs, b_obs, b_obs, attn_mask=b_masks, need_weights=False)
@@ -246,149 +287,91 @@ class SelfAttention(nn.Module):
 
 class AgentNN(nn.Module):
     @staticmethod
-    def build_layer(spec, obs_dims):
+    def build_layer(spec):
         kwargs = dict(spec)  # copy
         t = kwargs.pop("t")
-
-        for k, v in kwargs.items():
-            if v == "_M_":
-                kwargs[k] = obs_dims["misc"]
-            if v == "_H_":
-                assert obs_dims["hexes"] % 165 == 0
-                kwargs[k] = obs_dims["hexes"] // 165
-            if v == "_S_":
-                assert obs_dims["stacks"] % 20 == 0
-                kwargs[k] = obs_dims["stacks"] // 20
-
         layer_cls = getattr(torch.nn, t, None) or globals()[t]
         return layer_cls(**kwargs)
 
-    def __init__(self, network, action_space, observation_space, obs_dims):
+    def __init__(self, network, dim_other, dim_hexes):
         super().__init__()
 
-        self.observation_space = observation_space
-        self.action_space = action_space
-        self.obs_dims = obs_dims
+        self.dim_other = dim_other
+        self.dim_hexes = dim_hexes
 
-        assert isinstance(obs_dims, dict)
-        assert len(obs_dims) == 3
-        assert list(obs_dims.keys()) == ["misc", "stacks", "hexes"]  # order is important
+        self.encoder_other = torch.nn.Sequential()
+        self.encoder_hexes = torch.nn.Sequential()
+        self.encoder_merged = torch.nn.Sequential()
 
-        # 2 nonhex actions (RETREAT, WAIT) + 165 hexes*14 actions each
-        # Commented assert due to false positives on legacy models
-        # assert action_space.n == 2 + (165*14)
+        for spec in network.encoder_other:
+            layer = AgentNN.build_layer(spec)
+            self.encoder_other.append(layer)
 
-        if network.attention:
-            layer = AgentNN.build_layer(network.attention, obs_dims)
-            self.attention = common.layer_init(layer)
-        else:
-            self.attention = None
+        for spec in network.encoder_hexes:
+            layer = AgentNN.build_layer(spec)
+            self.encoder_hexes.append(layer)
 
-        # XXX: no lazy option for SelfAttention
+        for spec in network.encoder_merged:
+            layer = AgentNN.build_layer(spec)
+            self.encoder_merged.append(layer)
+
+        self.actor = AgentNN.build_layer(network.actor)
+        self.critic = AgentNN.build_layer(network.critic)
+
+        # Init lazy layers
         with torch.no_grad():
-            dummy_outputs = []
+            self.get_action_and_value(torch.randn([1, dim_other + dim_hexes]), torch.ones([1, 2312], dtype=torch.bool))
 
-        self.obs_splitter = Split(list(obs_dims.values()), dim=1)
+        common.layer_init(self.actor, gain=0.01)
+        common.layer_init(self.critic, gain=1.0)
 
-        self.features_extractor1_misc = torch.nn.Sequential()
-        for spec in network.features_extractor1_misc:
-            layer = AgentNN.build_layer(spec, obs_dims)
-            self.features_extractor1_misc.append(layer)
-
-        # dummy input to initialize lazy modules
-        with torch.no_grad():
-            dummy_outputs.append(self.features_extractor1_misc(torch.randn([1, obs_dims["misc"]])))
-
-        for layer in self.features_extractor1_misc:
-            common.layer_init(layer)
-
-        self.features_extractor1_stacks = torch.nn.Sequential(
-            torch.nn.Unflatten(dim=1, unflattened_size=[20, obs_dims["stacks"] // 20])
-        )
-
-        for spec in network.features_extractor1_stacks:
-            layer = AgentNN.build_layer(spec, obs_dims)
-            self.features_extractor1_stacks.append(layer)
-
-        # dummy input to initialize lazy modules
-        with torch.no_grad():
-            dummy_outputs.append(self.features_extractor1_stacks(torch.randn([1, obs_dims["stacks"]])))
-
-        for layer in self.features_extractor1_stacks:
-            common.layer_init(layer)
-
-        self.features_extractor1_hexes = torch.nn.Sequential(
-            torch.nn.Unflatten(dim=1, unflattened_size=[165, obs_dims["hexes"] // 165])
-        )
-
-        for spec in network.features_extractor1_hexes:
-            layer = AgentNN.build_layer(spec, obs_dims)
-            self.features_extractor1_hexes.append(layer)
-
-        # dummy input to initialize lazy modules
-        with torch.no_grad():
-            dummy_outputs.append(self.features_extractor1_hexes(torch.randn([1, obs_dims["hexes"]])))
-
-        for layer in self.features_extractor1_hexes:
-            common.layer_init(layer)
-
-        self.features_extractor2 = torch.nn.Sequential()
-        for spec in network.features_extractor2:
-            layer = AgentNN.build_layer(spec, obs_dims)
-            self.features_extractor2.append(layer)
-
-        # dummy input to initialize lazy modules
-        with torch.no_grad():
-            self.features_extractor2(torch.cat(tuple(dummy_outputs), dim=1))
-
-        for layer in self.features_extractor2:
-            common.layer_init(layer)
-
-        self.actor = common.layer_init(AgentNN.build_layer(network.actor, obs_dims), gain=0.01)
-        self.critic = common.layer_init(AgentNN.build_layer(network.critic, obs_dims), gain=1.0)
-
-    def extract_features(self, x):
-        misc, stacks, hexes = self.obs_splitter(x)
-        fmisc = self.features_extractor1_misc(misc)
-        fstacks = self.features_extractor1_stacks(stacks)
-        fhexes = self.features_extractor1_hexes(hexes)
-        fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
-        return self.features_extractor2(fcat)
+    def encode(self, x):
+        other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=1)
+        z_other = self.encoder_other(other)
+        z_hexes = self.encoder_hexes(hexes)
+        merged = torch.cat((z_other, z_hexes), dim=1)
+        return self.encoder_merged(merged)
 
     def get_value(self, x, attn_mask=None):
-        if self.attention:
-            x = self.attention(x, attn_mask)
-        return self.critic(self.extract_features(x))
+        return self.critic(self.encode(x))
 
-    def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
-        if self.attention:
-            x = self.attention(x, attn_mask)
-        features = self.extract_features(x)
-        value = self.critic(features)
-        action_logits = self.actor(features)
+    def get_action(self, x, mask, attn_mask=None, action=None, deterministic=False):
+        encoded = self.encode(x)
+        action_logits = self.actor(encoded)
         dist = common.CategoricalMasked(logits=action_logits, mask=mask)
         if action is None:
             if deterministic:
                 action = torch.argmax(dist.probs, dim=1)
             else:
                 action = dist.sample()
-        return action, dist.log_prob(action), dist.entropy(), value
+        return action, dist.log_prob(action), dist.entropy(), dist
+
+    def get_action_and_value(self, x, mask, attn_mask=None, action=None, deterministic=False):
+        encoded = self.encode(x)
+        value = self.critic(encoded)
+        action_logits = self.actor(encoded)
+        dist = common.CategoricalMasked(logits=action_logits, mask=mask)
+        if action is None:
+            if deterministic:
+                action = torch.argmax(dist.probs, dim=1)
+            else:
+                action = dist.sample()
+        return action, dist.log_prob(action), dist.entropy(), dist, value
 
     # Inference (deterministic)
-    # XXX: attention is not handled here
     def predict(self, b_obs, b_mask):
         with torch.no_grad():
             b_obs = torch.as_tensor(b_obs)
             b_mask = torch.as_tensor(b_mask)
 
             # Return unbatched action if input was unbatched
-            if b_obs.shape == self.observation_space.shape:
+            if len(b_mask.shape) == 1:
                 b_obs = b_obs.unsqueeze(dim=0)
                 b_mask = b_mask.unsqueeze(dim=0)
-                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _ = self.get_action(b_obs, b_mask, deterministic=True)
                 return b_env_action[0].cpu().item()
             else:
-                b_env_action, _, _, _ = self.get_action_and_value(b_obs, b_mask, deterministic=True)
+                b_env_action, _, _, _ = self.get_action(b_obs, b_mask, deterministic=True)
                 return b_env_action.cpu().numpy()
 
 
@@ -408,53 +391,48 @@ class Agent(nn.Module):
                 f" CWD: {os.getcwd()}"
             )
 
-        attrs = ["args", "observation_space", "action_space", "obs_dims", "state"]
+        attrs = ["args", "dim_other", "dim_hexes", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
-        clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
+        clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict(), strict=True)
         torch.save(clean_agent, agent_file)
 
     @staticmethod
     def jsave(agent, jagent_file):
         print("Saving JIT agent to %s" % jagent_file)
-        attrs = ["args", "observation_space", "action_space", "obs_dims", "state"]
+        attrs = ["args", "dim_other", "dim_hexes", "state"]
         data = {k: agent.__dict__[k] for k in attrs}
         clean_agent = agent.__class__(**data)
         clean_agent.NN.load_state_dict(agent.NN.state_dict(), strict=True)
         clean_agent.optimizer.load_state_dict(agent.optimizer.state_dict())
         jagent = JitAgent()
         jagent.env_version = clean_agent.env_version
-        jagent.obs_dims = clean_agent.obs_dims
-
-        # v2-
-        # jagent.features_extractor = clean_agent.NN.features_extractor
+        jagent.dim_other = clean_agent.dim_other
+        jagent.dim_hexes = clean_agent.dim_hexes
 
         # v3+
-        jagent.obs_splitter = clean_agent.NN.obs_splitter
-        jagent.features_extractor1_misc = clean_agent.NN.features_extractor1_misc
-        jagent.features_extractor1_stacks = clean_agent.NN.features_extractor1_stacks
-        jagent.features_extractor1_hexes = clean_agent.NN.features_extractor1_hexes
-        jagent.features_extractor2 = clean_agent.NN.features_extractor2
+        jagent.encoder = clean_agent.NN.encoder
 
         # common
         jagent.actor = clean_agent.NN.actor
-        jagent.critic = clean_agent.NN.critic
-        torch.jit.save(torch.jit.script(jagent), jagent_file)
+
+        jagent_optimized = optimize_for_mobile(torch.jit.script(jagent), preserved_methods=["get_version", "predict", "get_value"])
+        jagent_optimized._save_for_lite_interpreter(jagent_file)
 
     @staticmethod
     def load(agent_file, device="cpu"):
         print("Loading agent from %s (device: %s)" % (agent_file, device))
         return torch.load(agent_file, map_location=device, weights_only=False)
 
-    def __init__(self, args, observation_space, action_space, obs_dims, state=None, device="cpu"):
+    def __init__(self, args, dim_other, dim_hexes, state=None, device="cpu"):
         super().__init__()
         self.args = args
         self.env_version = args.env_version
-        self.observation_space = observation_space  # needed for save/load
-        self.action_space = action_space  # needed for save/load
-        self.obs_dims = obs_dims  # needed for save/load
-        self.NN = AgentNN(args.network, action_space, observation_space, obs_dims)
+        self._optimizer_state = None  # needed for save/load
+        self.dim_other = dim_other  # needed for save/load
+        self.dim_hexes = dim_hexes  # needed for save/load
+        self.NN = AgentNN(args.network, dim_other, dim_hexes)
         self.NN.to(device)
         self.optimizer = torch.optim.AdamW(self.NN.parameters(), eps=1e-5)
         self.predict = self.NN.predict
@@ -468,57 +446,88 @@ class JitAgent(nn.Module):
         super().__init__()
         # XXX: these are overwritten after object is initialized
         self.obs_splitter = nn.Identity()
-        self.features_extractor1_misc = nn.Identity()
-        self.features_extractor1_stacks = nn.Identity()
-        self.features_extractor1_hexes = nn.Identity()
-        self.features_extractor2 = nn.Identity()
+        self.encoder = nn.Identity()
         self.actor = nn.Identity()
         self.critic = nn.Identity()
         self.env_version = 0
 
-    # Inference (deterministic)
+    # Inference
     # XXX: attention is not handled here
     @torch.jit.export
-    def predict(self, obs, mask) -> int:
-        with torch.no_grad():
-            b_obs = obs.unsqueeze(dim=0)
-            b_mask = mask.unsqueeze(dim=0)
+    def predict(self, obs, mask, deterministic: bool = False) -> int:
+        b_obs = obs.unsqueeze(dim=0)
+        b_mask = mask.unsqueeze(dim=0)
+        encoded = self.encoder(b_obs)
+        action_logits = self.actor(encoded)
+        probs = self.categorical_masked(logits0=action_logits, mask=b_mask)
 
-            # v2-
-            # features = self.features_extractor(b_obs)
+        if deterministic:
+            action = torch.argmax(probs, dim=1)
+        else:
+            action = self.sample(probs, action_logits)
 
-            # v3+
-            misc, stacks, hexes = self.obs_splitter(b_obs)
-            fmisc = self.features_extractor1_misc(misc)
-            fstacks = self.features_extractor1_stacks(stacks)
-            fhexes = self.features_extractor1_hexes(hexes)
-            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
-            features = self.features_extractor2(fcat)
+        return action.int().item()
 
-            action_logits = self.actor(features)
-            dist = common.SerializableCategoricalMasked(logits=action_logits, mask=b_mask)
-            action = torch.argmax(dist.probs, dim=1)
-            return action.int().item()
+    @torch.jit.export
+    def forward(self, obs) -> torch.Tensor:
+        b_obs = obs.unsqueeze(dim=0)
+        encoded = self.encoder(b_obs)
+
+        return torch.cat(dim=1, tensors=(self.actor(encoded), self.critic(encoded)))
 
     @torch.jit.export
     def get_value(self, obs) -> float:
-        with torch.no_grad():
-            b_obs = obs.unsqueeze(dim=0)
-            misc, stacks, hexes = self.obs_splitter(b_obs)
-            fmisc = self.features_extractor1_misc(misc)
-            fstacks = self.features_extractor1_stacks(stacks)
-            fhexes = self.features_extractor1_hexes(hexes)
-            fcat = torch.cat((fmisc, fstacks, fhexes), dim=1)
-            features = self.features_extractor2(fcat)
-            value = self.critic(features)
-            return value.float().item()
+        b_obs = obs.unsqueeze(dim=0)
+        encoded = self.encoder(b_obs)
+        value = self.critic(encoded)
+        return value.float().item()
 
     @torch.jit.export
     def get_version(self) -> int:
         return self.env_version
 
+    # Implement SerializableCategoricalMasked as a function
+    # (lite interpreted does not support instantiating the class)
+    @torch.jit.export
+    def categorical_masked(self, logits0: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits0.dtype)
 
-def main(args, agent_cls=Agent):
+        # logits
+        logits1 = torch.where(mask, logits0, mask_value)
+        logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        return probs
+
+    @torch.jit.export
+    def sample(self, probs: torch.Tensor, action_logits: torch.Tensor) -> torch.Tensor:
+        num_events = action_logits.size()[-1]
+        probs_2d = probs.reshape(-1, num_events)
+        samples_2d = torch.multinomial(probs_2d, 1, True).T
+        batch_shape = action_logits.size()[:-1]
+        return samples_2d.reshape(batch_shape)
+
+
+def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae_lambda):
+    total_steps = len(rewards)
+    advantages = torch.zeros_like(rewards)
+    lastgaelam = 0
+    for t in reversed(range(total_steps)):
+        if t == total_steps - 1:
+            nextnonterminal = 1.0 - next_done
+            nextvalues = next_value
+        else:
+            nextnonterminal = 1.0 - dones[t + 1]
+            nextvalues = values[t + 1]
+        delta = rewards[t] + gamma * nextvalues * nextnonterminal - values[t]
+        advantages[t] = lastgaelam = delta + gamma * gae_lambda * nextnonterminal * lastgaelam
+    returns = advantages + values
+    return advantages, returns
+
+
+def main(args):
+    args.out_dir = args.out_dir_template.format(group_id=args.group_id, run_id=args.run_id)
+    args.out_dir_abs = os.path.abspath(args.out_dir)
+
     LOG = logging.getLogger("mppo")
     LOG.setLevel(args.loglevel)
 
@@ -526,7 +535,11 @@ def main(args, agent_cls=Agent):
 
     assert isinstance(args, Args)
 
-    agent, args = common.maybe_resume(Agent, args, device=device)
+    agent, args = common.maybe_resume(Agent, args, device_name=device.type)
+
+    # update out_dir (may have changed after load)
+    args.out_dir = args.out_dir_template.format(group_id=args.group_id, run_id=args.run_id)
+    args.out_dir_abs = os.path.abspath(args.out_dir)
 
     if args.seconds_total:
         assert not args.vsteps_total, "cannot have both vsteps_total and seconds_total"
@@ -545,7 +558,7 @@ def main(args, agent_cls=Agent):
 
     # Logger
     if not any(LOG.handlers):
-        formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.group_id}/{args.run_id}] %(message)s")
+        formatter = logging.Formatter(f"-- %(asctime)s %(levelname)s [{args.run_id}] %(message)s")
         formatter.default_time_format = "%Y-%m-%d %H:%M:%S"
         formatter.default_msec_format = None
         loghandler = logging.StreamHandler()
@@ -557,9 +570,10 @@ def main(args, agent_cls=Agent):
     out_dir = args.out_dir_template.format(seed=args.seed, group_id=args.group_id, run_id=args.run_id)
     LOG.info("Out dir: %s" % out_dir)
 
+    num_envs = args.num_envs
+
     lr_schedule_fn = common.schedule_fn(args.lr_schedule)
 
-    num_envs = len(args.envmaps)
     batch_size = int(num_envs * args.num_steps)
     minibatch_size = int(batch_size // args.num_minibatches)
 
@@ -584,7 +598,7 @@ def main(args, agent_cls=Agent):
 
     common.validate_tags(args.tags)
 
-    seed = 0
+    seed = args.seed
 
     # XXX: seed logic is buggy, do not use
     #      (this seed was never used to re-play trainings anyway)
@@ -597,51 +611,23 @@ def main(args, agent_cls=Agent):
     # else:
 
     # XXX: make sure the new seed is never 0
-    while seed == 0:
-        seed = np.random.randint(2**31 - 1)
+    # while seed == 0:
+    #     seed = np.random.randint(2**31 - 1)
 
     wrappers = args.env_wrappers
 
-    if args.env_version == 1:
-        from vcmi_gym import VcmiEnv_v1 as VcmiEnv
-        obs_space = VcmiEnv.OBSERVATION_SPACE
-    elif args.env_version == 2:
-        from vcmi_gym import VcmiEnv_v2 as VcmiEnv
-        obs_space = VcmiEnv.OBSERVATION_SPACE
-    elif args.env_version == 3:
-        from vcmi_gym import VcmiEnv_v3 as VcmiEnv
-        obs_space = VcmiEnv.OBSERVATION_SPACE
-    elif args.env_version == 4:
-        from vcmi_gym import VcmiEnv_v4 as VcmiEnv
-        print("Using legacy observation space wrapper")
-        wrappers.append(dict(module="vcmi_gym", cls="LegacyObservationSpaceWrapper"))
-        obs_space = VcmiEnv.OBSERVATION_SPACE["observation"]
-    else:
-        raise Exception("Unsupported env version: %d" % args.env_version)
+    assert args.env_version == 12
+    from vcmi_gym import VcmiEnv_v12 as VcmiEnv
 
+    obs_space = VcmiEnv.OBSERVATION_SPACE
     act_space = VcmiEnv.ACTION_SPACE
 
-    # TODO: robust mechanism ensuring these don't get mixed up
-    assert VcmiEnv.STATE_SEQUENCE == ["misc", "stacks", "hexes"]
-    obs_dims = dict(
-        misc=VcmiEnv.STATE_SIZE_MISC,
-        stacks=VcmiEnv.STATE_SIZE_STACKS,
-        hexes=VcmiEnv.STATE_SIZE_HEXES,
-    )
-
     if agent is None:
-        agent = Agent(args, obs_space, act_space, obs_dims, device=device)
-
-    import ipdb; ipdb.set_trace()  # noqa
-
-    # Legacy models with offset actions
-    if agent.NN.actor.out_features == 2311:
-        print("Using legacy model with 2311 actions")
-        wrappers.append(dict(module="vcmi_gym", cls="LegacyActionSpaceWrapper"))
-        n_actions = 2311
-    else:
-        print("Using new model with 2312 actions")
-        n_actions = 2312
+        # TODO: robust mechanism ensuring these don't get mixed up
+        dim_other = VcmiEnv.STATE_SIZE_GLOBAL + 2*VcmiEnv.STATE_SIZE_ONE_PLAYER
+        dim_hexes = VcmiEnv.STATE_SIZE_HEXES
+        assert VcmiEnv.STATE_SIZE == dim_other + dim_hexes
+        agent = Agent(args, dim_other, dim_hexes, device=device)
 
     # TRY NOT TO MODIFY: seeding
     LOG.info("RNG master seed: %s" % seed)
@@ -651,22 +637,14 @@ def main(args, agent_cls=Agent):
     torch.backends.cudnn.deterministic = True  # args.torch_deterministic
 
     try:
-        envs = common.create_venv(VcmiEnv, args, seed=np.random.randint(2**31))
-        [ENVS.append(e) for e in envs.unwrapped.envs]  # DEBUG
-
-        assert isinstance(act_space, gym.spaces.Discrete), "only discrete action space is supported"
+        seeds = [np.random.randint(2**31) for i in range(args.num_envs)]
+        envs = common.create_venv(VcmiEnv, args, seeds)
 
         agent.state.seed = seed
 
-        # these are used by gym's RecordEpisodeStatistics wrapper
-        envs.return_queue = agent.state.ep_rew_queue
-        envs.length_queue = agent.state.ep_length_queue
-
-        assert act_space.shape == ()
-
         if args.wandb_project:
             import wandb
-            common.setup_wandb(args, agent, __file__)
+            common.setup_wandb(args, agent, __file__, watch=False)
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
@@ -690,24 +668,24 @@ def main(args, agent_cls=Agent):
         attn = False
 
         # ALGO Logic: Storage setup
-        obs = torch.zeros((args.num_steps, num_envs) + obs_space.shape).to(device)
-        actions = torch.zeros((args.num_steps, num_envs) + act_space.shape).to(device)
+        obs = torch.zeros((args.num_steps, num_envs) + obs_space["observation"].shape).to(device)
+        actions = torch.zeros((args.num_steps, num_envs) + act_space.shape, dtype=torch.int64).to(device)
         logprobs = torch.zeros((args.num_steps, num_envs)).to(device)
         rewards = torch.zeros((args.num_steps, num_envs)).to(device)
         dones = torch.zeros((args.num_steps, num_envs)).to(device)
         values = torch.zeros((args.num_steps, num_envs)).to(device)
 
-        masks = torch.zeros((args.num_steps, num_envs, n_actions), dtype=torch.bool).to(device)
+        masks = torch.zeros((args.num_steps, num_envs, act_space.n), dtype=torch.bool).to(device)
         attnmasks = torch.zeros((args.num_steps, num_envs, 165, 165)).to(device)
 
         # TRY NOT TO MODIFY: start the game
-        next_obs, _ = envs.reset(seed=agent.state.seed)  # XXX: seed has no effect here
-        next_obs = torch.Tensor(next_obs).to(device)
-        next_done = torch.zeros(num_envs).to(device)
-        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask"))).to(device)
+        next_obs, _ = envs.reset(seed=args.seed)
+        next_obs = torch.as_tensor(next_obs, device=device)
+        next_done = torch.zeros(num_envs, device=device)
+        next_mask = torch.as_tensor(np.array(envs.unwrapped.call("action_mask")), device=device)
 
         if attn:
-            next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask")), device=device)
+            next_attnmask = torch.as_tensor(np.array(envs.unwrapped.call("attn_mask"))).to(device)
 
         progress = 0
         map_rollouts = 0
@@ -724,8 +702,17 @@ def main(args, agent_cls=Agent):
 
             agent.optimizer.param_groups[0]["lr"] = lr_schedule_fn(progress)
 
+            episode_count = 0
+
+            agent.state.ep_rew_queue.clear()
+            agent.state.ep_length_queue.clear()
+            agent.state.ep_net_value_queue.clear()
+            agent.state.ep_is_success_queue.clear()
+
             # XXX: eval during experience collection
             agent.eval()
+
+            # tstart = time.time()
             for step in range(0, args.num_steps):
                 obs[step] = next_obs
                 dones[step] = next_done
@@ -736,11 +723,13 @@ def main(args, agent_cls=Agent):
 
                 # ALGO LOGIC: action logic
                 with torch.no_grad():
-                    action, logprob, _, value = agent.NN.get_action_and_value(
+                    attn_mask = next_attnmask if attn else None
+                    action, logprob, _, _, value = agent.NN.get_action_and_value(
                         next_obs,
                         next_mask,
-                        attn_mask=next_attnmask if attn else None
+                        attn_mask=attn_mask
                     )
+
                     values[step] = value.flatten()
                 actions[step] = action
                 logprobs[step] = logprob
@@ -760,14 +749,16 @@ def main(args, agent_cls=Agent):
                 # https://github.com/DLR-RM/stable-baselines3/pull/658
 
                 # See notes/gym_vector.txt
-                for final_info, has_final_info in zip(infos.get("final_info", []), infos.get("_final_info", [])):
-                    # "final_info" must be None if "has_final_info" is False
-                    if has_final_info:
-                        assert final_info is not None, "has_final_info=True, but final_info=None"
-                        agent.state.ep_net_value_queue.append(final_info["net_value"])
-                        agent.state.ep_is_success_queue.append(final_info["is_success"])
-                        agent.state.current_episode += 1
-                        agent.state.global_episode += 1
+                if "_final_info" in infos:
+                    done_ids = np.flatnonzero(infos["_final_info"])
+                    final_infos = infos["final_info"]
+                    agent.state.ep_rew_queue.extend(final_infos["episode"]["r"][done_ids])
+                    agent.state.ep_length_queue.extend(final_infos["episode"]["r"][done_ids])
+                    agent.state.ep_net_value_queue.extend(final_infos["net_value"][done_ids])
+                    agent.state.ep_is_success_queue.extend(final_infos["is_success"][done_ids])
+                    agent.state.current_episode += 1
+                    agent.state.global_episode += 1
+                    episode_count += 1
 
                 agent.state.current_vstep += 1
                 agent.state.current_timestep += num_envs
@@ -775,43 +766,37 @@ def main(args, agent_cls=Agent):
                 agent.state.current_second = int(time.time() - start_time)
                 agent.state.global_second = global_start_second + agent.state.current_second
 
+            # print("SAMPLE TIME: %.2f" % (time.time() - tstart))
+            # tstart = time.time()
+
             # bootstrap value if not done
             with torch.no_grad():
                 next_value = agent.NN.get_value(
                     next_obs,
                     attn_mask=next_attnmask if attn else None
                 ).reshape(1, -1)
-                advantages = torch.zeros_like(rewards, device=device)
-                lastgaelam = 0
-                for t in reversed(range(args.num_steps)):
-                    if t == args.num_steps - 1:
-                        nextnonterminal = 1.0 - next_done
-                        nextvalues = next_value
-                    else:
-                        nextnonterminal = 1.0 - dones[t + 1]
-                        nextvalues = values[t + 1]
-                    delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
-                    advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
-                returns = advantages + values
+
+                advantages, _ = compute_advantages(
+                    rewards, dones, values, next_done, next_value, args.gamma, args.gae_lambda
+                )
+                _, returns = compute_advantages(rewards, dones, values, next_done, next_value, args.gamma, args.gae_lambda)
 
             # flatten the batch
-            b_obs = obs.reshape((-1,) + obs_space.shape)
-            b_logprobs = logprobs.reshape(-1)
-            b_actions = actions.reshape((-1,) + act_space.shape)
-            b_masks = masks.reshape((-1,) + (n_actions,))
-            b_advantages = advantages.reshape(-1)
-            b_returns = returns.reshape(-1)
-            b_values = values.reshape(-1)
+            b_obs = obs.flatten(end_dim=1)
+            b_logprobs = logprobs.flatten(end_dim=1)
+            b_actions = actions.flatten(end_dim=1)
+            b_masks = masks.flatten(end_dim=1)
+            b_advantages = advantages.flatten(end_dim=1)
+            b_returns = returns.flatten(end_dim=1)
+            b_values = values.flatten(end_dim=1)
 
             if attn:
                 b_attn_masks = attnmasks.reshape((-1,) + (165, 165))
 
-            # Optimizing the policy and value network
+            # Policy network optimization
             b_inds = np.arange(batch_size)
             clipfracs = []
 
-            # XXX: train during optimization
-            import ipdb; ipdb.set_trace()  # noqa
             agent.train()
             for epoch in range(args.update_epochs):
                 np.random.shuffle(b_inds)
@@ -819,7 +804,7 @@ def main(args, agent_cls=Agent):
                     end = start + minibatch_size
                     mb_inds = b_inds[start:end]
 
-                    _, newlogprob, entropy, newvalue = agent.NN.get_action_and_value(
+                    _action, newlogprob, entropy, _dist, newvalue = agent.NN.get_action_and_value(
                         b_obs[mb_inds],
                         b_masks[mb_inds],
                         attn_mask=b_attn_masks[mb_inds] if attn else None,
@@ -878,8 +863,9 @@ def main(args, agent_cls=Agent):
             ep_rew_mean = common.safe_mean(agent.state.ep_rew_queue)
             ep_value_mean = common.safe_mean(agent.state.ep_net_value_queue)
             ep_is_success_mean = common.safe_mean(agent.state.ep_is_success_queue)
+            ep_length_mean = common.safe_mean(agent.state.ep_length_queue)
 
-            if envs.episode_count > 0:
+            if episode_count > 0:
                 assert ep_rew_mean is not np.nan
                 assert ep_value_mean is not np.nan
                 assert ep_is_success_mean is not np.nan
@@ -890,8 +876,7 @@ def main(args, agent_cls=Agent):
                 agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
                 agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
 
-            wandb_log({"params/learning_rate": agent.optimizer.param_groups[0]["lr"]})
-            wandb_log({"losses/total_loss": loss.item()})
+            wandb_log({"params/policy_learning_rate": agent.optimizer.param_groups[0]["lr"]})
             wandb_log({"losses/value_loss": v_loss.item()})
             wandb_log({"losses/policy_loss": pg_loss.item()})
             wandb_log({"losses/entropy": entropy_loss.item()})
@@ -899,13 +884,23 @@ def main(args, agent_cls=Agent):
             wandb_log({"losses/approx_kl": approx_kl.item()})
             wandb_log({"losses/clipfrac": np.mean(clipfracs)})
             wandb_log({"losses/explained_variance": explained_var})
-            wandb_log({"rollout/ep_count": envs.episode_count})
-            wandb_log({"rollout/ep_len_mean": common.safe_mean(envs.length_queue)})
+            wandb_log({"rollout/ep_count": episode_count})
 
-            if envs.episode_count > 0:
+            if episode_count > 0:
+                assert ep_rew_mean is not np.nan
+                assert ep_value_mean is not np.nan
+                assert ep_is_success_mean is not np.nan
+                agent.state.rollout_rew_queue_100.append(ep_rew_mean)
+                agent.state.rollout_rew_queue_1000.append(ep_rew_mean)
+                agent.state.rollout_net_value_queue_100.append(ep_value_mean)
+                agent.state.rollout_net_value_queue_1000.append(ep_value_mean)
+                agent.state.rollout_is_success_queue_100.append(ep_is_success_mean)
+                agent.state.rollout_is_success_queue_1000.append(ep_is_success_mean)
+
                 wandb_log({"rollout/ep_rew_mean": ep_rew_mean})
                 wandb_log({"rollout/ep_value_mean": ep_value_mean})
                 wandb_log({"rollout/ep_success_rate": ep_is_success_mean})
+                wandb_log({"rollout/ep_len_mean": ep_length_mean})
 
             wandb_log({"rollout100/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_100)})
             wandb_log({"rollout1000/ep_value_mean": common.safe_mean(agent.state.rollout_net_value_queue_1000)})
@@ -917,8 +912,6 @@ def main(args, agent_cls=Agent):
             wandb_log({"global/num_timesteps": agent.state.current_timestep})
             wandb_log({"global/num_seconds": agent.state.current_second})
             wandb_log({"global/num_episode": agent.state.current_episode})
-
-            envs.episode_count = 0
 
             if rollouts_total:
                 wandb_log({"global/progress": progress})
@@ -946,48 +939,54 @@ def main(args, agent_cls=Agent):
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
                 wandb_log({
                     "global/global_num_timesteps": agent.state.global_timestep,
-                    "global/global_num_seconds": agent.state.global_second,
-                    "global/global_num_episodes": agent.state.global_episode,
+                    "global/global_num_seconds": agent.state.global_second
                 }, commit=True)  # commit on final log line
 
-                LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f loss=%.2f" % (
+                LOG.debug("rollout=%d rew=%.2f val=%.2f success=%.2f loss=%.1f|%.1f" % (
                     agent.state.current_rollout,
-                    agent.state.current_vstep,
                     ep_rew_mean,
                     ep_value_mean,
                     ep_is_success_mean,
-                    loss.item()
+                    v_loss.item(),
+                    pg_loss.item(),
                 ))
 
             agent.state.current_rollout += 1
-            save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent, out_dir)
+            save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent)
+            # print("TRAIN TIME: %.2f" % (time.time() - tstart))
 
     finally:
-        common.maybe_save(0, 10e9, args, agent, out_dir)
+        common.maybe_save(0, 10e9, args, agent)
         if "envs" in locals():
             envs.close()
 
     # Needed by PBT to save model after iteration ends
     # XXX: limit returned mean reward to only the rollouts in this iteration
-    return (
-        agent,
-        common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-agent.state.current_rollout:]),
-        common.safe_mean(list(agent.state.rollout_net_value_queue_1000)[-agent.state.current_rollout:]),
-    )
+    # XXX: but no more than the last 300 rollouts (esp. if training vs BattleAI)
+    ret_rew = common.safe_mean(list(agent.state.rollout_rew_queue_1000)[-min(300, agent.state.current_rollout):])
+    ret_value = common.safe_mean(list(agent.state.rollout_net_value_queue_1000)[-min(300, agent.state.current_rollout):])
+
+    wandb_log({
+        "trial/ep_rew_mean": ret_rew,
+        "trial/ep_value_mean": ret_value,
+        "trial/num_rollouts": agent.state.current_rollout,
+    }, commit=True)  # commit on final log line
+
+    return (agent, ret_rew, ret_value)
 
 
 def debug_args():
     return Args(
-        "mppo-test",
-        "mppo-test",
-        loglevel=logging.DEBUG,
+        run_id="mppo-test",
+        group_id="mppo-test",
         run_name=None,
+        loglevel=logging.DEBUG,
         trial_id=None,
         wandb_project=None,
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="simotest.pt",
+        # agent_load_file="/var/folders/m3/8p3yhh9171sbnhc7j_2xpk880000gn/T/x.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,
@@ -1000,26 +999,22 @@ def debug_args():
         mapside="defender",
         save_every=2000000000,  # greater than time.time()
         permasave_every=2000000000,  # greater than time.time()
-        max_saves=1,
+        max_saves=0,
         out_dir_template="data/mppo-test/mppo-test",
         opponent_load_file=None,
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
-        envmaps=["gym/generated/4096/4x1024.vmap"],
-        # num_steps=64,
-        num_steps=4,
+        num_envs=1,
+        num_steps=256,
         gamma=0.8,
-        gae_lambda=0.8,
-        num_minibatches=2,
-        # num_minibatches=16,
-        # update_epochs=2,
+        gae_lambda=0.9,
+        num_minibatches=4,
         update_epochs=2,
         norm_adv=True,
         clip_coef=0.3,
         clip_vloss=True,
         ent_coef=0.01,
-        vf_coef=1.2,
         max_grad_norm=0.5,
         target_kl=None,
         logparams={},
@@ -1027,70 +1022,86 @@ def debug_args():
         seed=42,
         skip_wandb_init=False,
         skip_wandb_log_code=False,
+        envmaps=["gym/A1.vmap"],
+        # envmaps=["gym/generated/4096/4x1024.vmap"],
         env=EnvArgs(
             max_steps=500,
-            reward_dmg_factor=5,
             vcmi_loglevel_global="error",
             vcmi_loglevel_ai="error",
             vcmienv_loglevel="WARN",
-            sparse_info=True,
-            step_reward_fixed=-100,
-            step_reward_mult=1,
-            term_reward_mult=0,
             random_heroes=0,
             random_obstacles=0,
+            random_terrain_chance=0,
+            tight_formation_chance=0,
             town_chance=0,
+            random_stack_chance=0,
             warmachine_chance=0,
             mana_min=0,
             mana_max=0,
+            # reward_step_fixed=-1,
+            # reward_dmg_mult=1,
+            # reward_term_mult=1,
+            # reward_relval_mult=1,
+            reward_step_fixed=-0.01,
+            reward_dmg_mult=0.01,
+            reward_term_mult=0.01,
+            reward_relval_mult=0.01,
             swap_sides=0,
-            reward_clip_tanh_army_frac=1,
-            reward_army_value_ref=0,
             user_timeout=0,
             vcmi_timeout=0,
             boot_timeout=0,
-            conntype="proc"
         ),
-        env_wrappers=[],
-        env_version=4,
         # env_wrappers=[dict(module="debugging.defend_wrapper", cls="DefendWrapper")],
-        network=dict(
-            attention=None,
-            features_extractor1_misc=[
-                # => (B, M)
-                dict(t="LazyLinear", out_features=4),
-                dict(t="LeakyReLU"),
-                # => (B, 2)
+        env_wrappers=[
+            dict(module="vcmi_gym.envs.util.wrappers", cls="LegacyObservationSpaceWrapper"),
+            dict(module="gymnasium.wrappers", cls="RecordEpisodeStatistics")
+        ],
+        env_version=12,
+        network={
+            "encoder_other": [
+                # => (B, 26)
+                {"t": "LazyLinear", "out_features": 64},
+                {"t": "LeakyReLU"},
+                # => (B, 64)
             ],
-            features_extractor1_stacks=[
-                # => (B, 20, S)
-                dict(t="LazyLinear", out_features=64),
-                dict(t="LeakyReLU"),
-                dict(t="Linear", in_features=64, out_features=16),
-                # => (B, 20, 16)
-
-                dict(t="Flatten"),
-                # => (B, 320)
-            ],
-            features_extractor1_hexes=[
+            "encoder_hexes": [
+                # => (B, 165*H)
+                dict(t="Unflatten", dim=1, unflattened_size=[165, 170]),
                 # => (B, 165, H)
-                dict(t="LazyLinear", out_features=32),
-                dict(t="LeakyReLU"),
-                dict(t="Linear", in_features=32, out_features=16),
+
+                # #
+                # # HexConv (variant A: classic conv)
+                # #
+                # {"t": "HexConv", "out_channels": 64},
+                # {"t": "LeakyReLU"},
+                # # => (B, 165, 64)
+                # {"t": "HexConv", "out_channels": 64},
+                # {"t": "LeakyReLU"},
+                # # => (B, 165, 16)
+
+                #
+                # HexConv (variant B: residual conv)
+                #
+                {"t": "HexConvResBlock", "channels": 170, "depth": 3},
+
+                #
+                # HexConv COMMON
+                #
+                {"t": "LazyLinear", "out_features": 16},
+                {"t": "LeakyReLU"},
                 # => (B, 165, 16)
 
-                dict(t="Flatten"),
-                # => (B, 2640)
+                {"t": "Flatten"},
+                # => (B, 5280)
             ],
-            features_extractor2=[
-                # => (B, 2964)
-                dict(t="LeakyReLU"),
-                dict(t="LazyLinear", out_features=512),
-                dict(t="LeakyReLU"),
+            "encoder_merged": [
+                {"t": "LazyLinear", "out_features": 1024},
+                {"t": "LeakyReLU"},
+                # => (B, 1024)
             ],
-            actor=dict(t="Linear", in_features=512, out_features=2312),
-            critic=dict(t="Linear", in_features=512, out_features=1)
-        )
+            "actor": {"t": "LazyLinear", "out_features": 2312},
+            "critic": {"t": "LazyLinear", "out_features": 1}
+        }
     )
 
 

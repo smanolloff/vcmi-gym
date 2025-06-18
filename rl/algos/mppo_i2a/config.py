@@ -16,9 +16,14 @@ env_kwargs = dict(
     warmachine_chance=0,
     mana_min=0,
     mana_max=0,
-    reward_step_fixed=-1,
-    reward_dmg_mult=1,
-    reward_term_mult=1,
+    # reward_step_fixed=-1,
+    # reward_dmg_mult=1,
+    # reward_term_mult=1,
+    # reward_relval_mult=1,
+    reward_step_fixed=-0.01,
+    reward_dmg_mult=0.01,
+    reward_term_mult=0.01,
+    reward_relval_mult=0.01,
     swap_sides=0,
     user_timeout=3600,
     vcmi_timeout=60,
@@ -64,22 +69,23 @@ config = dict(
         update_epochs=1,
 
         learning_rate=1e-3,
-        lr_scheduler_interval_s=5,  # use 1e9 to disable
+        # lr_scheduler_interval_s=5,  # use 1e9 to disable
+        lr_scheduler_interval_s=1e9,  # use 1e9 to disable
         lr_scheduler_step_mult=0.8,    # => 1e-4...1e-5 in 10 steps
         lr_scheduler_min_value=5e-4,
 
-        gamma=0.85,
+        gamma=0.8,
         gae_lambda=0.9,
-        ent_coef=0.05,
-        clip_coef=0.5,
+        ent_coef=0.01,
+        clip_coef=0.3,
         vf_coef=0.5,
         norm_adv=True,
         clip_vloss=True,
         target_kl=None,
-        max_grad_norm=1,
+        max_grad_norm=0.5,
         distill_lambda=1.0,
 
-        torch_autocast=True,
+        torch_autocast=False,
     ),
     model=dict(
         i2a_fc_units=1024,
@@ -116,20 +122,20 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 if os.getenv("VASTAI", None) != "1":
     config["train"]["num_vsteps"] = 256
     config["train"]["num_minibatches"] = 4
-    config["train"]["update_epochs"] = 1
+    config["train"]["update_epochs"] = 2
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     config["eval"]["num_vsteps"] = 5000
     config["eval"]["env"]["num_envs"] = 1
     config["eval"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    config["eval"]["interval_s"] = 60
+    config["eval"]["interval_s"] = 6000
     config["wandb_log_interval_s"] = 10
     config["checkpoint"]["interval_s"] = 2e9
     config["model"].update(
-        i2a_fc_units=16,
-        num_trajectories=1,  # valid actions are ~65 on average... (25 for peasant)
-        rollout_dim=16,
-        rollout_policy_fc_units=16,
-        horizon=2,
-        obs_processor_output_size=16,
+        i2a_fc_units=512,
+        num_trajectories=5,  # valid actions are ~65 on average... (25 for peasant)
+        rollout_dim=512,
+        rollout_policy_fc_units=512,
+        horizon=3,
+        obs_processor_output_size=512,
     )
