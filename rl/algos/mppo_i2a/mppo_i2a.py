@@ -472,7 +472,7 @@ def prepare_wandb_log(
     return wlog
 
 
-def main(config, resume_config, loglevel, dry_run, no_wandb):
+def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=float("inf")):
     if resume_config:
         with open(resume_config, "r") as f:
             print(f"Resuming from config: {f.name}")
@@ -656,6 +656,9 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
         "eval": Timer(),
     }
 
+    # For benchmark
+    cumulative_timer_values = {k: 0 for k in timers.keys()}
+
     timers["all"].start()
     eval_net_value_best = None
 
@@ -687,7 +690,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
     optimizer.param_groups[0]["lr"] = clamp_lr()
 
     try:
-        while True:
+        while state.current_rollout < total_rollouts:
             [v.reset(start=(k == "all")) for k, v in timers.items()]
 
             logger.debug("learning_rate: %s" % optimizer.param_groups[0]['lr'])
@@ -809,17 +812,22 @@ def main(config, resume_config, loglevel, dry_run, no_wandb):
                 # logger.info("Time for wandb log")
                 wandb_log_commit_timer.reset(start=True)
                 wlog.update(aggregate_logs())
-                wlog.update(timer_stats(timers))
+                tstats = timer_stats(timers)
+                wlog.update(tstats)
                 wlog["train/learning_rate"] = optimizer.param_groups[0]['lr']
                 wandb.log(wlog, commit=True)
 
             logger.info(wlog)
+
+            for k in timers.keys():
+                cumulative_timer_values[k] += timers[k].peek()
+
             state.current_rollout += 1
 
         ret_rew = safe_mean(list(state.rollout_rew_queue_1000)[-min(300, state.current_rollout):])
         ret_value = safe_mean(list(state.rollout_net_value_queue_1000)[-min(300, state.current_rollout):])
 
-        return ret_rew, ret_value
+        return ret_rew, ret_value, cumulative_timer_values
     finally:
         save_checkpoint(
             logger=logger,
