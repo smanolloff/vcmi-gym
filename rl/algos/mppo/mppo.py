@@ -241,23 +241,32 @@ class HexConv(nn.Module):
         return self.fc(fc_input)
 
 
+class HexConvResLayer(nn.Module):
+    def __init__(self, channels, act={"t": "LeakyReLU"}):
+        super().__init__()
+
+        self.act = AgentNN.build_layer(act)
+        self.body = nn.Sequential(
+            HexConv(channels),
+            self.act,
+            HexConv(channels),
+        )
+
+    def forward(self, x):
+        return self.act(self.body(x).add(x))
+
+
 class HexConvResBlock(nn.Module):
     def __init__(self, channels, depth=1, act={"t": "LeakyReLU"}):
         super().__init__()
 
-        self.layers = []
+        self.layers = nn.Sequential()
         for _ in range(depth):
-            self.layers.append((
-                HexConv(channels),
-                AgentNN.build_layer(act),
-                HexConv(channels),
-            ))
+            self.layers.append(HexConvResLayer(channels, act))
 
     def forward(self, x):
         assert x.is_contiguous
-        for conv1, act, conv2 in self.layers:
-            x = act(conv2(act(conv1(x))).add_(x))
-        return x
+        return self.layers(x)
 
 
 class SelfAttention(nn.Module):

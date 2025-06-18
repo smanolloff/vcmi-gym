@@ -52,20 +52,29 @@ class HexConv(nn.Module):
         return self.fc(fc_input)
 
 
+class HexConvResLayer(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+
+        self.act = nn.LeakyReLU()
+        self.body = nn.Sequential(
+            HexConv(channels),
+            self.act,
+            HexConv(channels),
+        )
+
+    def forward(self, x):
+        return self.act(self.body(x).add(x))
+
+
 class HexConvResBlock(nn.Module):
     def __init__(self, channels, depth=1):
         super().__init__()
 
-        self.act = nn.LeakyReLU()
-        self.components = nn.ModuleList([])
+        self.layers = nn.Sequential()
         for _ in range(depth):
-            self.components.append(nn.Sequential(
-                HexConv(channels),
-                self.act,
-                HexConv(channels),
-            ))
+            self.layers.append(HexConvResLayer(channels))
 
     def forward(self, x):
-        for comp in self.components:
-            x = self.act(comp(x).add_(x))
-        return x
+        assert x.is_contiguous
+        return self.layers(x)
