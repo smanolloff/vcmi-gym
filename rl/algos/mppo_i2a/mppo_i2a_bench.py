@@ -31,6 +31,7 @@ if __name__ == "__main__":
     config["model"]["num_trajectories"] = args.num_trajectories
     config["model"]["horizon"] = args.horizon
 
+    config["eval"]["env"]["num_envs"] = 1
     config["eval"]["interval_s"] = int(1e6)
     config["checkpoint"]["permanent_interval_s"] = int(1e7)
     config["train"]["env"]["kwargs"]["user_timeout"] = int(1e9)
