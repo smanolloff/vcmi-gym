@@ -48,12 +48,12 @@ if __name__ == "__main__":
             {"t": "LazyLinear", "out_features": 512},
             # => (B, 165, 512)
 
-            {"t": "HexConvResBlock", "channels": 170, "depth": 3},
+            {"t": "HexConvResBlock", "channels": 512, "depth": 3},
             # => (B, 165, 512)
 
             {"t": "TransformerEncoder", "num_layers": 3, "encoder_layer": {
                 "t": "TransformerEncoderLayer",
-                "d_model": 170,
+                "d_model": 512,
                 "nhead": 10,
                 "dropout": 0.2,
                 "batch_first": True
