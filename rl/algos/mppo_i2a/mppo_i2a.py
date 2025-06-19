@@ -447,7 +447,7 @@ def prepare_wandb_log(
         })
 
     wlog.update({
-        "train/learning_rate": optimizer.param_groups[0]["lr"],
+        "train/learning_rate": float(optimizer.param_groups[0]["lr"]),
         "train/value_loss": train_stats.value_loss,
         "train/policy_loss": train_stats.policy_loss,
         "train/entropy_loss": train_stats.entropy_loss,
