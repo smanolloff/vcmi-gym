@@ -301,6 +301,15 @@ class HexConvResBlock(nn.Module):
         return self.layers(x)
 
 
+class Mean(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x):
+        return x.mean(dim=self.dim)
+
+
 class SelfAttention(nn.Module):
     def __init__(self, edim, num_heads=1):
         assert edim % num_heads == 0, f"{edim} % {num_heads} == 0"
@@ -1125,23 +1134,23 @@ def debug_args():
         opponent_sbm_probs=[1, 0, 0],
         weight_decay=0.05,
         lr_schedule=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_value=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_policy=ScheduleArgs(mode="const", start=0.001),
-        lr_schedule_distill=ScheduleArgs(mode="const", start=0.001),
+        lr_schedule_value=ScheduleArgs(mode="const", start=0),
+        lr_schedule_policy=ScheduleArgs(mode="const", start=0),
+        lr_schedule_distill=ScheduleArgs(mode="const", start=0),
         num_envs=1,
         num_steps=256,
-        gamma=0.8,
+        num_minibatches=4,
+        update_epochs=2,
         gae_lambda=0.9,
+        gamma=0.8,
         gae_lambda_policy=0.95,
         gae_lambda_value=0.95,
-        num_minibatches=4,
-        num_minibatches_value=4,
-        num_minibatches_policy=4,
-        num_minibatches_distill=4,
-        update_epochs=2,
-        update_epochs_value=2,
-        update_epochs_policy=2,
-        update_epochs_distill=2,
+        num_minibatches_value=0,
+        num_minibatches_policy=0,
+        num_minibatches_distill=0,
+        update_epochs_value=0,
+        update_epochs_policy=0,
+        update_epochs_distill=0,
         norm_adv=True,
         clip_coef=0.3,
         clip_vloss=True,

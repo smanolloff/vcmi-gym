@@ -19,7 +19,17 @@ import math
 import torch
 import torch.nn as nn
 
-from .mppo_dna import debug_args, main, NetworkArgs
+from .mppo_dna import debug_args, main, NetworkArgs, AgentNN
+
+
+class TAgentNN(AgentNN):
+    def encode(self, x):
+        other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=1)
+        z_other = self.encoder_other(other)
+        z_hexes = self.encoder_hexes(hexes).mean(dim=1)
+        merged = torch.cat((z_other, z_hexes), dim=1)
+        return self.encoder_merged(merged)
+
 
 if __name__ == "__main__":
     kur = debug_args()
@@ -35,28 +45,23 @@ if __name__ == "__main__":
             dict(t="Unflatten", dim=1, unflattened_size=[165, 170]),
             # => (B, 165, H)
 
-            #
-            # HexConv (variant B: residual conv)
-            #
-            {"t": "HexConvResBlock", "channels": 170, "depth": 3},
+            {"t": "LazyLinear", "out_features": 512},
+            # => (B, 165, 512)
 
-            #
-            # HexConv COMMON
-            #
-            # {"t": "LazyLinear", "out_features": 16},
-            # {"t": "LeakyReLU"},
+            {"t": "HexConvResBlock", "channels": 170, "depth": 3},
+            # => (B, 165, 512)
 
             {"t": "TransformerEncoder", "num_layers": 3, "encoder_layer": {
                 "t": "TransformerEncoderLayer",
                 "d_model": 170,
                 "nhead": 10,
-                "dropout": 0.3,
+                "dropout": 0.2,
                 "batch_first": True
             }},
-            # => (B, 165, 16)
+            # => (B, 165, 512)
 
-            {"t": "Flatten"},
-            # => (B, 5280)
+            {"t": "Mean", "dim": 1},
+            # => (B, 512)
         ],
         "encoder_merged": [
             {"t": "LazyLinear", "out_features": 1024},
