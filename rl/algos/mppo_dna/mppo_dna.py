@@ -327,11 +327,16 @@ class SelfAttention(nn.Module):
 
 
 class AgentNN(nn.Module):
-    @staticmethod
-    def build_layer(spec):
+    @classmethod
+    def build_layer(cls, spec):
         kwargs = dict(spec)  # copy
         t = kwargs.pop("t")
         layer_cls = getattr(torch.nn, t, None) or globals()[t]
+
+        for k, v in kwargs.items():
+            if isinstance(v, dict) and "t" in v:
+                kwargs[k] = cls.build_layer(v)
+
         return layer_cls(**kwargs)
 
     def __init__(self, network, dim_other, dim_hexes):
