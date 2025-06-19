@@ -677,7 +677,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
     lr_schedule_timer = Timer()
     lr_schedule_timer.start()
 
-    assert train_config["lr_scheduler_min_value"] < train_config["learning_rate"]
+    assert train_config["lr_scheduler_min_value"] <= train_config["learning_rate"]
 
     lr_schedule = torch.optim.lr_scheduler.StepLR(
         optimizer,
