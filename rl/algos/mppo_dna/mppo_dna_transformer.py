@@ -41,6 +41,7 @@ class TAgentNN(AgentNN):
         nn.Module.__init__(self)
 
         cuda_cpu = lambda a, b: b if device in ["cpu", torch.device("cpu")] else a
+        print("Using device: %s" % device)
 
         self.device = device
         self.obs_index = ObsIndex(device)
