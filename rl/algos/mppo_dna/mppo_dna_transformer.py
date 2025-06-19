@@ -54,7 +54,7 @@ if __name__ == "__main__":
             {"t": "TransformerEncoder", "num_layers": 3, "encoder_layer": {
                 "t": "TransformerEncoderLayer",
                 "d_model": 512,
-                "nhead": 10,
+                "nhead": 8,
                 "dropout": 0.2,
                 "batch_first": True
             }},
