@@ -578,7 +578,7 @@ def compute_advantages(rewards, dones, values, next_done, next_value, gamma, gae
     return advantages, returns
 
 
-def main(args):
+def main(args, agent=None):
     args.out_dir = args.out_dir_template.format(group_id=args.group_id, run_id=args.run_id)
     args.out_dir_abs = os.path.abspath(args.out_dir)
 
@@ -589,7 +589,8 @@ def main(args):
 
     assert isinstance(args, Args)
 
-    agent, args = common.maybe_resume(Agent, args, device_name=device.type)
+    if agent is None:
+        agent, args = common.maybe_resume(Agent, args, device_name=device.type)
 
     # update out_dir (may have changed after load)
     args.out_dir = args.out_dir_template.format(group_id=args.group_id, run_id=args.run_id)
