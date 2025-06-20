@@ -142,7 +142,7 @@ class SerializableCategoricalMasked:
         return torch.nn.functional.softmax(self.logits, dim=-1)
 
 
-def create_venv(env_cls, args, seeds=None):
+def create_venv(env_cls, args, seeds=None, sync=False):
     assert args.mapside in ["attacker", "defender"]
 
     # assert args.env.conntype == "proc" or args.num_envs == 1, (
@@ -165,7 +165,7 @@ def create_venv(env_cls, args, seeds=None):
     )
 
     def env_creator(i):
-        if os.getpid() == pid:
+        if os.getpid() == pid and not sync:
             return dummy_env
 
         sbm = ["MMAI_SCRIPT_SUMMONER", "BattleAI", "MMAI_MODEL"]
@@ -208,7 +208,12 @@ def create_venv(env_cls, args, seeds=None):
     #     vec_env = gym.vector.AsyncVectorEnv(funcs)
     # else:
     funcs = [partial(env_creator, 0)]
-    vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+
+    if sync:
+        vec_env = gym.vector.SyncVectorEnv(funcs, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+    else:
+        vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+
     vec_env.reset()
 
     return vec_env

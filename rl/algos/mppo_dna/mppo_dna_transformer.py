@@ -22,15 +22,6 @@ import torch.nn as nn
 from .mppo_dna import debug_args, main, NetworkArgs, AgentNN
 
 
-class TAgentNN(AgentNN):
-    def encode(self, x):
-        other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=1)
-        z_other = self.encoder_other(other)
-        z_hexes = self.encoder_hexes(hexes).mean(dim=1)
-        merged = torch.cat((z_other, z_hexes), dim=1)
-        return self.encoder_merged(merged)
-
-
 if __name__ == "__main__":
     kur = debug_args()
     kur.network = NetworkArgs(**{
@@ -46,9 +37,6 @@ if __name__ == "__main__":
             # => (B, 165, H)
 
             {"t": "LazyLinear", "out_features": 512},
-            # => (B, 165, 512)
-
-            {"t": "HexConvResBlock", "channels": 512, "depth": 3},
             # => (B, 165, 512)
 
             {"t": "TransformerEncoder", "num_layers": 3, "encoder_layer": {

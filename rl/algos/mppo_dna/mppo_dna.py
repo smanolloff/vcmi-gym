@@ -713,7 +713,7 @@ def main(args, agent=None):
 
     try:
         seeds = [np.random.randint(2**31) for i in range(args.num_envs)]
-        envs = common.create_venv(VcmiEnv, args, seeds)
+        envs = common.create_venv(VcmiEnv, args, seeds, sync=(args.num_envs == 1))
 
         agent.state.seed = seed
 
@@ -1143,8 +1143,8 @@ def debug_args():
         update_epochs=2,
         gae_lambda=0.9,
         gamma=0.8,
-        gae_lambda_policy=0.95,
-        gae_lambda_value=0.95,
+        gae_lambda_policy=0,
+        gae_lambda_value=0,
         num_minibatches_value=0,
         num_minibatches_policy=0,
         num_minibatches_distill=0,
