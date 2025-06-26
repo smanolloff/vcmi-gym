@@ -15,6 +15,10 @@ pandas
 millify
 torchviz
 
+mctx
+jax
+flax
+
 ray
 #ray[tune]
 #ray[rllib]==2.38.0
