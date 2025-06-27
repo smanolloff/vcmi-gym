@@ -60,7 +60,7 @@ def leaf_key_paths(d: dict, parent_path=()):
     return paths
 
 
-def load_params_from_torch_state(jax_params, torch_state):
+def load_params_from_torch_state(jax_params, torch_state, head_names):
     jax_params = unfreeze(jax_params)["params"]
 
     # torch keys obtained via `torch_params.keys()`
@@ -98,13 +98,13 @@ def load_params_from_torch_state(jax_params, torch_state):
         'encoder_merged_hex.0.bias':                ['encoder_merged_hex', 'layers_0', 'bias'],
         'aggregator.0.weight':                      ['aggregator', 'layers_0', 'kernel'],
         'aggregator.0.bias':                        ['aggregator', 'layers_0', 'bias'],
-        'head_global.weight':                       ['head_global', 'kernel'],
-        'head_global.bias':                         ['head_global', 'bias'],
-        'head_player.weight':                       ['head_player', 'kernel'],
-        'head_player.bias':                         ['head_player', 'bias'],
-        'head_hex.weight':                          ['head_hex', 'kernel'],
-        'head_hex.bias':                            ['head_hex', 'bias'],
     }
+
+    for head_name in head_names:
+        torch_to_jax_mapping.update({
+            f"head_{head_name}.weight":  [f"head_{head_name}", 'kernel'],
+            f"head_{head_name}.bias":    [f"head_{head_name}", 'bias'],
+        })
 
     for torch_key, jax_keys in torch_to_jax_mapping.items():
         transpose = jax_keys[-1] == "kernel"

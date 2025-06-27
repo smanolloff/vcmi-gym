@@ -16,18 +16,6 @@ from ...util.constants_v12 import (
     DIM_OBS,
 )
 
-
-class Other(enum.IntEnum):
-    CAN_WAIT = 0
-    DONE = enum.auto()
-
-
-class Reconstruction(enum.IntEnum):
-    PROBS = 0               # clamp(cont) + softmax(bin) + softmax(cat)
-    SAMPLES = enum.auto()   # clamp(cont) + sample(sigmoid(bin)) + sample(softmax(cat))
-    GREEDY = enum.auto()    # clamp(cont) + round(sigmoid(bin)) + argmax(cat)
-
-
 class LeakyReLU(fnn.Module):
     negative_slope: float = 0.01
 
@@ -301,13 +289,7 @@ class FlaxTransitionModel(fnn.Module):
         #
 
         # => (B, Z_AGG)
-        self.head_global = fnn.Dense(STATE_SIZE_GLOBAL)
-
-        # => (B, 2, Z_AGG + Z_PLAYER)
-        self.head_player = fnn.Dense(STATE_SIZE_ONE_PLAYER)
-
-        # => (B, 165, Z_AGG + Z_HEX)
-        self.head_hex = fnn.Dense(STATE_SIZE_ONE_HEX)
+        self.head_reward = fnn.Dense(1)
 
     def __call__(self, obs, action):
         action_z = self.encoder_action(action)
@@ -384,127 +366,24 @@ class FlaxTransitionModel(fnn.Module):
         # Outputs
         #
 
-        global_out = self.head_global(z_agg)
-        # => (B, STATE_SIZE_GLOBAL)
+        out = jnp.reshape(self.head_reward(z_agg), (-1,))
+        # => (B,)
 
-        player_out = self.head_player(jax_cat([new_axis_broadcast(z_agg, 1, 2), z_player], axis=-1))
-        # => (B, 2, STATE_SIZE_ONE_PLAYER)
+        return out
 
-        hex_out = self.head_hex(jax_cat([new_axis_broadcast(z_agg, 1, 165), z_hex2], axis=-1))
-        # => (B, 165, STATE_SIZE_ONE_HEX)
-
-        obs_out = jax_cat([global_out, player_out.reshape(player_out.shape[0], -1), hex_out.reshape(hex_out.shape[0], -1)], axis=1)
-
-        return obs_out
-
-    # XXX: this is not called via __call__ => cannot use to self.make_rng, self.abs_index, etc.
-    # unless called like this:
-    #   jax_model.apply(
-    #       jax_params,
-    #       jax_obs_pred_raw,
-    #       rngs={"reconstruct": jax.random.PRNGKey(0)},
-    #       method=FlaxTransitionModel.reconstruct
-    #   )
-
-    def reconstruct(self, obs_out, strategy=Reconstruction.GREEDY):
-        key = self.make_rng("reconstruct")
-
-        global_cont_abs_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
-        global_cont_rel_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]]
-        global_cont_nullbit_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]]
-        global_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.BINARIES]]
-        global_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.CATEGORICALS]]
-        global_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.THRESHOLDS]]
-        player_cont_abs_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]]
-        player_cont_rel_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_REL]]
-        player_cont_nullbit_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]]
-        player_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.BINARIES]]
-        player_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.CATEGORICALS]]
-        player_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.THRESHOLDS]]
-        hex_cont_abs_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_ABS]]
-        hex_cont_rel_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_REL]]
-        hex_cont_nullbit_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]]
-        hex_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.BINARIES]]
-        hex_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.CATEGORICALS]]
-        hex_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.THRESHOLDS]]
-        next_obs = jnp.zeros_like(obs_out)
-
-        reconstruct_continuous = lambda logits: jnp.clip(logits, a_min=0, a_max=1)
-
-        # PROBS = enum.auto()     # clamp(cont) + sigmoid(bin) + softmax(cat)
-        # SAMPLES = enum.auto()   # clamp(cont) + sample(sigmoid(bin)) + sample(softmax(cat))
-        # GREEDY = enum.auto()    # clamp(cont) + round(sigmoid(bin)) + argmax(cat)
-
-        if strategy == Reconstruction.PROBS:
-            def reconstruct_binary(logits):
-                return jnn.sigmoid()
-
-            def reconstruct_categorical(logits):
-                return jnn.softmax(logits, axis=-1)
-
-        elif strategy == Reconstruction.SAMPLES:
-            def reconstruct_binary(logits):
-                return jax.random.bernoulli(key, jnn.sigmoid(logits))
-
-            def reconstruct_categorical(logits):
-                num_classes = logits.shape[-1]
-                flat_logits = logits.reshape(-1, num_classes)
-                sampled = jax.random.categorical(key, jnn.log_softmax(flat_logits, axis=-1))
-                sampled = sampled.reshape(logits.shape[:-1])
-                return jnn.one_hot(sampled, num_classes).astype(logits.dtype)
-
-        elif strategy == Reconstruction.GREEDY:
-            def reconstruct_binary(logits):
-                return (logits > 0).astype(jnp.float32)
-
-            def reconstruct_categorical(logits):
-                return jnn.one_hot(jnp.argmax(logits, axis=-1), num_classes=logits.shape[-1]).astype(jnp.float32)
-
-        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]].set(reconstruct_continuous(global_cont_abs_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]].set(reconstruct_continuous(global_cont_rel_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]].set(reconstruct_continuous(global_cont_nullbit_out))
-        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.BINARIES], global_binary_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.CATEGORICALS], global_categorical_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
-        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.THRESHOLDS], global_threshold_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-
-        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]].set(reconstruct_continuous(player_cont_abs_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_REL]].set(reconstruct_continuous(player_cont_rel_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]].set(reconstruct_continuous(player_cont_nullbit_out))
-        for ind, out in zip(self.abs_index[Group.PLAYER][Group.BINARIES], player_binary_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-        for ind, out in zip(self.abs_index[Group.PLAYER][Group.CATEGORICALS], player_categorical_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
-        for ind, out in zip(self.abs_index[Group.PLAYER][Group.THRESHOLDS], player_threshold_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-
-        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_ABS]].set(reconstruct_continuous(hex_cont_abs_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_REL]].set(reconstruct_continuous(hex_cont_rel_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]].set(reconstruct_continuous(hex_cont_nullbit_out))
-        for ind, out in zip(self.abs_index[Group.HEX][Group.BINARIES], hex_binary_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-        for ind, out in zip(self.abs_index[Group.HEX][Group.CATEGORICALS], hex_categorical_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
-        for ind, out in zip(self.abs_index[Group.HEX][Group.THRESHOLDS], hex_threshold_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-
-        return next_obs
-
-    def predict_batch(self, obs, action, strategy=Reconstruction.GREEDY):
+    def predict_batch(self, obs, action):
         main_logits, hex_logits = self(obs)
         logits_pred = self(obs, action)
-        return self.reconstruct(logits_pred, strategy=strategy)
+        return self.reconstruct(logits_pred)
 
-    def predict(self, obs, action, strategy=Reconstruction.GREEDY):
+    def predict(self, obs, action):
         obs = jnp.expand_dims(obs, axis=0).astype(jnp.float32)
         action = jnp.array([action])
-        return self.predict_batch(obs, action, strategy=strategy)[0]
+        return self.predict_batch(obs, action)[0][0]
 
 
 if __name__ == "__main__":
-    from ..t10n import TransitionModel
+    from ..reward import TransitionModel
 
     # INIT
     import torch
@@ -519,11 +398,11 @@ if __name__ == "__main__":
     )
 
     # LOAD
-    torch_state = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
+    torch_state = torch.load("aexhrgez-model.pt", weights_only=True, map_location="cpu")
     torch_model.load_state_dict(torch_state)
 
     from .load_utils import load_params_from_torch_state
-    jax_params = load_params_from_torch_state(jax_params, torch_state, head_names=["global", "player", "hex"])
+    jax_params = load_params_from_torch_state(jax_params, torch_state, head_names=["reward"])
 
     # TEST
 
@@ -531,26 +410,6 @@ if __name__ == "__main__":
     def jit_fwd(params, obs, act):
         return jax_model.apply(jax_params, obs, act)
 
-    @jax.jit
-    def jit_reconstruct(params, obs_out, rng_key):
-        return jax_model.apply(
-            params,
-            obs_out,
-            rngs={'reconstruct': rng_key},
-            method=FlaxTransitionModel.reconstruct,
-            strategy=Reconstruction.GREEDY
-        )
-
-    @jax.jit
-    def jit_predict(params, obs, act, rng_key):
-        return jax_model.apply(
-            params,
-            obs,
-            act,
-            strategy=Reconstruction.GREEDY,
-            method=FlaxTransitionModel.predict,
-            rngs={'reconstruct': rng_key},
-        )
 
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
     env = VcmiEnv(
@@ -569,8 +428,6 @@ if __name__ == "__main__":
     env.reset()
 
     with torch.no_grad():
-        from vcmi_gym.envs.v12.decoder.decoder import Decoder
-
         act = env.random_action()
         obs, rew, term, trunc, _info = env.step(act)
 
@@ -579,68 +436,16 @@ if __name__ == "__main__":
             act_prev = obs["transitions"]["actions"][i-1]
             obs_next = obs["transitions"]["observations"][i]
             # mask_next = obs["transitions"]["action_masks"][i]
-            # rew_next = obs["transitions"]["rewards"][i]
+            rew_next = obs["transitions"]["rewards"][i]
             # done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
-            torch_obs_pred_raw = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
-            jax_obs_pred_raw = jax_model.apply(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
-            jit_obs_pred_raw = jit_fwd(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
+            torch_rew_pred = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
+            jax_rew_pred = jax_model.apply(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
+            jit_rew_pred = jit_fwd(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
 
-            torch_recon = torch_model.reconstruct(torch_obs_pred_raw)
-            jax_recon = jax_model.apply(jax_params, jax_obs_pred_raw, rngs={"reconstruct": jax.random.PRNGKey(0)}, method=FlaxTransitionModel.reconstruct)
-            jit_recon = jit_reconstruct(jax_params, jit_obs_pred_raw, jax.random.PRNGKey(0))
-
-            torch_bf = Decoder.decode(torch_recon[0].numpy())
-            jax_bf = Decoder.decode(np.array(jax_recon[0]))
-            jit_bf = Decoder.decode(np.array(jit_recon[0]))
-
-            print("TORCH BF:")
-            print(torch_bf.render(0))
-            print("JAX BF:")
-            print(jax_bf.render(0))
-            print("JIT BF:")
-            print(jit_bf.render(0))
-
-            pred_bf = Decoder.decode(np.asarray(jit_predict(jax_params, obs_prev, act_prev, jax.random.PRNGKey(0))))
-            print("PRED BF:")
-            print(jit_bf.render(0))
-
-            # BENCHMARKS
-            import time
-
-            print("Benchmarking torch (100)...")
-            torch_start = time.perf_counter()
-            for _ in range(100):
-                torch_obs_pred_raw = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
-                torch_recon = torch_model.reconstruct(torch_obs_pred_raw)
-                print(".", end="", flush=True)
-            torch_end = time.perf_counter()
-            print("\ntorch: %.2fs" % (torch_end - torch_start))
-
-            print("Benchmarking jax (5)...")
-            jax_start = time.perf_counter()
-            for _ in range(5):
-                jax_obs_pred_raw = jax_model.apply(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
-                jax_recon = jax_model.apply(jax_params, jax_obs_pred_raw, rngs={"reconstruct": jax.random.PRNGKey(0)}, method=FlaxTransitionModel.reconstruct)
-                print(".", end="", flush=True)
-            jax_end = time.perf_counter()
-            print("\njax: %.2fs" % (jax_end - jax_start))
-
-            print("Benchmarking jit (100)...")
-            jit_start = time.perf_counter()
-            for _ in range(100):
-                jit_obs_pred_raw = jit_fwd(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
-                jit_recon = jit_reconstruct(jax_params, jit_obs_pred_raw, jax.random.PRNGKey(0))
-                print(".", end="", flush=True)
-            jit_end = time.perf_counter()
-            print("\njit: %.2fs" % (jit_end - jit_start))
-
-            print("Benchmarking pred (100)...")
-            jit_start = time.perf_counter()
-            for _ in range(100):
-                jit_recon = jit_predict(jax_params, obs_prev, act_prev, jax.random.PRNGKey(0))
-                print(".", end="", flush=True)
-            jit_end = time.perf_counter()
-            print("\npred: %.2fs" % (jit_end - jit_start))
+            print("REAL REWARD: %s" % rew_next)
+            print("TORCH REWARD: %s" % torch_rew_pred)
+            print("JAX REWARD: %s" % jax_rew_pred)
+            print("JIT REWARD: %s" % jit_rew_pred)
 
             import ipdb; ipdb.set_trace()  # noqa
