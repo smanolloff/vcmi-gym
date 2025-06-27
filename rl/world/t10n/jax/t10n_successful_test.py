@@ -1,3 +1,5 @@
+// WORKING SELF ATTN
+
 # flake8: noqa: E241
 import torch
 import flax.linen as fnn
@@ -37,7 +39,7 @@ class Identity(fnn.Module):
         return x
 
 
-class TransformerEncoderLayer(fnn.Module):
+class EncoderLayer(fnn.Module):
     d_model: int
     dim_feedforward: int
     num_heads: int
@@ -48,14 +50,12 @@ class TransformerEncoderLayer(fnn.Module):
         self.self_attn = fnn.MultiHeadAttention(
             num_heads=self.num_heads,
             qkv_features=self.d_model,
-            out_features=512,
-            use_bias=True,
             dropout_rate=self.dropout_rate,
+            broadcast_dropout=False,
             deterministic=self.deterministic,
-            broadcast_dropout=False
         )
 
-        self.linear1 = fnn.Dense(self.dim_feedforward)  # 2048=torch default
+        self.linear1 = fnn.Dense(self.dim_feedforward)
         self.dropout = fnn.Dropout(self.dropout_rate)
         self.linear2 = fnn.Dense(self.d_model)
         self.norm1 = fnn.LayerNorm(epsilon=1e-5)
@@ -67,17 +67,18 @@ class TransformerEncoderLayer(fnn.Module):
         # Multi-head self-attention block
         residual = x
         x = self.self_attn(x)
-        x = self.dropout1(x, deterministic=self.deterministic)
-        x = self.norm1(residual + x)
+        # import ipdb; ipdb.set_trace()  # noqa
+        # x = self.dropout1(x, deterministic=self.deterministic)
+        # x = self.norm1(residual + x)
 
-        # Position-wise feed-forward block
-        residual = x
-        x = self.linear1(x)
-        x = fnn.relu(x)
-        x = self.dropout(x, deterministic=self.deterministic)
-        x = self.linear2(x)
-        x = self.dropout2(x, deterministic=self.deterministic)
-        x = self.norm2(residual + x)
+        # # Position-wise feed-forward block
+        # residual = x
+        # x = self.linear1(x)
+        # x = fnn.relu(x)
+        # x = self.dropout(x, deterministic=self.deterministic)
+        # x = self.linear2(x)
+        # x = self.dropout2(x, deterministic=self.deterministic)
+        # x = self.norm2(residual + x)
 
         return x
 
@@ -92,8 +93,9 @@ class TransformerEncoder(fnn.Module):
     def setup(self):
         layers = []
         for _ in range(self.num_layers):
-            layers.append(TransformerEncoderLayer(
+            layers.append(EncoderLayer(
                 d_model=self.d_model,
+                dim_feedforward=2048,  # pytorch default
                 num_heads=self.num_heads,
                 dropout_rate=self.dropout_rate,
                 deterministic=self.deterministic,
@@ -613,88 +615,23 @@ def load_for_test():
 
         jp = dig(jax_params, jax_prefix_keys)
 
-        jp['query']['kernel']   = q_w.numpy().T.reshape(D, H, head_dim)
+        jp['query']['kernel']   = q_w.numpy().reshape(D, H, head_dim)
         jp['query']['bias']     = q_b.numpy().reshape(H, head_dim)
-        jp['key']['kernel']     = k_w.numpy().T.reshape(D, H, head_dim)
+        jp['key']['kernel']     = k_w.numpy().reshape(D, H, head_dim)
         jp['key']['bias']       = k_b.numpy().reshape(H, head_dim)
-        jp['value']['kernel']   = v_w.numpy().T.reshape(D, H, head_dim)
+        jp['value']['kernel']   = v_w.numpy().reshape(D, H, head_dim)
         jp['value']['bias']     = v_b.numpy().reshape(H, head_dim)
 
         out_w = torch_state[f'{torch_prefix}out_proj.weight']  # (D, D)
         out_b = torch_state[f'{torch_prefix}out_proj.bias']    # (D,)
-        jp['out']['kernel'] = out_w.numpy().T.reshape(H, head_dim, D)
+        jp['out']['kernel'] = out_w.numpy().reshape(H, head_dim, D)
         jp['out']['bias']   = out_b.numpy()  # stays (D,)
 
 
     # SELF-ATTN TEST
-    # torch_attn = torch.nn.MultiheadAttention(
-    #     512,
-    #     8,
-    #     dropout=0.0,
-    #     bias=True,
-    #     batch_first=True,
-    # )
-
-    # torch_attn.load_state_dict({
-    #     "in_proj_weight": torch_state["transformer_hex.layers.0.self_attn.in_proj_weight"],
-    #     "in_proj_bias": torch_state["transformer_hex.layers.0.self_attn.in_proj_bias"],
-    #     "out_proj.weight": torch_state["transformer_hex.layers.0.self_attn.out_proj.weight"],
-    #     'out_proj.bias': torch_state["transformer_hex.layers.0.self_attn.out_proj.bias"]
-    # })
-
-    # torch_attn_state = torch_attn.state_dict()
-
-    # jax_attn = fnn.MultiHeadAttentio(
-    #     num_heads=8,
-    #     qkv_features=512,
-    #     out_features=512,
-    #     use_bias=True,
-    #     dropout_rate=0.0,
-    #     deterministic=True,
-    #     broadcast_dropout=False
-    # )
-
-    # jax_attn_params = jax_attn.init({"params": jax.random.PRNGKey(0)}, jnp.zeros([1, 1, 512]))
-    # jax_attn_params = unfreeze(jax_attn_params)["params"]
-
-    # in_w = torch_attn_state["in_proj_weight"]   # (3*D, D)
-    # in_b = torch_attn_state["in_proj_bias"]     # (3*D,)
-    # qkv_size = in_w.shape[0]
-    # D = qkv_size // 3
-    # H = jax_attn_params["query"]["bias"].shape[0]
-    # head_dim = D // H
-
-    # # split into query, key, value
-    # q_w, k_w, v_w = in_w.split(D, dim=0)   # each (D, D)
-    # q_b, k_b, v_b = in_b.split(D, dim=0)   # each (D,)
-
-    # jax_attn_params['query']['kernel']   = q_w.numpy().T.reshape(D, H, head_dim)
-    # jax_attn_params['query']['bias']     = q_b.numpy().reshape(H, head_dim)
-    # jax_attn_params['key']['kernel']     = k_w.numpy().T.reshape(D, H, head_dim)
-    # jax_attn_params['key']['bias']       = k_b.numpy().reshape(H, head_dim)
-    # jax_attn_params['value']['kernel']   = v_w.numpy().T.reshape(D, H, head_dim)
-    # jax_attn_params['value']['bias']     = v_b.numpy().reshape(H, head_dim)
-
-    # out_w = torch_attn_state["out_proj.weight"]  # (D, D)
-    # out_b = torch_attn_state["out_proj.bias"]    # (D,)
-    # jax_attn_params['out']['kernel'] = out_w.numpy().T.reshape(H, head_dim, D)
-    # jax_attn_params['out']['bias']   = out_b.numpy()  # stays (D,)
-    # jax_attn_params = freeze({"params": jax_attn_params})
-
-    # torch_in = torch.ones([1, 1, 512])
-    # jax_in = torch_in.numpy()
-
-    # torch_out = torch_attn(torch_in, torch_in, torch_in)
-    # jax_out = jax_attn.apply(jax_attn_params, jax_in)
-    # !!!!
-    # ipdb> torch_out[0][0,0,0]
-    # tensor(0.9930, grad_fn=<SelectBackward0>)
-    # ipdb> jax_out[0,0,0]
-    # Array(-0.798804, dtype=float32)
-
     # torch_out <> jax_out
-    # import ipdb; ipdb.set_trace()  # noqa
-    # pass
+    import ipdb; ipdb.set_trace()  # noqa
+    pass
 
     load_self_attn(torch_state, "transformer_hex.layers.0.self_attn.", jax_params, ["transformer_hex", "layers_0", "self_attn"])
     load_self_attn(torch_state, "transformer_hex.layers.1.self_attn.", jax_params, ["transformer_hex", "layers_1", "self_attn"])
@@ -737,7 +674,7 @@ def do_test(jax_params, jax_model, torch_model, env):
     env.reset()
 
     # PREVENTS breakpoints
-    torch_model.eval()
+    # torch_model.eval()
 
     for _ in range(10):
         print("=" * 100)
@@ -758,6 +695,7 @@ def do_test(jax_params, jax_model, torch_model, env):
             # done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
             from vcmi_gym.envs.v12.decoder.decoder import Decoder
+            import ipdb; ipdb.set_trace()  # noqa
             torch_obs_pred_raw = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
             jax_obs_pred_raw = jax_model.apply(jax_params, obs_prev.reshape(1,-1), act_prev.reshape(1))
 
@@ -863,5 +801,100 @@ def do_test(jax_params, jax_model, torch_model, env):
     # print(Decoder.decode(obs_real))
 
 
+def test_self_attn():
+    from ..t10n import TransitionModel
+    torch_model = TransitionModel()
+    torch_state = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
+
+    # SELF-ATTN TEST
+    torch_attn = torch.nn.MultiheadAttention(
+        512,
+        8,
+        dropout=0.0,
+        bias=True,
+        batch_first=True,
+    )
+
+    torch_attn.load_state_dict({
+        "in_proj_weight": torch_state["transformer_hex.layers.0.self_attn.in_proj_weight"],
+        "in_proj_bias": torch_state["transformer_hex.layers.0.self_attn.in_proj_bias"],
+        "out_proj.weight": torch_state["transformer_hex.layers.0.self_attn.out_proj.weight"],
+        'out_proj.bias': torch_state["transformer_hex.layers.0.self_attn.out_proj.bias"]
+    })
+
+    torch_attn_state = torch_attn.state_dict()
+
+    jax_attn = fnn.SelfAttention(
+        num_heads=8,
+        qkv_features=512,
+        out_features=512,
+        use_bias=True,
+        dropout_rate=0.0,
+        deterministic=True,
+        broadcast_dropout=False
+    )
+
+    jax_attn_params = jax_attn.init({"params": jax.random.PRNGKey(0)}, jnp.zeros([1, 1, 512]))
+    jax_attn_params = unfreeze(jax_attn_params)["params"]
+
+    in_w = torch_attn_state["in_proj_weight"]   # (3*D, D)
+    in_b = torch_attn_state["in_proj_bias"]     # (3*D,)
+    qkv_size = in_w.shape[0]
+    D = qkv_size // 3
+    H = jax_attn_params["query"]["bias"].shape[0]
+    head_dim = D // H
+
+    # split into query, key, value
+    q_w, k_w, v_w = in_w.split(D, dim=0)   # each (D, D)
+    q_b, k_b, v_b = in_b.split(D, dim=0)   # each (D,)
+
+    jax_attn_params['query']['kernel']   = q_w.numpy().T.reshape(D, H, head_dim)
+    jax_attn_params['query']['bias']     = q_b.numpy().reshape(H, head_dim)
+    jax_attn_params['key']['kernel']     = k_w.numpy().T.reshape(D, H, head_dim)
+    jax_attn_params['key']['bias']       = k_b.numpy().reshape(H, head_dim)
+    jax_attn_params['value']['kernel']   = v_w.numpy().T.reshape(D, H, head_dim)
+    jax_attn_params['value']['bias']     = v_b.numpy().reshape(H, head_dim)
+
+    out_w = torch_attn_state["out_proj.weight"]  # (D, D)
+    out_b = torch_attn_state["out_proj.bias"]    # (D,)
+    jax_attn_params['out']['kernel'] = out_w.numpy().T.reshape(H, head_dim, D)
+    jax_attn_params['out']['bias']   = out_b.numpy()  # stays (D,)
+    jax_attn_params = freeze({"params": jax_attn_params})
+
+    torch_in = torch.ones([1, 1, 512])
+    jax_in = torch_in.numpy()
+
+    torch_out = torch_attn(torch_in, torch_in, torch_in)
+    jax_out = jax_attn.apply(jax_attn_params, jax_in)
+
+    # ipdb> torch_out[0][0,0,0]
+    # tensor(0.9930, grad_fn=<SelectBackward0>)
+    # ipdb> jax_out[0,0,0]
+    # Array(-0.798804, dtype=float32)
+
+    import ipdb; ipdb.set_trace()  # noqa
+    pass
+
+
+def test_encoder_layer():
+    jax_encoder = EncoderLayer(
+        d_model=5,
+        dim_feedforward=4,
+        num_heads=1,
+        dropout_rate=0.0,
+        deterministic=True,
+    )
+
+    torch_encoder = torch.nn.EncoderLayer(
+        d_model=5,
+        dim_feedforward=4,
+        nhead=1,
+        dropout=0.0,
+        batch_first=True,
+    )
+
+    import ipdb; ipdb.set_trace()  # noqa
+    pass
+
 if __name__ == "__main__":
-    test()
+    test_encoder_layer()
