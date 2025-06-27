@@ -493,39 +493,7 @@ class TransitionModel(nn.Module):
 
         obs_out = torch.cat((global_out, player_out.flatten(start_dim=1), hex_out.flatten(start_dim=1)), dim=1)
 
-        # return obs_out
-        return {
-            "global_cont_abs_z": global_cont_abs_z,
-            "global_cont_rel_z": global_cont_rel_z,
-            "global_cont_nullbit_z": global_cont_nullbit_z,
-            "global_binary_z": global_binary_z,
-            "global_categorical_z": global_categorical_z,
-            "global_threshold_z": global_threshold_z,
-            "global_merged": global_merged,
-            "z_global": z_global,
-            "player_cont_abs_z": player_cont_abs_z,
-            "player_cont_rel_z": player_cont_rel_z,
-            "player_cont_nullbit_z": player_cont_nullbit_z,
-            "player_binary_z": player_binary_z,
-            "player_categorical_z": player_categorical_z,
-            "player_threshold_z": player_threshold_z,
-            "player_merged": player_merged,
-            "z_player": z_player,
-            "hex_cont_abs_z": hex_cont_abs_z,
-            "hex_cont_rel_z": hex_cont_rel_z,
-            "hex_cont_nullbit_z": hex_cont_nullbit_z,
-            "hex_binary_z": hex_binary_z,
-            "hex_categorical_z": hex_categorical_z,
-            "hex_threshold_z": hex_threshold_z,
-            "hex_merged": hex_merged,
-            "z_hex1": z_hex1,
-            "z_hex2": z_hex2,
-            "z_agg": z_agg,
-            "global_out": global_out,
-            "player_out": player_out,
-            "hex_out": hex_out,
-            "obs_out": obs_out,
-        }
+        return obs_out
 
     def reconstruct(self, obs_out, strategy=Reconstruction.GREEDY):
         global_cont_abs_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]

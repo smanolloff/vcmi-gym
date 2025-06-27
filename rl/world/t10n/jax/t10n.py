@@ -1,24 +1,31 @@
-# flake8: noqa: E241
-import torch
-import flax.linen as fnn
+import numpy as np
 import jax
 import jax.nn as jnn
 import jax.numpy as jnp
+import flax.linen as fnn
 import math
-from flax.core import freeze, unfreeze
+import enum
 
-from .obs_index import ObsIndex, Group, ContextGroup, DataGroup
+from .obs_index import ObsIndex, Group
 
 from ...util.constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
-    N_HEX_ACTIONS,
-    DIM_OTHER,
-    DIM_HEXES,
     DIM_OBS,
 )
+
+
+class Other(enum.IntEnum):
+    CAN_WAIT = 0
+    DONE = enum.auto()
+
+
+class Reconstruction(enum.IntEnum):
+    PROBS = 0               # clamp(cont) + softmax(bin) + softmax(cat)
+    SAMPLES = enum.auto()   # clamp(cont) + sample(sigmoid(bin)) + sample(softmax(cat))
+    GREEDY = enum.auto()    # clamp(cont) + round(sigmoid(bin)) + argmax(cat)
 
 
 class LeakyReLU(fnn.Module):
@@ -48,7 +55,7 @@ class TransformerEncoderLayer(fnn.Module):
         self.self_attn = fnn.MultiHeadAttention(
             num_heads=self.num_heads,
             qkv_features=self.d_model,
-            out_features=512,
+            out_features=self.d_model,
             use_bias=True,
             dropout_rate=self.dropout_rate,
             deterministic=self.deterministic,
@@ -85,6 +92,7 @@ class TransformerEncoderLayer(fnn.Module):
 class TransformerEncoder(fnn.Module):
     num_layers: int
     d_model: int
+    dim_feedforward: int
     num_heads: int
     dropout_rate: float
     deterministic: bool
@@ -94,16 +102,16 @@ class TransformerEncoder(fnn.Module):
         for _ in range(self.num_layers):
             layers.append(TransformerEncoderLayer(
                 d_model=self.d_model,
+                dim_feedforward=self.dim_feedforward,
                 num_heads=self.num_heads,
                 dropout_rate=self.dropout_rate,
-                deterministic=self.deterministic,
+                deterministic=True,
             ))
         self.layers = layers
 
     def __call__(self, x):
-        # x is (batch, seq_len, d_model) – batch_first by default
-        for l in self.layers:
-            x = l(x)
+        for mod in self.layers:
+            x = mod(x)
         return x
 
 
@@ -269,6 +277,7 @@ class FlaxTransitionModel(fnn.Module):
         self.transformer_hex = TransformerEncoder(
             num_layers=6,
             d_model=z_size_hex,
+            dim_feedforward=2048,
             num_heads=8,
             dropout_rate=0.3,
             deterministic=self.deterministic
@@ -303,7 +312,6 @@ class FlaxTransitionModel(fnn.Module):
     def __call__(self, obs, action):
         action_z = self.encoder_action(action)
 
-        # torch.cat which returns empty tensor if tuple is empty
         def jax_cat(arrays, axis=0):
             if sum(len(a) for a in arrays) == 0:
                 return jnp.array([], dtype=jnp.float32)
@@ -387,333 +395,161 @@ class FlaxTransitionModel(fnn.Module):
 
         obs_out = jax_cat([global_out, player_out.reshape(player_out.shape[0], -1), hex_out.reshape(hex_out.shape[0], -1)], axis=1)
 
-        # return obs_out
-        return {
-            "global_cont_abs_z": global_cont_abs_z,
-            "global_cont_rel_z": global_cont_rel_z,
-            "global_cont_nullbit_z": global_cont_nullbit_z,
-            "global_binary_z": global_binary_z,
-            "global_categorical_z": global_categorical_z,
-            "global_threshold_z": global_threshold_z,
-            "global_merged": global_merged,
-            "z_global": z_global,
-            "player_cont_abs_z": player_cont_abs_z,
-            "player_cont_rel_z": player_cont_rel_z,
-            "player_cont_nullbit_z": player_cont_nullbit_z,
-            "player_binary_z": player_binary_z,
-            "player_categorical_z": player_categorical_z,
-            "player_threshold_z": player_threshold_z,
-            "player_merged": player_merged,
-            "z_player": z_player,
-            "hex_cont_abs_z": hex_cont_abs_z,
-            "hex_cont_rel_z": hex_cont_rel_z,
-            "hex_cont_nullbit_z": hex_cont_nullbit_z,
-            "hex_binary_z": hex_binary_z,
-            "hex_categorical_z": hex_categorical_z,
-            "hex_threshold_z": hex_threshold_z,
-            "hex_merged": hex_merged,
-            "z_hex1": z_hex1,
-            "z_hex2": z_hex2,
-            "z_agg": z_agg,
-            "global_out": global_out,
-            "player_out": player_out,
-            "hex_out": hex_out,
-            "obs_out": obs_out,
-        }
+        return obs_out
 
-def load_for_test():
-    model = FlaxTransitionModel(deterministic=True)
+    # XXX: this is not called via __call__ => cannot use to self.make_rng, self.abs_index, etc.
+    # unless called like this:
+    #   jax_model.apply(
+    #       jax_params,
+    #       jax_obs_pred_raw,
+    #       rngs={"reconstruct": jax.random.PRNGKey(0)},
+    #       method=FlaxTransitionModel.reconstruct
+    #   )
 
-    jax_params = model.init(
+    def reconstruct(self, obs_out, strategy=Reconstruction.GREEDY):
+        key = self.make_rng("reconstruct")
+
+        global_cont_abs_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
+        global_cont_rel_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]]
+        global_cont_nullbit_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]]
+        global_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.BINARIES]]
+        global_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.CATEGORICALS]]
+        global_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.THRESHOLDS]]
+        player_cont_abs_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]]
+        player_cont_rel_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_REL]]
+        player_cont_nullbit_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]]
+        player_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.BINARIES]]
+        player_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.CATEGORICALS]]
+        player_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.THRESHOLDS]]
+        hex_cont_abs_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_ABS]]
+        hex_cont_rel_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_REL]]
+        hex_cont_nullbit_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]]
+        hex_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.BINARIES]]
+        hex_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.CATEGORICALS]]
+        hex_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.THRESHOLDS]]
+        next_obs = jnp.zeros_like(obs_out)
+
+        reconstruct_continuous = lambda logits: jnp.clip(logits, a_min=0, a_max=1)
+
+        # PROBS = enum.auto()     # clamp(cont) + sigmoid(bin) + softmax(cat)
+        # SAMPLES = enum.auto()   # clamp(cont) + sample(sigmoid(bin)) + sample(softmax(cat))
+        # GREEDY = enum.auto()    # clamp(cont) + round(sigmoid(bin)) + argmax(cat)
+
+        if strategy == Reconstruction.PROBS:
+            def reconstruct_binary(logits):
+                return jnn.sigmoid()
+
+            def reconstruct_categorical(logits):
+                return jnn.softmax(logits, axis=-1)
+
+        elif strategy == Reconstruction.SAMPLES:
+            def reconstruct_binary(logits):
+                return jax.random.bernoulli(key, jnn.sigmoid(logits))
+
+            def reconstruct_categorical(logits):
+                num_classes = logits.shape[-1]
+                flat_logits = logits.reshape(-1, num_classes)
+                sampled = jax.random.categorical(key, jnn.log_softmax(flat_logits, axis=-1))
+                sampled = sampled.reshape(logits.shape[:-1])
+                return jnn.one_hot(sampled, num_classes).astype(logits.dtype)
+
+        elif strategy == Reconstruction.GREEDY:
+            def reconstruct_binary(logits):
+                return (logits > 0).astype(jnp.float32)
+
+            def reconstruct_categorical(logits):
+                return jnn.one_hot(jnp.argmax(logits, axis=-1), num_classes=logits.shape[-1]).astype(jnp.float32)
+
+        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]].set(reconstruct_continuous(global_cont_abs_out))
+        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]].set(reconstruct_continuous(global_cont_rel_out))
+        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]].set(reconstruct_continuous(global_cont_nullbit_out))
+        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.BINARIES], global_binary_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.CATEGORICALS], global_categorical_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
+        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.THRESHOLDS], global_threshold_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+
+        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]].set(reconstruct_continuous(player_cont_abs_out))
+        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_REL]].set(reconstruct_continuous(player_cont_rel_out))
+        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]].set(reconstruct_continuous(player_cont_nullbit_out))
+        for ind, out in zip(self.abs_index[Group.PLAYER][Group.BINARIES], player_binary_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+        for ind, out in zip(self.abs_index[Group.PLAYER][Group.CATEGORICALS], player_categorical_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
+        for ind, out in zip(self.abs_index[Group.PLAYER][Group.THRESHOLDS], player_threshold_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+
+        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_ABS]].set(reconstruct_continuous(hex_cont_abs_out))
+        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_REL]].set(reconstruct_continuous(hex_cont_rel_out))
+        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]].set(reconstruct_continuous(hex_cont_nullbit_out))
+        for ind, out in zip(self.abs_index[Group.HEX][Group.BINARIES], hex_binary_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+        for ind, out in zip(self.abs_index[Group.HEX][Group.CATEGORICALS], hex_categorical_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
+        for ind, out in zip(self.abs_index[Group.HEX][Group.THRESHOLDS], hex_threshold_outs):
+            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+
+        return next_obs
+
+    def predict(self, obs, action, strategy=Reconstruction.GREEDY):
+        obs = jnp.expand_dims(obs, axis=0).astype(jnp.float32)
+        action = jnp.array([action])
+        logits_pred = self(obs, action)
+        obs_pred = self.reconstruct(logits_pred, strategy=strategy)
+        return obs_pred[0]
+
+
+if __name__ == "__main__":
+    from ..t10n import TransitionModel
+
+    # INIT
+    import torch
+    torch_model = TransitionModel()
+    torch_model.eval()
+
+    jax_model = FlaxTransitionModel(deterministic=True)
+    jax_params = jax_model.init(
         rngs={"params": jax.random.PRNGKey(0)},
         obs=jnp.zeros([2, DIM_OBS]),
         action=jnp.array([0, 0])
     )
 
-    initial_jax_params = jax_params.copy()
-
-    model.apply(
-        jax_params,
-        obs=jnp.zeros([2, DIM_OBS]),
-        action=jnp.array([0, 0]),
-        # rngs={"dropout": jax.random.PRNGKey(0)}
-    )
-
-    from ..t10n import TransitionModel
-    torch_model = TransitionModel()
+    # LOAD
     torch_state = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
     torch_model.load_state_dict(torch_state)
 
-    # LOAD PYTORCH PARAMS
-    jax_params = unfreeze(jax_params)["params"]
-    # torch_state = torch_model.state_dict()
+    from .load_utils import load_params_from_torch_state
+    jax_params = load_params_from_torch_state(jax_params, torch_state)
 
-    def dig(data, keys):
-        for key in keys:
-            assert isinstance(data, dict), f"not a dict: {data}"
-            assert key in data, f"'{key}' not found in: {data.keys()}"
-            data = data[key]
-        return data
+    # TEST
 
-    def load(torch_key, jax_keys, transpose):
-        assert len(jax_keys) > 1
-        jax_leaf = dig(jax_params, jax_keys[:-1])
-        to_assign = torch_state[torch_key]
-        if transpose:
-            torch_state[torch_key] = torch_state[torch_key].T
+    @jax.jit
+    def jit_fwd(params, obs, act):
+        return jax_model.apply(jax_params, obs, act)
 
-        assert jax_leaf[jax_keys[-1]].shape == tuple(torch_state[torch_key].shape), f"{jax_keys} == {torch_key}: {jax_leaf[jax_keys[-1]].shape} == {tuple(torch_state[torch_key].shape)}"
-        jax_leaf[jax_keys[-1]] = torch_state[torch_key].numpy()
+    @jax.jit
+    def jit_reconstruct(params, obs_out, rng_key):
+        return jax_model.apply(
+            params,
+            obs_out,
+            rngs={'reconstruct': rng_key},
+            method=FlaxTransitionModel.reconstruct,
+            strategy=Reconstruction.GREEDY
+        )
 
-    def leaf_key_paths(d: dict, parent_path=()):
-        paths = []
-        for key, value in d.items():
-            current_path = parent_path + (key,)
-            if isinstance(value, dict) and value:
-                paths.extend(leaf_key_paths(value, current_path))
-            else:
-                paths.append(current_path)
-        return paths
+    @jax.jit
+    def jit_predict(params, obs, act, rng_key):
+        return jax_model.apply(
+            params,
+            obs,
+            act,
+            strategy=Reconstruction.GREEDY,
+            method=FlaxTransitionModel.predict,
+            rngs={'reconstruct': rng_key},
+        )
 
-    # torch keys obtained via `torch_params.keys()`
-    # jax keys obtained via `[print(path) for path in leaf_key_paths(jax_params)]`
-    # NOTE: self_attn paths are excluded as they need special handling (see below)
-
-    torch_to_jax_mapping = {
-        'encoder_action.weight':                    ['encoder_action', 'embedding'],
-        'encoders_global_binaries.0.weight':        ['encoders_global_binaries_0', 'kernel'],
-        'encoders_global_binaries.0.bias':          ['encoders_global_binaries_0', 'bias'],
-        'encoders_global_categoricals.0.weight':    ['encoders_global_categoricals_0', 'embedding'],
-        'encoders_global_categoricals.1.weight':    ['encoders_global_categoricals_1', 'embedding'],
-        'encoders_global_categoricals.2.weight':    ['encoders_global_categoricals_2', 'embedding'],
-        'encoder_merged_global.0.weight':           ['encoder_merged_global', 'layers_0', 'kernel'],
-        'encoder_merged_global.0.bias':             ['encoder_merged_global', 'layers_0', 'bias'],
-        'encoders_player_categoricals.0.weight':    ['encoders_player_categoricals_0', 'embedding'],
-        'encoder_merged_player.0.weight':           ['encoder_merged_player', 'layers_0', 'kernel'],
-        'encoder_merged_player.0.bias':             ['encoder_merged_player', 'layers_0', 'bias'],
-        'encoders_hex_binaries.0.weight':           ['encoders_hex_binaries_0', 'kernel'],
-        'encoders_hex_binaries.0.bias':             ['encoders_hex_binaries_0', 'bias'],
-        'encoders_hex_binaries.1.weight':           ['encoders_hex_binaries_1', 'kernel'],
-        'encoders_hex_binaries.1.bias':             ['encoders_hex_binaries_1', 'bias'],
-        'encoders_hex_binaries.2.weight':           ['encoders_hex_binaries_2', 'kernel'],
-        'encoders_hex_binaries.2.bias':             ['encoders_hex_binaries_2', 'bias'],
-        'encoders_hex_binaries.3.weight':           ['encoders_hex_binaries_3', 'kernel'],
-        'encoders_hex_binaries.3.bias':             ['encoders_hex_binaries_3', 'bias'],
-        'encoders_hex_binaries.4.weight':           ['encoders_hex_binaries_4', 'kernel'],
-        'encoders_hex_binaries.4.bias':             ['encoders_hex_binaries_4', 'bias'],
-        'encoders_hex_categoricals.0.weight':       ['encoders_hex_categoricals_0', 'embedding'],
-        'encoders_hex_categoricals.1.weight':       ['encoders_hex_categoricals_1', 'embedding'],
-        'encoders_hex_categoricals.2.weight':       ['encoders_hex_categoricals_2', 'embedding'],
-        'encoders_hex_categoricals.3.weight':       ['encoders_hex_categoricals_3', 'embedding'],
-        'encoders_hex_categoricals.4.weight':       ['encoders_hex_categoricals_4', 'embedding'],
-        'encoders_hex_categoricals.5.weight':       ['encoders_hex_categoricals_5', 'embedding'],
-        'encoder_merged_hex.0.weight':              ['encoder_merged_hex', 'layers_0', 'kernel'],
-        'encoder_merged_hex.0.bias':                ['encoder_merged_hex', 'layers_0', 'bias'],
-        'aggregator.0.weight':                      ['aggregator', 'layers_0', 'kernel'],
-        'aggregator.0.bias':                        ['aggregator', 'layers_0', 'bias'],
-        'head_global.weight':                       ['head_global', 'kernel'],
-        'head_global.bias':                         ['head_global', 'bias'],
-        'head_player.weight':                       ['head_player', 'kernel'],
-        'head_player.bias':                         ['head_player', 'bias'],
-        'head_hex.weight':                          ['head_hex', 'kernel'],
-        'head_hex.bias':                            ['head_hex', 'bias'],
-
-        # Transformer (excl. self_attn): those were manually sorted as they
-        # were in different order
-        # 'transformer_hex.layers.0.linear1.weight':  ['transformer_hex', 'layers_0', 'linear1', 'kernel'],
-        # 'transformer_hex.layers.0.linear1.bias':    ['transformer_hex', 'layers_0', 'linear1', 'bias'],
-        # 'transformer_hex.layers.0.linear2.weight':  ['transformer_hex', 'layers_0', 'linear2', 'kernel'],
-        # 'transformer_hex.layers.0.linear2.bias':    ['transformer_hex', 'layers_0', 'linear2', 'bias'],
-        # 'transformer_hex.layers.0.norm1.weight':    ['transformer_hex', 'layers_0', 'norm1', 'scale'],
-        # 'transformer_hex.layers.0.norm1.bias':      ['transformer_hex', 'layers_0', 'norm1', 'bias'],
-        # 'transformer_hex.layers.0.norm2.weight':    ['transformer_hex', 'layers_0', 'norm2', 'scale'],
-        # 'transformer_hex.layers.0.norm2.bias':      ['transformer_hex', 'layers_0', 'norm2', 'bias'],
-        # 'transformer_hex.layers.1.linear1.weight':  ['transformer_hex', 'layers_1', 'linear1', 'kernel'],
-        # 'transformer_hex.layers.1.linear1.bias':    ['transformer_hex', 'layers_1', 'linear1', 'bias'],
-        # 'transformer_hex.layers.1.linear2.weight':  ['transformer_hex', 'layers_1', 'linear2', 'kernel'],
-        # 'transformer_hex.layers.1.linear2.bias':    ['transformer_hex', 'layers_1', 'linear2', 'bias'],
-        # 'transformer_hex.layers.1.norm1.weight':    ['transformer_hex', 'layers_1', 'norm1', 'scale'],
-        # 'transformer_hex.layers.1.norm1.bias':      ['transformer_hex', 'layers_1', 'norm1', 'bias'],
-        # 'transformer_hex.layers.1.norm2.weight':    ['transformer_hex', 'layers_1', 'norm2', 'scale'],
-        # 'transformer_hex.layers.1.norm2.bias':      ['transformer_hex', 'layers_1', 'norm2', 'bias'],
-        # 'transformer_hex.layers.2.linear1.weight':  ['transformer_hex', 'layers_2', 'linear1', 'kernel'],
-        # 'transformer_hex.layers.2.linear1.bias':    ['transformer_hex', 'layers_2', 'linear1', 'bias'],
-        # 'transformer_hex.layers.2.linear2.weight':  ['transformer_hex', 'layers_2', 'linear2', 'kernel'],
-        # 'transformer_hex.layers.2.linear2.bias':    ['transformer_hex', 'layers_2', 'linear2', 'bias'],
-        # 'transformer_hex.layers.2.norm1.weight':    ['transformer_hex', 'layers_2', 'norm1', 'scale'],
-        # 'transformer_hex.layers.2.norm1.bias':      ['transformer_hex', 'layers_2', 'norm1', 'bias'],
-        # 'transformer_hex.layers.2.norm2.weight':    ['transformer_hex', 'layers_2', 'norm2', 'scale'],
-        # 'transformer_hex.layers.2.norm2.bias':      ['transformer_hex', 'layers_2', 'norm2', 'bias'],
-        # 'transformer_hex.layers.3.linear1.weight':  ['transformer_hex', 'layers_3', 'linear1', 'kernel'],
-        # 'transformer_hex.layers.3.linear1.bias':    ['transformer_hex', 'layers_3', 'linear1', 'bias'],
-        # 'transformer_hex.layers.3.linear2.weight':  ['transformer_hex', 'layers_3', 'linear2', 'kernel'],
-        # 'transformer_hex.layers.3.linear2.bias':    ['transformer_hex', 'layers_3', 'linear2', 'bias'],
-        # 'transformer_hex.layers.3.norm1.weight':    ['transformer_hex', 'layers_3', 'norm1', 'scale'],
-        # 'transformer_hex.layers.3.norm1.bias':      ['transformer_hex', 'layers_3', 'norm1', 'bias'],
-        # 'transformer_hex.layers.3.norm2.weight':    ['transformer_hex', 'layers_3', 'norm2', 'scale'],
-        # 'transformer_hex.layers.3.norm2.bias':      ['transformer_hex', 'layers_3', 'norm2', 'bias'],
-        # 'transformer_hex.layers.4.linear1.weight':  ['transformer_hex', 'layers_4', 'linear1', 'kernel'],
-        # 'transformer_hex.layers.4.linear1.bias':    ['transformer_hex', 'layers_4', 'linear1', 'bias'],
-        # 'transformer_hex.layers.4.linear2.weight':  ['transformer_hex', 'layers_4', 'linear2', 'kernel'],
-        # 'transformer_hex.layers.4.linear2.bias':    ['transformer_hex', 'layers_4', 'linear2', 'bias'],
-        # 'transformer_hex.layers.4.norm1.weight':    ['transformer_hex', 'layers_4', 'norm1', 'scale'],
-        # 'transformer_hex.layers.4.norm1.bias':      ['transformer_hex', 'layers_4', 'norm1', 'bias'],
-        # 'transformer_hex.layers.4.norm2.weight':    ['transformer_hex', 'layers_4', 'norm2', 'scale'],
-        # 'transformer_hex.layers.4.norm2.bias':      ['transformer_hex', 'layers_4', 'norm2', 'bias'],
-        # 'transformer_hex.layers.5.linear1.weight':  ['transformer_hex', 'layers_5', 'linear1', 'kernel'],
-        # 'transformer_hex.layers.5.linear1.bias':    ['transformer_hex', 'layers_5', 'linear1', 'bias'],
-        # 'transformer_hex.layers.5.linear2.weight':  ['transformer_hex', 'layers_5', 'linear2', 'kernel'],
-        # 'transformer_hex.layers.5.linear2.bias':    ['transformer_hex', 'layers_5', 'linear2', 'bias'],
-        # 'transformer_hex.layers.5.norm1.weight':    ['transformer_hex', 'layers_5', 'norm1', 'scale'],
-        # 'transformer_hex.layers.5.norm1.bias':      ['transformer_hex', 'layers_5', 'norm1', 'bias'],
-        # 'transformer_hex.layers.5.norm2.weight':    ['transformer_hex', 'layers_5', 'norm2', 'scale'],
-        # 'transformer_hex.layers.5.norm2.bias':      ['transformer_hex', 'layers_5', 'norm2', 'bias'],
-    }
-
-    for torch_key, jax_keys in torch_to_jax_mapping.items():
-        transpose = jax_keys[-1] == "kernel"
-        load(torch_key, jax_keys, transpose)
-
-    # In torch's SelfAttention, `in_proj_weight` and `in_proj_bias`
-    # are single matrices of shape (3*D, D) and (3*D,) respectively.
-    # In flax's SelfAttention, they are separate, per-head and transposed, i.e
-    # (H, D/H, D) and (H, D/H) respectively where H=num_heads, D=Dmodel
-    #
-    # These are the torch keys:
-    #   'self_attn.in_proj_weight'          # (3*D, D)
-    #   'self_attn.in_proj_bias'            # (3*D,)
-    #   'self_attn.out_proj.weight'         # (3*D, D)
-    #   'self_attn.out_proj.bias'           # (3*D,)
-    #
-    # These are the flax keys:
-    #   ['self_attn', 'query', 'kernel']    # (D, H, head_dim)
-    #   ['self_attn', 'query', 'bias']      # (H, head_dim)
-    #   ['self_attn', 'key', 'kernel']      # (D, H, head_dim)
-    #   ['self_attn', 'key', 'bias']        # (H, head_dim)
-    #   ['self_attn', 'value', 'kernel']    # (D, H, head_dim)
-    #   ['self_attn', 'value', 'bias']      # (H, head_dim)
-    #   ['self_attn', 'out', 'kernel']      # (D, H, head_dim)
-    #   ['self_attn', 'out', 'bias']        # (H, head_dim)
-
-    def load_self_attn(torch_state, torch_prefix, jax_params, jax_prefix_keys):
-        # 1) split the PyTorch in-projection weight and bias
-        in_w = torch_state[f'{torch_prefix}in_proj_weight']   # (3*D, D)
-        in_b = torch_state[f'{torch_prefix}in_proj_bias']     # (3*D,)
-        qkv_size = in_w.shape[0]
-
-        assert qkv_size % 3 == 0
-        D = qkv_size // 3
-        H = dig(jax_params, jax_prefix_keys)["query"]["bias"].shape[0]
-        assert D % H == 0
-        head_dim = D // H
-
-        # split into query, key, value
-        q_w, k_w, v_w = in_w.split(D, dim=0)   # each (D, D)
-        q_b, k_b, v_b = in_b.split(D, dim=0)   # each (D,)
-
-        jp = dig(jax_params, jax_prefix_keys)
-
-        jp['query']['kernel']   = q_w.numpy().T.reshape(D, H, head_dim)
-        jp['query']['bias']     = q_b.numpy().reshape(H, head_dim)
-        jp['key']['kernel']     = k_w.numpy().T.reshape(D, H, head_dim)
-        jp['key']['bias']       = k_b.numpy().reshape(H, head_dim)
-        jp['value']['kernel']   = v_w.numpy().T.reshape(D, H, head_dim)
-        jp['value']['bias']     = v_b.numpy().reshape(H, head_dim)
-
-        out_w = torch_state[f'{torch_prefix}out_proj.weight']  # (D, D)
-        out_b = torch_state[f'{torch_prefix}out_proj.bias']    # (D,)
-        jp['out']['kernel'] = out_w.numpy().T.reshape(H, head_dim, D)
-        jp['out']['bias']   = out_b.numpy()  # stays (D,)
-
-
-    # SELF-ATTN TEST
-    # torch_attn = torch.nn.MultiheadAttention(
-    #     512,
-    #     8,
-    #     dropout=0.0,
-    #     bias=True,
-    #     batch_first=True,
-    # )
-
-    # torch_attn.load_state_dict({
-    #     "in_proj_weight": torch_state["transformer_hex.layers.0.self_attn.in_proj_weight"],
-    #     "in_proj_bias": torch_state["transformer_hex.layers.0.self_attn.in_proj_bias"],
-    #     "out_proj.weight": torch_state["transformer_hex.layers.0.self_attn.out_proj.weight"],
-    #     'out_proj.bias': torch_state["transformer_hex.layers.0.self_attn.out_proj.bias"]
-    # })
-
-    # torch_attn_state = torch_attn.state_dict()
-
-    # jax_attn = fnn.MultiHeadAttentio(
-    #     num_heads=8,
-    #     qkv_features=512,
-    #     out_features=512,
-    #     use_bias=True,
-    #     dropout_rate=0.0,
-    #     deterministic=True,
-    #     broadcast_dropout=False
-    # )
-
-    # jax_attn_params = jax_attn.init({"params": jax.random.PRNGKey(0)}, jnp.zeros([1, 1, 512]))
-    # jax_attn_params = unfreeze(jax_attn_params)["params"]
-
-    # in_w = torch_attn_state["in_proj_weight"]   # (3*D, D)
-    # in_b = torch_attn_state["in_proj_bias"]     # (3*D,)
-    # qkv_size = in_w.shape[0]
-    # D = qkv_size // 3
-    # H = jax_attn_params["query"]["bias"].shape[0]
-    # head_dim = D // H
-
-    # # split into query, key, value
-    # q_w, k_w, v_w = in_w.split(D, dim=0)   # each (D, D)
-    # q_b, k_b, v_b = in_b.split(D, dim=0)   # each (D,)
-
-    # jax_attn_params['query']['kernel']   = q_w.numpy().T.reshape(D, H, head_dim)
-    # jax_attn_params['query']['bias']     = q_b.numpy().reshape(H, head_dim)
-    # jax_attn_params['key']['kernel']     = k_w.numpy().T.reshape(D, H, head_dim)
-    # jax_attn_params['key']['bias']       = k_b.numpy().reshape(H, head_dim)
-    # jax_attn_params['value']['kernel']   = v_w.numpy().T.reshape(D, H, head_dim)
-    # jax_attn_params['value']['bias']     = v_b.numpy().reshape(H, head_dim)
-
-    # out_w = torch_attn_state["out_proj.weight"]  # (D, D)
-    # out_b = torch_attn_state["out_proj.bias"]    # (D,)
-    # jax_attn_params['out']['kernel'] = out_w.numpy().T.reshape(H, head_dim, D)
-    # jax_attn_params['out']['bias']   = out_b.numpy()  # stays (D,)
-    # jax_attn_params = freeze({"params": jax_attn_params})
-
-    # torch_in = torch.ones([1, 1, 512])
-    # jax_in = torch_in.numpy()
-
-    # torch_out = torch_attn(torch_in, torch_in, torch_in)
-    # jax_out = jax_attn.apply(jax_attn_params, jax_in)
-    # !!!!
-    # ipdb> torch_out[0][0,0,0]
-    # tensor(0.9930, grad_fn=<SelectBackward0>)
-    # ipdb> jax_out[0,0,0]
-    # Array(-0.798804, dtype=float32)
-
-    # torch_out <> jax_out
-    # import ipdb; ipdb.set_trace()  # noqa
-    # pass
-
-    load_self_attn(torch_state, "transformer_hex.layers.0.self_attn.", jax_params, ["transformer_hex", "layers_0", "self_attn"])
-    load_self_attn(torch_state, "transformer_hex.layers.1.self_attn.", jax_params, ["transformer_hex", "layers_1", "self_attn"])
-    load_self_attn(torch_state, "transformer_hex.layers.2.self_attn.", jax_params, ["transformer_hex", "layers_2", "self_attn"])
-    load_self_attn(torch_state, "transformer_hex.layers.3.self_attn.", jax_params, ["transformer_hex", "layers_3", "self_attn"])
-    load_self_attn(torch_state, "transformer_hex.layers.4.self_attn.", jax_params, ["transformer_hex", "layers_4", "self_attn"])
-    load_self_attn(torch_state, "transformer_hex.layers.5.self_attn.", jax_params, ["transformer_hex", "layers_5", "self_attn"])
-
-    jax_paths = [path for path in leaf_key_paths(jax_params)]
-    jax_shapes = {" ".join(p): dig(jax_params, p).shape for p in jax_paths}
-    torch_shapes = {k: tuple(torch_state[k].shape) for k in torch_state.keys()}
-    new_params = freeze({"params": jax_params})
-    return new_params, model, torch_model
-
-def test():
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
-
-    jax_params, jax_model, torch_model = load_for_test()
-    # env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", random_heroes=1, swap_sides=1)
     env = VcmiEnv(
         mapname="gym/generated/evaluation/8x512.vmap",
         opponent="BattleAI",
@@ -727,27 +563,13 @@ def test():
         tight_formation_chance=30,
     )
 
-    with torch.no_grad():
-        do_test(jax_params, jax_model, torch_model, env)
-
-
-def do_test(jax_params, jax_model, torch_model, env):
-    from vcmi_gym.envs.v12.decoder.decoder import Decoder
-
     env.reset()
 
-    # PREVENTS breakpoints
-    torch_model.eval()
+    with torch.no_grad():
+        from vcmi_gym.envs.v12.decoder.decoder import Decoder
 
-    for _ in range(10):
-        print("=" * 100)
-        if env.terminated or env.truncated:
-            env.reset()
         act = env.random_action()
         obs, rew, term, trunc, _info = env.step(act)
-
-        # [(obs, act, real_obs), (obs, act, real_obs), ...]
-        dream = [(obs["transitions"]["observations"][0], obs["transitions"]["actions"][0], None)]
 
         for i in range(1, len(obs["transitions"]["observations"])):
             obs_prev = obs["transitions"]["observations"][i-1]
@@ -757,111 +579,65 @@ def do_test(jax_params, jax_model, torch_model, env):
             # rew_next = obs["transitions"]["rewards"][i]
             # done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
-            from vcmi_gym.envs.v12.decoder.decoder import Decoder
             torch_obs_pred_raw = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
-            jax_obs_pred_raw = jax_model.apply(jax_params, obs_prev.reshape(1,-1), act_prev.reshape(1))
+            jax_obs_pred_raw = jax_model.apply(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
+            jit_obs_pred_raw = jit_fwd(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
 
-            # torch_bf = Decoder.decode(torch_model.reconstruct(torch_obs_pred_raw)[0].numpy())
-            # jax_bf = Decoder.decode(torch_model.reconstruct(torch.as_tensor(jax_obs_pred_raw))[0].numpy())
+            torch_recon = torch_model.reconstruct(torch_obs_pred_raw)
+            jax_recon = jax_model.apply(jax_params, jax_obs_pred_raw, rngs={"reconstruct": jax.random.PRNGKey(0)}, method=FlaxTransitionModel.reconstruct)
+            jit_recon = jit_reconstruct(jax_params, jit_obs_pred_raw, jax.random.PRNGKey(0))
 
-            # print(torch_bf.render(0))
-            # print(jax_bf.render(0))
+            torch_bf = Decoder.decode(torch_recon[0].numpy())
+            jax_bf = Decoder.decode(np.array(jax_recon[0]))
+            jit_bf = Decoder.decode(np.array(jit_recon[0]))
+
+            print("TORCH BF:")
+            print(torch_bf.render(0))
+            print("JAX BF:")
+            print(jax_bf.render(0))
+            print("JIT BF:")
+            print(jit_bf.render(0))
+
+            pred_bf = Decoder.decode(np.asarray(jit_predict(jax_params, obs_prev, act_prev, jax.random.PRNGKey(0))))
+            print("PRED BF:")
+            print(jit_bf.render(0))
+
+            # BENCHMARKS
+            import time
+
+            print("Benchmarking torch (100)...")
+            torch_start = time.perf_counter()
+            for _ in range(100):
+                torch_obs_pred_raw = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
+                torch_recon = torch_model.reconstruct(torch_obs_pred_raw)
+                print(".", end="", flush=True)
+            torch_end = time.perf_counter()
+            print("\ntorch: %.2fs" % (torch_end - torch_start))
+
+            print("Benchmarking jax (5)...")
+            jax_start = time.perf_counter()
+            for _ in range(5):
+                jax_obs_pred_raw = jax_model.apply(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
+                jax_recon = jax_model.apply(jax_params, jax_obs_pred_raw, rngs={"reconstruct": jax.random.PRNGKey(0)}, method=FlaxTransitionModel.reconstruct)
+                print(".", end="", flush=True)
+            jax_end = time.perf_counter()
+            print("\njax: %.2fs" % (jax_end - jax_start))
+
+            print("Benchmarking jit (100)...")
+            jit_start = time.perf_counter()
+            for _ in range(100):
+                jit_obs_pred_raw = jit_fwd(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
+                jit_recon = jit_reconstruct(jax_params, jit_obs_pred_raw, jax.random.PRNGKey(0))
+                print(".", end="", flush=True)
+            jit_end = time.perf_counter()
+            print("\njit: %.2fs" % (jit_end - jit_start))
+
+            print("Benchmarking pred (100)...")
+            jit_start = time.perf_counter()
+            for _ in range(100):
+                jit_recon = jit_predict(jax_params, obs_prev, act_prev, jax.random.PRNGKey(0))
+                print(".", end="", flush=True)
+            jit_end = time.perf_counter()
+            print("\npred: %.2fs" % (jit_end - jit_start))
+
             import ipdb; ipdb.set_trace()  # noqa
-
-            obs_pred_raw = model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
-            obs_pred_raw = obs_pred_raw[0]
-            obs_pred = model.predict(obs_prev, act_prev)
-            dream.append((model.predict(*dream[i-1][:2]), obs["transitions"]["actions"][i], obs_next))
-
-            def prepare(state, action, reward, headline):
-                import re
-                bf = Decoder.decode(state)
-                ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-                rewtxt = "" if reward is None else "Reward: %s" % round(reward, 2)
-                render = {}
-                render["bf_lines"] = bf.render_battlefield()[0][:-1]
-                render["bf_len"] = [len(l) for l in render["bf_lines"]]
-                render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
-                render["bf_maxlen"] = max(render["bf_len"])
-                render["bf_maxprintlen"] = max(render["bf_printlen"])
-                render["bf_lines"].insert(0, rewtxt.ljust(render["bf_maxprintlen"]))
-                render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
-                render["bf_lines"].insert(0, headline)
-                render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
-                render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
-                render["bf_lines"].append(env.__class__.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
-                return render["bf_lines"]
-
-            lines_prev = prepare(obs_prev, act_prev, None, "Start:")
-            lines_real = prepare(obs_next, -1, None, "Real:")
-            lines_pred = prepare(obs_pred, -1, None, "Predicted:")
-
-            total_loss, losses = mod.compute_losses(
-                logger=None,
-                abs_index=model.abs_index,
-                loss_weights=weights,
-                next_obs=torch.as_tensor(obs_next).unsqueeze(0),
-                pred_obs=obs_pred_raw.unsqueeze(0),
-            )
-
-            # print("Losses | Obs: binary=%.4f, cont=%.4f, categorical=%.4f, threshold=%.4f" % losses)
-            print("Losses: %s | %s" % (total_loss, losses))
-
-            # print(Decoder.decode(obs_prev).render(0))
-            # for i in range(len(bfields)):
-            print("")
-            print("\n".join([(" ".join(rowlines)) for rowlines in zip(lines_prev, lines_real, lines_pred)]))
-            print("")
-
-            import ipdb; ipdb.set_trace()  # noqa
-            # bf_next = Decoder.decode(obs_next)
-            # bf_pred = Decoder.decode(obs_pred)
-
-            # print(env.render_transitions())
-            # print("Predicted:")
-            # print(bf_pred.render(0))
-            # print("Real:")
-            # print(bf_next.render(0))
-
-            # hex20_pred.stack.QUEUE.raw
-
-            # def action_str(obs, a):
-            #     if a > 1:
-            #         bf = Decoder.decode(obs)
-            #         hex = bf.get_hex((a - 2) // len(HEX_ACT_MAP))
-            #         act = list(HEX_ACT_MAP)[(a - 2) % len(HEX_ACT_MAP)]
-            #         return "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
-            #     else:
-            #         assert a == 1
-            #         return "Wait"
-
-        # if len(dream) > 2:
-        #     print(" ******** SEQUENCE: ********** ")
-        #     print(env.render_transitions(add_regular_render=False))
-        #     print(" ******** DREAM: ********** ")
-        #     rcfg = env.reward_cfg._replace(step_fixed=0)
-        #     for i, (obs, act, obs_real) in enumerate(dream):
-        #         print("*" * 10)
-        #         if i == 0:
-        #             print("Start:")
-        #             print(Decoder.decode(obs).render(act))
-        #         else:
-        #             bf_real = Decoder.decode(obs_real)
-        #             bf = Decoder.decode(obs)
-        #             print(f"Real step #{i}:")
-        #             print(bf_real.render(act))
-        #             print("")
-        #             print(f"Dream step #{i}:")
-        #             print(bf.render(act))
-        #             print(f"Real / Dream rewards: {env.calc_reward(0, bf_real, rcfg)} / {env.calc_reward(0, bf, rcfg)}:")
-
-    # print(env.render_transitions())
-
-    # print("Pred:")
-    # print(Decoder.decode(obs_pred))
-    # print("Real:")
-    # print(Decoder.decode(obs_real))
-
-
-if __name__ == "__main__":
-    test()
