@@ -1,4 +1,3 @@
-from flax.core import freeze, unfreeze
 
 
 def load_self_attn(torch_attn_state, jax_attn_params, torch_prefix="", jax_keys=[]):
@@ -60,14 +59,16 @@ def leaf_key_paths(d: dict, parent_path=()):
     return paths
 
 
-def load_params_from_torch_state(jax_params, torch_state, head_names):
-    jax_params = unfreeze(jax_params)["params"]
+def load_params_from_torch_state(jax_params, torch_state, head_names, action=True):
+    torch_to_jax_mapping = {}
+
+    if action:
+        torch_to_jax_mapping["encoder_action.weight"] = ['encoder_action', 'embedding']
 
     # torch keys obtained via `torch_params.keys()`
     # jax keys obtained via `[print(path) for path in leaf_key_paths(jax_params)]`
     # NOTE: transformer handled separately (see below)
     torch_to_jax_mapping = {
-        'encoder_action.weight':                    ['encoder_action', 'embedding'],
         'encoders_global_binaries.0.weight':        ['encoders_global_binaries_0', 'kernel'],
         'encoders_global_binaries.0.bias':          ['encoders_global_binaries_0', 'bias'],
         'encoders_global_categoricals.0.weight':    ['encoders_global_categoricals_0', 'embedding'],
@@ -126,5 +127,4 @@ def load_params_from_torch_state(jax_params, torch_state, head_names):
         load_generic(torch_state, jax_params, f"{torch_common}.norm2.weight",    [*jax_common, "norm2", "scale"])
         load_generic(torch_state, jax_params, f"{torch_common}.norm2.bias",      [*jax_common, "norm2", "bias"])
 
-    jax_params = freeze({"params": jax_params})
     return jax_params

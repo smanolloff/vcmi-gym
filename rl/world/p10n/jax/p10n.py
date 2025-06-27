@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import flax.linen as fnn
 import math
 import enum
+from flax.core import freeze, unfreeze
 
 from .obs_index import ObsIndex, Group
 
@@ -450,7 +451,9 @@ if __name__ == "__main__":
     torch_model.load_state_dict(torch_state)
 
     from .load_utils import load_params_from_torch_state
-    jax_params = load_params_from_torch_state(jax_params, torch_state)
+    jax_params = freeze({
+        "params": load_params_from_torch_state(unfreeze(jax_params)["params"], torch_state, head_names=["main", "hex"], action=False)
+    })
 
     # TEST
     @jax.jit

@@ -1,4 +1,3 @@
-from flax.core import freeze, unfreeze
 
 
 def load_self_attn(torch_attn_state, jax_attn_params, torch_prefix="", jax_keys=[]):
@@ -60,8 +59,11 @@ def leaf_key_paths(d: dict, parent_path=()):
     return paths
 
 
-def load_params_from_torch_state(jax_params, torch_state):
-    jax_params = unfreeze(jax_params)["params"]
+def load_params_from_torch_state(jax_params, torch_state, head_names, action=True):
+    torch_to_jax_mapping = {}
+
+    if action:
+        torch_to_jax_mapping["encoder_action.weight"] = ['encoder_action', 'embedding']
 
     # torch keys obtained via `torch_params.keys()`
     # jax keys obtained via `[print(path) for path in leaf_key_paths(jax_params)]`
@@ -97,11 +99,13 @@ def load_params_from_torch_state(jax_params, torch_state):
         'encoder_merged_hex.0.bias':                ['encoder_merged_hex', 'layers_0', 'bias'],
         'aggregator.0.weight':                      ['aggregator', 'layers_0', 'kernel'],
         'aggregator.0.bias':                        ['aggregator', 'layers_0', 'bias'],
-        'head_main.weight':                         ['head_main', 'kernel'],
-        'head_main.bias':                           ['head_main', 'bias'],
-        'head_hex.weight':                          ['head_hex', 'kernel'],
-        'head_hex.bias':                            ['head_hex', 'bias'],
     }
+
+    for head_name in head_names:
+        torch_to_jax_mapping.update({
+            f"head_{head_name}.weight":  [f"head_{head_name}", 'kernel'],
+            f"head_{head_name}.bias":    [f"head_{head_name}", 'bias'],
+        })
 
     for torch_key, jax_keys in torch_to_jax_mapping.items():
         transpose = jax_keys[-1] == "kernel"
@@ -123,5 +127,4 @@ def load_params_from_torch_state(jax_params, torch_state):
         load_generic(torch_state, jax_params, f"{torch_common}.norm2.weight",    [*jax_common, "norm2", "scale"])
         load_generic(torch_state, jax_params, f"{torch_common}.norm2.bias",      [*jax_common, "norm2", "bias"])
 
-    jax_params = freeze({"params": jax_params})
     return jax_params

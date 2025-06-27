@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import flax.linen as fnn
 import math
 import enum
+from flax.core import freeze, unfreeze
 
 from .obs_index import ObsIndex, Group
 
@@ -406,9 +407,7 @@ class FlaxTransitionModel(fnn.Module):
     #       method=FlaxTransitionModel.reconstruct
     #   )
 
-    def reconstruct(self, obs_out, strategy=Reconstruction.GREEDY):
-        key = self.make_rng("reconstruct")
-
+    def reconstruct(self, obs_out):
         global_cont_abs_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
         global_cont_rel_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]]
         global_cont_nullbit_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]]
@@ -435,30 +434,11 @@ class FlaxTransitionModel(fnn.Module):
         # SAMPLES = enum.auto()   # clamp(cont) + sample(sigmoid(bin)) + sample(softmax(cat))
         # GREEDY = enum.auto()    # clamp(cont) + round(sigmoid(bin)) + argmax(cat)
 
-        if strategy == Reconstruction.PROBS:
-            def reconstruct_binary(logits):
-                return jnn.sigmoid()
+        def reconstruct_binary(logits):
+            return (logits > 0).astype(jnp.float32)
 
-            def reconstruct_categorical(logits):
-                return jnn.softmax(logits, axis=-1)
-
-        elif strategy == Reconstruction.SAMPLES:
-            def reconstruct_binary(logits):
-                return jax.random.bernoulli(key, jnn.sigmoid(logits))
-
-            def reconstruct_categorical(logits):
-                num_classes = logits.shape[-1]
-                flat_logits = logits.reshape(-1, num_classes)
-                sampled = jax.random.categorical(key, jnn.log_softmax(flat_logits, axis=-1))
-                sampled = sampled.reshape(logits.shape[:-1])
-                return jnn.one_hot(sampled, num_classes).astype(logits.dtype)
-
-        elif strategy == Reconstruction.GREEDY:
-            def reconstruct_binary(logits):
-                return (logits > 0).astype(jnp.float32)
-
-            def reconstruct_categorical(logits):
-                return jnn.one_hot(jnp.argmax(logits, axis=-1), num_classes=logits.shape[-1]).astype(jnp.float32)
+        def reconstruct_categorical(logits):
+            return jnn.one_hot(jnp.argmax(logits, axis=-1), num_classes=logits.shape[-1]).astype(jnp.float32)
 
         next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]].set(reconstruct_continuous(global_cont_abs_out))
         next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]].set(reconstruct_continuous(global_cont_rel_out))
@@ -492,15 +472,14 @@ class FlaxTransitionModel(fnn.Module):
 
         return next_obs
 
-    def predict_batch(self, obs, action, strategy=Reconstruction.GREEDY):
-        main_logits, hex_logits = self(obs)
+    def predict_batch(self, obs, action):
         logits_pred = self(obs, action)
-        return self.reconstruct(logits_pred, strategy=strategy)
+        return self.reconstruct(logits_pred)
 
-    def predict(self, obs, action, strategy=Reconstruction.GREEDY):
+    def predict(self, obs, action):
         obs = jnp.expand_dims(obs, axis=0).astype(jnp.float32)
         action = jnp.array([action])
-        return self.predict_batch(obs, action, strategy=strategy)[0]
+        return self.predict_batch(obs, action)[0]
 
 
 if __name__ == "__main__":
@@ -523,7 +502,9 @@ if __name__ == "__main__":
     torch_model.load_state_dict(torch_state)
 
     from .load_utils import load_params_from_torch_state
-    jax_params = load_params_from_torch_state(jax_params, torch_state, head_names=["global", "player", "hex"])
+    jax_params = freeze({
+        "params": load_params_from_torch_state(unfreeze(jax_params)["params"], torch_state, head_names=["global", "player", "hex"])
+    })
 
     # TEST
 
@@ -538,7 +519,6 @@ if __name__ == "__main__":
             obs_out,
             rngs={'reconstruct': rng_key},
             method=FlaxTransitionModel.reconstruct,
-            strategy=Reconstruction.GREEDY
         )
 
     @jax.jit
@@ -547,7 +527,6 @@ if __name__ == "__main__":
             params,
             obs,
             act,
-            strategy=Reconstruction.GREEDY,
             method=FlaxTransitionModel.predict,
             rngs={'reconstruct': rng_key},
         )

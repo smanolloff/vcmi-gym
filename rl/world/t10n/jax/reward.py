@@ -1,20 +1,17 @@
-import numpy as np
 import jax
 import jax.nn as jnn
 import jax.numpy as jnp
 import flax.linen as fnn
 import math
-import enum
+from flax.core import freeze, unfreeze
 
 from .obs_index import ObsIndex, Group
 
 from ...util.constants_v12 import (
-    STATE_SIZE_GLOBAL,
-    STATE_SIZE_ONE_PLAYER,
-    STATE_SIZE_ONE_HEX,
     N_ACTIONS,
     DIM_OBS,
 )
+
 
 class LeakyReLU(fnn.Module):
     negative_slope: float = 0.01
@@ -372,9 +369,7 @@ class FlaxTransitionModel(fnn.Module):
         return out
 
     def predict_batch(self, obs, action):
-        main_logits, hex_logits = self(obs)
-        logits_pred = self(obs, action)
-        return self.reconstruct(logits_pred)
+        return self(obs, action)
 
     def predict(self, obs, action):
         obs = jnp.expand_dims(obs, axis=0).astype(jnp.float32)
@@ -402,14 +397,15 @@ if __name__ == "__main__":
     torch_model.load_state_dict(torch_state)
 
     from .load_utils import load_params_from_torch_state
-    jax_params = load_params_from_torch_state(jax_params, torch_state, head_names=["reward"])
+    jax_params = freeze({
+        "params": load_params_from_torch_state(unfreeze(jax_params)["params"], torch_state, head_names=["reward"])
+    })
 
     # TEST
 
     @jax.jit
     def jit_fwd(params, obs, act):
         return jax_model.apply(jax_params, obs, act)
-
 
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
     env = VcmiEnv(
