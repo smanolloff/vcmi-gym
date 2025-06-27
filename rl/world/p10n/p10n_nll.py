@@ -5,7 +5,8 @@ import enum
 import pandas as pd
 import contextlib
 
-import collections
+from collections import defaultdict
+from contextlib import nullcontext
 
 import torch.nn.functional as F
 
@@ -558,7 +559,7 @@ class ActionPredictionModel(nn.Module):
 
         return action
 
-    def predict_(self, obs, logits=None, strategy=Prediction.GREEDY, timers=None):
+    def predict_(self, obs, logits=None, strategy=Prediction.GREEDY, timers=defaultdict(lambda: nullcontext())):
         with timers["p10n.forward"]:
             if logits is None:
                 logits = self.forward(obs)
