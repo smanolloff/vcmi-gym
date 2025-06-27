@@ -68,6 +68,7 @@ if __name__ == "__main__":
         reward_step_fixed=env.reward_cfg.step_fixed,
         reward_dmg_mult=env.reward_cfg.dmg_mult,
         reward_term_mult=env.reward_cfg.term_mult,
+        max_transitions=10,
         transition_model_file=f"{oldcwd}/hauzybxn-model.pt",
         action_prediction_model_file=f"{oldcwd}/ogyesvkb-model.pt",
         reward_prediction_model_file=f"{oldcwd}/aexhrgez-model.pt",
@@ -131,11 +132,14 @@ if __name__ == "__main__":
         pdb_state = dict(repeat=False)
 
         dream.clear()
-        state, reward, done = do_dream(t10n.Reconstruction.GREEDY, p10n.Prediction.GREEDY, callback)
+        state, reward, done, num_t = do_dream(t10n.Reconstruction.GREEDY, p10n.Prediction.GREEDY, callback)
         # render_dream(dream)
-        # print("[GREEDY] Done: %s" % str([done, done.item()]))
+        print("Predicted transitions: %s, real: %s" % (num_t, num_transitions-1))
+        print("[GREEDY] Done: %s" % str([done, done.item()]))
         print("[GREEDY] Reward: %s" % str([rew, reward.item()]))
         print("[GREEDY] Reward loss (done=%s): %.2f" % (done[0].long().item(), torch.nn.functional.mse_loss(torch.tensor(rew), reward[0])))
+
+        # env.render_transitions()
 
         # dream2.clear()
         # state2, reward2, done2 = do_dream(t10n.Reconstruction.GREEDY, p10n.Prediction.PROBS, callback2)

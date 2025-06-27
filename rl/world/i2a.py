@@ -223,7 +223,7 @@ class ImaginationCore(nn.Module):
                         current_player = state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(dim=1)
                         current_winner = state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(dim=1)
                         terminated_now = ~finished & ((current_player == 0) | (current_winner > 0))
-                        finished_now = terminated_now | (current_player != initial_player)
+                        finished_now = terminated_now | (current_player == initial_player)
 
                         terminated |= terminated_now
                         finished |= finished_now
