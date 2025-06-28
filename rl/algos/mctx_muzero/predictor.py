@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+from jax import lax
 from flax import linen as fnn
 from flax.core import freeze, unfreeze
 
@@ -8,6 +9,7 @@ import rl.world.t10n.jax.reward as t10n_rew
 import rl.world.p10n.jax.p10n as p10n_act
 
 from rl.world.util.constants_v12 import (
+    STATE_SIZE,
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,
@@ -71,6 +73,9 @@ class Predictor(fnn.Module):
     reward_dmg_mult: float
     reward_term_mult: float
 
+    # Very slow on CPU
+    jit: bool = False
+
     def setup(self):
         self.obs_model = t10n_obs.FlaxTransitionModel(deterministic=True)
         self.rew_model = t10n_rew.FlaxTransitionModel(deterministic=True)
@@ -94,6 +99,16 @@ class Predictor(fnn.Module):
             self.index_enemy_value_lost_acc_rel0 = INDEX_PLAYER0_VALUE_LOST_ACC_REL0
         else:
             raise Exception("Unknown side: %s" % self.side)
+
+        # These make it a lot slower on CPU
+        if self.jit:
+            self.predict_obs = jax.jit(self.obs_model.predict_batch)
+            self.predict_rew = jax.jit(self.rew_model.predict_batch)
+            self.predict_act = jax.jit(self.act_model.predict_batch)
+        else:
+            self.predict_obs = self.obs_model.predict_batch
+            self.predict_rew = self.rew_model.predict_batch
+            self.predict_act = self.act_model.predict_batch
 
     def setup_params(self, initial_state, initial_action):
         self.obs_model.predict_batch(initial_state, initial_action)
@@ -133,10 +148,8 @@ class Predictor(fnn.Module):
                 terminated = initial_terminated
                 finished = initial_terminated
                 state = initial_state
-                state_logits = initial_state
             else:
                 # state is (B, 28114)
-                # state_logits is (B, 28114)
                 current_player = state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(axis=1)
                 current_winner = state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(axis=1)
                 terminated_now = ~finished & ((current_player == 0) | (current_winner > 0))
@@ -194,7 +207,7 @@ class Predictor(fnn.Module):
                 break
 
             if t != 0:
-                action = action.at[~finished].set(self.act_model.predict_batch(state[~finished]))
+                action = action.at[~finished].set(self.predict_act(state[~finished]))
 
                 # p10n predicts -1 when it believes battle has ended
                 # => treat this as an additional alt termination condition
@@ -227,10 +240,8 @@ class Predictor(fnn.Module):
                     break
 
             # Transition to next state:
-            state_logits = state_logits.at[~finished].set(self.obs_model(state[~finished], action[~finished]).astype(jnp.float32))
-            reward = reward.at[~finished].add(self.rew_model(state[~finished], action[~finished]).astype(jnp.float32))
-
-            state = state.at[~finished].set(self.obs_model.reconstruct(state_logits[~finished]))
+            reward = reward.at[~finished].add(self.predict_rew(state[~finished], action[~finished]).astype(jnp.float32))
+            state = state.at[~finished].set(self.predict_obs(state[~finished], action[~finished]).astype(jnp.float32))
             num_t = num_t.at[~finished].add(1)
 
         # TODO: ideally, here we should check for alt winconns again
@@ -260,16 +271,57 @@ class Predictor(fnn.Module):
 
         return state, reward, terminated, num_t
 
+    @classmethod
+    def create_model(cls, **model_kwargs):
+        # must be 1st (env changes workdir)
+        import torch
+        torch_state_obs = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
+        torch_state_rew = torch.load("aexhrgez-model.pt", weights_only=True, map_location="cpu")
+        torch_state_act = torch.load("ogyesvkb-model.pt", weights_only=True, map_location="cpu")
+
+        model = Predictor(**model_kwargs)
+
+        params = model.init(
+            rngs={"params": jax.random.PRNGKey(0)},
+            initial_state=jnp.zeros([1, STATE_SIZE]),
+            initial_action=jnp.array([1]),
+            method=Predictor.setup_params
+        )
+
+        from rl.world.t10n.jax.load_utils import load_params_from_torch_state
+
+        params_obs = load_params_from_torch_state(
+            unfreeze(params["params"]["obs_model"]),
+            torch_state_obs,
+            head_names=["global", "player", "hex"]
+        )
+
+        params_rew = load_params_from_torch_state(
+            unfreeze(params["params"]["rew_model"]),
+            torch_state_rew,
+            head_names=["reward"]
+        )
+
+        params_act = load_params_from_torch_state(
+            unfreeze(params["params"]["act_model"]),
+            torch_state_act,
+            head_names=["main", "hex"],
+            action=False
+        )
+
+        params = freeze({
+            "params": {
+                "obs_model": params_obs,
+                "rew_model": params_rew,
+                "act_model": params_act,
+            }
+        })
+
+        return model, params
+
 
 if __name__ == "__main__":
-    # must be 1st (env changes workdir)
-    import torch
-    torch_state_obs = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
-    torch_state_rew = torch.load("aexhrgez-model.pt", weights_only=True, map_location="cpu")
-    torch_state_act = torch.load("ogyesvkb-model.pt", weights_only=True, map_location="cpu")
-
-    from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
-    env = VcmiEnv(
+    env_kwargs = dict(
         mapname="gym/generated/evaluation/8x512.vmap",
         opponent="BattleAI",
         role="defender",
@@ -287,57 +339,19 @@ if __name__ == "__main__":
         reward_relval_mult=0.01,
     )
 
-    env.reset()
-    while True:
-        action = env.random_action()
-        obs_ = env.step(action)[0]
-        if len(obs_["transitions"]) > 2:
-            break
-
-    obs = obs_["observation"]
-
-    model = Predictor(
-        max_transitions=5,
-        side=(env.role == "defender"),
-        reward_dmg_mult=env.reward_cfg.dmg_mult,
-        reward_term_mult=env.reward_cfg.term_mult,
-    )
-    params = model.init(
-        rngs={"params": jax.random.PRNGKey(0)},
-        initial_state=jnp.expand_dims(obs, axis=0),
-        initial_action=jnp.array([action]),
-        method=Predictor.setup_params
-    )
-
-    from rl.world.t10n.jax.load_utils import load_params_from_torch_state
-
-    params_obs = load_params_from_torch_state(
-        unfreeze(params["params"]["obs_model"]),
-        torch_state_obs,
-        head_names=["global", "player", "hex"]
-    )
-
-    params_rew = load_params_from_torch_state(
-        unfreeze(params["params"]["rew_model"]),
-        torch_state_rew,
-        head_names=["reward"]
-    )
-
-    params_act = load_params_from_torch_state(
-        unfreeze(params["params"]["act_model"]),
-        torch_state_act,
-        head_names=["main", "hex"],
-        action=False
-    )
-
     key = jax.random.PRNGKey(0)
-    params = freeze({
-        "params": {
-            "obs_model": params_obs,
-            "rew_model": params_rew,
-            "act_model": params_act,
-        }
-    })
+    model, params = Predictor.create_model(
+        jit=False,  # very slow, maybe due to differing batch; or due to CPU
+        max_transitions=5,
+        side=(env_kwargs["role"] == "defender"),
+        reward_dmg_mult=env_kwargs["reward_dmg_mult"],
+        reward_term_mult=env_kwargs["reward_term_mult"],
+    )
+
+    # Initialize env AFTER model (changes cwd)
+    from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
+    env = VcmiEnv(**env_kwargs)
+    env.reset()
 
     # TEST
 
@@ -372,8 +386,7 @@ if __name__ == "__main__":
         state, reward, done, num_t = model.apply(
             params,
             initial_state=jnp.expand_dims(start_obs, axis=0),
-            initial_action=jnp.array([start_act]),
-            rngs={"reconstruct": key}
+            initial_action=jnp.array([start_act])
         )
 
         # render_dream(dream)
@@ -391,5 +404,27 @@ if __name__ == "__main__":
 
         print("Predicted obs:")
         print(Decoder.decode(np.array(state)[0]).render(0))
+
+        import time
+        print("Benchmarking (5)...")
+        jax_start = time.perf_counter()
+        for _ in range(5):
+            model.apply(
+                params,
+                initial_state=jnp.expand_dims(start_obs, axis=0),
+                initial_action=jnp.array([start_act])
+            )
+            print(".", end="", flush=True)
+        jax_end = time.perf_counter()
+        print("\ntime: %.2fs" % (jax_end - jax_start))
+
+        # print("Benchmarking jit (5)...")
+        # jax_start = time.perf_counter()
+        # for _ in range(5):
+        #     jit_fwd(params, obs=start_obs, act=start_act, key=key)
+        #     print(".", end="", flush=True)
+        # jax_end = time.perf_counter()
+        # print("\ntime: %.2fs" % (jax_end - jax_start))
+
         import ipdb; ipdb.set_trace()  # noqa
         pass

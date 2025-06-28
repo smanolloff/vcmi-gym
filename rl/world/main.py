@@ -48,18 +48,21 @@ if __name__ == "__main__":
 
     oldcwd = os.getcwd()
     env = VcmiEnv(
-        # mapname="gym/generated/evaluation/8x512.vmap",
-        mapname="gym/A1.vmap",
-        opponent="StupidAI",
-        swap_sides=0,
+        mapname="gym/generated/evaluation/8x512.vmap",
+        opponent="BattleAI",
         role="defender",
-        random_heroes=1,
-        random_obstacles=1,
-        town_chance=20,
-        warmachine_chance=30,
-        random_stack_chance=65,
-        random_terrain_chance=100,
-        tight_formation_chance=30,
+        swap_sides=0,
+        random_heroes=0,
+        random_obstacles=0,
+        town_chance=0,
+        warmachine_chance=0,
+        random_terrain_chance=0,
+        random_stack_chance=0,
+        tight_formation_chance=0,
+        reward_step_fixed=-0.01,
+        reward_dmg_mult=0.01,
+        reward_term_mult=0.01,
+        reward_relval_mult=0.01,
     )
 
     assert env.role == "defender"
@@ -138,6 +141,15 @@ if __name__ == "__main__":
         print("[GREEDY] Done: %s" % str([done, done.item()]))
         print("[GREEDY] Reward: %s" % str([rew, reward.item()]))
         print("[GREEDY] Reward loss (done=%s): %.2f" % (done[0].long().item(), torch.nn.functional.mse_loss(torch.tensor(rew), reward[0])))
+
+        import time
+        print("Benchmarking (5)...")
+        time_start = time.perf_counter()
+        for _ in range(5):
+            ic(t(start_obs), t(start_act), t10n.Reconstruction.GREEDY, p10n.Prediction.GREEDY)
+            print(".", end="", flush=True)
+        time_end = time.perf_counter()
+        print("\ntime: %.2fs" % (time_end - time_start))
 
         # env.render_transitions()
 
