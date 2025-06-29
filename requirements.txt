@@ -18,6 +18,7 @@ torchviz
 mctx
 jax
 flax
+dm-haiku
 
 ray
 #ray[tune]

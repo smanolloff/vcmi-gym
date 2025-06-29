@@ -7,7 +7,7 @@ from flax.core import freeze, unfreeze
 
 from .obs_index import ObsIndex, Group
 
-from ...util.constants_v12 import (
+from ....util.constants_v12 import (
     N_ACTIONS,
     DIM_OBS,
 )

@@ -22,7 +22,7 @@ from .util.timer import Timer
 
 from collections import defaultdict
 TIMER_ALL = Timer()
-TIMERS = defaultdict(lambda: Timer())
+TIMERS = defaultdict(lambda: Timer(cuda_sync=False))
 
 INDEX_BSAP_START = GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][1]
 INDEX_BSAP_END = GLOBAL_ATTR_MAP["BATTLE_SIDE_ACTIVE_PLAYER"][2] + INDEX_BSAP_START
@@ -77,6 +77,7 @@ class ImaginationCore(nn.Module):
     def __init__(
         self,
         side,
+        # FIXME: reward_step_fixed should be taken into account
         reward_step_fixed,
         reward_dmg_mult,
         reward_term_mult,

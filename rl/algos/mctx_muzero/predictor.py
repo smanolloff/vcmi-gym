@@ -4,8 +4,8 @@ from jax import lax
 from flax import linen as fnn
 from flax.core import freeze, unfreeze
 
-import rl.world.t10n.jax.t10n as t10n_obs
-import rl.world.t10n.jax.reward as t10n_rew
+import rl.world.t10n.jax.flax.t10n as t10n_obs
+import rl.world.t10n.jax.flax.reward as t10n_rew
 import rl.world.p10n.jax.p10n as p10n_act
 
 from rl.world.util.constants_v12 import (
@@ -72,6 +72,7 @@ class Predictor(fnn.Module):
     side: int
     reward_dmg_mult: float
     reward_term_mult: float
+    # FIXME: add reward_step_fixed and use it
 
     # Very slow on CPU
     jit: bool = False
@@ -288,7 +289,7 @@ class Predictor(fnn.Module):
             method=Predictor.setup_params
         )
 
-        from rl.world.t10n.jax.load_utils import load_params_from_torch_state
+        from rl.world.t10n.jax.flax.load_utils import load_params_from_torch_state
 
         params_obs = load_params_from_torch_state(
             unfreeze(params["params"]["obs_model"]),
@@ -326,7 +327,7 @@ if __name__ == "__main__":
         opponent="BattleAI",
         role="defender",
         swap_sides=0,
-        random_heroes=0,
+        random_heroes=1,
         random_obstacles=0,
         town_chance=0,
         warmachine_chance=0,
@@ -339,7 +340,6 @@ if __name__ == "__main__":
         reward_relval_mult=0.01,
     )
 
-    key = jax.random.PRNGKey(0)
     model, params = Predictor.create_model(
         jit=False,  # very slow, maybe due to differing batch; or due to CPU
         max_transitions=5,
@@ -348,6 +348,23 @@ if __name__ == "__main__":
         reward_term_mult=env_kwargs["reward_term_mult"],
     )
 
+    test_cuda = True or any(device.platform == 'gpu' for device in jax.devices())
+
+    if test_cuda:
+        import torch
+        from rl.world.i2a import ImaginationCore
+        torch_model = ImaginationCore(
+            max_transitions=model.max_transitions,
+            side=model.side,
+            reward_step_fixed=0,
+            reward_dmg_mult=model.reward_dmg_mult,
+            reward_term_mult=model.reward_term_mult,
+            transition_model_file="hauzybxn-model.pt",
+            reward_prediction_model_file="aexhrgez-model.pt",
+            action_prediction_model_file="ogyesvkb-model.pt",
+            device=torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
+        )
+
     # Initialize env AFTER model (changes cwd)
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
     env = VcmiEnv(**env_kwargs)
@@ -355,76 +372,127 @@ if __name__ == "__main__":
 
     # TEST
 
+    buffer = {"act": [], "obs": [], "rew": [], "term": []}
+
+    nsteps = 10
+    nsplits = 10
+    assert nsteps % nsplits == 0
+
+    for _ in range(nsteps):
+        if env.terminated or env.truncated:
+            env.reset()
+        act = env.random_action()
+        obs, rew, term, trunc, _info = env.step(act)
+
+        buffer["act"].append(act)
+        buffer["obs"].append(obs)
+        buffer["rew"].append(rew)
+        buffer["term"].append(term)
+
+    import numpy as np
+    split_obs = np.array(np.split(np.array([o["observation"] for o in buffer["obs"]]), nsplits))
+    split_act = np.array(np.split(np.array(buffer["act"]), nsplits))
+
+    import time
+
+    if test_cuda:
+        print("------- BATCH TEST JAX ON CUDA ----------")
+
+        print("Benchmarking jax (%dx%d)..." % (nsplits, len(split_act[0])))
+        batch_start = time.perf_counter()
+        for b_obs, b_act in zip(split_obs, split_act):
+            state, reward, done, num_t = model.apply(
+                params,
+                initial_state=jnp.array(b_obs),
+                initial_action=jnp.array(b_act)
+            )
+            print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
+
+        # cuda_obs = torch.as_tensor(np.array([o["observation"] for o in buffer["obs"]]), device=torch_model.device)
+        # cuda_act = torch.as_tensor(buffer["act"], device=torch_model.device, dtype=torch.int64)
+
+        print("------- BATCH TEST TORCH ON CUDA ----------")
+        print("Benchmarking cuda (%dx%d)..." % (nsplits, len(split_act[0])))
+        batch_start = time.perf_counter()
+        for b_obs, b_act in zip(split_obs, split_act):
+            torch_model(
+                initial_state=torch.as_tensor(b_obs, device=torch_model.device),
+                initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
+            )
+            print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
+
+    import ipdb; ipdb.set_trace()  # noqa
+
     episodes = 0
     step = 0
 
-    while step < 5:
-        if env.terminated or env.truncated:
-            env.reset()
-            episodes += 1
-        act = env.random_action()
-        obs0, rew, term, trunc, _info = env.step(act)
-        done = term or trunc
+    act = buffer["act"][0]
+    obs0 = buffer["obs"][0]
+    rew = buffer["rew"][0]
+    term = buffer["term"][0]
 
-        num_transitions = len(obs0["transitions"]["observations"])
-        # if num_transitions < 3:
-        #     continue
+    num_transitions = len(obs0["transitions"]["observations"])
+    # if num_transitions < 3:
+    #     continue
 
-        print("Step: %d" % step)
+    print("Step: %d" % step)
 
-        # if num_transitions != 4:
-        #     continue
+    # if num_transitions != 4:
+    #     continue
 
-        start_obs = obs0["transitions"]["observations"][0]
-        start_act = obs0["transitions"]["actions"][0]
+    start_obs = obs0["transitions"]["observations"][0]
+    start_act = obs0["transitions"]["actions"][0]
 
-        print("=" * 100)
-        # env.render_transitions(add_regular_render=False)
-        print("^ Transitions: %d" % num_transitions)
-        # print("Dream act: %s" % start_act)
+    print("=" * 100)
+    # env.render_transitions(add_regular_render=False)
+    print("^ Transitions: %d" % num_transitions)
+    # print("Dream act: %s" % start_act)
 
-        state, reward, done, num_t = model.apply(
+    state, reward, done, num_t = model.apply(
+        params,
+        initial_state=jnp.expand_dims(start_obs, axis=0),
+        initial_action=jnp.array([start_act])
+    )
+
+    # render_dream(dream)
+    print("Predicted transitions: %s, real: %s" % (num_t, num_transitions-1))
+    print("[GREEDY] Done: %s" % str([done, done[0]]))
+    print("[GREEDY] Reward: %s" % str([rew, reward[0]]))
+
+    from vcmi_gym.envs.v12.decoder.decoder import Decoder
+    import numpy as np
+
+    print("Start obs:")
+    print(Decoder.decode(np.array(start_obs)).render(start_act))
+    print("Next obs:")
+    print(Decoder.decode(np.array(obs0["transitions"]["observations"][-1])).render(0))
+
+    print("Predicted obs:")
+    print(Decoder.decode(np.array(state)[0]).render(0))
+
+    print("Benchmarking (5)...")
+    jax_start = time.perf_counter()
+    for _ in range(5):
+        model.apply(
             params,
             initial_state=jnp.expand_dims(start_obs, axis=0),
             initial_action=jnp.array([start_act])
         )
+        print(".", end="", flush=True)
+    jax_end = time.perf_counter()
+    print("\ntime: %.2fs" % (jax_end - jax_start))
 
-        # render_dream(dream)
-        print("Predicted transitions: %s, real: %s" % (num_t, num_transitions-1))
-        print("[GREEDY] Done: %s" % str([done, done[0]]))
-        print("[GREEDY] Reward: %s" % str([rew, reward[0]]))
+    # print("Benchmarking jit (5)...")
+    # jax_start = time.perf_counter()
+    # for _ in range(5):
+    #     jit_fwd(params, obs=start_obs, act=start_act, key=key)
+    #     print(".", end="", flush=True)
+    # jax_end = time.perf_counter()
+    # print("\ntime: %.2fs" % (jax_end - jax_start))
 
-        from vcmi_gym.envs.v12.decoder.decoder import Decoder
-        import numpy as np
-
-        print("Start obs:")
-        print(Decoder.decode(np.array(start_obs)).render(start_act))
-        print("Next obs:")
-        print(Decoder.decode(np.array(obs0["transitions"]["observations"][-1])).render(0))
-
-        print("Predicted obs:")
-        print(Decoder.decode(np.array(state)[0]).render(0))
-
-        import time
-        print("Benchmarking (5)...")
-        jax_start = time.perf_counter()
-        for _ in range(5):
-            model.apply(
-                params,
-                initial_state=jnp.expand_dims(start_obs, axis=0),
-                initial_action=jnp.array([start_act])
-            )
-            print(".", end="", flush=True)
-        jax_end = time.perf_counter()
-        print("\ntime: %.2fs" % (jax_end - jax_start))
-
-        # print("Benchmarking jit (5)...")
-        # jax_start = time.perf_counter()
-        # for _ in range(5):
-        #     jit_fwd(params, obs=start_obs, act=start_act, key=key)
-        #     print(".", end="", flush=True)
-        # jax_end = time.perf_counter()
-        # print("\ntime: %.2fs" % (jax_end - jax_start))
-
-        import ipdb; ipdb.set_trace()  # noqa
-        pass
+    import ipdb; ipdb.set_trace()  # noqa
+    pass

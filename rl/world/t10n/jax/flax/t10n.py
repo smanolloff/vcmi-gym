@@ -483,7 +483,7 @@ class FlaxTransitionModel(fnn.Module):
 
 
 if __name__ == "__main__":
-    from ..t10n import TransitionModel
+    from ...t10n import TransitionModel
 
     # INIT
     import torch

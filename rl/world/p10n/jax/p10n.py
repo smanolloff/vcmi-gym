@@ -464,6 +464,10 @@ if __name__ == "__main__":
     def jit_predict(params, obs):
         return jax_model.apply(params, obs, method=FlaxActionPredictionModel.predict)
 
+    @jax.jit
+    def jit_predict_batch(params, obs):
+        return jax_model.apply(params, obs, method=FlaxActionPredictionModel.predict_batch)
+
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
     env = VcmiEnv(
         mapname="gym/generated/evaluation/8x512.vmap",
@@ -513,20 +517,43 @@ if __name__ == "__main__":
             torch_end = time.perf_counter()
             print("\ntorch: %.2fs" % (torch_end - torch_start))
 
-            print("Benchmarking jax (5)...")
-            jax_start = time.perf_counter()
-            for _ in range(5):
-                jax_act_pred = jax_model.apply(jax_params, o, method=FlaxActionPredictionModel.predict)
-                print(".", end="", flush=True)
-            jax_end = time.perf_counter()
-            print("\njax: %.2fs" % (jax_end - jax_start))
+            if torch.cuda.is_available():
+                print("Benchmarking torch-CUDA (100x100)...")
+                torch_model.device = torch.device("cuda")
+                torch_model.to(torch_model.device)
+                ocuda = torch.as_tensor(o, device=torch_model.device)
+                ocuda = ocuda.unsqueeze(0).repeat(100, 1)
+                torch_start = time.perf_counter()
+                for _ in range(100):
+                    torch_act_pred = torch_model.predict_(ocuda)
+                    print(".", end="", flush=True)
+                torch_end = time.perf_counter()
+                print("\ntorch: %.2fs" % (torch_end - torch_start))
 
-            print("Benchmarking jit (100)...")
-            jit_start = time.perf_counter()
-            for _ in range(100):
-                jit_act_pred = jit_predict(jax_params, o)
-                print(".", end="", flush=True)
-            jit_end = time.perf_counter()
-            print("\njit: %.2fs" % (jit_end - jit_start))
+                print("Benchmarking jit-CUDA (100x100)...")
+                jit_start = time.perf_counter()
+                jo = jnp.repeat(jnp.expand_dims(o, axis=0), repeats=100, axis=0)
+                for _ in range(100):
+                    jit_act_pred = jit_predict_batch(jax_params, jo)
+                    print(".", end="", flush=True)
+                jit_end = time.perf_counter()
+                print("\njit: %.2fs" % (jit_end - jit_start))
 
-            import ipdb; ipdb.set_trace()  # noqa
+            else:
+                print("Benchmarking jax (5)...")
+                jax_start = time.perf_counter()
+                for _ in range(5):
+                    jax_act_pred = jax_model.apply(jax_params, o, method=FlaxActionPredictionModel.predict)
+                    print(".", end="", flush=True)
+                jax_end = time.perf_counter()
+                print("\njax: %.2fs" % (jax_end - jax_start))
+
+                print("Benchmarking jit (100)...")
+                jit_start = time.perf_counter()
+                for _ in range(100):
+                    jit_act_pred = jit_predict(jax_params, o)
+                    print(".", end="", flush=True)
+                jit_end = time.perf_counter()
+                print("\njit: %.2fs" % (jit_end - jit_start))
+
+                import ipdb; ipdb.set_trace()  # noqa

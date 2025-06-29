@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from functools import partial
 
-from ...util.constants_v12 import (
+from ....util.constants_v12 import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     STATE_SIZE_ONE_HEX,

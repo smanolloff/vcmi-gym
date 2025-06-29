@@ -131,8 +131,8 @@ class HaikuTransformerEncoder(hk.Module):
         return x
 
 
-class FlaxTransitionModel(hk.Module):
-    """ Flax translation of the PyTorch TransitionModel. """
+class HaikuTransitionModel(hk.Module):
+    """ Haiku translation of the PyTorch TransitionModel. """
     def __init__(self, deterministic=False, name=None):
         super().__init__(name=name)
         self.deterministic = deterministic
@@ -503,46 +503,25 @@ if __name__ == "__main__":
     torch_model = TransitionModel()
     torch_model.eval()
 
-    jax_model = FlaxTransitionModel(deterministic=True)
-    jax_params = jax_model.init(
-        rngs={"params": jax.random.PRNGKey(0)},
-        obs=jnp.zeros([2, DIM_OBS]),
-        action=jnp.array([0, 0])
-    )
+    haiku_model = HaikuTransitionModel(deterministic=True)
+
+    def forward_fn(obs, act):
+        return haiku_model(obs, act)  # False for "is_training"
+
+    rng = jax.random.PRNGKey(0)
+    transformed = hk.transform(forward_fn)
+    haiku_params = transformed.init(rng, obs=jnp.zeros([2, DIM_OBS]), act=jnp.array([0, 0]))
+    haiku_params = hk.data_structures.to_mutable_dict(haiku_params)
 
     # LOAD
     torch_state = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
     torch_model.load_state_dict(torch_state)
 
     from .load_utils import load_params_from_torch_state
-    jax_params = freeze({
-        "params": load_params_from_torch_state(unfreeze(jax_params)["params"], torch_state, head_names=["global", "player", "hex"])
-    })
+    haiku_params = load_params_from_torch_state(haiku_params, torch_state, head_names=["global", "player", "hex"])
+    haiku_params = hk.data_structures.to_immutable_dict(haiku_params)
 
     # TEST
-
-    @jax.jit
-    def jit_fwd(params, obs, act):
-        return jax_model.apply(jax_params, obs, act)
-
-    @jax.jit
-    def jit_reconstruct(params, obs_out, rng_key):
-        return jax_model.apply(
-            params,
-            obs_out,
-            rngs={'reconstruct': rng_key},
-            method=FlaxTransitionModel.reconstruct,
-        )
-
-    @jax.jit
-    def jit_predict(params, obs, act, rng_key):
-        return jax_model.apply(
-            params,
-            obs,
-            act,
-            method=FlaxTransitionModel.predict,
-            rngs={'reconstruct': rng_key},
-        )
 
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
     env = VcmiEnv(
