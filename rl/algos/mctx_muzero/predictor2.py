@@ -1,4 +1,4 @@
-import functools
+import os
 import jax
 import jax.numpy as jnp
 from jax import lax
@@ -370,7 +370,9 @@ if __name__ == "__main__":
         reward_relval_mult=0.01,
     )
 
-    test_cuda = True or any(device.platform == 'gpu' for device in jax.devices())
+    # always enable "test_cuda" on my mac (for dev purposes)
+    have_cuda = any(device.platform == 'gpu' for device in jax.devices())
+    test_cuda = os.getenv("USER", "") == "simo" or have_cuda
 
     model, params = Predictor.create_model(
         jit=test_cuda,  # very slow (10-100x slower than torch, even on GPU)
@@ -408,7 +410,7 @@ if __name__ == "__main__":
 
     buffer = {"act": [], "obs": [], "rew": [], "term": []}
 
-    nsteps = 10
+    nsteps = 1000 if have_cuda else 10
     nsplits = 10
     assert nsteps % nsplits == 0
 
@@ -431,7 +433,8 @@ if __name__ == "__main__":
 
     # warmup
     jit_fwd(params, jnp.array(split_obs[0]), jnp.array(split_act[0]))
-    torch_model(torch.as_tensor(split_obs[0], device=torch_model.device), torch.as_tensor(split_act[0], device=torch_model.device, dtype=torch.int64))
+    with torch.no_grad():
+        torch_model(torch.as_tensor(split_obs[0], device=torch_model.device), torch.as_tensor(split_act[0], device=torch_model.device, dtype=torch.int64))
 
     if test_cuda:
         print("------- BATCH TEST JAX ON CUDA ----------")
@@ -449,13 +452,14 @@ if __name__ == "__main__":
 
         print("------- BATCH TEST TORCH ON CUDA ----------")
         print("Benchmarking cuda (%dx%d)..." % (nsplits, len(split_act[0])))
-        batch_start = time.perf_counter()
-        for b_obs, b_act in zip(split_obs, split_act):
-            torch_model(
-                initial_state=torch.as_tensor(b_obs, device=torch_model.device),
-                initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
-            )
-            print(".", end="", flush=True)
+        with torch.no_grad():
+            batch_start = time.perf_counter()
+            for b_obs, b_act in zip(split_obs, split_act):
+                torch_model(
+                    initial_state=torch.as_tensor(b_obs, device=torch_model.device),
+                    initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
+                )
+                print(".", end="", flush=True)
         batch_end = time.perf_counter()
         print("\ntime: %.2fs" % (batch_end - batch_start))
 
