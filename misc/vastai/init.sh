@@ -113,6 +113,7 @@ cd vcmi-gym
 sed -i 's/^torch/#torch/' requirements.txt
 pip install --pre torch==2.8.0.dev20250627+cu128 --index-url https://download.pytorch.org/whl/nightly/cu128
 pip install -r requirements.txt
+pip install jax[cuda12]
 pip install vastai
 
 #
