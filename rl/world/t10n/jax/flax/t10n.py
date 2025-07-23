@@ -582,7 +582,7 @@ if __name__ == "__main__":
 
             pred_bf = Decoder.decode(np.asarray(jit_predict(jax_params, obs_prev, act_prev, jax.random.PRNGKey(0))))
             print("PRED BF:")
-            print(jit_bf.render(0))
+            print(pred_bf.render(0))
 
             # BENCHMARKS
             import time

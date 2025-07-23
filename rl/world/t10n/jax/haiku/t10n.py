@@ -5,9 +5,11 @@ import jax.numpy as jnp
 import haiku as hk
 import math
 import enum
-from flax.core import freeze, unfreeze
+import os
+import sys
+# from flax.core import freeze, unfreeze
 
-from .obs_index import ObsIndex, Group
+from ..flax.obs_index import ObsIndex, Group
 
 from ....util.constants_v12 import (
     STATE_SIZE_GLOBAL,
@@ -16,6 +18,13 @@ from ....util.constants_v12 import (
     N_ACTIONS,
     DIM_OBS,
 )
+
+if os.getenv("PYDEBUG", None) == "1":
+    def excepthook(exc_type, exc_value, tb):
+        import ipdb
+        ipdb.post_mortem(tb)
+
+    sys.excepthook = excepthook
 
 
 class Other(enum.IntEnum):
@@ -53,7 +62,7 @@ class HaikuTransformerEncoderLayer(hk.Module):
             num_heads=self.num_heads,
             key_size=self.d_model // self.num_heads,
             model_size=self.d_model,
-            w_init=None,
+            w_init=hk.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform"),
             name="self_attn"
         )
 
@@ -125,7 +134,7 @@ class HaikuTransformerEncoder(hk.Module):
             )
             self.layers.append(layer)
 
-    def __call__(self, x: jnp.ndarray, is_training: bool) -> jnp.ndarray:
+    def __call__(self, x: jnp.ndarray, is_training: bool = False) -> jnp.ndarray:
         for layer in self.layers:
             x = layer(x, is_training)
         return x
@@ -144,7 +153,7 @@ class HaikuTransitionModel(hk.Module):
 
         emb_calc = lambda n: math.ceil(math.sqrt(n))
 
-        self.encoder_action = hk.Embed(N_ACTIONS, emb_calc(N_ACTIONS))
+        self.encoder_action = hk.Embed(N_ACTIONS, emb_calc(N_ACTIONS), name="encoder_action")
 
         #
         # Global encoders
@@ -159,28 +168,28 @@ class HaikuTransitionModel(hk.Module):
         # (B, n)
         global_nullbit_size = len(self.rel_index[Group.GLOBAL][Group.CONT_NULLBIT])
         if global_nullbit_size:
-            self.encoder_global_cont_nullbit = hk.Linear(global_nullbit_size)
+            self.encoder_global_cont_nullbit = hk.Linear(global_nullbit_size, name="encoder_global_cont_nullbit")
         else:
             self.encoder_global_cont_nullbit = lambda x: x
 
         # Binaries:
         # [(B, b1), (B, b2), ...]
         self.encoders_global_binaries = [
-            hk.Linear(len(ind))
+            hk.Linear(len(ind), name="encoders_global_binaries")
             for ind in self.rel_index[Group.GLOBAL][Group.BINARIES]
         ]
 
         # Categoricals:
         # [(B, C1), (B, C2), ...]
         self.encoders_global_categoricals = [
-            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)))
+            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)), name="encoders_global_categoricals")
             for ind in self.rel_index[Group.GLOBAL][Group.CATEGORICALS]
         ]
 
         # Thresholds:
         # [(B, T1), (B, T2), ...]
         self.encoders_global_thresholds = [
-            hk.Linear(len(ind))
+            hk.Linear(len(ind), name="encoders_global_thresholds")
             for ind in self.rel_index[Group.GLOBAL][Group.THRESHOLDS]
         ]
 
@@ -188,7 +197,7 @@ class HaikuTransitionModel(hk.Module):
         z_size_global = 256
         self.encoder_merged_global = hk.Sequential([
             # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            hk.Linear(z_size_global),
+            hk.Linear(z_size_global, name="encoder_merged_global"),
             jnn.leaky_relu,
         ])
         # => (B, Z_GLOBAL)
@@ -207,26 +216,26 @@ class HaikuTransitionModel(hk.Module):
         self.encoder_player_cont_nullbit = lambda x: x
         player_nullbit_size = len(self.rel_index[Group.PLAYER][Group.CONT_NULLBIT])
         if player_nullbit_size:
-            self.encoder_player_cont_nullbit = hk.Linear(player_nullbit_size)
+            self.encoder_player_cont_nullbit = hk.Linear(player_nullbit_size, name="encoder_player_cont_nullbit")
 
         # Binaries per player:
         # [(B, b1), (B, b2), ...]
         self.encoders_player_binaries = [
-            hk.Linear(len(ind))
+            hk.Linear(len(ind), name="encoders_player_binaries")
             for ind in self.rel_index[Group.PLAYER][Group.BINARIES]
         ]
 
         # Categoricals per player:
         # [(B, C1), (B, C2), ...]
         self.encoders_player_categoricals = [
-            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)))
+            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)), name="encoders_player_categoricals")
             for ind in self.rel_index[Group.PLAYER][Group.CATEGORICALS]
         ]
 
         # Thresholds per player:
         # [(B, T1), (B, T2), ...]
         self.encoders_player_thresholds = [
-            hk.Linear(len(ind))
+            hk.Linear(len(ind), name="encoders_player_thresholds")
             for ind in self.rel_index[Group.PLAYER][Group.THRESHOLDS]
         ]
 
@@ -234,7 +243,7 @@ class HaikuTransitionModel(hk.Module):
         z_size_player = 256
         self.encoder_merged_player = hk.Sequential([
             # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            hk.Linear(z_size_player),
+            hk.Linear(z_size_player, name="encoder_merged_player"),
             jnn.leaky_relu,
         ])
         # => (B, 2, Z_PLAYER)
@@ -252,28 +261,28 @@ class HaikuTransitionModel(hk.Module):
         # (B, n)
         hex_nullbit_size = len(self.rel_index[Group.HEX][Group.CONT_NULLBIT])
         if hex_nullbit_size:
-            self.encoder_hex_cont_nullbit = hk.Linear(hex_nullbit_size)
+            self.encoder_hex_cont_nullbit = hk.Linear(hex_nullbit_size, name="encoder_hex_cont_nullbit")
         else:
             self.encoder_hex_cont_nullbit = lambda x: x
 
         # Binaries per hex:
         # [(B, b1), (B, b2), ...]
         self.encoders_hex_binaries = [
-            hk.Linear(len(ind))
+            hk.Linear(len(ind), name="encoders_hex_binaries")
             for ind in self.rel_index[Group.HEX][Group.BINARIES]
         ]
 
         # Categoricals per hex:
         # [(B, C1), (B, C2), ...]
         self.encoders_hex_categoricals = [
-            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)))
+            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)), name="encoders_hex_categoricals")
             for ind in self.rel_index[Group.HEX][Group.CATEGORICALS]
         ]
 
         # Thresholds per hex:
         # [(B, T1), (B, T2), ...]
         self.encoders_hex_thresholds = [
-            hk.Linear(len(ind))
+            hk.Linear(len(ind), name="encoders_hex_thresholds")
             for ind in self.rel_index[Group.HEX][Group.THRESHOLDS]
         ]
 
@@ -281,7 +290,7 @@ class HaikuTransitionModel(hk.Module):
         z_size_hex = 512
         self.encoder_merged_hex = hk.Sequential([
             # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            hk.Linear(z_size_hex),
+            hk.Linear(z_size_hex, name="encoder_merged_hex"),
             jnn.leaky_relu,
             # fnn.Dropout(0.3, deterministic=self.deterministic)  # must be applied in __call__
         ])
@@ -305,7 +314,7 @@ class HaikuTransitionModel(hk.Module):
         z_size_agg = 2048
         self.aggregator = hk.Sequential([
             # => (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
-            hk.Linear(z_size_agg),
+            hk.Linear(z_size_agg, name="aggregator"),
             jnn.leaky_relu,
         ])
         # => (B, Z_AGG)
@@ -315,13 +324,13 @@ class HaikuTransitionModel(hk.Module):
         #
 
         # => (B, Z_AGG)
-        self.head_global = hk.Linear(STATE_SIZE_GLOBAL)
+        self.head_global = hk.Linear(STATE_SIZE_GLOBAL, name="head_global")
 
         # => (B, 2, Z_AGG + Z_PLAYER)
-        self.head_player = hk.Linear(STATE_SIZE_ONE_PLAYER)
+        self.head_player = hk.Linear(STATE_SIZE_ONE_PLAYER, name="head_player")
 
         # => (B, 165, Z_AGG + Z_HEX)
-        self.head_hex = hk.Linear(STATE_SIZE_ONE_HEX)
+        self.head_hex = hk.Linear(STATE_SIZE_ONE_HEX, name="head_hex")
 
     def __call__(self, obs, action):
         action_z = self.encoder_action(action)
@@ -496,21 +505,44 @@ class HaikuTransitionModel(hk.Module):
 
 
 if __name__ == "__main__":
-    from ..t10n import TransitionModel
+    from ...t10n import TransitionModel
 
     # INIT
     import torch
     torch_model = TransitionModel()
     torch_model.eval()
 
-    haiku_model = HaikuTransitionModel(deterministic=True)
-
     def forward_fn(obs, act):
-        return haiku_model(obs, act)  # False for "is_training"
+        model = HaikuTransitionModel(deterministic=True)
+        return model(obs, act)
+
+    def reconstruct_fn(obs):
+        model = HaikuTransitionModel(deterministic=True)
+        return model.reconstruct(obs)
+
+    def predict_fn(obs, act):
+        model = HaikuTransitionModel(deterministic=True)
+        return model.predict(obs, act)
 
     rng = jax.random.PRNGKey(0)
-    transformed = hk.transform(forward_fn)
-    haiku_params = transformed.init(rng, obs=jnp.zeros([2, DIM_OBS]), act=jnp.array([0, 0]))
+    haiku_fwd = hk.transform(forward_fn)
+    haiku_reconstruct = hk.transform(reconstruct_fn)
+    haiku_predict = hk.transform(predict_fn)
+
+    # create a jitted apply that compiles once and reuses the XLA binary
+    @jax.jit
+    def jit_fwd(params, rng, obs, action):
+        return haiku_fwd.apply(params, rng, obs, action)
+
+    @jax.jit
+    def jit_reconstruct(params, rng, obs):
+        return haiku_reconstruct.apply(params, rng, obs)
+
+    @jax.jit
+    def jit_predict(params, rng, obs, act):
+        return haiku_predict.apply(params, rng, obs, act)
+
+    haiku_params = haiku_fwd.init(rng, obs=jnp.zeros([2, DIM_OBS]), act=jnp.array([0, 0]))
     haiku_params = hk.data_structures.to_mutable_dict(haiku_params)
 
     # LOAD
@@ -554,27 +586,27 @@ if __name__ == "__main__":
             # done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
             torch_obs_pred_raw = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
-            jax_obs_pred_raw = jax_model.apply(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
-            jit_obs_pred_raw = jit_fwd(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
+            haiku_obs_pred_raw = haiku_fwd.apply(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
+            jit_obs_pred_raw = jit_fwd(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
 
             torch_recon = torch_model.reconstruct(torch_obs_pred_raw)
-            jax_recon = jax_model.apply(jax_params, jax_obs_pred_raw, rngs={"reconstruct": jax.random.PRNGKey(0)}, method=FlaxTransitionModel.reconstruct)
-            jit_recon = jit_reconstruct(jax_params, jit_obs_pred_raw, jax.random.PRNGKey(0))
+            haiku_recon = haiku_reconstruct.apply(haiku_params, rng, haiku_obs_pred_raw)
+            jit_recon = jit_reconstruct(haiku_params, rng, haiku_obs_pred_raw)
 
             torch_bf = Decoder.decode(torch_recon[0].numpy())
-            jax_bf = Decoder.decode(np.array(jax_recon[0]))
+            haiku_bf = Decoder.decode(np.array(haiku_recon[0]))
             jit_bf = Decoder.decode(np.array(jit_recon[0]))
 
             print("TORCH BF:")
             print(torch_bf.render(0))
             print("JAX BF:")
-            print(jax_bf.render(0))
+            print(haiku_bf.render(0))
             print("JIT BF:")
             print(jit_bf.render(0))
 
-            pred_bf = Decoder.decode(np.asarray(jit_predict(jax_params, obs_prev, act_prev, jax.random.PRNGKey(0))))
+            pred_bf = Decoder.decode(np.asarray(jit_predict(haiku_params, rng, obs_prev, act_prev)))
             print("PRED BF:")
-            print(jit_bf.render(0))
+            print(pred_bf.render(0))
 
             # BENCHMARKS
             import time
@@ -591,8 +623,8 @@ if __name__ == "__main__":
             print("Benchmarking jax (5)...")
             jax_start = time.perf_counter()
             for _ in range(5):
-                jax_obs_pred_raw = jax_model.apply(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
-                jax_recon = jax_model.apply(jax_params, jax_obs_pred_raw, rngs={"reconstruct": jax.random.PRNGKey(0)}, method=FlaxTransitionModel.reconstruct)
+                haiku_obs_pred_raw = haiku_fwd.apply(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
+                haiku_recon = haiku_reconstruct.apply(haiku_params, rng, haiku_obs_pred_raw)
                 print(".", end="", flush=True)
             jax_end = time.perf_counter()
             print("\njax: %.2fs" % (jax_end - jax_start))
@@ -600,8 +632,8 @@ if __name__ == "__main__":
             print("Benchmarking jit (100)...")
             jit_start = time.perf_counter()
             for _ in range(100):
-                jit_obs_pred_raw = jit_fwd(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
-                jit_recon = jit_reconstruct(jax_params, jit_obs_pred_raw, jax.random.PRNGKey(0))
+                jit_obs_pred_raw = jit_fwd(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
+                jit_recon = jit_reconstruct(haiku_params, rng, jit_obs_pred_raw)
                 print(".", end="", flush=True)
             jit_end = time.perf_counter()
             print("\njit: %.2fs" % (jit_end - jit_start))
@@ -609,7 +641,7 @@ if __name__ == "__main__":
             print("Benchmarking pred (100)...")
             jit_start = time.perf_counter()
             for _ in range(100):
-                jit_recon = jit_predict(jax_params, obs_prev, act_prev, jax.random.PRNGKey(0))
+                jit_recon = jit_predict(haiku_params, rng, obs_prev, act_prev)
                 print(".", end="", flush=True)
             jit_end = time.perf_counter()
             print("\npred: %.2fs" % (jit_end - jit_start))
