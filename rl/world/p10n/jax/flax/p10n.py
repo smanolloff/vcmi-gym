@@ -8,7 +8,7 @@ from flax.core import freeze, unfreeze
 
 from .obs_index import ObsIndex, Group
 
-from ...util.constants_v12 import (
+from ....util.constants_v12 import (
     HEX_ACT_MAP,
     N_ACTIONS,
     DIM_OBS,
@@ -433,7 +433,7 @@ class FlaxActionPredictionModel(fnn.Module):
 
 
 if __name__ == "__main__":
-    from ..p10n_nll import ActionPredictionModel
+    from ...p10n_nll import ActionPredictionModel
 
     # INIT
     import torch

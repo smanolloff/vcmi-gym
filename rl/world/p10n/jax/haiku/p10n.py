@@ -1,4 +1,3 @@
-import numpy as np
 import jax
 import jax.nn as jnn
 import jax.numpy as jnp
@@ -11,9 +10,7 @@ import sys
 from ..flax.obs_index import ObsIndex, Group
 
 from ....util.constants_v12 import (
-    STATE_SIZE_GLOBAL,
-    STATE_SIZE_ONE_PLAYER,
-    STATE_SIZE_ONE_HEX,
+    HEX_ACT_MAP,
     N_ACTIONS,
     DIM_OBS,
 )
@@ -26,15 +23,15 @@ if os.getenv("PYDEBUG", None) == "1":
     sys.excepthook = excepthook
 
 
+class MainAction(enum.IntEnum):
+    RESET = 0
+    WAIT = enum.auto()
+    HEX = enum.auto()
+
+
 class Other(enum.IntEnum):
     CAN_WAIT = 0
     DONE = enum.auto()
-
-
-class Reconstruction(enum.IntEnum):
-    PROBS = 0               # clamp(cont) + softmax(bin) + softmax(cat)
-    SAMPLES = enum.auto()   # clamp(cont) + sample(sigmoid(bin)) + sample(softmax(cat))
-    GREEDY = enum.auto()    # clamp(cont) + round(sigmoid(bin)) + argmax(cat)
 
 
 class HaikuTransformerEncoderLayer(hk.Module):
@@ -323,17 +320,14 @@ class HaikuTransitionModel(hk.Module):
         #
 
         # => (B, Z_AGG)
-        self.head_global = hk.Linear(STATE_SIZE_GLOBAL, name="head_global")
-
-        # => (B, 2, Z_AGG + Z_PLAYER)
-        self.head_player = hk.Linear(STATE_SIZE_ONE_PLAYER, name="head_player")
+        self.head_main = hk.Linear(len(MainAction), name="head_main")
+        # => (B, MainAction._count)
 
         # => (B, 165, Z_AGG + Z_HEX)
-        self.head_hex = hk.Linear(STATE_SIZE_ONE_HEX, name="head_hex")
+        self.head_hex = hk.Linear(1 + len(HEX_ACT_MAP), name="head_hex")
+        # => (B, 165, hex_score + HexAction._count)
 
-    def __call__(self, obs, action):
-        action_z = self.encoder_action(action)
-
+    def __call__(self, obs):
         def jax_cat(arrays, axis=0):
             if sum(len(a) for a in arrays) == 0:
                 return jnp.array([], dtype=jnp.float32)
@@ -360,7 +354,7 @@ class HaikuTransitionModel(hk.Module):
         #      e.g. for input with num_classes=4, instead of `[0,0,1,0]` it expects just `2`
         global_categorical_z = jax_cat([enc(x.argmax(axis=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], axis=-1)
         global_threshold_z = jax_cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], axis=-1)
-        global_merged = jax_cat([action_z, global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z], axis=-1)
+        global_merged = jax_cat([global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z], axis=-1)
         z_global = self.encoder_merged_global(global_merged)
         # => (B, Z_GLOBAL)
 
@@ -376,7 +370,7 @@ class HaikuTransitionModel(hk.Module):
         player_binary_z = jax_cat([lin(x) for lin, x in zip(self.encoders_player_binaries, player_binary_ins)], axis=-1)
         player_categorical_z = jax_cat([enc(x.argmax(axis=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], axis=-1)
         player_threshold_z = jax_cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], axis=-1)
-        player_merged = jax_cat([new_axis_broadcast(action_z, 1, 2), player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z], axis=-1)
+        player_merged = jax_cat([player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z], axis=-1)
         z_player = self.encoder_merged_player(player_merged)
         # => (B, 2, Z_PLAYER)
 
@@ -392,7 +386,7 @@ class HaikuTransitionModel(hk.Module):
         hex_binary_z = jax_cat([lin(x) for lin, x in zip(self.encoders_hex_binaries, hex_binary_ins)], axis=-1)
         hex_categorical_z = jax_cat([enc(x.argmax(axis=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], axis=-1)
         hex_threshold_z = jax_cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], axis=-1)
-        hex_merged = jax_cat([new_axis_broadcast(action_z, 1, 165), hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z], axis=-1)
+        hex_merged = jax_cat([hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z], axis=-1)
         z_hex1 = self.encoder_merged_hex(hex_merged)
         z_hex2 = self.transformer_hex(z_hex1)
         # => (B, 165, Z_HEX)
@@ -406,150 +400,106 @@ class HaikuTransitionModel(hk.Module):
         # Outputs
         #
 
-        global_out = self.head_global(z_agg)
-        # => (B, STATE_SIZE_GLOBAL)
-
-        player_out = self.head_player(jax_cat([new_axis_broadcast(z_agg, 1, 2), z_player], axis=-1))
-        # => (B, 2, STATE_SIZE_ONE_PLAYER)
+        main_out = self.head_main(z_agg)
+        # => (B, 3)
 
         hex_out = self.head_hex(jax_cat([new_axis_broadcast(z_agg, 1, 165), z_hex2], axis=-1))
-        # => (B, 165, STATE_SIZE_ONE_HEX)
+        # => (B, 165, HexActions + hex_score)  # score=choose this hex
 
-        obs_out = jax_cat([global_out, player_out.reshape(player_out.shape[0], -1), hex_out.reshape(hex_out.shape[0], -1)], axis=1)
+        return main_out, hex_out
 
-        return obs_out
+    def predict_batch(self, obs):
+        main_logits, hex_logits = self(obs)
+        # main_logits is (B, 3)
+        # hex_logits is (B, 165, 15)
 
-    # XXX: this is not called via __call__ => cannot use to self.make_rng, self.abs_index, etc.
-    # unless called like this:
-    #   jax_model.apply(
-    #       jax_params,
-    #       jax_obs_pred_raw,
-    #       rngs={"reconstruct": jax.random.PRNGKey(0)},
-    #       method=FlaxTransitionModel.reconstruct
-    #   )
+        B = main_logits.shape[0]
 
-    def reconstruct(self, obs_out):
-        global_cont_abs_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
-        global_cont_rel_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]]
-        global_cont_nullbit_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]]
-        global_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.BINARIES]]
-        global_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.CATEGORICALS]]
-        global_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.THRESHOLDS]]
-        player_cont_abs_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]]
-        player_cont_rel_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_REL]]
-        player_cont_nullbit_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]]
-        player_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.BINARIES]]
-        player_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.CATEGORICALS]]
-        player_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.THRESHOLDS]]
-        hex_cont_abs_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_ABS]]
-        hex_cont_rel_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_REL]]
-        hex_cont_nullbit_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]]
-        hex_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.BINARIES]]
-        hex_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.CATEGORICALS]]
-        hex_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.THRESHOLDS]]
-        next_obs = jnp.zeros_like(obs_out)
+        def pick(x):
+            return x.argmax(axis=1)
 
-        reconstruct_continuous = lambda logits: jnp.clip(logits, a_min=0, a_max=1)
+        action_main = pick(main_logits)
+        # => (B) of MainAction values
 
-        # PROBS = enum.auto()     # clamp(cont) + sigmoid(bin) + softmax(cat)
-        # SAMPLES = enum.auto()   # clamp(cont) + sample(sigmoid(bin)) + sample(softmax(cat))
-        # GREEDY = enum.auto()    # clamp(cont) + round(sigmoid(bin)) + argmax(cat)
+        hex_id = pick(hex_logits[:, :, 0])
+        # => (B) of Hex ids
 
-        def reconstruct_binary(logits):
-            return (logits > 0).astype(jnp.float32)
+        hex_id = hex_logits[:, :, 0].argmax(axis=1)
+        hex_logits_1 = hex_logits[:, :, 1:]
+        idx = jnp.broadcast_to(hex_id.reshape(B, 1, 1), (B, 1, hex_logits_1.shape[-1]))
+        row_logits = jnp.take_along_axis(hex_logits_1, idx, axis=1).squeeze(axis=1)
+        hex_action = row_logits.argmax(axis=1)
+        # => (B) of hex actions for the predicted hex ids
 
-        def reconstruct_categorical(logits):
-            return jnn.one_hot(jnp.argmax(logits, axis=-1), num_classes=logits.shape[-1]).astype(jnp.float32)
+        # Action = 2 + hex_id * N_ACTIONS + hex_action
+        action_calc = 2 + hex_id * len(HEX_ACT_MAP) + hex_action
+        mask_reset = (action_main == MainAction.RESET)
+        action = jnp.where(mask_reset, -1, action_calc)
 
-        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]].set(reconstruct_continuous(global_cont_abs_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]].set(reconstruct_continuous(global_cont_rel_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]].set(reconstruct_continuous(global_cont_nullbit_out))
-        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.BINARIES], global_binary_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.CATEGORICALS], global_categorical_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
-        for ind, out in zip(self.abs_index[Group.GLOBAL][Group.THRESHOLDS], global_threshold_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+        # mask out WAIT => +1
+        mask_wait = (action_main == MainAction.WAIT)
+        action = jnp.where(mask_wait, 1, action)
 
-        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]].set(reconstruct_continuous(player_cont_abs_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_REL]].set(reconstruct_continuous(player_cont_rel_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]].set(reconstruct_continuous(player_cont_nullbit_out))
-        for ind, out in zip(self.abs_index[Group.PLAYER][Group.BINARIES], player_binary_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-        for ind, out in zip(self.abs_index[Group.PLAYER][Group.CATEGORICALS], player_categorical_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
-        for ind, out in zip(self.abs_index[Group.PLAYER][Group.THRESHOLDS], player_threshold_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+        action = jnp.where(
+            action_main != MainAction.HEX,  # condition: where True, pick action_main
+            action_main,                    # True-branch
+            action                          # False-branch
+        )
 
-        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_ABS]].set(reconstruct_continuous(hex_cont_abs_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_REL]].set(reconstruct_continuous(hex_cont_rel_out))
-        next_obs = next_obs.at[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]].set(reconstruct_continuous(hex_cont_nullbit_out))
-        for ind, out in zip(self.abs_index[Group.HEX][Group.BINARIES], hex_binary_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
-        for ind, out in zip(self.abs_index[Group.HEX][Group.CATEGORICALS], hex_categorical_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_categorical(out))
-        for ind, out in zip(self.abs_index[Group.HEX][Group.THRESHOLDS], hex_threshold_outs):
-            next_obs = next_obs.at[:, ind].set(reconstruct_binary(out))
+        return action
 
-        return next_obs
-
-    def predict_batch(self, obs, action):
-        logits_pred = self(obs, action)
-        return self.reconstruct(logits_pred)
-
-    def predict(self, obs, action):
-        obs = jnp.expand_dims(obs, axis=0).astype(jnp.float32)
-        action = jnp.array([action])
-        return self.predict_batch(obs, action)[0]
+    def predict(self, obs):
+        b_obs = jnp.expand_dims(obs, axis=0).astype(jnp.float32)
+        return self.predict_batch(b_obs)[0]
 
 
 if __name__ == "__main__":
-    from ...t10n import TransitionModel
+    from ...p10n_nll import ActionPredictionModel
 
     # INIT
     import torch
-    torch_model = TransitionModel()
+    torch_model = ActionPredictionModel()
     torch_model.eval()
 
-    def forward_fn(obs, act):
+    def forward_fn(obs):
         model = HaikuTransitionModel(deterministic=True)
-        return model(obs, act)
+        return model(obs)
 
-    def reconstruct_fn(obs):
+    def predict_fn(obs):
         model = HaikuTransitionModel(deterministic=True)
-        return model.reconstruct(obs)
+        return model.predict(obs)
 
-    def predict_fn(obs, act):
+    def predict_batch_fn(obs):
         model = HaikuTransitionModel(deterministic=True)
-        return model.predict(obs, act)
+        return model.predict_batch(obs)
 
     rng = jax.random.PRNGKey(0)
     haiku_fwd = hk.transform(forward_fn)
-    haiku_reconstruct = hk.transform(reconstruct_fn)
     haiku_predict = hk.transform(predict_fn)
+    haiku_predict_batch = hk.transform(predict_batch_fn)
 
     # create a jitted apply that compiles once and reuses the XLA binary
     @jax.jit
-    def jit_fwd(params, rng, obs, action):
-        return haiku_fwd.apply(params, rng, obs, action)
+    def jit_fwd(params, rng, obs):
+        return haiku_fwd.apply(params, rng, obs)
 
     @jax.jit
-    def jit_reconstruct(params, rng, obs):
-        return haiku_reconstruct.apply(params, rng, obs)
+    def jit_predict(params, rng, obs):
+        return haiku_predict.apply(params, rng, obs)
 
     @jax.jit
-    def jit_predict(params, rng, obs, act):
-        return haiku_predict.apply(params, rng, obs, act)
+    def jit_predict_batch(params, rng, obs):
+        return haiku_predict_batch.apply(params, rng, obs)
 
-    haiku_params = haiku_fwd.init(rng, obs=jnp.zeros([2, DIM_OBS]), act=jnp.array([0, 0]))
+    haiku_params = haiku_fwd.init(rng, obs=jnp.zeros([2, DIM_OBS]))
     haiku_params = hk.data_structures.to_mutable_dict(haiku_params)
 
     # LOAD
-    torch_state = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
+    torch_state = torch.load("ogyesvkb-model.pt", weights_only=True, map_location="cpu")
     torch_model.load_state_dict(torch_state)
 
     from .load_utils import load_params_from_torch_state
-    haiku_params = load_params_from_torch_state(haiku_params, torch_state, head_names=["global", "player", "hex"])
+    haiku_params = load_params_from_torch_state(haiku_params, torch_state, head_names=["main", "hex"])
     haiku_params = hk.data_structures.to_immutable_dict(haiku_params)
 
     # TEST
@@ -573,76 +523,84 @@ if __name__ == "__main__":
     with torch.no_grad():
         from vcmi_gym.envs.v12.decoder.decoder import Decoder
 
-        act = env.random_action()
-        obs, rew, term, trunc, _info = env.step(act)
+        while True:
+            if env.terminated or env.truncated:
+                env.reset()
+            act = env.random_action()
+            obs, rew, term, trunc, _info = env.step(act)
+            num_transitions = len(obs["transitions"]["observations"])
+            if num_transitions > 2:
+                break
 
         for i in range(1, len(obs["transitions"]["observations"])):
-            obs_prev = obs["transitions"]["observations"][i-1]
-            act_prev = obs["transitions"]["actions"][i-1]
-            obs_next = obs["transitions"]["observations"][i]
-            # mask_next = obs["transitions"]["action_masks"][i]
-            # rew_next = obs["transitions"]["rewards"][i]
-            # done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
+            o = obs["transitions"]["observations"][i]
+            a = obs["transitions"]["actions"][i]
 
-            torch_obs_pred_raw = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
-            haiku_obs_pred_raw = haiku_fwd.apply(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
-            jit_obs_pred_raw = jit_fwd(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
+            torch_logits = torch_model(torch.as_tensor(o).unsqueeze(0))
+            jax_logits = haiku_fwd.apply(haiku_params, rng, o.reshape(1, -1))
+            jit_logits = jit_fwd(haiku_params, rng, o.reshape(1, -1))
 
-            torch_recon = torch_model.reconstruct(torch_obs_pred_raw)
-            haiku_recon = haiku_reconstruct.apply(haiku_params, rng, haiku_obs_pred_raw)
-            jit_recon = jit_reconstruct(haiku_params, rng, haiku_obs_pred_raw)
+            torch_act_pred = torch_model.predict(o)
+            jax_act_pred = haiku_predict.apply(haiku_params, rng, o)
+            jit_act_pred = jit_predict(haiku_params, rng, o)
 
-            torch_bf = Decoder.decode(torch_recon[0].numpy())
-            haiku_bf = Decoder.decode(np.array(haiku_recon[0]))
-            jit_bf = Decoder.decode(np.array(jit_recon[0]))
+            print("BF:")
+            print(Decoder.decode(o).render(0))
 
-            print("TORCH BF:")
-            print(torch_bf.render(0))
-            print("JAX BF:")
-            print(haiku_bf.render(0))
-            print("JIT BF:")
-            print(jit_bf.render(0))
+            print("REAL ACT: %s" % a)
+            print("TORCH ACT: %s" % torch_act_pred)
+            print("JAX ACT: %s" % jax_act_pred)
+            print("JIT ACT: %s" % jit_act_pred)
 
-            pred_bf = Decoder.decode(np.asarray(jit_predict(haiku_params, rng, obs_prev, act_prev)))
-            print("PRED BF:")
-            print(pred_bf.render(0))
-
+            import ipdb; ipdb.set_trace()  # noqa
             # BENCHMARKS
             import time
 
             print("Benchmarking torch (100)...")
             torch_start = time.perf_counter()
             for _ in range(100):
-                torch_obs_pred_raw = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
-                torch_recon = torch_model.reconstruct(torch_obs_pred_raw)
+                torch_act_pred = torch_model.predict(o)
                 print(".", end="", flush=True)
             torch_end = time.perf_counter()
             print("\ntorch: %.2fs" % (torch_end - torch_start))
 
-            print("Benchmarking jax (5)...")
-            jax_start = time.perf_counter()
-            for _ in range(5):
-                haiku_obs_pred_raw = haiku_fwd.apply(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
-                haiku_recon = haiku_reconstruct.apply(haiku_params, rng, haiku_obs_pred_raw)
-                print(".", end="", flush=True)
-            jax_end = time.perf_counter()
-            print("\njax: %.2fs" % (jax_end - jax_start))
+            if torch.cuda.is_available():
+                print("Benchmarking torch-CUDA (100x100)...")
+                torch_model.device = torch.device("cuda")
+                torch_model.to(torch_model.device)
+                ocuda = torch.as_tensor(o, device=torch_model.device)
+                ocuda = ocuda.unsqueeze(0).repeat(100, 1)
+                torch_start = time.perf_counter()
+                for _ in range(100):
+                    torch_act_pred = torch_model.predict_(ocuda)
+                    print(".", end="", flush=True)
+                torch_end = time.perf_counter()
+                print("\ntorch: %.2fs" % (torch_end - torch_start))
 
-            print("Benchmarking jit (100)...")
-            jit_start = time.perf_counter()
-            for _ in range(100):
-                jit_obs_pred_raw = jit_fwd(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
-                jit_recon = jit_reconstruct(haiku_params, rng, jit_obs_pred_raw)
-                print(".", end="", flush=True)
-            jit_end = time.perf_counter()
-            print("\njit: %.2fs" % (jit_end - jit_start))
+                print("Benchmarking jit-CUDA (100x100)...")
+                jit_start = time.perf_counter()
+                jo = jnp.repeat(jnp.expand_dims(o, axis=0), repeats=100, axis=0)
+                for _ in range(100):
+                    jit_act_pred = jit_predict_batch(haiku_params, rng, jo)
+                    print(".", end="", flush=True)
+                jit_end = time.perf_counter()
+                print("\njit: %.2fs" % (jit_end - jit_start))
 
-            print("Benchmarking pred (100)...")
-            jit_start = time.perf_counter()
-            for _ in range(100):
-                jit_recon = jit_predict(haiku_params, rng, obs_prev, act_prev)
-                print(".", end="", flush=True)
-            jit_end = time.perf_counter()
-            print("\npred: %.2fs" % (jit_end - jit_start))
+            else:
+                print("Benchmarking jax (5)...")
+                jax_start = time.perf_counter()
+                for _ in range(5):
+                    jax_act_pred = haiku_predict.apply(haiku_params, rng, o)
+                    print(".", end="", flush=True)
+                jax_end = time.perf_counter()
+                print("\njax: %.2fs" % (jax_end - jax_start))
 
-            import ipdb; ipdb.set_trace()  # noqa
+                print("Benchmarking jit (100)...")
+                jit_start = time.perf_counter()
+                for _ in range(100):
+                    jit_act_pred = jit_predict(haiku_params, rng, o)
+                    print(".", end="", flush=True)
+                jit_end = time.perf_counter()
+                print("\njit: %.2fs" % (jit_end - jit_start))
+
+                import ipdb; ipdb.set_trace()  # noqa
