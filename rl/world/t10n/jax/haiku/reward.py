@@ -1,110 +1,134 @@
 import jax
 import jax.nn as jnn
 import jax.numpy as jnp
-import flax.linen as fnn
+import haiku as hk
 import math
-from flax.core import freeze, unfreeze
+import os
+import sys
 
-from .obs_index import ObsIndex, Group
+from ..flax.obs_index import ObsIndex, Group
 
 from ....util.constants_v12 import (
     N_ACTIONS,
     DIM_OBS,
 )
 
+if os.getenv("PYDEBUG", None) == "1":
+    def excepthook(exc_type, exc_value, tb):
+        import ipdb
+        ipdb.post_mortem(tb)
 
-class LeakyReLU(fnn.Module):
-    negative_slope: float = 0.01
-
-    @fnn.compact
-    def __call__(self, x):
-        return jnn.leaky_relu(x, self.negative_slope)
-
-
-class Identity(fnn.Module):
-    features: int = 0
-
-    @fnn.compact
-    def __call__(self, x):
-        return x
+    sys.excepthook = excepthook
 
 
-class TransformerEncoderLayer(fnn.Module):
-    d_model: int
-    dim_feedforward: int
-    num_heads: int
-    dropout_rate: float
-    deterministic: bool
+class HaikuTransformerEncoderLayer(hk.Module):
+    def __init__(
+        self,
+        d_model: int,
+        dim_feedforward: int,
+        num_heads: int,
+        dropout_rate: float,
+        deterministic: bool,
+        name: str = None
+    ):
+        super().__init__(name=name)
+        self.d_model = d_model
+        self.dim_feedforward = dim_feedforward
+        self.num_heads = num_heads
+        self.dropout_rate = dropout_rate
+        self.deterministic = deterministic
 
-    def setup(self):
-        self.self_attn = fnn.MultiHeadAttention(
+        assert self.d_model % self.num_heads == 0
+
+        # note: Haiku’s MHA needs key_size; we split model dim equally
+        self.self_attn = hk.MultiHeadAttention(
             num_heads=self.num_heads,
-            qkv_features=self.d_model,
-            out_features=self.d_model,
-            use_bias=True,
-            dropout_rate=self.dropout_rate,
-            deterministic=self.deterministic,
-            broadcast_dropout=False
+            key_size=self.d_model // self.num_heads,
+            model_size=self.d_model,
+            w_init=hk.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform"),
+            name="self_attn"
         )
 
-        self.linear1 = fnn.Dense(self.dim_feedforward)  # 2048=torch default
-        self.dropout = fnn.Dropout(self.dropout_rate)
-        self.linear2 = fnn.Dense(self.d_model)
-        self.norm1 = fnn.LayerNorm(epsilon=1e-5)
-        self.norm2 = fnn.LayerNorm(epsilon=1e-5)
-        self.dropout1 = fnn.Dropout(self.dropout_rate)
-        self.dropout2 = fnn.Dropout(self.dropout_rate)
+        self.linear1 = hk.Linear(self.dim_feedforward, name="linear1")
+        self.linear2 = hk.Linear(self.d_model, name="linear2")
 
-    def __call__(self, x):
+        # LayerNorms
+        self.norm1 = hk.LayerNorm(
+            axis=-1, create_scale=True, create_offset=True, eps=1e-5,
+            name="norm1"
+        )
+        self.norm2 = hk.LayerNorm(
+            axis=-1, create_scale=True, create_offset=True, eps=1e-5,
+            name="norm2"
+        )
+
+        # Dropout helpers (preserve names)
+        self.dropout1 = lambda x, is_training: (
+            hk.dropout(hk.next_rng_key(), self.dropout_rate, x)
+            if is_training else x
+        )
+        self.dropout2 = lambda x, is_training: (
+            hk.dropout(hk.next_rng_key(), self.dropout_rate, x)
+            if is_training else x
+        )
+        self.dropout = lambda x, is_training: (
+            hk.dropout(hk.next_rng_key(), self.dropout_rate, x)
+            if is_training else x
+        )
+
+    def __call__(self, x: jnp.ndarray, is_training: bool) -> jnp.ndarray:
         # Multi-head self-attention block
         residual = x
-        x = self.self_attn(x)
-        x = self.dropout1(x, deterministic=self.deterministic)
+        x = self.self_attn(query=x, key=x, value=x)
+        x = self.dropout1(x, is_training)
         x = self.norm1(residual + x)
 
         # Position-wise feed-forward block
         residual = x
         x = self.linear1(x)
-        x = fnn.relu(x)
-        x = self.dropout(x, deterministic=self.deterministic)
+        x = jnn.relu(x)
+        x = self.dropout(x, is_training)
         x = self.linear2(x)
-        x = self.dropout2(x, deterministic=self.deterministic)
+        x = self.dropout2(x, is_training)
         x = self.norm2(residual + x)
 
         return x
 
 
-class TransformerEncoder(fnn.Module):
-    num_layers: int
-    d_model: int
-    dim_feedforward: int
-    num_heads: int
-    dropout_rate: float
-    deterministic: bool
+class HaikuTransformerEncoder(hk.Module):
+    def __init__(
+        self,
+        num_layers: int,
+        d_model: int,
+        dim_feedforward: int,
+        num_heads: int,
+        dropout_rate: float,
+        deterministic: bool,
+        name: str = None
+    ):
+        super().__init__(name=name)
+        self.layers = []
+        for i in range(num_layers):
+            # deterministic is often True for evaluation but here we pass flag on call
+            layer = HaikuTransformerEncoderLayer(
+                d_model, dim_feedforward, num_heads,
+                dropout_rate, deterministic,
+                name=f"layer_{i}"
+            )
+            self.layers.append(layer)
 
-    def setup(self):
-        layers = []
-        for _ in range(self.num_layers):
-            layers.append(TransformerEncoderLayer(
-                d_model=self.d_model,
-                dim_feedforward=self.dim_feedforward,
-                num_heads=self.num_heads,
-                dropout_rate=self.dropout_rate,
-                deterministic=True,
-            ))
-        self.layers = layers
-
-    def __call__(self, x):
-        for mod in self.layers:
-            x = mod(x)
+    def __call__(self, x: jnp.ndarray, is_training: bool = False) -> jnp.ndarray:
+        for layer in self.layers:
+            x = layer(x, is_training)
         return x
 
 
-class FlaxTransitionModel(fnn.Module):
-    """ Flax translation of the PyTorch TransitionModel. """
-    deterministic: bool = False
+class HaikuTransitionModel(hk.Module):
+    """ Haiku translation of the PyTorch TransitionModel. """
+    def __init__(self, deterministic=False, name=None):
+        super().__init__(name=name)
+        self.deterministic = deterministic
 
-    def setup(self):
         self.obs_index = ObsIndex()
 
         self.abs_index = self.obs_index.abs_index
@@ -112,7 +136,7 @@ class FlaxTransitionModel(fnn.Module):
 
         emb_calc = lambda n: math.ceil(math.sqrt(n))
 
-        self.encoder_action = fnn.Embed(N_ACTIONS, emb_calc(N_ACTIONS))
+        self.encoder_action = hk.Embed(N_ACTIONS, emb_calc(N_ACTIONS), name="encoder_action")
 
         #
         # Global encoders
@@ -120,45 +144,44 @@ class FlaxTransitionModel(fnn.Module):
 
         # Continuous:
         # (B, n)
-        self.encoder_global_cont_abs = Identity()
-        self.encoder_global_cont_rel = Identity()
+        self.encoder_global_cont_abs = lambda x: x
+        self.encoder_global_cont_rel = lambda x: x
 
         # Continuous (nulls):
         # (B, n)
-        encoder_global_cont_nullbit = Identity()
         global_nullbit_size = len(self.rel_index[Group.GLOBAL][Group.CONT_NULLBIT])
         if global_nullbit_size:
-            encoder_global_cont_nullbit = fnn.Dense(global_nullbit_size)
-        self.encoder_global_cont_nullbit = encoder_global_cont_nullbit
+            self.encoder_global_cont_nullbit = hk.Linear(global_nullbit_size, name="encoder_global_cont_nullbit")
+        else:
+            self.encoder_global_cont_nullbit = lambda x: x
 
         # Binaries:
         # [(B, b1), (B, b2), ...]
-        encoders_global_binaries = []
-        for ind in self.rel_index[Group.GLOBAL][Group.BINARIES]:
-            encoders_global_binaries.append(fnn.Dense(len(ind)))
-        self.encoders_global_binaries = encoders_global_binaries
+        self.encoders_global_binaries = [
+            hk.Linear(len(ind), name="encoders_global_binaries")
+            for ind in self.rel_index[Group.GLOBAL][Group.BINARIES]
+        ]
 
         # Categoricals:
         # [(B, C1), (B, C2), ...]
-        encoders_global_categoricals = []
-        for ind in self.rel_index[Group.GLOBAL][Group.CATEGORICALS]:
-            cat_emb = fnn.Embed(len(ind), emb_calc(len(ind)))
-            encoders_global_categoricals.append(cat_emb)
-        self.encoders_global_categoricals = encoders_global_categoricals
+        self.encoders_global_categoricals = [
+            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)), name="encoders_global_categoricals")
+            for ind in self.rel_index[Group.GLOBAL][Group.CATEGORICALS]
+        ]
 
         # Thresholds:
         # [(B, T1), (B, T2), ...]
-        encoders_global_thresholds = []
-        for ind in self.rel_index[Group.GLOBAL][Group.THRESHOLDS]:
-            encoders_global_thresholds.append(fnn.Dense(len(ind)))
-        self.encoders_global_thresholds = encoders_global_thresholds
+        self.encoders_global_thresholds = [
+            hk.Linear(len(ind), name="encoders_global_thresholds")
+            for ind in self.rel_index[Group.GLOBAL][Group.THRESHOLDS]
+        ]
 
         # Merge
         z_size_global = 256
-        self.encoder_merged_global = fnn.Sequential([
+        self.encoder_merged_global = hk.Sequential([
             # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            fnn.Dense(z_size_global),
-            LeakyReLU(),
+            hk.Linear(z_size_global, name="encoder_merged_global"),
+            jnn.leaky_relu,
         ])
         # => (B, Z_GLOBAL)
 
@@ -168,44 +191,43 @@ class FlaxTransitionModel(fnn.Module):
 
         # Continuous per player:
         # (B, n)
-        self.encoder_player_cont_abs = Identity()
-        self.encoder_player_cont_rel = Identity()
+        self.encoder_player_cont_abs = lambda x: x
+        self.encoder_player_cont_rel = lambda x: x
 
         # Continuous (nulls) per player:
         # (B, n)
-        self.encoder_player_cont_nullbit = Identity()
+        self.encoder_player_cont_nullbit = lambda x: x
         player_nullbit_size = len(self.rel_index[Group.PLAYER][Group.CONT_NULLBIT])
         if player_nullbit_size:
-            self.encoder_player_cont_nullbit = fnn.Dense(player_nullbit_size)
+            self.encoder_player_cont_nullbit = hk.Linear(player_nullbit_size, name="encoder_player_cont_nullbit")
 
         # Binaries per player:
         # [(B, b1), (B, b2), ...]
-        encoders_player_binaries = []
-        for ind in self.rel_index[Group.PLAYER][Group.BINARIES]:
-            encoders_player_binaries.append(fnn.Dense(len(ind)))
-        self.encoders_player_binaries = encoders_player_binaries
+        self.encoders_player_binaries = [
+            hk.Linear(len(ind), name="encoders_player_binaries")
+            for ind in self.rel_index[Group.PLAYER][Group.BINARIES]
+        ]
 
         # Categoricals per player:
         # [(B, C1), (B, C2), ...]
-        encoders_player_categoricals = []
-        for ind in self.rel_index[Group.PLAYER][Group.CATEGORICALS]:
-            cat_emb = fnn.Embed(len(ind), emb_calc(len(ind)))
-            encoders_player_categoricals.append(cat_emb)
-        self.encoders_player_categoricals = encoders_player_categoricals
+        self.encoders_player_categoricals = [
+            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)), name="encoders_player_categoricals")
+            for ind in self.rel_index[Group.PLAYER][Group.CATEGORICALS]
+        ]
 
         # Thresholds per player:
         # [(B, T1), (B, T2), ...]
-        encoders_player_thresholds = []
-        for ind in self.rel_index[Group.PLAYER][Group.THRESHOLDS]:
-            encoders_player_thresholds.append(fnn.Dense(len(ind)))
-        self.encoders_player_thresholds = encoders_player_thresholds
+        self.encoders_player_thresholds = [
+            hk.Linear(len(ind), name="encoders_player_thresholds")
+            for ind in self.rel_index[Group.PLAYER][Group.THRESHOLDS]
+        ]
 
         # Merge per player
         z_size_player = 256
-        self.encoder_merged_player = fnn.Sequential([
+        self.encoder_merged_player = hk.Sequential([
             # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            fnn.Dense(z_size_player),
-            LeakyReLU(),
+            hk.Linear(z_size_player, name="encoder_merged_player"),
+            jnn.leaky_relu,
         ])
         # => (B, 2, Z_PLAYER)
 
@@ -215,51 +237,50 @@ class FlaxTransitionModel(fnn.Module):
 
         # Continuous per hex:
         # (B, n)
-        self.encoder_hex_cont_abs = Identity()
-        self.encoder_hex_cont_rel = Identity()
+        self.encoder_hex_cont_abs = lambda x: x
+        self.encoder_hex_cont_rel = lambda x: x
 
         # Continuous (nulls) per hex:
         # (B, n)
-        encoder_hex_cont_nullbit = Identity()
         hex_nullbit_size = len(self.rel_index[Group.HEX][Group.CONT_NULLBIT])
         if hex_nullbit_size:
-            encoder_hex_cont_nullbit = fnn.Dense(hex_nullbit_size)
-        self.encoder_hex_cont_nullbit = encoder_hex_cont_nullbit
+            self.encoder_hex_cont_nullbit = hk.Linear(hex_nullbit_size, name="encoder_hex_cont_nullbit")
+        else:
+            self.encoder_hex_cont_nullbit = lambda x: x
 
         # Binaries per hex:
         # [(B, b1), (B, b2), ...]
-        encoders_hex_binaries = []
-        for ind in self.rel_index[Group.HEX][Group.BINARIES]:
-            encoders_hex_binaries.append(fnn.Dense(len(ind)))
-        self.encoders_hex_binaries = encoders_hex_binaries
+        self.encoders_hex_binaries = [
+            hk.Linear(len(ind), name="encoders_hex_binaries")
+            for ind in self.rel_index[Group.HEX][Group.BINARIES]
+        ]
 
         # Categoricals per hex:
         # [(B, C1), (B, C2), ...]
-        encoders_hex_categoricals = []
-        for ind in self.rel_index[Group.HEX][Group.CATEGORICALS]:
-            cat_emb = fnn.Embed(len(ind), emb_calc(len(ind)))
-            encoders_hex_categoricals.append(cat_emb)
-        self.encoders_hex_categoricals = encoders_hex_categoricals
+        self.encoders_hex_categoricals = [
+            hk.Embed(vocab_size=len(ind), embed_dim=emb_calc(len(ind)), name="encoders_hex_categoricals")
+            for ind in self.rel_index[Group.HEX][Group.CATEGORICALS]
+        ]
 
         # Thresholds per hex:
         # [(B, T1), (B, T2), ...]
-        encoders_hex_thresholds = []
-        for ind in self.rel_index[Group.HEX][Group.THRESHOLDS]:
-            encoders_hex_thresholds.append(fnn.Dense(len(ind)))
-        self.encoders_hex_thresholds = encoders_hex_thresholds
+        self.encoders_hex_thresholds = [
+            hk.Linear(len(ind), name="encoders_hex_thresholds")
+            for ind in self.rel_index[Group.HEX][Group.THRESHOLDS]
+        ]
 
         # Merge per hex
         z_size_hex = 512
-        self.encoder_merged_hex = fnn.Sequential([
+        self.encoder_merged_hex = hk.Sequential([
             # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            fnn.Dense(z_size_hex),
-            LeakyReLU(),
-            fnn.Dropout(0.3, deterministic=self.deterministic)
+            hk.Linear(z_size_hex, name="encoder_merged_hex"),
+            jnn.leaky_relu,
+            # fnn.Dropout(0.3, deterministic=self.deterministic)  # must be applied in __call__
         ])
         # => (B, 165, Z_HEX)
 
         # Transformer (hexes only)
-        self.transformer_hex = TransformerEncoder(
+        self.transformer_hex = HaikuTransformerEncoder(
             num_layers=6,
             d_model=z_size_hex,
             dim_feedforward=2048,
@@ -274,10 +295,10 @@ class FlaxTransitionModel(fnn.Module):
         #
 
         z_size_agg = 2048
-        self.aggregator = fnn.Sequential([
+        self.aggregator = hk.Sequential([
             # => (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
-            fnn.Dense(z_size_agg),
-            LeakyReLU(),
+            hk.Linear(z_size_agg, name="aggregator"),
+            jnn.leaky_relu,
         ])
         # => (B, Z_AGG)
 
@@ -286,7 +307,7 @@ class FlaxTransitionModel(fnn.Module):
         #
 
         # => (B, Z_AGG)
-        self.head_reward = fnn.Dense(1)
+        self.head_reward = hk.Linear(1, name="head_reward")
 
     def __call__(self, obs, action):
         action_z = self.encoder_action(action)
@@ -385,27 +406,30 @@ if __name__ == "__main__":
     torch_model = TransitionModel()
     torch_model.eval()
 
-    jax_model = FlaxTransitionModel(deterministic=True)
-    jax_params = jax_model.init(
-        rngs={"params": jax.random.PRNGKey(0)},
-        obs=jnp.zeros([2, DIM_OBS]),
-        action=jnp.array([0, 0])
-    )
+    def forward_fn(obs, act):
+        model = HaikuTransitionModel(deterministic=True)
+        return model(obs, act)
+
+    rng = jax.random.PRNGKey(0)
+    haiku_fwd = hk.transform(forward_fn)
+
+    # create a jitted apply that compiles once and reuses the XLA binary
+    @jax.jit
+    def jit_fwd(params, rng, obs, action):
+        return haiku_fwd.apply(params, rng, obs, action)
+
+    haiku_params = haiku_fwd.init(rng, obs=jnp.zeros([2, DIM_OBS]), act=jnp.array([0, 0]))
+    haiku_params = hk.data_structures.to_mutable_dict(haiku_params)
 
     # LOAD
     torch_state = torch.load("aexhrgez-model.pt", weights_only=True, map_location="cpu")
     torch_model.load_state_dict(torch_state)
 
     from .load_utils import load_params_from_torch_state
-    jax_params = freeze({
-        "params": load_params_from_torch_state(unfreeze(jax_params)["params"], torch_state, head_names=["reward"])
-    })
+    haiku_params = load_params_from_torch_state(haiku_params, torch_state, head_names=["reward"])
+    haiku_params = hk.data_structures.to_immutable_dict(haiku_params)
 
     # TEST
-
-    @jax.jit
-    def jit_fwd(params, obs, act):
-        return jax_model.apply(jax_params, obs, act)
 
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
     env = VcmiEnv(
@@ -436,8 +460,8 @@ if __name__ == "__main__":
             # done_next = (term or trunc) and i == len(obs["transitions"]["observations"]) - 1
 
             torch_rew_pred = torch_model(torch.as_tensor(obs_prev).unsqueeze(0), torch.as_tensor(act_prev).unsqueeze(0))
-            jax_rew_pred = jax_model.apply(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
-            jit_rew_pred = jit_fwd(jax_params, obs_prev.reshape(1, -1), act_prev.reshape(1))
+            jax_rew_pred = haiku_fwd.apply(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
+            jit_rew_pred = jit_fwd(haiku_params, rng, obs_prev.reshape(1, -1), act_prev.reshape(1))
 
             print("REAL REWARD: %s" % rew_next)
             print("TORCH REWARD: %s" % torch_rew_pred)
