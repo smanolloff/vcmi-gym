@@ -1,13 +1,14 @@
+import os
 import jax
 import jax.numpy as jnp
-import haiku as hk
-import os
-
 from jax import lax
+from flax import linen as fnn
+from flax.core import freeze, unfreeze
 
-import rl.world.t10n.jax.haiku.t10n as t10n_obs
-import rl.world.t10n.jax.haiku.reward as t10n_rew
-import rl.world.p10n.jax.haiku.p10n as p10n_act
+
+import rl.world.t10n.jax.flax.t10n as t10n_obs
+import rl.world.t10n.jax.flax.reward as t10n_rew
+import rl.world.p10n.jax.flax.p10n as p10n_act
 
 from rl.world.util.constants_v12 import (
     STATE_SIZE,
@@ -68,28 +69,20 @@ assert HEX_ATTR_MAP["STACK_QUEUE"][0].endswith("_ZERO_NULL")
 INDEX_HEX_STACK_STACK_QUEUE = HEX_ATTR_MAP["STACK_QUEUE"][1]  # 1st bit = currently active
 
 
-class Predictor(hk.Module):
-    def __init__(
-        self,
-        max_transitions: int,
-        side: int,
-        reward_dmg_mult: float,
-        reward_term_mult: float,
-        # TODO: add reward_step_fixed and use it
+class Predictor(fnn.Module):
+    max_transitions: int
+    side: int
+    reward_dmg_mult: float
+    reward_term_mult: float
+    # FIXME: add reward_step_fixed and use it
 
-        jit: bool = False,
-        name: str = None,
-    ):
-        super().__init__(name=name)
-        self.max_transitions = max_transitions
-        self.side = side
-        self.reward_dmg_mult = reward_dmg_mult
-        self.reward_term_mult = reward_term_mult
-        self.jit = jit
+    # Very slow on CPU
+    jit: bool = False
 
-        self.obs_model = t10n_obs.HaikuTransitionModel(deterministic=True, name="obs_model")
-        self.rew_model = t10n_rew.HaikuTransitionModel(deterministic=True, name="rew_model")
-        self.act_model = p10n_act.HaikuActionPredictionModel(deterministic=True, name="act_model")
+    def setup(self):
+        self.obs_model = t10n_obs.FlaxTransitionModel(deterministic=True)
+        self.rew_model = t10n_rew.FlaxTransitionModel(deterministic=True)
+        self.act_model = p10n_act.FlaxActionPredictionModel(deterministic=True)
 
         if self.side == 0:
             self.index_my_dmg_received_now_rel = INDEX_PLAYER0_DMG_RECEIVED_NOW_REL
@@ -110,6 +103,7 @@ class Predictor(hk.Module):
         else:
             raise Exception("Unknown side: %s" % self.side)
 
+        # These make it a lot slower on CPU
         if self.jit:
             self.predict_obs = jax.jit(self.obs_model.predict_batch)
             self.predict_rew = jax.jit(self.rew_model.predict_batch)
@@ -308,90 +302,53 @@ class Predictor(hk.Module):
 
         return state_f, reward_f, terminated_f, num_t_f
 
-
-class PredictorWrapper:
-    def __init__(
-        self,
-        max_transitions: int,
-        side: int,
-        reward_dmg_mult: float,
-        reward_term_mult: float,
-        # TODO: add reward_step_fixed and use it
-
-        jit: bool = False,
-        name: str = None,
-    ):
-        self.max_transitions = max_transitions
-        self.side = side
-        self.reward_dmg_mult = reward_dmg_mult
-        self.reward_term_mult = reward_term_mult
-        self.jit = jit
-
-        model_kwargs = {
-            "max_transitions": max_transitions,
-            "side": side,
-            "reward_dmg_mult": reward_dmg_mult,
-            "reward_term_mult": reward_term_mult,
-            "jit": jit,
-            "name": name,
-        }
-
-        def forward_fn(initial_state, initial_action):
-            model = Predictor(**model_kwargs)
-            return model(initial_state, initial_action)
-
-        def setup_params_fn(initial_state, initial_action):
-            model = Predictor(**model_kwargs)
-            return model.setup_params(initial_state, initial_action)
-
-        self.predictor_fwd = hk.transform(forward_fn)
-        self.predictor_setup_params = hk.transform(setup_params_fn)
-
-        # create a jitted apply that compiles once and reuses the XLA binary
-        @jax.jit
-        def jit_fwd(params, rng, obs, action):
-            return self.predictor_fwd.apply(params, rng, obs, action)
-
-        self.jit_fwd = jit_fwd
-
-    # Get initial params (wrapper around hk.Model#init)
-    def init(self, rng, initial_state, initial_action):
-        return self.predictor_setup_params.init(rng, initial_state, initial_action)
-
-    # Returns params loaded from torch files (custom method)
-    def load(self, params, rng):
+    @classmethod
+    def create_model(cls, **model_kwargs):
+        # must be 1st (env changes workdir)
         import torch
         torch_state_obs = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
         torch_state_rew = torch.load("aexhrgez-model.pt", weights_only=True, map_location="cpu")
         torch_state_act = torch.load("ogyesvkb-model.pt", weights_only=True, map_location="cpu")
 
-        params = hk.data_structures.to_mutable_dict(params)
+        model = Predictor(**model_kwargs)
 
-        from rl.world.t10n.jax.haiku.load_utils import load_params_from_torch_state
-        prefix = "haiku_transition_model"
+        params = model.init(
+            rngs={"params": jax.random.PRNGKey(0)},
+            initial_state=jnp.zeros([1, STATE_SIZE]),
+            initial_action=jnp.array([1]),
+            method=Predictor.setup_params
+        )
 
-        prefix_obs = "predictor/~/obs_model"
-        params_obs = {k.replace(prefix_obs, prefix, 1): v for k, v in params.items() if k.startswith(prefix_obs)}
-        params_obs = load_params_from_torch_state(params_obs, torch_state_obs, head_names=["global", "player", "hex"])
+        from rl.world.t10n.jax.flax.load_utils import load_params_from_torch_state
 
-        prefix_rew = "predictor/~/rew_model"
-        params_rew = {k.replace(prefix_rew, prefix, 1): v for k, v in params.items() if k.startswith(prefix_rew)}
-        params_rew = load_params_from_torch_state(params_rew, torch_state_rew, head_names=["reward"])
+        params_obs = load_params_from_torch_state(
+            unfreeze(params["params"]["obs_model"]),
+            torch_state_obs,
+            head_names=["global", "player", "hex"]
+        )
 
-        prefix_act = "predictor/~/act_model"
-        params_act = {k.replace(prefix_act, prefix, 1): v for k, v in params.items() if k.startswith(prefix_act)}
-        params_act = load_params_from_torch_state(params_act, torch_state_act, head_names=["main", "hex"])
+        params_rew = load_params_from_torch_state(
+            unfreeze(params["params"]["rew_model"]),
+            torch_state_rew,
+            head_names=["reward"]
+        )
 
-        return hk.data_structures.to_immutable_dict({
-            **{k.replace(prefix, prefix_obs, 1): v for k, v in params_obs.items()},
-            **{k.replace(prefix, prefix_rew, 1): v for k, v in params_rew.items()},
-            **{k.replace(prefix, prefix_act, 1): v for k, v in params_act.items()}
+        params_act = load_params_from_torch_state(
+            unfreeze(params["params"]["act_model"]),
+            torch_state_act,
+            head_names=["main", "hex"],
+            action=False
+        )
+
+        params = freeze({
+            "params": {
+                "obs_model": params_obs,
+                "rew_model": params_rew,
+                "act_model": params_act,
+            }
         })
 
-    # Forward pass (wrapper around hk.Model#apply)
-    def apply(self, params, rng, initial_state, initial_action):
-        func = self.jit_fwd if self.jit else self.predictor_fwd.apply
-        return func(params, rng, initial_state, initial_action)
+        return model, params
 
 
 if __name__ == "__main__":
@@ -413,31 +370,36 @@ if __name__ == "__main__":
         reward_relval_mult=0.01,
     )
 
-    modelw = PredictorWrapper(
-        jit=True,
+    # always enable "test_cuda" on my mac (for dev purposes)
+    have_cuda = any(device.platform == 'gpu' for device in jax.devices())
+    test_cuda = os.getenv("USER", "") == "simo" or have_cuda
+
+    model, params = Predictor.create_model(
+        jit=test_cuda,  # very slow (10-100x slower than torch, even on GPU)
         max_transitions=5,
         side=(env_kwargs["role"] == "defender"),
         reward_dmg_mult=env_kwargs["reward_dmg_mult"],
         reward_term_mult=env_kwargs["reward_term_mult"],
     )
 
-    rng = jax.random.PRNGKey(0)
-    params = modelw.init(rng, initial_state=jnp.zeros([1, STATE_SIZE]), initial_action=jnp.array([1]))
-    params = modelw.load(params, rng)
+    @jax.jit
+    def jit_fwd(params, initial_state, initial_action):
+        return model.apply(params, initial_state, initial_action)
 
-    import torch
-    from rl.world.i2a import ImaginationCore
-    torch_model = ImaginationCore(
-        max_transitions=modelw.max_transitions,
-        side=modelw.side,
-        reward_step_fixed=0,
-        reward_dmg_mult=modelw.reward_dmg_mult,
-        reward_term_mult=modelw.reward_term_mult,
-        transition_model_file="hauzybxn-model.pt",
-        reward_prediction_model_file="aexhrgez-model.pt",
-        action_prediction_model_file="ogyesvkb-model.pt",
-        device=torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
-    )
+    if test_cuda:
+        import torch
+        from rl.world.i2a import ImaginationCore
+        torch_model = ImaginationCore(
+            max_transitions=model.max_transitions,
+            side=model.side,
+            reward_step_fixed=0,
+            reward_dmg_mult=model.reward_dmg_mult,
+            reward_term_mult=model.reward_term_mult,
+            transition_model_file="hauzybxn-model.pt",
+            reward_prediction_model_file="aexhrgez-model.pt",
+            action_prediction_model_file="ogyesvkb-model.pt",
+            device=torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
+        )
 
     # Initialize env AFTER model (changes cwd)
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
@@ -448,7 +410,7 @@ if __name__ == "__main__":
 
     buffer = {"act": [], "obs": [], "rew": [], "term": []}
 
-    nsteps = 1000 if any(device.platform == "gpu" for device in jax.devices()) else 10
+    nsteps = 1000 if have_cuda else 10
     nsplits = 10
     assert nsteps % nsplits == 0
 
@@ -469,40 +431,44 @@ if __name__ == "__main__":
 
     import time
 
-    print("------- BATCH TEST TORCH ----------")
-    print("Warmup...")
+    # warmup
+    jit_fwd(params, jnp.array(split_obs[0]), jnp.array(split_act[0]))
     with torch.no_grad():
         torch_model(torch.as_tensor(split_obs[0], device=torch_model.device), torch.as_tensor(split_act[0], device=torch_model.device, dtype=torch.int64))
-    print("Benchmarking torch (%dx%d)..." % (nsplits, len(split_act[0])))
-    batch_start = time.perf_counter()
-    for b_obs, b_act in zip(split_obs, split_act):
-        torch_model(
-            initial_state=torch.as_tensor(b_obs, device=torch_model.device),
-            initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
-        )
-        print(".", end="", flush=True)
-    batch_end = time.perf_counter()
-    print("\ntime: %.2fs" % (batch_end - batch_start))
-    # cuda_obs = torch.as_tensor(np.array([o["observation"] for o in buffer["obs"]]), device=torch_model.device)
-    # cuda_act = torch.as_tensor(buffer["act"], device=torch_model.device, dtype=torch.int64)
 
-    print(f"------- BATCH TEST JAX (jit={modelw.jit}) ----------")
-    print("Warmup...")
-    modelw.apply(params, rng, jnp.array(split_obs[0]), jnp.array(split_act[0]))
-    print("Benchmarking jax (jit=%s) (%dx%d)..." % (modelw.jit, nsplits, len(split_act[0])))
-    batch_start = time.perf_counter()
-    for b_obs, b_act in zip(split_obs, split_act):
-        state, reward, done, num_t = modelw.apply(
-            params,
-            rng,
-            initial_state=jnp.array(b_obs),
-            initial_action=jnp.array(b_act)
-        )
-        print(".", end="", flush=True)
-    batch_end = time.perf_counter()
-    print("\ntime: %.2fs" % (batch_end - batch_start))
+    if test_cuda:
+        print("------- BATCH TEST JAX ON CUDA ----------")
+
+        print("Benchmarking jax (%dx%d)..." % (nsplits, len(split_act[0])))
+        batch_start = time.perf_counter()
+        for b_obs, b_act in zip(split_obs, split_act):
+            jit_fwd(params, jnp.array(b_obs), jnp.array(b_act))
+            print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
+
+        # cuda_obs = torch.as_tensor(np.array([o["observation"] for o in buffer["obs"]]), device=torch_model.device)
+        # cuda_act = torch.as_tensor(buffer["act"], device=torch_model.device, dtype=torch.int64)
+
+        print("------- BATCH TEST TORCH ON CUDA ----------")
+        print("Benchmarking cuda (%dx%d)..." % (nsplits, len(split_act[0])))
+        with torch.no_grad():
+            batch_start = time.perf_counter()
+            for b_obs, b_act in zip(split_obs, split_act):
+                torch_model(
+                    initial_state=torch.as_tensor(b_obs, device=torch_model.device),
+                    initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
+                )
+                print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
 
     import ipdb; ipdb.set_trace()  # noqa
+
+    # pdb:
+    # from vcmi_gym.envs.v12.decoder.decoder import Decoder
+    # i=1; obs, act, jres, tres = split_obs[i], split_act[i], jit_fwd(params, jnp.array(split_obs[i]), jnp.array(split_act[i])), torch_model(torch.as_tensor(split_obs[i], device=torch_model.device), torch.as_tensor(split_act[i], device=torch_model.device, dtype=torch.int64))
+    # print("Action: ", act[0]); print(Decoder.decode(obs[0]).render(0)); print("------------------- Torch:"); print(Decoder.decode(np.array(tres[0][0].detach())).render(0)); print("---------------------- JAX:"); print(Decoder.decode(np.array(jres[0][0])).render(0))
 
     episodes = 0
     step = 0
@@ -529,9 +495,8 @@ if __name__ == "__main__":
     print("^ Transitions: %d" % num_transitions)
     # print("Dream act: %s" % start_act)
 
-    state, reward, done, num_t = modelw.apply(
+    state, reward, done, num_t = model.apply(
         params,
-        rng,
         initial_state=jnp.expand_dims(start_obs, axis=0),
         initial_action=jnp.array([start_act])
     )
@@ -551,6 +516,22 @@ if __name__ == "__main__":
 
     print("Predicted obs:")
     print(Decoder.decode(np.array(state)[0]).render(0))
+
+    print("Benchmarking (5)...")
+    jax_start = time.perf_counter()
+    for _ in range(5):
+        jit_fwd(params, jnp.expand_dims(start_obs, axis=0), jnp.array([start_act]))
+        print(".", end="", flush=True)
+    jax_end = time.perf_counter()
+    print("\ntime: %.2fs" % (jax_end - jax_start))
+
+    # print("Benchmarking jit (5)...")
+    # jax_start = time.perf_counter()
+    # for _ in range(5):
+    #     jit_fwd(params, obs=start_obs, act=start_act, key=key)
+    #     print(".", end="", flush=True)
+    # jax_end = time.perf_counter()
+    # print("\ntime: %.2fs" % (jax_end - jax_start))
 
     import ipdb; ipdb.set_trace()  # noqa
     pass

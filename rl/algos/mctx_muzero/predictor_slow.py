@@ -3,8 +3,6 @@ import jax.numpy as jnp
 import haiku as hk
 import os
 
-from jax import lax
-
 import rl.world.t10n.jax.haiku.t10n as t10n_obs
 import rl.world.t10n.jax.haiku.reward as t10n_rew
 import rl.world.p10n.jax.haiku.p10n as p10n_act
@@ -77,7 +75,7 @@ class Predictor(hk.Module):
         reward_term_mult: float,
         # TODO: add reward_step_fixed and use it
 
-        jit: bool = False,
+        jit: bool = False,  # Very slow on CPU
         name: str = None,
     ):
         super().__init__(name=name)
@@ -110,6 +108,7 @@ class Predictor(hk.Module):
         else:
             raise Exception("Unknown side: %s" % self.side)
 
+        # These make it a lot slower on CPU
         if self.jit:
             self.predict_obs = jax.jit(self.obs_model.predict_batch)
             self.predict_rew = jax.jit(self.rew_model.predict_batch)
@@ -125,188 +124,160 @@ class Predictor(hk.Module):
         self.act_model.predict_batch(initial_state)
 
     def __call__(self, initial_state, initial_action):
-        """Vectorised dream roll‑out, fully JIT‑compatible.
-
-        Special cases handled:
-          • *first_step* — player‑swap termination is ignored on t = 0.
-          • *alternate win conditions* — army wiped out either before or after an
-            action ("p10n –1") ends the episode and sets the winner flags.
-        """
-
-        B = initial_state.shape[0]
-
-        # ------------------------------------------------------------------
-        # helpers
-        # ------------------------------------------------------------------
-
-        def _terminated_now(state, finished):
-            """Active‑player==NA or explicit winner flag set."""
-            cur_player = state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(1)
-            cur_winner = state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(1)
-            return (~finished) & ((cur_player == 0) | (cur_winner > 0)), cur_player
-
-        def _alt_dead_masks(state, finished):
-            """Detect army‑wiped‑out deaths for both players."""
-            state_hexes = state[:, HEXES_OFFSET:].reshape(-1, 165, STATE_SIZE_ONE_HEX)
-
-            p0_alive = (
-                (state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_ABS] > 0)
-                & (state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_REL] > 0)
-                & (state_hexes[:, :, INDEX_HEX_STACK_SIDE_PLAYER0].sum(1) > 0)
-            )
-            p1_alive = (
-                (state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_ABS] > 0)
-                & (state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_REL] > 0)
-                & (state_hexes[:, :, INDEX_HEX_STACK_SIDE_PLAYER1].sum(1) > 0)
-            )
-            p0_dead = (~finished) & (~p0_alive)
-            p1_dead = (~finished) & (~p1_alive)
-            return p0_dead, p1_dead
-
-        # ------------------------------------------------------------------
-        # scan body
-        # ------------------------------------------------------------------
-
-        def step(carry, _):
-            (
-                state,
-                action,
-                reward,
-                terminated,
-                finished,
-                num_t,
-                first_step,  # scalar bool (0‑D array)
-            ) = carry
-
-            # --------------------------------------------------------------
-            # 1. env‑level terminations (winner flag / no active player)
-            # --------------------------------------------------------------
-            term_now, cur_player = _terminated_now(state, finished)
-
-            # --------------------------------------------------------------
-            # 2. alternate win conditions BEFORE acting (army wiped out)
-            # --------------------------------------------------------------
-            p0_dead, p1_dead = _alt_dead_masks(state, finished)
-            alt_term_pre = p0_dead | p1_dead
-
-            # mark winners & NA active player where relevant
-            state = state.at[:, INDEX_WINNER_PLAYER1].set(jnp.where(p0_dead, 1, state[:, INDEX_WINNER_PLAYER1]))
-            state = state.at[:, INDEX_BSAP_PLAYER_NA].set(jnp.where(p1_dead, 1, state[:, INDEX_BSAP_PLAYER_NA]))
-            state = state.at[:, INDEX_BSAP_PLAYER_NA].set(jnp.where(alt_term_pre, 1, state[:, INDEX_BSAP_PLAYER_NA]))
-
-            # --------------------------------------------------------------
-            # 3. player‑swap termination (except first step)
-            # --------------------------------------------------------------
-            swap_now = (cur_player == initial_player) & (~first_step)
-
-            # aggregate new terminations / finishes
-            fin_now = term_now | alt_term_pre | swap_now
-            terminated |= term_now | alt_term_pre
-            finished |= fin_now
-
-            # --------------------------------------------------------------
-            # 4. choose next action for unfinished trajectories
-            # --------------------------------------------------------------
-            next_action = lax.select(
-                finished,
-                action,
-                self.predict_act(state).astype(jnp.int32),
-            )
-
-            # --------------------------------------------------------------
-            # 5. p10n model signals end with action == −1 (post‑action alt win)
-            # --------------------------------------------------------------
-            terminated_by_action = (~finished) & (next_action == -1)
-            p0_dead_a = terminated_by_action & (
-                state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_REL] < state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_REL]
-            )
-            p1_dead_a = terminated_by_action & (~p0_dead_a)
-
-            # update winners / active player flags
-            state = state.at[:, INDEX_WINNER_PLAYER1].set(jnp.where(p0_dead_a, 1, state[:, INDEX_WINNER_PLAYER1]))
-            state = state.at[:, INDEX_BSAP_PLAYER_NA].set(jnp.where(p1_dead_a, 1, state[:, INDEX_BSAP_PLAYER_NA]))
-            state = state.at[:, INDEX_BSAP_PLAYER_NA].set(jnp.where(terminated_by_action, 1, state[:, INDEX_BSAP_PLAYER_NA]))
-
-            terminated |= terminated_by_action
-            finished |= terminated_by_action
-
-            # --------------------------------------------------------------
-            # 6. rewards and transition to next observation
-            # --------------------------------------------------------------
-            add_rew = self.predict_rew(state, next_action)
-            reward += lax.select(finished, jnp.zeros_like(add_rew), add_rew)
-
-            next_state = jnp.where(
-                finished[:, None],
-                state,
-                self.predict_obs(state, next_action).astype(jnp.float32),
-            ).astype(jnp.float32)
-
-            num_t += (~finished).astype(jnp.int32)
-
-            carry_out = (
-                next_state,
-                next_action,
-                reward,
-                terminated,
-                finished,
-                num_t,
-                jnp.bool_(False),  # subsequent iterations are no longer first
-            )
-            return carry_out, None
-
-        # ------------------------------------------------------------------
-        # initial bookkeeping
-        # ------------------------------------------------------------------
-
-        initial_player = initial_state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(1)
-        initial_winner = initial_state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(1)
+        initial_player = initial_state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(axis=1)
+        # => (B)  # values 0=none, 1=red or 2=blue
+        initial_winner = initial_state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(axis=1)
+        # => (B)  # values 0=none, 1=red or 2=blue
         initial_terminated = (initial_player == 0) | (initial_winner > 0)
+        # => (B) of done flags
 
-        carry0 = (
-            initial_state,
-            initial_action,
-            jnp.zeros((B,), dtype=jnp.float32),  # reward so far
-            initial_terminated,
-            initial_terminated,
-            jnp.zeros((B,), dtype=jnp.int32),    # num_t
-            jnp.bool_(True),                     # first_step flag
-        )
+        action = initial_action
+        reward = jnp.zeros((initial_state.shape[0],), dtype=initial_state.dtype)
 
-        # ------------------------------------------------------------------
-        # roll‑out loop (static length, fully on device)
-        # ------------------------------------------------------------------
+        # => (B) of rewards
 
-        carry_final, _ = lax.scan(
-            step,
-            carry0,
-            xs=None,
-            length=self.max_transitions - 1,
-        )
+        final_state = initial_state
+        B = initial_state.shape[0]
+        num_t = jnp.zeros(B, dtype=jnp.int32)
 
-        (
-            state_f,
-            _action_f,
-            reward_f,
-            terminated_f,
-            _finished_f,
-            num_t_f,
-            _,
-        ) = carry_final
+        # Initial transition is always the input observation
+        # => max-1 transitions to predict
+        for t in range(0, self.max_transitions-1):
+            if t == 0:
+                # XXX:
+                #   terminated -- episode ended
+                #   finished -- episode OR transition ended
+                #   *_now -- same as above, but it happened this `t`
+                current_player = initial_player
+                current_winner = initial_winner
+                action = initial_action
+                terminated_now = initial_terminated
+                finished_now = initial_terminated
+                terminated = initial_terminated
+                finished = initial_terminated
+                state = initial_state
+            else:
+                # state is (B, 28114)
+                current_player = state[:, INDEX_BSAP_START:INDEX_BSAP_END].argmax(axis=1)
+                current_winner = state[:, INDEX_WINNER_START:INDEX_WINNER_END].argmax(axis=1)
+                terminated_now = ~finished & ((current_player == 0) | (current_winner > 0))
+                finished_now = terminated_now | (current_player == initial_player)
 
-        # ------------------------------------------------------------------
-        # terminal reward (vectorised)
-        # ------------------------------------------------------------------
+                terminated |= terminated_now
+                finished |= finished_now
 
-        term_this_phase = terminated_f & (~initial_terminated)
-        extra = (
-            state_f[:, self.index_enemy_value_lost_now_rel] - state_f[:, self.index_my_value_lost_now_rel]
-            + self.reward_dmg_mult * (state_f[:, self.index_enemy_dmg_received_now_rel] - state_f[:, self.index_my_dmg_received_now_rel])
-            + self.reward_term_mult * (state_f[:, self.index_enemy_value_lost_acc_rel0] - state_f[:, self.index_my_value_lost_acc_rel0])
-        )
-        reward_f = reward_f + jnp.where(term_this_phase, 1000 * extra, 0.0)
+                if finished_now.all():
+                    # Since we always update all entries in `state`
+                    # (even finished ones) through t10n and p10n,
+                    # make sure to assign only those finished *now*
+                    # XXX: must do this only if breaking from the loop,
+                    #      otherwise they will re-assigned again later
+                    if finished_now.any():
+                        final_state = final_state.at[finished_now].set(state[finished_now])
+                    break
 
-        return state_f, reward_f, terminated_f, num_t_f
+                # check non-finished states for alternate win conditions
+                # NOTE: this will probably not work if state is just probs (and not reconstructed)
+                state_hexes = state[:, HEXES_OFFSET:].reshape(-1, 165, STATE_SIZE_ONE_HEX)
+
+                # a.k.a. not(finished) AND not(alive)
+                #   (alive means having value > 0 + at least 1 stack)
+                p0_dead_mask = ~finished & ~(
+                    (state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_ABS] > 0)
+                    & (state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_REL] > 0)
+                    & (state_hexes[:, :, INDEX_HEX_STACK_SIDE_PLAYER0].sum(axis=1) > 0)
+                )
+                # => (B) bool mask (True means P0 looks dead)
+
+                p1_dead_mask = ~finished & ~(
+                    (state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_ABS] > 0)
+                    & (state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_REL] > 0)
+                    & (state_hexes[:, :, INDEX_HEX_STACK_SIDE_PLAYER1].sum(axis=1) > 0)
+                )
+                # => (B) bool mask (True means P1 looks dead)
+
+                terminated_now |= (p0_dead_mask | p1_dead_mask)
+                finished_now |= terminated_now
+
+                terminated |= terminated_now
+                finished |= finished_now
+
+                # Set active player to NA and mark winners
+                state = state.at[terminated_now, INDEX_BSAP_PLAYER_NA].set(1)
+                state = state.at[p0_dead_mask, INDEX_WINNER_PLAYER1].set(1)
+                state = state.at[p1_dead_mask, INDEX_BSAP_PLAYER_NA].set(1)
+
+            if finished.all():
+                # XXX: must do this only if breaking from the loop (see comment above)
+                if finished_now.any():
+                    final_state = final_state.at[finished_now].set(state[finished_now])
+                # import ipdb; ipdb.set_trace()  # noqa
+                break
+
+            if t != 0:
+                action = action.at[~finished].set(self.predict_act(state[~finished]))
+
+                # p10n predicts -1 when it believes battle has ended
+                # => treat this as an additional alt termination condition
+                # To determine who died, we must compare the army values...
+                terminated_by_action = ~finished & (action == -1)
+
+                p0_dead_mask = (
+                    terminated_by_action
+                    & (state[:, INDEX_PLAYER0_ARMY_VALUE_NOW_REL] < state[:, INDEX_PLAYER1_ARMY_VALUE_NOW_REL])
+                )
+
+                p1_dead_mask = terminated_by_action & (~p0_dead_mask)
+
+                # Mark winners and set active player to NA
+                state = state.at[p0_dead_mask, INDEX_WINNER_PLAYER1].set(1)
+                state = state.at[p1_dead_mask, INDEX_BSAP_PLAYER_NA].set(1)
+                state = state.at[terminated_by_action, INDEX_BSAP_PLAYER_NA].set(1)
+
+                terminated_now |= terminated_by_action
+                finished_now |= terminated_now
+
+                terminated |= terminated_now
+                finished |= finished_now
+
+                if finished.all():
+                    # XXX: must do this only if breaking from the loop (see comment above)
+                    if finished_now.any():
+                        final_state = final_state.at[finished_now].set(state[finished_now])
+                    # import ipdb; ipdb.set_trace()  # noqa
+                    break
+
+            # Transition to next state:
+            reward = reward.at[~finished].add(self.predict_rew(state[~finished], action[~finished]).astype(jnp.float32))
+            state = state.at[~finished].set(self.predict_obs(state[~finished], action[~finished]).astype(jnp.float32))
+            num_t = num_t.at[~finished].add(1)
+
+        # TODO: ideally, here we should check for alt winconns again
+        #       for cases where env finished exactly after MAX_TRANSITIONS
+        #       (a very edge case though)
+
+        num_truncated = (~finished).sum()
+
+        if num_truncated > 0:
+            # self.num_truncations += num_truncated
+            # print(f"WARNING: state still in progress after {self.max_transitions} transitions")
+            pass
+
+        # Give one final step reward + a term reward
+        # (the rew_model cannot predict terminal rewards)
+        #
+        # NOTE: excluding initial_finished states i.e. states which finished
+        #       in prev dream phases and already have term rewards
+        term_this_dream_phase = terminated & (~initial_terminated)
+        if term_this_dream_phase.any():
+            s = state[term_this_dream_phase]
+            reward = reward.at[term_this_dream_phase].add(1000 * (
+                s[:, self.index_enemy_value_lost_now_rel] - s[:, self.index_my_value_lost_now_rel]
+                + self.reward_dmg_mult * (s[:, self.index_enemy_dmg_received_now_rel] - s[:, self.index_my_dmg_received_now_rel])
+                + self.reward_term_mult * (s[:, self.index_enemy_value_lost_acc_rel0] - s[:, self.index_my_value_lost_acc_rel0])
+            ))
+
+        return state, reward, terminated, num_t
 
 
 class PredictorWrapper:
@@ -318,7 +289,7 @@ class PredictorWrapper:
         reward_term_mult: float,
         # TODO: add reward_step_fixed and use it
 
-        jit: bool = False,
+        jit: bool = False,  # Very slow on CPU
         name: str = None,
     ):
         self.max_transitions = max_transitions
@@ -413,8 +384,11 @@ if __name__ == "__main__":
         reward_relval_mult=0.01,
     )
 
+    # Always true for non-vastai (for tests on Mac)
+    test_cuda = os.getenv("VASTAI") is None or any(device.platform == 'gpu' for device in jax.devices())
+
     modelw = PredictorWrapper(
-        jit=True,
+        jit=test_cuda,  # very slow (10-100x slower than torch, even on GPU)
         max_transitions=5,
         side=(env_kwargs["role"] == "defender"),
         reward_dmg_mult=env_kwargs["reward_dmg_mult"],
@@ -425,19 +399,20 @@ if __name__ == "__main__":
     params = modelw.init(rng, initial_state=jnp.zeros([1, STATE_SIZE]), initial_action=jnp.array([1]))
     params = modelw.load(params, rng)
 
-    import torch
-    from rl.world.i2a import ImaginationCore
-    torch_model = ImaginationCore(
-        max_transitions=modelw.max_transitions,
-        side=modelw.side,
-        reward_step_fixed=0,
-        reward_dmg_mult=modelw.reward_dmg_mult,
-        reward_term_mult=modelw.reward_term_mult,
-        transition_model_file="hauzybxn-model.pt",
-        reward_prediction_model_file="aexhrgez-model.pt",
-        action_prediction_model_file="ogyesvkb-model.pt",
-        device=torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
-    )
+    if test_cuda:
+        import torch
+        from rl.world.i2a import ImaginationCore
+        torch_model = ImaginationCore(
+            max_transitions=modelw.max_transitions,
+            side=modelw.side,
+            reward_step_fixed=0,
+            reward_dmg_mult=modelw.reward_dmg_mult,
+            reward_term_mult=modelw.reward_term_mult,
+            transition_model_file="hauzybxn-model.pt",
+            reward_prediction_model_file="aexhrgez-model.pt",
+            action_prediction_model_file="ogyesvkb-model.pt",
+            device=torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
+        )
 
     # Initialize env AFTER model (changes cwd)
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
@@ -448,7 +423,7 @@ if __name__ == "__main__":
 
     buffer = {"act": [], "obs": [], "rew": [], "term": []}
 
-    nsteps = 1000 if any(device.platform == "gpu" for device in jax.devices()) else 10
+    nsteps = 10
     nsplits = 10
     assert nsteps % nsplits == 0
 
@@ -469,40 +444,56 @@ if __name__ == "__main__":
 
     import time
 
-    print("------- BATCH TEST TORCH ----------")
-    print("Warmup...")
-    with torch.no_grad():
-        torch_model(torch.as_tensor(split_obs[0], device=torch_model.device), torch.as_tensor(split_act[0], device=torch_model.device, dtype=torch.int64))
-    print("Benchmarking torch (%dx%d)..." % (nsplits, len(split_act[0])))
-    batch_start = time.perf_counter()
-    for b_obs, b_act in zip(split_obs, split_act):
-        torch_model(
-            initial_state=torch.as_tensor(b_obs, device=torch_model.device),
-            initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
-        )
-        print(".", end="", flush=True)
-    batch_end = time.perf_counter()
-    print("\ntime: %.2fs" % (batch_end - batch_start))
-    # cuda_obs = torch.as_tensor(np.array([o["observation"] for o in buffer["obs"]]), device=torch_model.device)
-    # cuda_act = torch.as_tensor(buffer["act"], device=torch_model.device, dtype=torch.int64)
+    if test_cuda:
+        print("------- BATCH TEST TORCH ON CUDA ----------")
+        print("Benchmarking cuda (%dx%d)..." % (nsplits, len(split_act[0])))
+        batch_start = time.perf_counter()
+        for b_obs, b_act in zip(split_obs, split_act):
+            torch_model(
+                initial_state=torch.as_tensor(b_obs, device=torch_model.device),
+                initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
+            )
+            print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
 
-    print(f"------- BATCH TEST JAX (jit={modelw.jit}) ----------")
-    print("Warmup...")
-    modelw.apply(params, rng, jnp.array(split_obs[0]), jnp.array(split_act[0]))
-    print("Benchmarking jax (jit=%s) (%dx%d)..." % (modelw.jit, nsplits, len(split_act[0])))
-    batch_start = time.perf_counter()
-    for b_obs, b_act in zip(split_obs, split_act):
-        state, reward, done, num_t = modelw.apply(
-            params,
-            rng,
-            initial_state=jnp.array(b_obs),
-            initial_action=jnp.array(b_act)
-        )
-        print(".", end="", flush=True)
-    batch_end = time.perf_counter()
-    print("\ntime: %.2fs" % (batch_end - batch_start))
+        # cuda_obs = torch.as_tensor(np.array([o["observation"] for o in buffer["obs"]]), device=torch_model.device)
+        # cuda_act = torch.as_tensor(buffer["act"], device=torch_model.device, dtype=torch.int64)
 
-    import ipdb; ipdb.set_trace()  # noqa
+        print("------- BATCH TEST JAX ON CUDA ----------")
+
+        print("Benchmarking jax (%dx%d)..." % (nsplits, len(split_act[0])))
+        batch_start = time.perf_counter()
+        for b_obs, b_act in zip(split_obs, split_act):
+            state, reward, done, num_t = modelw.apply(
+                params,
+                rng,
+                initial_state=jnp.array(b_obs),
+                initial_action=jnp.array(b_act)
+            )
+            print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
+
+        print("------- BATCH TEST JAX (JIT) ON CUDA ----------")
+
+        print("Benchmarking jax (%dx%d)..." % (nsplits, len(split_act[0])))
+        oldjit = modelw.jit
+        modelw.jit = True
+        batch_start = time.perf_counter()
+        for b_obs, b_act in zip(split_obs, split_act):
+            state, reward, done, num_t = modelw.apply(
+                params,
+                rng,
+                initial_state=jnp.array(b_obs),
+                initial_action=jnp.array(b_act)
+            )
+            print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
+
+        import ipdb; ipdb.set_trace()  # noqa
+        modelw.jit = oldjit
 
     episodes = 0
     step = 0
@@ -551,6 +542,27 @@ if __name__ == "__main__":
 
     print("Predicted obs:")
     print(Decoder.decode(np.array(state)[0]).render(0))
+
+    print("Benchmarking (5)...")
+    jax_start = time.perf_counter()
+    for _ in range(5):
+        modelw.apply(
+            params,
+            rng,
+            initial_state=jnp.expand_dims(start_obs, axis=0),
+            initial_action=jnp.array([start_act])
+        )
+        print(".", end="", flush=True)
+    jax_end = time.perf_counter()
+    print("\ntime: %.2fs" % (jax_end - jax_start))
+
+    # print("Benchmarking jit (5)...")
+    # jax_start = time.perf_counter()
+    # for _ in range(5):
+    #     jit_fwd(params, obs=start_obs, act=start_act, key=key)
+    #     print(".", end="", flush=True)
+    # jax_end = time.perf_counter()
+    # print("\ntime: %.2fs" % (jax_end - jax_start))
 
     import ipdb; ipdb.set_trace()  # noqa
     pass

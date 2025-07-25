@@ -136,7 +136,7 @@ class HaikuTransformerEncoder(hk.Module):
         return x
 
 
-class HaikuTransitionModel(hk.Module):
+class HaikuActionPredictionModel(hk.Module):
     """ Haiku translation of the PyTorch TransitionModel. """
     def __init__(self, deterministic=False, name=None):
         super().__init__(name=name)
@@ -462,15 +462,15 @@ if __name__ == "__main__":
     torch_model.eval()
 
     def forward_fn(obs):
-        model = HaikuTransitionModel(deterministic=True)
+        model = HaikuActionPredictionModel(deterministic=True)
         return model(obs)
 
     def predict_fn(obs):
-        model = HaikuTransitionModel(deterministic=True)
+        model = HaikuActionPredictionModel(deterministic=True)
         return model.predict(obs)
 
     def predict_batch_fn(obs):
-        model = HaikuTransitionModel(deterministic=True)
+        model = HaikuActionPredictionModel(deterministic=True)
         return model.predict_batch(obs)
 
     rng = jax.random.PRNGKey(0)

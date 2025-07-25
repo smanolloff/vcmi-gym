@@ -75,11 +75,11 @@ if __name__ == "__main__":
     mz_model = MZModel()
     mz_params = mz_model.init(rngs=rngs, obs=jnp.zeros([1, t10n.DIM_OBS]))
 
-    def representation_fn(_params, obs):
+    def representation_fn(obs):
         # here we treat raw obs as the “latent” root
         return obs
 
-    def prediction_fn(params, latent, obs):
+    def prediction_fn(latent, obs):
         # produce policy logits & value
         logits, value = mz_model.apply(params["mz"], obs)
         mask = get_action_mask(obs)                      # shape (num_actions,)

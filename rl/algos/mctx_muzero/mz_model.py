@@ -1,6 +1,6 @@
 import jax.nn as jnn
 import jax.numpy as jnp
-from flax import linen as fnn
+import haiku as hk
 
 from rl.world.constants_v12 import (
     N_ACTIONS,
@@ -10,8 +10,10 @@ from rl.world.constants_v12 import (
 )
 
 
-class HexConv(fnn.Module):
-    out_channels: int
+class HexConv(hk.Module):
+    def __init__(self, out_channels: int, name: str = None):
+        super().__init__(name=name)
+        self.out_channels = out_channels
 
     def setup(self):
         # Precompute the 7 neighbor offsets for even/odd rows
@@ -26,13 +28,11 @@ class HexConv(fnn.Module):
                 off = offsets0 if (y % 2 == 0) else offsets1
                 inds = inds.at[y-1, x-1].set(off + base)
 
-        # Store as a constant for use in __call__
-        self.padded_convinds = self.variable(
-            "constants", "padded_convinds", lambda: inds.flatten()
-        )
+        # Store as a DeviceArray for use in __call__
+        self.padded_convinds = jnp.array(inds.flatten(), dtype=jnp.int32)
 
         # Dense layer to project each 7-neighborhood to out_channels
-        self.fc = fnn.Dense(self.out_channels)
+        self.fc = hk.Linear(output_size=self.out_channels)
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         # x: [batch, 165, in_features]
@@ -45,13 +45,15 @@ class HexConv(fnn.Module):
 
         # Gather all 7 neighbors per hex and apply dense
         flat = padded.reshape((b, -1, hexdim))
-        idxs = self.padded_convinds.value  # shape (11*15*7,)
+        idxs = self.padded_convinds  # shape (11*15*7,)
         neigh = flat[:, idxs, :].reshape((b, 165, 7 * hexdim))
         return self.fc(neigh)
 
 
-class HexConvResLayer(fnn.Module):
-    channels: int
+class HexConvResLayer(hk.Module):
+    def __init__(self, channels: int, name: str = None):
+        super().__init__(name=name)
+        self.channels = channels
 
     def setup(self):
         self.conv1 = HexConv(self.channels)
@@ -64,9 +66,11 @@ class HexConvResLayer(fnn.Module):
         return jnn.relu(y + x)
 
 
-class HexConvResBlock(fnn.Module):
-    channels: int
-    depth: int = 1
+class HexConvResBlock(hk.Module):
+    def __init__(self, channels: int, depth: int, name: str = None):
+        super().__init__(name=name)
+        self.channels = channels
+        self.depth = depth
 
     def setup(self):
         self.layers = [HexConvResLayer(self.channels) for _ in range(self.depth)]
@@ -78,23 +82,23 @@ class HexConvResBlock(fnn.Module):
 
 
 # Trainable prediction head (policy & value)
-class MZModel(fnn.Module):
+class MZModel(hk.Module):
     def setup(self):
-        self.encoder_other = fnn.Sequential([
-            fnn.Dense(64),
-            fnn.relu
+        self.encoder_other = hk.Sequential([
+            hk.Linear(64),
+            jnn.relu
         ])
 
-        self.encoder_hexes = fnn.Sequential([
+        self.encoder_hexes = hk.Sequential([
             HexConvResBlock(channels=170, layers=3),
-            fnn.Dense(32),
-            fnn.relu,
+            hk.Linear(32),
+            jnn.relu,
         ])
 
-        self.encoder_merged = fnn.Dense(1024)
+        self.encoder_merged = hk.Linear(1024)
 
-        self.action_head = fnn.Dense(N_ACTIONS)
-        self.value_head = fnn.Dense(1)
+        self.action_head = hk.Linear(N_ACTIONS)
+        self.value_head = hk.Linear(1)
 
     def __call__(self, obs):
         other, hexes = jnp.split(obs, [DIM_OTHER], axis=1)
