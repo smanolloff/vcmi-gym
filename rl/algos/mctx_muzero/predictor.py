@@ -413,6 +413,10 @@ if __name__ == "__main__":
         reward_relval_mult=0.01,
     )
 
+    # always enable "test_cuda" on my mac (for dev purposes)
+    have_cuda = any(device.platform == 'gpu' for device in jax.devices())
+    test_cuda = os.getenv("USER", "") == "simo" or have_cuda
+
     modelw = PredictorWrapper(
         jit=True,
         max_transitions=5,
@@ -425,19 +429,20 @@ if __name__ == "__main__":
     params = modelw.init(rng, initial_state=jnp.zeros([1, STATE_SIZE]), initial_action=jnp.array([1]))
     params = modelw.load(params, rng)
 
-    import torch
-    from rl.world.i2a import ImaginationCore
-    torch_model = ImaginationCore(
-        max_transitions=modelw.max_transitions,
-        side=modelw.side,
-        reward_step_fixed=0,
-        reward_dmg_mult=modelw.reward_dmg_mult,
-        reward_term_mult=modelw.reward_term_mult,
-        transition_model_file="hauzybxn-model.pt",
-        reward_prediction_model_file="aexhrgez-model.pt",
-        action_prediction_model_file="ogyesvkb-model.pt",
-        device=torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
-    )
+    if test_cuda:
+        import torch
+        from rl.world.i2a import ImaginationCore
+        torch_model = ImaginationCore(
+            max_transitions=modelw.max_transitions,
+            side=modelw.side,
+            reward_step_fixed=0,
+            reward_dmg_mult=modelw.reward_dmg_mult,
+            reward_term_mult=modelw.reward_term_mult,
+            transition_model_file="hauzybxn-model.pt",
+            reward_prediction_model_file="aexhrgez-model.pt",
+            action_prediction_model_file="ogyesvkb-model.pt",
+            device=torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"),
+        )
 
     # Initialize env AFTER model (changes cwd)
     from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
@@ -448,7 +453,7 @@ if __name__ == "__main__":
 
     buffer = {"act": [], "obs": [], "rew": [], "term": []}
 
-    nsteps = 1000 if any(device.platform == "gpu" for device in jax.devices()) else 10
+    nsteps = 1000 if have_cuda else 10
     nsplits = 10
     assert nsteps % nsplits == 0
 
@@ -469,40 +474,44 @@ if __name__ == "__main__":
 
     import time
 
-    print("------- BATCH TEST TORCH ----------")
-    print("Warmup...")
+    # warmup
+    modelw.apply(params, rng, jnp.array(split_obs[0]), jnp.array(split_act[0]))
     with torch.no_grad():
         torch_model(torch.as_tensor(split_obs[0], device=torch_model.device), torch.as_tensor(split_act[0], device=torch_model.device, dtype=torch.int64))
-    print("Benchmarking torch (%dx%d)..." % (nsplits, len(split_act[0])))
-    batch_start = time.perf_counter()
-    for b_obs, b_act in zip(split_obs, split_act):
-        torch_model(
-            initial_state=torch.as_tensor(b_obs, device=torch_model.device),
-            initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
-        )
-        print(".", end="", flush=True)
-    batch_end = time.perf_counter()
-    print("\ntime: %.2fs" % (batch_end - batch_start))
-    # cuda_obs = torch.as_tensor(np.array([o["observation"] for o in buffer["obs"]]), device=torch_model.device)
-    # cuda_act = torch.as_tensor(buffer["act"], device=torch_model.device, dtype=torch.int64)
 
-    print(f"------- BATCH TEST JAX (jit={modelw.jit}) ----------")
-    print("Warmup...")
-    modelw.apply(params, rng, jnp.array(split_obs[0]), jnp.array(split_act[0]))
-    print("Benchmarking jax (jit=%s) (%dx%d)..." % (modelw.jit, nsplits, len(split_act[0])))
-    batch_start = time.perf_counter()
-    for b_obs, b_act in zip(split_obs, split_act):
-        state, reward, done, num_t = modelw.apply(
-            params,
-            rng,
-            initial_state=jnp.array(b_obs),
-            initial_action=jnp.array(b_act)
-        )
-        print(".", end="", flush=True)
-    batch_end = time.perf_counter()
-    print("\ntime: %.2fs" % (batch_end - batch_start))
+    if test_cuda:
+        print("------- BATCH TEST JAX ON CUDA ----------")
+
+        print("Benchmarking jax (%dx%d)..." % (nsplits, len(split_act[0])))
+        batch_start = time.perf_counter()
+        for b_obs, b_act in zip(split_obs, split_act):
+            modelw.apply(params, rng, jnp.array(b_obs), jnp.array(b_act))
+            print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
+
+        # cuda_obs = torch.as_tensor(np.array([o["observation"] for o in buffer["obs"]]), device=torch_model.device)
+        # cuda_act = torch.as_tensor(buffer["act"], device=torch_model.device, dtype=torch.int64)
+
+        print("------- BATCH TEST TORCH ON CUDA ----------")
+        print("Benchmarking cuda (%dx%d)..." % (nsplits, len(split_act[0])))
+        with torch.no_grad():
+            batch_start = time.perf_counter()
+            for b_obs, b_act in zip(split_obs, split_act):
+                torch_model(
+                    initial_state=torch.as_tensor(b_obs, device=torch_model.device),
+                    initial_action=torch.as_tensor(b_act, device=torch_model.device, dtype=torch.int64),
+                )
+                print(".", end="", flush=True)
+        batch_end = time.perf_counter()
+        print("\ntime: %.2fs" % (batch_end - batch_start))
 
     import ipdb; ipdb.set_trace()  # noqa
+
+    # pdb:
+    # from vcmi_gym.envs.v12.decoder.decoder import Decoder
+    # i=1; obs, act, jres, tres = split_obs[i], split_act[i], jit_fwd(params, jnp.array(split_obs[i]), jnp.array(split_act[i])), torch_model(torch.as_tensor(split_obs[i], device=torch_model.device), torch.as_tensor(split_act[i], device=torch_model.device, dtype=torch.int64))
+    # print("Action: ", act[0]); print(Decoder.decode(obs[0]).render(0)); print("------------------- Torch:"); print(Decoder.decode(np.array(tres[0][0].detach())).render(0)); print("---------------------- JAX:"); print(Decoder.decode(np.array(jres[0][0])).render(0))
 
     episodes = 0
     step = 0
@@ -554,3 +563,5 @@ if __name__ == "__main__":
 
     import ipdb; ipdb.set_trace()  # noqa
     pass
+
+
