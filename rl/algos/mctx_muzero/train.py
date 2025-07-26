@@ -46,6 +46,7 @@ def get_action_mask_functor():
         # Gather all mask bits in one go:
         return obs[:, ACTION_MASK_IDX]
 
+    return get_action_mask
 
 def get_action_mask_slow(obs):
     map_gmask = GLOBAL_ATTR_MAP["ACTION_MASK"]
@@ -61,6 +62,50 @@ def get_action_mask_slow(obs):
     # => (B, N_ACTIONS)
 
     return actmask
+
+
+def create_venv(env_kwargs, num_envs, sync=True):
+    import gymnasium as gym
+    import os
+    from types import SimpleNamespace
+    from functools import partial
+    from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
+    from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
+
+    # AsyncVectorEnv creates a dummy_env() in the main process just to
+    # extract metadata, which causes VCMI init pid error afterwards
+    pid = os.getpid()
+    dummy_env = SimpleNamespace(
+        metadata={'render_modes': ['ansi', 'rgb_array'], 'render_fps': 30},
+        render_mode='ansi',
+        action_space=VcmiEnv.ACTION_SPACE,
+        observation_space=VcmiEnv.OBSERVATION_SPACE["observation"],
+        close=lambda: None,
+    )
+
+    def env_creator(i):
+        if os.getpid() == pid and not sync:
+            return dummy_env
+
+        # env = VcmiEnv(**env_kwargs)
+        env = gym.make("VCMI-v12", max_episode_steps=100, **env_kwargs)
+        env = LegacyObservationSpaceWrapper(env)
+        return env
+
+    funcs = [partial(env_creator, i) for i in range(num_envs)]
+
+    # XXX: SyncVectorEnv won't work when both train and eval env are started in main process
+    #       => consider always using AsyncVectorEnv:
+    #       vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+
+    if num_envs > 1:
+        vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+    else:
+        vec_env = gym.vector.SyncVectorEnv(funcs, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+
+    vec_env.reset()
+
+    return vec_env
 
 
 if __name__ == "__main__":
@@ -84,7 +129,7 @@ if __name__ == "__main__":
     )
 
     predictorw = PredictorWrapper(
-        jit=False,  # very slow, maybe due to differing batch; or due to CPU
+        jit=True,
         max_transitions=5,
         side=(env_kwargs["role"] == "defender"),
         reward_dmg_mult=env_kwargs["reward_dmg_mult"],
@@ -94,7 +139,7 @@ if __name__ == "__main__":
     params = predictorw.init(
         jax.random.PRNGKey(0),
         initial_state=jnp.zeros([1, STATE_SIZE]),
-        initial_action=jnp.array([1])
+        initial_action=jnp.array([1], dtype=jnp.int32)
     )
 
     params = predictorw.load(params)
@@ -106,11 +151,14 @@ if __name__ == "__main__":
 
     # @jax.jit
     def repr_fn(obs):
+        print("[main] repr_fn")
         # here we treat raw obs as the "latent" root
+        print("[main] repr_fn [return]")
         return obs
 
     # @jax.jit
     def pred_fn(state):
+        print("[main] pred_fn")
         # XXX: "latent" state is simply obs in this model
 
         # produce policy logits & value
@@ -119,20 +167,38 @@ if __name__ == "__main__":
         mask = get_action_mask(state)
         neg_inf = -1e9
         masked_logits = jnp.where(mask, logits, neg_inf)
-        return masked_logits, value
+
+        # XXX: muax expects (v, logits), not (logits, v)
+        # https://github.com/bwfbowen/muax/blob/4a77962d4adc2a7d63561d3cde31ccafb061a297/muax/nn.py#L37
+        print("[main] pred_fn [return]")
+        return value, masked_logits
 
     # @jax.jit
     def dyn_fn(state, action):
-        next_obs, reward, term, num_t = predictor_fwd_no_params(state, action)
-        # next_obs becomes the next latent state in this model
-        return next_obs, reward
+        print("[main] dyn_fn")
+        # XXX: muax naively assumes state and action are both float32
+        #      when calling dyn_fn.init()
+        #   https://github.com/bwfbowen/muax/blob/4a77962d4adc2a7d63561d3cde31ccafb061a297/muax/train.py#L137
+        #   https://github.com/bwfbowen/muax/blob/4a77962d4adc2a7d63561d3cde31ccafb061a297/muax/model.py#L132
+        # Real action dtype is int64, but jax does not handle it natively => use int32
+        action = action.astype(jnp.int32)
 
+        next_obs, reward, term, num_t = predictor_fwd_no_params(state, action)
+
+        # XXX: muax expects (r, s), not (s, r)
+        # https://github.com/bwfbowen/muax/blob/4a77962d4adc2a7d63561d3cde31ccafb061a297/muax/nn.py#L61
+        print("[main] dyn_fn [return]")
+        return reward, next_obs
+
+    print("[main] init optimizer")
     # 5) Bundle into a MuZero model
     gradient_transform = muax.model.optimizer(
         init_value=0.02, peak_value=0.02, end_value=0.002,
-        warmup_steps=5_000, transition_steps=5_000
+        warmup_steps=5, transition_steps=5
+        # warmup_steps=5_000, transition_steps=5_000
     )
 
+    print("[main] init MuZero")
     model = muax.MuZero(
         repr_fn,
         pred_fn,
@@ -152,17 +218,22 @@ if __name__ == "__main__":
 
     opt = optax.masked(gradient_transform, mask_fn)     # freezes obs & reward params :contentReference[oaicite:1]{index=1}
 
-    from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
-    env = VcmiEnv(**env_kwargs)
-    env.reset()
+    # XXX: muax naively assumes env.spec.max_episode_steps is available
+    #      => use gym.make(..., max_episode_steps=...)
+    import gymnasium as gym
+    import vcmi_gym
+    vcmi_gym.register_envs()
+    env = gym.make("VCMI-v12", max_episode_steps=100, **env_kwargs)
 
-    # TODO: `env` and test_env` must be DIFFERENT
-    #       using the same just to test for exceptions
-    #       (don't have "proc" vcmienv connectors anymore)
+    from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
+    env = LegacyObservationSpaceWrapper(env)
+
+    # TODO: `env` and test_env` MUST BE DIFFERENT
     #test_env = VcmiEnv(**env_kwargs)
     test_env = env
 
     # 7) Train with muax.fit
+    print("[main] muax.fit(...)")
     model_path = muax.fit(
         model,
         env=env,
@@ -180,3 +251,4 @@ if __name__ == "__main__":
         random_seed=0,
         log_all_metrics=True
     )
+    print("[main] done")

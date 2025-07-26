@@ -101,6 +101,7 @@ class MZModel(hk.Module):
         self.value_head = hk.Linear(1)
 
     def __call__(self, obs):
+        print("[MZModel] __call__")
         b = obs.shape[0]
         other, hexes = jnp.split(obs, [DIM_OTHER], axis=1)
 
@@ -120,6 +121,7 @@ class MZModel(hk.Module):
         action_logits = self.action_head(z_merged)
         value = self.value_head(z_merged)
 
+        print("[MZModel] __call__ [return]")
         return action_logits, value
 
 

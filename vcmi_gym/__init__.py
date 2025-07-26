@@ -16,7 +16,6 @@
 
 import gymnasium
 from .envs.v12.vcmi_env import VcmiEnv as VcmiEnv_v12
-
 from .envs.util.dual_env import DualEnvController, DualEnvClient
 
 

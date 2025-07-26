@@ -132,6 +132,7 @@ class Predictor(hk.Module):
           • *alternate win conditions* — army wiped out either before or after an
             action ("p10n –1") ends the episode and sets the winner flags.
         """
+        print("[Predictor] __call__")
 
         B = initial_state.shape[0]
 
@@ -207,6 +208,7 @@ class Predictor(hk.Module):
             # --------------------------------------------------------------
             # 4. choose next action for unfinished trajectories
             # --------------------------------------------------------------
+            # import ipdb; ipdb.set_trace()  # noqa
             next_action = lax.select(
                 finished,
                 action,
@@ -306,6 +308,7 @@ class Predictor(hk.Module):
         )
         reward_f = reward_f + jnp.where(term_this_phase, 1000 * extra, 0.0)
 
+        print("[Predictor] __call__ [return]")
         return state_f, reward_f, terminated_f, num_t_f
 
 
@@ -509,8 +512,6 @@ if __name__ == "__main__":
                 print(".", end="", flush=True)
         batch_end = time.perf_counter()
         print("\ntime: %.2fs" % (batch_end - batch_start))
-
-    import ipdb; ipdb.set_trace()  # noqa
 
     # pdb:
     # from vcmi_gym.envs.v12.decoder.decoder import Decoder
