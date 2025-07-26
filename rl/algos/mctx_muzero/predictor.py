@@ -344,13 +344,17 @@ class PredictorWrapper:
             model = Predictor(**model_kwargs)
             return model.setup_params(initial_state, initial_action)
 
-        self.predictor_fwd = hk.transform(forward_fn)
-        self.predictor_setup_params = hk.transform(setup_params_fn)
+        predictor_fwd = hk.transform(forward_fn)
+        predictor_setup_params = hk.transform(setup_params_fn)
+
+        # Drop the rng param for .apply (still needed for .init though)
+        self.predictor_fwd = hk.without_apply_rng(predictor_fwd)
+        self.predictor_setup_params = hk.without_apply_rng(predictor_setup_params)
 
         # create a jitted apply that compiles once and reuses the XLA binary
         @jax.jit
-        def jit_fwd(params, rng, obs, action):
-            return self.predictor_fwd.apply(params, rng, obs, action)
+        def jit_fwd(params, obs, action):
+            return self.predictor_fwd.apply(params, obs, action)
 
         self.jit_fwd = jit_fwd
 
@@ -359,7 +363,7 @@ class PredictorWrapper:
         return self.predictor_setup_params.init(rng, initial_state, initial_action)
 
     # Returns params loaded from torch files (custom method)
-    def load(self, params, rng):
+    def load(self, params):
         import torch
         torch_state_obs = torch.load("hauzybxn-model.pt", weights_only=True, map_location="cpu")
         torch_state_rew = torch.load("aexhrgez-model.pt", weights_only=True, map_location="cpu")
@@ -389,9 +393,9 @@ class PredictorWrapper:
         })
 
     # Forward pass (wrapper around hk.Model#apply)
-    def apply(self, params, rng, initial_state, initial_action):
+    def apply(self, params, initial_state, initial_action):
         func = self.jit_fwd if self.jit else self.predictor_fwd.apply
-        return func(params, rng, initial_state, initial_action)
+        return func(params, initial_state, initial_action)
 
 
 if __name__ == "__main__":
@@ -427,7 +431,7 @@ if __name__ == "__main__":
 
     rng = jax.random.PRNGKey(0)
     params = modelw.init(rng, initial_state=jnp.zeros([1, STATE_SIZE]), initial_action=jnp.array([1]))
-    params = modelw.load(params, rng)
+    params = modelw.load(params)
 
     if test_cuda:
         import torch
@@ -475,7 +479,7 @@ if __name__ == "__main__":
     import time
 
     # warmup
-    modelw.apply(params, rng, jnp.array(split_obs[0]), jnp.array(split_act[0]))
+    modelw.apply(params, jnp.array(split_obs[0]), jnp.array(split_act[0]))
     with torch.no_grad():
         torch_model(torch.as_tensor(split_obs[0], device=torch_model.device), torch.as_tensor(split_act[0], device=torch_model.device, dtype=torch.int64))
 
@@ -485,7 +489,7 @@ if __name__ == "__main__":
         print("Benchmarking jax (%dx%d)..." % (nsplits, len(split_act[0])))
         batch_start = time.perf_counter()
         for b_obs, b_act in zip(split_obs, split_act):
-            modelw.apply(params, rng, jnp.array(b_obs), jnp.array(b_act))
+            modelw.apply(params, jnp.array(b_obs), jnp.array(b_act))
             print(".", end="", flush=True)
         batch_end = time.perf_counter()
         print("\ntime: %.2fs" % (batch_end - batch_start))
@@ -540,7 +544,6 @@ if __name__ == "__main__":
 
     state, reward, done, num_t = modelw.apply(
         params,
-        rng,
         initial_state=jnp.expand_dims(start_obs, axis=0),
         initial_action=jnp.array([start_act])
     )

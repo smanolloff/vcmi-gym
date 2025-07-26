@@ -19,6 +19,7 @@ mctx
 jax
 flax
 dm-haiku
+muax
 
 ray
 #ray[tune]
