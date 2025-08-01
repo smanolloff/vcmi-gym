@@ -150,7 +150,7 @@ def train(
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-    scaler = torch.amp.GradScaler()
+    scaler = torch.amp.GradScaler() if config.get("train", {}).get("autoscaler") else None
 
     optimize_local_storage = config.get("s3", {}).get("optimize_local_storage")
 
@@ -222,7 +222,6 @@ def train(
         )
 
         optimizer.param_groups[0]["lr"] = learning_rate
-
 
     if no_wandb:
         from unittest.mock import Mock

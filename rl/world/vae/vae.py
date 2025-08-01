@@ -3,12 +3,11 @@ import torch.nn as nn
 import math
 import enum
 import contextlib
-import random
 import torch.nn.functional as F
 import pandas as pd
 
 from ..util.buffer_base import BufferBase
-from ..util.dataset_vcmi import Data, Context
+from ..util.dataset_vcmi import Data, Context, DataInstruction
 from ..util.misc import layer_init
 from ..util.obs_index import ObsIndex, Group, ContextGroup, DataGroup
 from ..util.timer import Timer
@@ -20,7 +19,6 @@ from ..util.constants_v12 import (
     STATE_SIZE_ONE_HEX,
     N_ACTIONS,
     N_HEX_ACTIONS,
-    HEX_ACT_MAP,
 )
 
 
@@ -102,20 +100,22 @@ def vcmi_dataloader_functor():
     state = {"reward_carry": 0}
 
     def mw(data: Data, ctx: Context):
+        instruction = DataInstruction.USE
+
+        # Always skip last transition (it is identical to the next first transition)
         if ctx.transition_id == ctx.num_transitions - 1:
             state["reward_carry"] = data.reward
             if not data.done:
-                return None
-
-        if (data.action - 2) % len(HEX_ACT_MAP) == HEX_ACT_MAP["MOVE"]:
-            # Skip 50% of MOVEs
-            if random.random() < 0.5:
-                return None
+                instruction = DataInstruction.SKIP
 
         if ctx.transition_id == 0 and ctx.ep_steps > 0:
             data = data._replace(reward=state["reward_carry"])
 
-        return data
+        # XXX:
+        # SKIP instructions MUST NOT be used to promote more AMOVE samples here
+        # as this results in inconsistent transitions in the buffer.
+
+        return data, instruction
 
     return mw
 
@@ -128,9 +128,6 @@ class Buffer(BufferBase):
 
     def _valid_indices(self):
         max_index = self.capacity if self.full else self.index
-        # Valid are indices of samples where done=False and cutoff=False
-        # (i.e. to ensure obs,next_obs is valid)
-        # XXX: float->bool conversion is OK given floats are exactly 1 or 0
         ok_samples = ~self.containers["done"][:max_index - 1].bool()
         ok_samples[self.worker_cutoffs] = False
         return torch.nonzero(ok_samples, as_tuple=True)[0]
@@ -145,41 +142,14 @@ class Buffer(BufferBase):
         super().add_batch(data)
 
     def sample(self, batch_size):
-        inds = self._valid_indices()
-        sampled_indices = inds[torch.randint(len(inds), (batch_size,), device=self.device)]
-
-        obs = self.containers["obs"][sampled_indices]
-        # action_mask = self.containers["mask"][sampled_indices]
-        action = self.containers["action"][sampled_indices]
-        next_obs = self.containers["obs"][sampled_indices + 1]
-        next_mask = self.containers["mask"][sampled_indices + 1]
-        next_reward = self.containers["reward"][sampled_indices + 1]
-        next_done = self.containers["done"][sampled_indices + 1]
-
-        return obs, action, next_obs, next_mask, next_reward, next_done
+        inds = torch.randperm(self.capacity, device=self.device)[:batch_size]
+        return self.containers["obs"][inds]
 
     def sample_iter(self, batch_size):
-        valid_indices = self._valid_indices()
-        shuffled_indices = valid_indices[torch.randperm(len(valid_indices), device=self.device)]
-
-        # The valid indices are < than all indices by `short`
-        short = self.capacity - len(shuffled_indices)
-        if short:
-            filler_indices = valid_indices[torch.randperm(len(valid_indices), device=self.device)][:short]
-            shuffled_indices = torch.cat((shuffled_indices, filler_indices))
-
-        assert len(shuffled_indices) == self.capacity
-
-        for i in range(0, len(shuffled_indices), batch_size):
-            batch_indices = shuffled_indices[i:i + batch_size]
-            yield (
-                self.containers["obs"][batch_indices],
-                self.containers["action"][batch_indices],
-                self.containers["obs"][batch_indices + 1],
-                self.containers["mask"][batch_indices + 1],
-                self.containers["reward"][batch_indices + 1],
-                self.containers["done"][batch_indices + 1]
-            )
+        inds = torch.randperm(self.capacity, device=self.device)
+        for i in range(0, len(inds), batch_size):
+            batch_indices = inds[i:i + batch_size]
+            yield self.containers["obs"][batch_indices]
 
 
 class Encoder(nn.Module):
@@ -187,7 +157,6 @@ class Encoder(nn.Module):
         super().__init__()
         self.device = device
         self.obs_index = ObsIndex(device)
-
         self.abs_index = self.obs_index.abs_index
         self.rel_index = self.obs_index.rel_index
 
@@ -223,8 +192,8 @@ class Encoder(nn.Module):
         # [(B, C1), (B, C2), ...]
         self.encoders_global_categoricals = nn.ModuleList([])
         for ind in self.rel_index[Group.GLOBAL][Group.CATEGORICALS]:
-            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
-            self.encoders_global_categoricals.append(cat_emb_size)
+            cat_emb = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_global_categoricals.append(cat_emb)
 
         # Thresholds:
         # [(B, T1), (B, T2), ...]
@@ -234,10 +203,10 @@ class Encoder(nn.Module):
             # No nonlinearity needed?
 
         # Merge
-        z_size_global = 256
+        self.z_size_global = 256
         self.encoder_merged_global = nn.Sequential(
-            # => (B, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            nn.LazyLinear(z_size_global),
+            # => (B, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+            nn.LazyLinear(self.z_size_global),
             nn.LeakyReLU(),
         )
         # => (B, Z_GLOBAL)
@@ -254,9 +223,9 @@ class Encoder(nn.Module):
         # Continuous (nulls) per player:
         # (B, n)
         self.encoder_player_cont_nullbit = nn.Identity()
-        player_nullbit_size = len(self.rel_index[Group.PLAYER][Group.CONT_NULLBIT])
-        if player_nullbit_size:
-            self.encoder_player_cont_nullbit = nn.LazyLinear(player_nullbit_size)
+        self.player_nullbit_size = len(self.rel_index[Group.PLAYER][Group.CONT_NULLBIT])
+        if self.player_nullbit_size:
+            self.encoder_player_cont_nullbit = nn.LazyLinear(self.player_nullbit_size)
             # No nonlinearity needed?
 
         # Binaries per player:
@@ -270,8 +239,8 @@ class Encoder(nn.Module):
         # [(B, C1), (B, C2), ...]
         self.encoders_player_categoricals = nn.ModuleList([])
         for ind in self.rel_index[Group.PLAYER][Group.CATEGORICALS]:
-            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
-            self.encoders_player_categoricals.append(cat_emb_size)
+            cat_emb = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_player_categoricals.append(cat_emb)
 
         # Thresholds per player:
         # [(B, T1), (B, T2), ...]
@@ -280,10 +249,10 @@ class Encoder(nn.Module):
             self.encoders_player_thresholds.append(nn.LazyLinear(len(ind)))
 
         # Merge per player
-        z_size_player = 256
+        self.z_size_player = 256
         self.encoder_merged_player = nn.Sequential(
-            # => (B, 2, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            nn.LazyLinear(z_size_player),
+            # => (B, 2, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+            nn.LazyLinear(self.z_size_player),
             nn.LeakyReLU(),
         )
         # => (B, 2, Z_PLAYER)
@@ -300,9 +269,9 @@ class Encoder(nn.Module):
         # Continuous (nulls) per hex:
         # (B, n)
         self.encoder_hex_cont_nullbit = nn.Identity()
-        hex_nullbit_size = len(self.rel_index[Group.HEX][Group.CONT_NULLBIT])
-        if hex_nullbit_size:
-            self.encoder_hex_cont_nullbit = nn.LazyLinear(hex_nullbit_size)
+        self.hex_nullbit_size = len(self.rel_index[Group.HEX][Group.CONT_NULLBIT])
+        if self.hex_nullbit_size:
+            self.encoder_hex_cont_nullbit = nn.LazyLinear(self.hex_nullbit_size)
             # No nonlinearity needed?
 
         # Binaries per hex:
@@ -316,8 +285,8 @@ class Encoder(nn.Module):
         # [(B, C1), (B, C2), ...]
         self.encoders_hex_categoricals = nn.ModuleList([])
         for ind in self.rel_index[Group.HEX][Group.CATEGORICALS]:
-            cat_emb_size = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
-            self.encoders_hex_categoricals.append(cat_emb_size)
+            cat_emb = nn.Embedding(num_embeddings=len(ind), embedding_dim=emb_calc(len(ind)))
+            self.encoders_hex_categoricals.append(cat_emb)
 
         # Thresholds per hex:
         # [(B, T1), (B, T2), ...]
@@ -326,10 +295,10 @@ class Encoder(nn.Module):
             self.encoders_hex_thresholds.append(nn.LazyLinear(len(ind)))
 
         # Merge per hex
-        z_size_hex = 512
+        self.z_size_hex = 512
         self.encoder_merged_hex = nn.Sequential(
-            # => (B, 165, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
-            nn.LazyLinear(z_size_hex),
+            # => (B, 165, N_ACTIONS + N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+            nn.LazyLinear(self.z_size_hex),
             nn.LeakyReLU(),
             nn.Dropout(p=0.3)
         )
@@ -337,8 +306,9 @@ class Encoder(nn.Module):
 
         # Transformer (hexes only)
         self.transformer_hex = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=z_size_hex, nhead=8, dropout=0.3, batch_first=True),
-            num_layers=6
+            nn.TransformerEncoderLayer(d_model=self.z_size_hex, nhead=8, dropout=0.3, batch_first=True),
+            num_layers=6,
+            norm=nn.LayerNorm(self.z_size_hex)
         )
         # => (B, 165, Z_HEX)
 
@@ -347,133 +317,33 @@ class Encoder(nn.Module):
         #
 
         # (B, Z_GLOBAL + AVG(2*Z_PLAYER) + AVG(165*Z_HEX))
+        self.z_size_agg = 2048
         self.aggregator = nn.Sequential(
-            nn.LazyLinear(2048),
+            nn.LazyLinear(self.z_size_agg),
             nn.LeakyReLU(),
         )
         # => (B, Z_AGG)
-
-        # (B, Z_AGG)
-        self.encoder_mu = nn.LazyLinear(1024)
-        self.encoder_logvar = nn.LazyLinear(1024)
-
-    def forward(self, obs, action):
-        action_z = self.encoder_action(action)
-        return self._forward(obs, action_z)
-
-    def _forward(self, obs, action_z):
-        assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
-
-        # torch.cat which returns empty tensor if tuple is empty
-        def torch_cat(tuple_of_tensors, **kwargs):
-            if len(tuple_of_tensors) == 0:
-                return torch.tensor([], device=self.device)
-            return torch.cat(tuple_of_tensors, **kwargs)
-
-        global_cont_abs_in = obs[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
-        global_cont_rel_in = obs[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]]
-        global_cont_nullbit_in = obs[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]]
-        global_binary_ins = [obs[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.BINARIES]]
-        global_categorical_ins = [obs[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.CATEGORICALS]]
-        global_threshold_ins = [obs[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.THRESHOLDS]]
-        global_cont_abs_z = self.encoder_global_cont_abs(global_cont_abs_in)
-        global_cont_rel_z = self.encoder_global_cont_rel(global_cont_rel_in)
-        global_cont_nullbit_z = self.encoder_global_cont_nullbit(global_cont_nullbit_in)
-        global_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_global_binaries, global_binary_ins)], dim=-1)
-
-        # XXX: Embedding layers expect single-integer inputs
-        #      e.g. for input with num_classes=4, instead of `[0,0,1,0]` it expects just `2`
-        global_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
-        global_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], dim=-1)
-        global_merged = torch_cat((global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
-        z_global = self.encoder_merged_global(global_merged)
-        # => (B, Z_GLOBAL)
-
-        player_cont_abs_in = obs[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]]
-        player_cont_rel_in = obs[:, self.abs_index[Group.PLAYER][Group.CONT_REL]]
-        player_cont_nullbit_in = obs[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]]
-        player_binary_ins = [obs[:, ind] for ind in self.abs_index[Group.PLAYER][Group.BINARIES]]
-        player_categorical_ins = [obs[:, ind] for ind in self.abs_index[Group.PLAYER][Group.CATEGORICALS]]
-        player_threshold_ins = [obs[:, ind] for ind in self.abs_index[Group.PLAYER][Group.THRESHOLDS]]
-        player_cont_abs_z = self.encoder_player_cont_abs(player_cont_abs_in)
-        player_cont_rel_z = self.encoder_player_cont_rel(player_cont_rel_in)
-        player_cont_nullbit_z = self.encoder_player_cont_nullbit(player_cont_nullbit_in)
-        player_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_binaries, player_binary_ins)], dim=-1)
-        player_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
-        player_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], dim=-1)
-        player_merged = torch_cat((player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
-        z_player = self.encoder_merged_player(player_merged)
-        # => (B, 2, Z_PLAYER)
-
-        hex_cont_abs_in = obs[:, self.abs_index[Group.HEX][Group.CONT_ABS]]
-        hex_cont_rel_in = obs[:, self.abs_index[Group.HEX][Group.CONT_REL]]
-        hex_cont_nullbit_in = obs[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]]
-        hex_binary_ins = [obs[:, ind] for ind in self.abs_index[Group.HEX][Group.BINARIES]]
-        hex_categorical_ins = [obs[:, ind] for ind in self.abs_index[Group.HEX][Group.CATEGORICALS]]
-        hex_threshold_ins = [obs[:, ind] for ind in self.abs_index[Group.HEX][Group.THRESHOLDS]]
-        hex_cont_abs_z = self.encoder_hex_cont_abs(hex_cont_abs_in)
-        hex_cont_rel_z = self.encoder_hex_cont_rel(hex_cont_rel_in)
-        hex_cont_nullbit_z = self.encoder_hex_cont_nullbit(hex_cont_nullbit_in)
-        hex_binary_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_binaries, hex_binary_ins)], dim=-1)
-        hex_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
-        hex_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
-        hex_merged = torch_cat((hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
-        z_hex = self.encoder_merged_hex(hex_merged)
-        z_hex = self.transformer_hex(z_hex)
-        # => (B, 165, Z_HEX)
-
-        mean_z_player = z_player.mean(dim=1)
-        mean_z_hex = z_hex.mean(dim=1)
-        z_agg = self.aggregator(torch.cat([z_global, mean_z_player, mean_z_hex], dim=-1))
-        # => (B, Z_AGG)
-
-        mu = self.encoder_mu(z_agg)
-        logvar = self.encoder_logvar(z_agg)
-
-        return mu, logvar
-
-
-class Decoder(nn.Module):
-    def __init__(self, device=torch.device("cpu")):
-        # (B, Z_AGG)
-        self.transition = nn.Sequential(
-            nn.LazyLinear(2048),
-            nn.LeakyReLU(),
-        )
-        # => (B, Z_TRANS)
 
         #
         # Heads
         #
 
-        # => (B, Z_AGG)
-        self.head_global = nn.LazyLinear(STATE_SIZE_GLOBAL)
-
-        # => (B, 2, Z_AGG + Z_PLAYER)
-        self.head_player = nn.LazyLinear(STATE_SIZE_ONE_PLAYER)
-
-        # => (B, 165, Z_AGG + Z_HEX)
-        self.head_hex = nn.LazyLinear(STATE_SIZE_ONE_HEX)
+        # (B, Z_AGG)
+        self.z_size = 1024
+        self.encoder_mu = nn.LazyLinear(self.z_size)
+        self.encoder_logvar = nn.LazyLinear(self.z_size)
+        # (B, Z_AGG)
 
         self.to(device)
 
         # Init lazy layers
         with torch.no_grad():
-            obs = self.reconstruct(torch.randn([2, DIM_OBS], device=device))
-            action = torch.tensor([1, 1], device=device)
-            self.forward(obs, action)
+            obs = torch.randn([2, DIM_OBS], device=device)
+            self.forward(obs)
 
         layer_init(self)
 
-    def forward_probs(self, obs, action_probs):
-        action_z = torch.matmul(action_probs, self.encoder_action.weight)  # shape: [batch_size, embedding_dim]
-        return self._forward(obs, action_z)
-
-    def forward(self, obs, action):
-        action_z = self.encoder_action(action)
-        return self._forward(obs, action_z)
-
-    def _forward(self, obs, action_z):
+    def forward(self, obs):
         assert obs.device.type == self.device.type, f"{obs.device.type} == {self.device.type}"
 
         # torch.cat which returns empty tensor if tuple is empty
@@ -498,7 +368,6 @@ class Decoder(nn.Module):
         global_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_global_categoricals, global_categorical_ins)], dim=-1)
         global_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_global_thresholds, global_threshold_ins)], dim=-1)
         global_merged = torch_cat((global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
-        # global_merged = torch_cat((action_z, global_cont_abs_z, global_cont_rel_z, global_cont_nullbit_z, global_binary_z, global_categorical_z, global_threshold_z), dim=-1)
         z_global = self.encoder_merged_global(global_merged)
         # => (B, Z_GLOBAL)
 
@@ -515,7 +384,6 @@ class Decoder(nn.Module):
         player_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_player_categoricals, player_categorical_ins)], dim=-1)
         player_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_player_thresholds, player_threshold_ins)], dim=-1)
         player_merged = torch_cat((player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
-        # player_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 2, -1), player_cont_abs_z, player_cont_rel_z, player_cont_nullbit_z, player_binary_z, player_categorical_z, player_threshold_z), dim=-1)
         z_player = self.encoder_merged_player(player_merged)
         # => (B, 2, Z_PLAYER)
 
@@ -532,56 +400,370 @@ class Decoder(nn.Module):
         hex_categorical_z = torch_cat([enc(x.argmax(dim=-1)) for enc, x in zip(self.encoders_hex_categoricals, hex_categorical_ins)], dim=-1)
         hex_threshold_z = torch_cat([lin(x) for lin, x in zip(self.encoders_hex_thresholds, hex_threshold_ins)], dim=-1)
         hex_merged = torch_cat((hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
-        # hex_merged = torch_cat((action_z.unsqueeze(1).expand(-1, 165, -1), hex_cont_abs_z, hex_cont_rel_z, hex_cont_nullbit_z, hex_binary_z, hex_categorical_z, hex_threshold_z), dim=-1)
         z_hex = self.encoder_merged_hex(hex_merged)
         z_hex = self.transformer_hex(z_hex)
         # => (B, 165, Z_HEX)
 
         mean_z_player = z_player.mean(dim=1)
         mean_z_hex = z_hex.mean(dim=1)
-        z_agg = self.aggregator(torch.cat([z_global, mean_z_player, mean_z_hex], dim=-1))
+        z = self.aggregator(torch.cat([z_global, mean_z_player, mean_z_hex], dim=-1))
         # => (B, Z_AGG)
-
-        z_trans = self.transition(torch.cat([action_z, z_agg], dim=-1))
-        # => (B, Z_TRANS)
 
         #
         # Outputs
         #
 
-        global_out = self.head_global(z_trans)
-        # => (B, STATE_SIZE_GLOBAL)
+        mu = self.encoder_mu(z)
+        logvar = self.encoder_logvar(z)
 
-        player_out = self.head_player(torch.cat([z_trans.unsqueeze(1).expand(-1, 2, -1), z_player], dim=-1))
-        # => (B, 2, STATE_SIZE_ONE_PLAYER)
+        return mu, logvar
 
-        hex_out = self.head_hex(torch.cat([z_trans.unsqueeze(1).expand(-1, 165, -1), z_hex], dim=-1))
-        # => (B, 165, STATE_SIZE_ONE_HEX)
 
-        obs_out = torch.cat((global_out, player_out.flatten(start_dim=1), hex_out.flatten(start_dim=1)), dim=1)
+class Decoder(nn.Module):
+    def __init__(self, encoder):
+        super().__init__()
 
-        return obs_out
+        self.device = encoder.device
+        self.abs_index = encoder.abs_index
+        self.rel_index = encoder.rel_index
 
-    def reconstruct(self, obs_out, strategy=Reconstruction.GREEDY):
-        global_cont_abs_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
-        global_cont_rel_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]]
-        global_cont_nullbit_out = obs_out[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]]
-        global_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.BINARIES]]
-        global_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.CATEGORICALS]]
-        global_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.THRESHOLDS]]
-        player_cont_abs_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]]
-        player_cont_rel_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_REL]]
-        player_cont_nullbit_out = obs_out[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]]
-        player_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.BINARIES]]
-        player_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.CATEGORICALS]]
-        player_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.PLAYER][Group.THRESHOLDS]]
-        hex_cont_abs_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_ABS]]
-        hex_cont_rel_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_REL]]
-        hex_cont_nullbit_out = obs_out[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]]
-        hex_binary_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.BINARIES]]
-        hex_categorical_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.CATEGORICALS]]
-        hex_threshold_outs = [obs_out[:, ind] for ind in self.abs_index[Group.HEX][Group.THRESHOLDS]]
-        next_obs = torch.zeros_like(obs_out)
+        self.z_size_hex = encoder.z_size_hex
+        self.z_size_player = encoder.z_size_player
+        self.z_size_global = encoder.z_size_global
+
+        #
+        # Aggregator decoder
+        #
+        self.z_decoder = nn.Sequential(
+            nn.LazyLinear(self.z_size_global + self.z_size_player + self.z_size_hex),
+            nn.LeakyReLU()
+        )
+        # => (B, Z_GLOBAL + Z_PLAYER + Z_HEX)
+
+        #
+        # Hex decoders
+        #
+
+        # learned positional embeddings for 165 hexes
+        self.hex_pos_embed = nn.Parameter(torch.randn(1, 165, self.z_size_hex))
+        # => (B, 165, Z_HEX)
+
+        self.transformer_decoder_hex = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(
+                d_model=self.z_size_hex,
+                nhead=encoder.transformer_hex.layers[0].self_attn.num_heads,
+                dropout=encoder.transformer_hex.layers[0].self_attn.dropout,
+                batch_first=True
+            ),
+            num_layers=len(encoder.transformer_hex.layers),
+            norm=nn.LayerNorm(self.z_size_hex)
+        )
+        # => (B, 165, Z_HEX)
+
+        self.z_size_hex_threshold = sum(lin.out_features for lin in encoder.encoders_hex_thresholds)
+        self.z_size_hex_categorical = sum(emb.embedding_dim for emb in encoder.encoders_hex_categoricals)
+        self.z_size_hex_binary = sum(lin.out_features for lin in encoder.encoders_hex_binaries)
+        self.z_size_hex_cont_nullbit = getattr(encoder.encoder_hex_cont_nullbit, "out_features", 0)
+        self.z_size_hex_cont_rel = len(self.rel_index[Group.HEX][Group.CONT_REL])
+        self.z_size_hex_cont_abs = len(self.rel_index[Group.HEX][Group.CONT_ABS])
+        self.z_size_hex_merged = (
+            self.z_size_hex_threshold
+            + self.z_size_hex_categorical
+            + self.z_size_hex_binary
+            + self.z_size_hex_cont_nullbit
+            + self.z_size_hex_cont_rel
+            + self.z_size_hex_cont_abs
+        )
+
+        self.decoder_merged_hex = nn.Sequential(
+            # => (B, 165, Z_HEX)
+            nn.LazyLinear(self.z_size_hex_merged),
+            nn.LeakyReLU(),
+            nn.Dropout(p=0.3)
+        )
+        # => (B, 165, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+
+        self.decoders_hex_thresholds = nn.ModuleList([])
+        for ind in self.rel_index[Group.HEX][Group.THRESHOLDS]:
+            self.decoders_hex_thresholds.append(nn.LazyLinear(len(ind)))
+
+        self.decoders_hex_categoricals = nn.ModuleList([])
+        for ind in self.rel_index[Group.HEX][Group.CATEGORICALS]:
+            # Simply use a Linear layer as the inverse of Embedding
+            self.decoders_hex_categoricals.append(nn.LazyLinear(len(ind)))
+
+        self.decoders_hex_binaries = nn.ModuleList([])
+        for ind in self.rel_index[Group.HEX][Group.BINARIES]:
+            self.decoders_hex_binaries.append(nn.LazyLinear(len(ind)))
+
+        self.decoder_hex_cont_nullbit = nn.Identity()
+        self.hex_nullbit_size = len(self.rel_index[Group.HEX][Group.CONT_NULLBIT])
+        if self.hex_nullbit_size:
+            self.decoder_hex_cont_nullbit = nn.LazyLinear(self.hex_nullbit_size)
+
+        self.decoder_hex_cont_abs = nn.Identity()
+        self.decoder_hex_cont_rel = nn.Identity()
+
+        #
+        # Player decoders
+        #
+
+        # learned positional embeddings for 2 players
+        self.player_pos_embed = nn.Parameter(torch.randn(1, 2, self.z_size_player))
+        # => (B, 2, Z_PLAYER)
+
+        self.z_size_player_threshold = sum(lin.out_features for lin in encoder.encoders_player_thresholds)
+        self.z_size_player_categorical = sum(emb.embedding_dim for emb in encoder.encoders_player_categoricals)
+        self.z_size_player_binary = sum(lin.out_features for lin in encoder.encoders_player_binaries)
+        self.z_size_player_cont_nullbit = getattr(encoder.encoder_player_cont_nullbit, "out_features", 0)
+        self.z_size_player_cont_rel = len(self.rel_index[Group.PLAYER][Group.CONT_REL])
+        self.z_size_player_cont_abs = len(self.rel_index[Group.PLAYER][Group.CONT_ABS])
+        self.z_size_player_merged = (
+            self.z_size_player_threshold
+            + self.z_size_player_categorical
+            + self.z_size_player_binary
+            + self.z_size_player_cont_nullbit
+            + self.z_size_player_cont_rel
+            + self.z_size_player_cont_abs
+        )
+
+        self.decoder_merged_player = nn.Sequential(
+            # => (B, 2, Z_PLAYER)
+            nn.LazyLinear(self.z_size_player_merged),
+            nn.LeakyReLU(),
+            nn.Dropout(p=0.3)
+        )
+        # => (B, 2, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+
+        self.decoders_player_thresholds = nn.ModuleList([])
+        for ind in self.rel_index[Group.PLAYER][Group.THRESHOLDS]:
+            self.decoders_player_thresholds.append(nn.LazyLinear(len(ind)))
+
+        self.decoders_player_categoricals = nn.ModuleList([])
+        for ind in self.rel_index[Group.PLAYER][Group.CATEGORICALS]:
+            # Simply use a Linear layer as the inverse of Embedding
+            self.decoders_player_categoricals.append(nn.LazyLinear(len(ind)))
+
+        self.decoders_player_binaries = nn.ModuleList([])
+        for ind in self.rel_index[Group.PLAYER][Group.BINARIES]:
+            self.decoders_player_binaries.append(nn.LazyLinear(len(ind)))
+
+        self.decoder_player_cont_nullbit = nn.Identity()
+        self.player_nullbit_size = len(self.rel_index[Group.PLAYER][Group.CONT_NULLBIT])
+        if self.player_nullbit_size:
+            self.decoder_player_cont_nullbit = nn.LazyLinear(self.player_nullbit_size)
+
+        self.decoder_player_cont_abs = nn.Identity()
+        self.decoder_player_cont_rel = nn.Identity()
+
+        #
+        # Global decoders
+        #
+
+        self.z_sizes_global_thresholds = [lin.out_features for lin in encoder.encoders_global_thresholds]
+        self.z_sizes_global_categoricals = [emb.embedding_dim for emb in encoder.encoders_global_categoricals]
+        self.z_sizes_global_binaries = [lin.out_features for lin in encoder.encoders_global_binaries]
+        self.z_size_global_cont_nullbit = getattr(encoder.encoder_global_cont_nullbit, "out_features", 0)
+        self.z_size_global_cont_rel = len(self.rel_index[Group.GLOBAL][Group.CONT_REL])
+        self.z_size_global_cont_abs = len(self.rel_index[Group.GLOBAL][Group.CONT_ABS])
+        self.z_size_global_merged = (
+            sum(self.z_sizes_global_thresholds)
+            + sum(self.z_sizes_global_categoricals)
+            + sum(self.z_sizes_global_binaries)
+            + self.z_size_global_cont_nullbit
+            + self.z_size_global_cont_rel
+            + self.z_size_global_cont_abs
+        )
+
+        self.decoder_merged_global = nn.LazyLinear(self.z_size_global_merged)
+        # => (B, Z_GLOBAL)
+
+        self.decoders_global_thresholds = nn.ModuleList([])
+        for ind in self.rel_index[Group.GLOBAL][Group.THRESHOLDS]:
+            self.decoders_global_thresholds.append(nn.LazyLinear(len(ind)))
+
+        self.decoders_global_categoricals = nn.ModuleList([])
+        for ind in self.rel_index[Group.GLOBAL][Group.CATEGORICALS]:
+            # Simply use a Linear layer as the inverse of Embedding
+            self.decoders_global_categoricals.append(nn.LazyLinear(len(ind)))
+
+        self.decoders_global_binaries = nn.ModuleList([])
+        for ind in self.rel_index[Group.GLOBAL][Group.BINARIES]:
+            self.decoders_global_binaries.append(nn.LazyLinear(len(ind)))
+
+        self.decoder_global_cont_nullbit = nn.Identity()
+        self.global_nullbit_size = len(self.rel_index[Group.GLOBAL][Group.CONT_NULLBIT])
+        if self.global_nullbit_size:
+            self.decoder_global_cont_nullbit = nn.LazyLinear(self.global_nullbit_size)
+
+        self.decoder_global_cont_abs = nn.Identity()
+        self.decoder_global_cont_rel = nn.Identity()
+
+        self.to(encoder.device)
+
+        # Init lazy layers
+        with torch.no_grad():
+            z_agg = torch.randn([2, encoder.z_size], device=self.device)
+            self.forward(z_agg)
+
+        layer_init(self)
+
+    def forward(self, z):
+        # torch.cat which returns empty tensor if tuple is empty
+        def torch_cat(tuple_of_tensors, dim):
+            if len(tuple_of_tensors) == 0:
+                return torch.tensor([], device=self.device)
+            return torch.cat(tuple_of_tensors, dim=dim)
+
+        b = z.shape[0]
+        obs_decoded = torch.zeros([b, DIM_OBS], device=self.device)
+
+        z = self.z_decoder(z)
+        mean_z_hex, mean_z_player, z_global = z.split([self.z_size_hex, self.z_size_player, self.z_size_global], dim=1)
+
+        # Hex
+
+        z_hex = mean_z_hex.unsqueeze(1).repeat(1, 165, 1) + self.hex_pos_embed  # => (B, 165, Z_HEX)
+        # XXX: we don't have the _original_ z_hex from the encoder to use as "memory"
+        # => two options:
+        # 1. Zero memory: a tensor of zeros so that cross-attention has no effect
+        # 2. z_hex as both tgt and memory: reuse the decoder’s own inputs for both attention passes,
+        #   effectively giving the decoder two attention sub-layers without external context.
+        # Trying with 2. (TODO: try with 1)
+        z_hex = self.transformer_decoder_hex(tgt=z_hex, memory=z_hex)  # => (B, 165, Z_HEX)
+        z_hex = self.decoder_merged_hex(z_hex)  # => (B, 165, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+        assert z_hex.shape == torch.Size([b, 165, self.z_size_hex_merged]), f"{z_hex.shape} == {[b, 165, self.z_size_hex_merged]}"
+        (
+            hex_threshold_z,
+            hex_categorical_z,
+            hex_binary_z,
+            hex_cont_nullbit_z,
+            hex_cont_rel_z,
+            hex_cont_abs_z
+        ) = z_hex.split([
+            self.z_size_hex_threshold,
+            self.z_size_hex_categorical,
+            self.z_size_hex_binary,
+            self.z_size_hex_cont_nullbit,
+            self.z_size_hex_cont_rel,
+            self.z_size_hex_cont_abs,
+        ], dim=2)
+
+        emb_calc = lambda n: math.ceil(math.sqrt(n))
+
+        hex_threshold_zs = hex_threshold_z.split([lin.out_features for lin in self.decoders_hex_thresholds], dim=2)
+        hex_threshold_outs = [lin(x) for lin, x in zip(self.decoders_hex_thresholds, hex_threshold_zs)]
+        hex_categorical_zs = hex_categorical_z.split([emb_calc(lin.out_features) for lin in self.decoders_hex_categoricals], dim=2)
+        hex_categorical_outs = [lin(x) for lin, x in zip(self.decoders_hex_categoricals, hex_categorical_zs)]
+        hex_binary_zs = hex_binary_z.split([lin.out_features for lin in self.decoders_hex_binaries], dim=2)
+        hex_binary_outs = [lin(x) for lin, x in zip(self.decoders_hex_binaries, hex_binary_zs)]
+        hex_cont_nullbit_out = self.decoder_hex_cont_nullbit(hex_cont_nullbit_z)
+        hex_cont_rel_out = self.decoder_hex_cont_rel(hex_cont_rel_z)
+        hex_cont_abs_out = self.decoder_hex_cont_abs(hex_cont_abs_z)
+
+        obs_decoded[:, torch_cat(self.abs_index[Group.HEX][Group.THRESHOLDS], dim=1).to(torch.int64)] = torch_cat(hex_threshold_outs, dim=2).to(obs_decoded.dtype)
+        obs_decoded[:, torch_cat(self.abs_index[Group.HEX][Group.CATEGORICALS], dim=1).to(torch.int64)] = torch_cat(hex_categorical_outs, dim=2).to(obs_decoded.dtype)
+        obs_decoded[:, torch_cat(self.abs_index[Group.HEX][Group.BINARIES], dim=1).to(torch.int64)] = torch_cat(hex_binary_outs, dim=2).to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]] = hex_cont_nullbit_out.to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.HEX][Group.CONT_REL]] = hex_cont_rel_out.to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.HEX][Group.CONT_ABS]] = hex_cont_abs_out.to(obs_decoded.dtype)
+
+        # Player
+
+        z_player = mean_z_player.unsqueeze(1).repeat(1, 2, 1) + self.player_pos_embed  # => (B, 2, Z_HEX)
+        z_player = self.decoder_merged_player(z_player)  # => (B, 2, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+        assert z_player.shape == torch.Size([b, 2, self.z_size_player_merged]), f"{z_player.shape} == {b, 2, self.z_size_player_merged}"
+        (
+            player_threshold_z,
+            player_categorical_z,
+            player_binary_z,
+            player_cont_nullbit_z,
+            player_cont_rel_z,
+            player_cont_abs_z
+        ) = z_player.split([
+            self.z_size_player_threshold,
+            self.z_size_player_categorical,
+            self.z_size_player_binary,
+            self.z_size_player_cont_nullbit,
+            self.z_size_player_cont_rel,
+            self.z_size_player_cont_abs,
+        ], dim=2)
+        player_threshold_zs = player_threshold_z.split([lin.out_features for lin in self.decoders_player_thresholds], dim=2)
+        player_threshold_outs = [lin(x) for lin, x in zip(self.decoders_player_thresholds, player_threshold_zs)]
+        player_categorical_zs = player_categorical_z.split([lin.out_features for lin in self.decoders_player_categoricals], dim=2)
+        player_categorical_outs = [lin(x) for lin, x in zip(self.decoders_player_categoricals, player_categorical_zs)]
+        player_binary_zs = player_binary_z.split([lin.out_features for lin in self.decoders_player_binaries], dim=2)
+        player_binary_outs = [lin(x) for lin, x in zip(self.decoders_player_binaries, player_binary_zs)]
+        player_cont_nullbit_out = self.decoder_player_cont_nullbit(player_cont_nullbit_z)
+        player_cont_rel_out = self.decoder_player_cont_rel(player_cont_rel_z)
+        player_cont_abs_out = self.decoder_player_cont_abs(player_cont_abs_z)
+
+        obs_decoded[:, torch_cat(self.abs_index[Group.PLAYER][Group.THRESHOLDS], dim=1).to(torch.int64)] = torch_cat(player_threshold_outs, dim=2).to(obs_decoded.dtype)
+        obs_decoded[:, torch_cat(self.abs_index[Group.PLAYER][Group.CATEGORICALS], dim=1).to(torch.int64)] = torch_cat(player_categorical_outs, dim=2).to(obs_decoded.dtype)
+        obs_decoded[:, torch_cat(self.abs_index[Group.PLAYER][Group.BINARIES], dim=1).to(torch.int64)] = torch_cat(player_binary_outs, dim=2).to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]] = player_cont_nullbit_out.to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.PLAYER][Group.CONT_REL]] = player_cont_rel_out.to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]] = player_cont_abs_out.to(obs_decoded.dtype)
+
+        # Global
+        z_global = self.decoder_merged_global(z_global)  # => (B, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
+        assert z_global.shape == torch.Size([b, self.z_size_global_merged]), f"{z_global.shape} == {[b, self.z_size_global_merged]}"
+
+        (
+            global_threshold_z,
+            global_categorical_z,
+            global_binary_z,
+            global_cont_nullbit_z,
+            global_cont_rel_z,
+            global_cont_abs_z
+        ) = z_global.split([
+            sum(self.z_sizes_global_thresholds),
+            sum(self.z_sizes_global_categoricals),
+            sum(self.z_sizes_global_binaries),
+            self.z_size_global_cont_nullbit,
+            self.z_size_global_cont_rel,
+            self.z_size_global_cont_abs,
+        ], dim=1)
+
+        global_threshold_zs = global_threshold_z.split(self.z_sizes_global_thresholds, dim=1)
+        global_threshold_outs = [lin(x) for lin, x in zip(self.decoders_global_thresholds, global_threshold_zs)]
+        global_categorical_zs = global_categorical_z.split(self.z_sizes_global_categoricals, dim=1)
+        global_categorical_outs = [lin(x) for lin, x in zip(self.decoders_global_categoricals, global_categorical_zs)]
+        global_binary_zs = global_binary_z.split(self.z_sizes_global_binaries, dim=1)
+        global_binary_outs = [lin(x) for lin, x in zip(self.decoders_global_binaries, global_binary_zs)]
+        global_cont_nullbit_out = self.decoder_global_cont_nullbit(global_cont_nullbit_z)
+        global_cont_rel_out = self.decoder_global_cont_rel(global_cont_rel_z)
+        global_cont_abs_out = self.decoder_global_cont_abs(global_cont_abs_z)
+
+        obs_decoded[:, torch_cat(self.abs_index[Group.GLOBAL][Group.THRESHOLDS], dim=0).to(torch.int64)] = torch_cat(global_threshold_outs, dim=1).to(obs_decoded.dtype)
+        obs_decoded[:, torch_cat(self.abs_index[Group.GLOBAL][Group.CATEGORICALS], dim=0).to(torch.int64)] = torch_cat(global_categorical_outs, dim=1).to(obs_decoded.dtype)
+        obs_decoded[:, torch_cat(self.abs_index[Group.GLOBAL][Group.BINARIES], dim=0).to(torch.int64)] = torch_cat(global_binary_outs, dim=1).to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]] = global_cont_nullbit_out.to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]] = global_cont_rel_out.to(obs_decoded.dtype)
+        obs_decoded[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]] = global_cont_abs_out.to(obs_decoded.dtype)
+
+        return obs_decoded
+
+    def reconstruct(self, obs_decoded, strategy=Reconstruction.GREEDY):
+        global_cont_abs_out = obs_decoded[:, self.abs_index[Group.GLOBAL][Group.CONT_ABS]]
+        global_cont_rel_out = obs_decoded[:, self.abs_index[Group.GLOBAL][Group.CONT_REL]]
+        global_cont_nullbit_out = obs_decoded[:, self.abs_index[Group.GLOBAL][Group.CONT_NULLBIT]]
+        global_binary_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.BINARIES]]
+        global_categorical_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.CATEGORICALS]]
+        global_threshold_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.GLOBAL][Group.THRESHOLDS]]
+        player_cont_abs_out = obs_decoded[:, self.abs_index[Group.PLAYER][Group.CONT_ABS]]
+        player_cont_rel_out = obs_decoded[:, self.abs_index[Group.PLAYER][Group.CONT_REL]]
+        player_cont_nullbit_out = obs_decoded[:, self.abs_index[Group.PLAYER][Group.CONT_NULLBIT]]
+        player_binary_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.PLAYER][Group.BINARIES]]
+        player_categorical_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.PLAYER][Group.CATEGORICALS]]
+        player_threshold_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.PLAYER][Group.THRESHOLDS]]
+        hex_cont_abs_out = obs_decoded[:, self.abs_index[Group.HEX][Group.CONT_ABS]]
+        hex_cont_rel_out = obs_decoded[:, self.abs_index[Group.HEX][Group.CONT_REL]]
+        hex_cont_nullbit_out = obs_decoded[:, self.abs_index[Group.HEX][Group.CONT_NULLBIT]]
+        hex_binary_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.HEX][Group.BINARIES]]
+        hex_categorical_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.HEX][Group.CATEGORICALS]]
+        hex_threshold_outs = [obs_decoded[:, ind] for ind in self.abs_index[Group.HEX][Group.THRESHOLDS]]
+        next_obs = torch.zeros_like(obs_decoded)
 
         reconstruct_continuous = lambda logits: torch.clamp(logits, 0, 1)
 
@@ -608,7 +790,7 @@ class Decoder(nn.Module):
 
         elif strategy == Reconstruction.GREEDY:
             def reconstruct_binary(logits):
-                return logits.sigmoid().round()
+                return (logits > 0).float()
 
             def reconstruct_categorical(logits):
                 return F.one_hot(logits.argmax(dim=-1), num_classes=logits.shape[-1]).float()
@@ -645,26 +827,44 @@ class Decoder(nn.Module):
 
         return next_obs
 
-    def predict_from_probs_(self, obs, action_probs, strategy=Reconstruction.GREEDY):
-        logits = self.forward_probs(obs, action_probs)
-        return self.reconstruct(logits, strategy=strategy)
 
-    def predict_(self, obs, action, strategy=Reconstruction.GREEDY):
-        logits = self.forward(obs, action)
-        return self.reconstruct(logits, strategy=strategy)
+class VAE(nn.Module):
+    def __init__(self, deterministic=False, device=torch.device("cpu")):
+        super().__init__()
+        self.deterministic = deterministic
+        self.device = device
+        self.obs_index = ObsIndex(device)
+        self.abs_index = self.obs_index.abs_index
+        self.rel_index = self.obs_index.rel_index
 
-    def predict(self, obs, action, strategy=Reconstruction.GREEDY):
-        with torch.no_grad():
-            obs = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
-            action = torch.as_tensor(action, dtype=torch.int64, device=self.device).unsqueeze(0)
-            return self.predict_(obs, action, strategy=strategy)[0].numpy()
+        self.encoder = Encoder(device)
+        self.decoder = Decoder(self.encoder)
+
+    def encode(self, obs):
+        mu, logvar = self.encoder(obs)
+        return mu, logvar
+
+    def reparameterize(self, mu, logvar):
+        std = (0.5 * logvar).exp()
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def decode(self, z):
+        obs = self.decoder(z)
+        return obs
+
+    def forward(self, x):
+        mu, logvar = self.encode(x)
+        z = mu if self.deterministic else self.reparameterize(mu, logvar)
+        decoded = self.decode(z)
+        return mu, logvar, decoded
 
 
-def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
+def _compute_reconstruction_losses(logits, target, index, weights, device=torch.device("cpu")):
     # Aggregate each feature's loss across players/hexes
 
     if logits[Group.CONT_ABS].dim() == 3:
-        # (B, 165, N_FEATS)
+        # (B, 165, N_FEATS) (or (B, 165) for categoricals after CE)
         def sum_repeats(loss):
             return loss.sum(dim=1)
     else:
@@ -727,7 +927,7 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
                     i_lgt = i_lgt.swapaxes(1, 2)
                     i_tgt = i_tgt.swapaxes(1, 2)
 
-                # XXX: cross_entropy always removes last dim (even with reduction=none)
+                # XXX: cross_entropy always removes the "C" dim (even with reduction=none)
                 loss[i] = sum_repeats(F.cross_entropy(i_lgt, i_tgt, reduction="none")).mean(dim=0)
                 # (1)  # single loss for the i'th categorical feature
             losses[dgroup] = loss
@@ -782,7 +982,7 @@ def _compute_losses(logits, target, index, weights, device=torch.device("cpu")):
     return losses
 
 
-def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
+def compute_decode_losses(logger, abs_index, loss_weights, real_obs, decoded_obs):
     # For shapes, see ObsIndex._build_abs_indices()
     extract = lambda t, obs: {
         Group.CONT_ABS: obs[:, abs_index[t][Group.CONT_ABS]],
@@ -793,19 +993,20 @@ def compute_losses(logger, abs_index, loss_weights, next_obs, pred_obs):
         Group.THRESHOLDS: [obs[:, ind] for ind in abs_index[t][Group.THRESHOLDS]],
     }
 
-    losses = {}
-    device = next_obs.device
-    total_loss = torch.tensor(0., device=pred_obs.device)
+    device = real_obs.device
+
+    recon_losses = {}
+    total_recon_loss = torch.tensor(0., device=decoded_obs.device)
 
     for cgroup in ContextGroup.as_list():
-        logits = extract(cgroup, pred_obs)
-        target = extract(cgroup, next_obs)
+        logits = extract(cgroup, decoded_obs)
+        target = extract(cgroup, real_obs)
         index = abs_index[cgroup]
         weights = loss_weights[cgroup]
-        losses[cgroup] = _compute_losses(logits, target, index, weights=weights, device=device)
-        total_loss += sum(subtype_losses.sum() for subtype_losses in losses[cgroup].values())
+        recon_losses[cgroup] = _compute_reconstruction_losses(logits, target, index, weights=weights, device=device)
+        total_recon_loss += sum(subtype_losses.sum() for subtype_losses in recon_losses[cgroup].values())
 
-    return total_loss, losses
+    return total_recon_loss, recon_losses
 
 
 def losses_to_rows(losses, obs_index):
@@ -849,7 +1050,7 @@ def train_model(
 ):
     assert buffer.capacity % batch_size == 0, f"{buffer.capacity} % {batch_size} == 0"
 
-    maybe_autocast = torch.amp.autocast(model.device.type) if scaler else contextlib.nullcontext()
+    maybe_autocast = torch.autocast(model.device.type) if scaler else contextlib.nullcontext()
 
     model.train()
     timer = Timer()
@@ -860,16 +1061,25 @@ def train_model(
         assert grad_steps > 0
 
     for epoch in range(epochs):
+        logger.debug("Epoch: %s" % epoch)
         timer.start()
-        for batch in buffer.sample_iter(batch_size):
+        for obs in buffer.sample_iter(batch_size):
+            logger.debug(f"Obs shape: {obs.shape}")
             timer.stop()
-            obs, action, next_obs, next_mask, next_rew, next_done = batch
 
             with maybe_autocast:
-                pred_obs = model(obs, action)
-                loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
+                mu, logvar, decoded_obs = model(obs)
+                decode_loss_tot, decode_losses = compute_decode_losses(logger, model.abs_index, loss_weights, obs, decoded_obs)
+                kld = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+                loss_tot = decode_loss_tot + kld
 
-            loss_rows.extend(losses_to_rows(losses, model.obs_index))
+            loss_rows.extend(losses_to_rows(decode_losses, model.obs_index))
+            loss_rows.append({
+                TableColumn.ATTRIBUTE: "kld",
+                TableColumn.CONTEXT: "all",
+                TableColumn.DATATYPE: "",
+                TableColumn.LOSS: kld.item()
+            })
 
             if accumulate_grad:
                 if scaler:
@@ -899,7 +1109,7 @@ def train_model(
                 optimizer.step()
             optimizer.zero_grad()
 
-    return rows_to_df(loss_rows), timer.peek()
+    return rows_to_df(loss_rows), timer.peek(), {}
 
 
 def eval_model(
@@ -914,15 +1124,23 @@ def eval_model(
     loss_rows = []
 
     timer.start()
-    for batch in buffer.sample_iter(batch_size):
+    for obs in buffer.sample_iter(batch_size):
         timer.stop()
-        obs, action, next_obs, next_mask, next_rew, next_done = batch
 
         with torch.no_grad():
-            pred_obs = model(obs, action)
+            mu, logvar, decoded_obs = model(obs)
 
-        loss_tot, losses = compute_losses(logger, model.abs_index, loss_weights, next_obs, pred_obs)
-        loss_rows.extend(losses_to_rows(losses, model.obs_index))
+        _, decode_losses = compute_decode_losses(logger, model.abs_index, loss_weights, obs, decoded_obs)
+        kld = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+
+        loss_rows.extend(losses_to_rows(decode_losses, model.obs_index))
+        loss_rows.append({
+            TableColumn.ATTRIBUTE: "kld",
+            TableColumn.CONTEXT: "all",
+            TableColumn.DATATYPE: "",
+            TableColumn.LOSS: kld.item()
+        })
+
         timer.start()
 
-    return rows_to_df(loss_rows), timer.peek()
+    return rows_to_df(loss_rows), timer.peek(), {}
