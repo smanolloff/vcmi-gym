@@ -132,7 +132,6 @@ def save_checkpoint(
     model,
     optimizer,
     scaler,
-    state,  # object with .to_json() and .from_json(string)
     out_dir,
     run_id,
     optimize_local_storage,
@@ -140,6 +139,7 @@ def save_checkpoint(
     uploading_event,
     permanent=False,
     config=None,
+    state=None,  # object with .to_json() and .from_json(string)
 ):
     if permanent:
         assert config, "config is also needed for permanent checkpoints"

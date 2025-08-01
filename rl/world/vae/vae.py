@@ -630,7 +630,7 @@ class Decoder(nn.Module):
         # 2. z_hex as both tgt and memory: reuse the decoder’s own inputs for both attention passes,
         #   effectively giving the decoder two attention sub-layers without external context.
         # Trying with 2. (TODO: try with 1)
-        z_hex = self.transformer_decoder_hex(tgt=z_hex, memory=z_hex)  # => (B, 165, Z_HEX)
+        z_hex = self.transformer_decoder_hex(tgt=z_hex, memory=torch.zeros_like(z_hex))  # => (B, 165, Z_HEX)
         z_hex = self.decoder_merged_hex(z_hex)  # => (B, 165, N_CONT_FEATS + N_BIN_FEATS + C*N_CAT_FEATS + T*N_THR_FEATS)
         assert z_hex.shape == torch.Size([b, 165, self.z_size_hex_merged]), f"{z_hex.shape} == {[b, 165, self.z_size_hex_merged]}"
         (
@@ -1136,8 +1136,8 @@ def eval_model(
         loss_rows.extend(losses_to_rows(decode_losses, model.obs_index))
         loss_rows.append({
             TableColumn.ATTRIBUTE: "kld",
-            TableColumn.CONTEXT: "all",
-            TableColumn.DATATYPE: "",
+            TableColumn.CONTEXT: "kld",
+            TableColumn.DATATYPE: "kld",
             TableColumn.LOSS: kld.item()
         })
 

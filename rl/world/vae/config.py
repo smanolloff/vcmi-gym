@@ -118,17 +118,27 @@ if os.getenv("VASTAI", None) == "1":
     config["train"]["autoscaler"] = True
 
     # Mem usage and timings for 20 iterations
-    # (RTX 5070 Ti  20x Core™ i5-14600KF):
-    # StupidAI:
+    # $ python -m rl.world.vae.main --dry-run train --loglevel DEBUG
+    #
+    # (RTX 5070 Ti  20x Core™ i5-14600KF, StupidAI):
     # - batch_size=300, num_workers=6 => OOM
     # - batch_size=100, num_workers=6 => 6500MB     17s
     # - batch_size=200, num_workers=6 => 11789MiB   33s => no speedup
     # - batch_size=200, num_workers=12 => 12027MiB  69s => no speedup
-    # BattleAI is the same:
-
-    # (1x RTX 5070     18x Xeon® E5-2686 v4):
+    # ^ StupidAI and BattleAI have the same speed
+    #
+    # (RTX 5070     18x Xeon® E5-2686 v4, StupidAI):
     # - batch_size=100, num_workers=6 => 6400MiB     31s
-    # - batch_size=100, num_workers=12 => 6400MiB    59s
+    # - batch_size=100, num_workers=12 => 6400MiB    59s minor speedup
+    #
+    # (RTX 5080     12x AMD Ryzen 5 9600X 6-core, StupidAI)
+    # - batch_size=100, num_workers=6 => 6552MiB     28s
+    # - batch_size=200, num_workers=6 =>  11808MiB   33s minor speedup
+    #
+    # (RTX 4080S    16x AMD Ryzen 7 5800X 8-core, StupidAI)
+    # - batch_size=100, num_workers=6 =>             17s
+    # - batch_size=100, num_workers=12 =>            34s minor speedup
+    #
 
     config["train"]["batch_size"] = 250
     config["eval"]["batch_size"] = config["train"]["batch_size"]
