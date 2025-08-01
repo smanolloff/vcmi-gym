@@ -35,8 +35,8 @@ env_kwargs = dict(
 
 config = dict(
     name_template="{datetime}-{id}-v12",
-    out_dir_template="data/world/t10n",
-    wandb_group="transition-model",
+    out_dir_template="data/world/vae",
+    wandb_group="vae-model",
 
     env=dict(
         train=dict(
@@ -117,7 +117,20 @@ if os.getenv("VASTAI", None) == "1":
     # On CUDA, autoscaler results in 2x speed and 0.6x mem usage => enable
     config["train"]["autoscaler"] = True
 
-    config["train"]["batch_size"] = 300
+    # Mem usage and timings for 20 iterations
+    # (RTX 5070 Ti  20x Core™ i5-14600KF):
+    # StupidAI:
+    # - batch_size=300, num_workers=6 => OOM
+    # - batch_size=100, num_workers=6 => 6500MB     17s
+    # - batch_size=200, num_workers=6 => 11789MiB   33s => no speedup
+    # - batch_size=200, num_workers=12 => 12027MiB  69s => no speedup
+    # BattleAI is the same:
+
+    # (1x RTX 5070     18x Xeon® E5-2686 v4):
+    # - batch_size=100, num_workers=6 => 6400MiB     31s
+    # - batch_size=100, num_workers=12 => 6400MiB    59s
+
+    config["train"]["batch_size"] = 250
     config["eval"]["batch_size"] = config["train"]["batch_size"]
     config["eval"]["interval_s"] = 60
 
