@@ -1,0 +1,19 @@
+Convo https://chatgpt.com/c/688dc644-8564-8332-ad19-ce4b837ffe00:
+
+# autoregressive Transformer encoder–decoder predictor implementation
+https://chatgpt.com/s/t_688dc43e5a488191b4ca4508aa3714c1
+
+# Teacher-forcing explanation
+https://chatgpt.com/s/t_688dc45baa448191b995182cf8d60dab
+
+# Adaptation to global + per-tile features
+https://chatgpt.com/s/t_688dc40930888191bca67c568d7154da
+
+# + fix for shape incompatibility in above answer:
+https://chatgpt.com/s/t_688dc7fc82c081919036be3116c72a12
+
+# Inference (no teacher-forcing):
+https://chatgpt.com/s/t_688dcbfb8798819196657be6e567ab9e
+
+# + fix for mixing two concepts in above answer (h_dec concatenate vs replace):
+https://chatgpt.com/s/t_688dd220b26c8191a0db6e18d6ddc910
