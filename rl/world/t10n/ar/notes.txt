@@ -1,4 +1,5 @@
-Convo https://chatgpt.com/c/688dc644-8564-8332-ad19-ce4b837ffe00:
+# Full convo
+https://chatgpt.com/c/688dc644-8564-8332-ad19-ce4b837ffe00
 
 # autoregressive Transformer encoder–decoder predictor implementation
 https://chatgpt.com/s/t_688dc43e5a488191b4ca4508aa3714c1
@@ -8,6 +9,9 @@ https://chatgpt.com/s/t_688dc45baa448191b995182cf8d60dab
 
 # Adaptation to global + per-tile features
 https://chatgpt.com/s/t_688dc40930888191bca67c568d7154da
+
+# Adaptation to ACTION + global + tile
+https://chatgpt.com/s/t_68908378a8b08191b14e43782921ee30
 
 # + fix for shape incompatibility in above answer:
 https://chatgpt.com/s/t_688dc7fc82c081919036be3116c72a12

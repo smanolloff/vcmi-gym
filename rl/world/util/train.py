@@ -141,7 +141,7 @@ def train(
     # torch.autograd.set_detect_anomaly(True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model_creator(device=device)
+    model = model_creator(config=config["model"], device=device)
 
     if weights_builder is not None:
         feature_weights = weights_builder(model, config["weights"])
