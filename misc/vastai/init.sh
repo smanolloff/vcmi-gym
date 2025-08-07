@@ -233,11 +233,6 @@ cmake --build rel/ -- -j8
 cd ../../
 wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
 
-# XXX: temp - for mppo_i2a
-aws s3 cp s3://vcmi-gym/models/ogyesvkb-model.pt .
-aws s3 cp s3://vcmi-gym/models/aexhrgez-model.pt .
-aws s3 cp s3://vcmi-gym/models/hauzybxn-model.pt .
-
 # Mark as completed
 touch /workspace/.initialized
 vastai label instance $VASTAI_INSTANCE_ID ready
