@@ -1262,10 +1262,16 @@ def main(args, agent=None):
                     raise Exception("Not implemented: map change on target")
 
             if agent.state.current_rollout > 0 and agent.state.current_rollout % args.rollouts_per_log == 0:
+                tstats = timer_stats(timers)
+
+                wandb_log(tstats)
                 wandb_log({
                     "global/global_num_timesteps": agent.state.global_timestep,
                     "global/global_num_seconds": agent.state.global_second
                 }, commit=True)  # commit on final log line
+
+                for k, v in tstats.items():
+                    print("%-20s: %.4f " % (k, v))
 
                 LOG.debug("rollout=%d vstep=%d rew=%.2f net_value=%.2f is_success=%.2f losses=%.1f|%.1f|%.1f" % (
                     agent.state.current_rollout,
@@ -1277,9 +1283,6 @@ def main(args, agent=None):
                     policy_loss.item(),
                     distill_loss.item()
                 ))
-
-            for k, v in timer_stats(timers).items():
-                print("%-20s: %.4f " % (k, v))
 
             agent.state.current_rollout += 1
             save_ts, permasave_ts = common.maybe_save(save_ts, permasave_ts, args, agent)

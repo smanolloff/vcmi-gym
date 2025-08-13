@@ -26,7 +26,7 @@ config = {
         #       $ NO_WANDB=true NO_SAVE=true python -m rl.algos.mppo.mppo
         #
         # """
-        "population_size": 5,
+        "population_size": 2,
         "cuda": True,  # use CUDA if available
 
         # """
@@ -127,16 +127,13 @@ config = {
     # "agent_load_file": "data/PBT-layernorm-20241115_204726/0f21f_00004/checkpoint_000032/agent.pt",
 
     # "agent_load_file": None,
-    "tags": ["BattleAI", "obstacles-random", "v4"],
+    "tags": [],
     "mapside": "attacker",  # attacker/defender; irrelevant if env.swap_sides > 0
     "envmaps": [
-        # "gym/generated/4096/4096-mixstack-100K-01.vmap",
         "gym/generated/4096/4x1024.vmap"
     ],
     "opponent_sbm_probs": [1, 0, 0],
     "opponent_load_file": None,
-    # "opponent_load_file": "rl/models/Attacker model:v9/jit-agent.pt",
-    # "opponent_load_file": "data/bfa3b_00000_checkpoint_000079.pt",
 
     #
     # PPO hyperparams
@@ -178,14 +175,26 @@ config = {
     "network": {
         "encoder_other": [
             # => (B, 26)
-            {"t": "LazyLinear", "out_features": 64},
+            {"t": "LazyLinear", "out_features": 32},
             {"t": "LeakyReLU"},
             # => (B, 64)
         ],
+        "encoder_hexes": [
+            # => (B, 165*H)
+            dict(t="Unflatten", dim=1, unflattened_size=[165, 170]),
+            # => (B, 165, H)
+
+            {"t": "HexConvResBlock", "channels": 170, "depth": 3},
+            {"t": "LazyLinear", "out_features": 32},
+            {"t": "LeakyReLU"},
+            # => (B, 165, 16)
+        ],
         "encoder_merged": [
+            {"t": "LazyLinear", "out_features": 1024},
+            {"t": "LeakyReLU"},
             # => (B, 1024)
         ],
-        "actor": {"t": "LazyLinear", "out_features": 1322},
+        "actor": {"t": "LazyLinear", "out_features": 4+165+165},
         "critic": {"t": "LazyLinear", "out_features": 1}
     },
 
@@ -229,14 +238,16 @@ config = {
 
     "num_envs": 1,
     "env": {
-        "reward_step_fixed": -1,
-        "reward_dmg_mult": 1,
-        "reward_term_mult": 1,
+        "max_steps": 500,
+        "reward_step_fixed": -0.01,
+        "reward_dmg_mult": 0.01,
+        "reward_term_mult": 0.01,
+        "reward_relval_mult": 0.01,
         "random_heroes": 1,
         "random_obstacles": 1,
+        "random_terrain_chance": 100,
         "town_chance": 10,
         "warmachine_chance": 40,
-        "random_terrain_chance": 100,
         "tight_formation_chance": 0,
         "battlefield_pattern": "",
         "mana_min": 0,
@@ -248,8 +259,11 @@ config = {
         "conntype": "thread"
     },
     "seed": 0,
-    "env_version": 9,
-    "env_wrappers": [{"module": "vcmi_gym.envs.util.wrappers", "cls": "LegacyObservationSpaceWrapper"}],
+    "env_version": 12,
+    "env_wrappers": [
+        {"module": "vcmi_gym.envs.util.wrappers", "cls": "LegacyObservationSpaceWrapper"},
+        {"module": "gymnasium.wrappers", "cls": "RecordEpisodeStatistics"}
+    ],
     # Wandb already initialized when algo is invoked
     # "run_id": None
     # "group_id": None
