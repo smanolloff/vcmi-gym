@@ -246,6 +246,7 @@ config = {
         "random_heroes": 1,
         "random_obstacles": 1,
         "random_terrain_chance": 100,
+        "random_stack_chance": 20,
         "town_chance": 10,
         "warmachine_chance": 40,
         "tight_formation_chance": 0,
@@ -256,7 +257,6 @@ config = {
         "user_timeout": 600,
         "vcmi_timeout": 600,
         "boot_timeout": 300,
-        "conntype": "thread"
     },
     "seed": 0,
     "env_version": 12,

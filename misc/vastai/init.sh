@@ -20,6 +20,8 @@ fi
 
 set -x
 
+started_at=$(date +%s)
+
 #
 # TMUX setup
 # (ctrl+b - shift+p) to enable logging
@@ -232,6 +234,10 @@ cmake --build rel/ -- -j8
 
 cd ../../
 wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
+
+finished_at=$(date +%s)
+
+echo "Done in $((finished_at - started_at)) seconds."
 
 # Mark as completed
 touch /workspace/.initialized

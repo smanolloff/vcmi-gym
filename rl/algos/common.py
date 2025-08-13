@@ -536,5 +536,5 @@ def coerce_dataclass_ints(dataclass_obj):
     for f in dataclasses.fields(dataclass_obj):
         v = getattr(dataclass_obj, f.name)
         if f.type == int and v is not None and not isinstance(v, int):
-            assert isinstance(v, float)
+            assert isinstance(v, float), f"Field is not float: {f.name}"
             setattr(dataclass_obj, f.name, round(v))
