@@ -561,7 +561,7 @@ class AgentNN(nn.Module):
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
         # 3. MASK_ACTION - ie. allowed main action mask
-        mask_action = torch.zeros(B, 4, dtype=torch.bool)
+        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
 
         # 0=WAIT
         mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
