@@ -33,7 +33,7 @@ ray
 #ray @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
 #ray[tune] @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp312-cp312-manylinux2014_x86_64.whl
 
-#torch_geometric==2.7.0
+torch_geometric==2.4.0
 
 # Manually uncomment one of the torch packages -- see comment below
 torch==2.7.0

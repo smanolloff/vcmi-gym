@@ -3,7 +3,8 @@ import torch
 
 
 class Timer:
-    def __init__(self, cuda_sync=True):
+    def __init__(self, name="default", cuda_sync=True):
+        self.name = name
         self._cuda = torch.cuda.is_available() and cuda_sync
         self.reset()
 

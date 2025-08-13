@@ -180,7 +180,7 @@ class VcmiEnv(gym.Env):
             relval_mult=float(reward_relval_mult),
         )
 
-        self.logger = log.get_logger("VcmiEnv-vv13", vcmienv_loglevel)
+        self.logger = log.get_logger("VcmiEnv-v13", vcmienv_loglevel)
 
         self.connector = PyConnector(
             vcmienv_loglevel,
