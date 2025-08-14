@@ -333,7 +333,7 @@ class Model(nn.Module):
         self.encoder_hexes = nn.Sequential(OrderedDict({
             "unflatten": nn.Unflatten(dim=1, unflattened_size=[165, STATE_SIZE_ONE_HEX]),
             "hexconv": HexConvResBlock(hex_size=STATE_SIZE_ONE_HEX, depth=3),
-            "linear": nn.LazyLinear(config["z_size_hexes"]),
+            "linear": nn.LazyLinear(config["z_size_hex"]),
             "relu": nn.LeakyReLU()
         }))
 
