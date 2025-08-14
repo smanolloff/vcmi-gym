@@ -277,7 +277,7 @@ class HexConvResBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self, config):
         super().__init__()
 
         self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
@@ -326,19 +326,19 @@ class Model(nn.Module):
         self.register_buffer("inverse_table", inverse_table)
 
         self.encoder_other = nn.Sequential(OrderedDict({
-            "linear": nn.LazyLinear(2),
+            "linear": nn.LazyLinear(config["z_size_other"]),
             "relu": nn.LeakyReLU()
         }))
 
         self.encoder_hexes = nn.Sequential(OrderedDict({
             "unflatten": nn.Unflatten(dim=1, unflattened_size=[165, STATE_SIZE_ONE_HEX]),
             "hexconv": HexConvResBlock(hex_size=STATE_SIZE_ONE_HEX, depth=3),
-            "linear": nn.LazyLinear(2),
+            "linear": nn.LazyLinear(config["z_size_hexes"]),
             "relu": nn.LeakyReLU()
         }))
 
         self.encoder_merged = nn.Sequential(OrderedDict({
-            "linear": nn.LazyLinear(4),
+            "linear": nn.LazyLinear(config["z_size_merged"]),
             "relu": nn.LeakyReLU()
         }))
 

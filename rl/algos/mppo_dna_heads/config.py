@@ -49,10 +49,10 @@ config = dict(
     ),
     eval=dict(
         env=dict(
-            num_envs=40,
+            num_envs=1,
             kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap")
         ),
-        num_vsteps=100,
+        num_vsteps=1000,
         interval_s=1800,
         at_script_start=False,
     ),
@@ -60,12 +60,12 @@ config = dict(
         env=dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
-            num_envs=40,
+            num_envs=10,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
         # XXX: ep_len_mean=30... try to capture AT LEAST 1 episode per env
-        num_vsteps=40,  # num_steps = num_vsteps * num_envs
-        num_minibatches=50,
+        num_vsteps=100,  # num_steps = num_vsteps * num_envs
+        num_minibatches=20,
         update_epochs=1,
 
         learning_rate=1e-4,
@@ -87,7 +87,11 @@ config = dict(
 
         torch_autocast=False,
     ),
-    model=dict(),
+    model=dict(
+        z_size_other=32,
+        z_size_hex=32,
+        z_size_merged=1024
+    ),
 )
 
 config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].replace("{wandb_group}", config["wandb_group"])
