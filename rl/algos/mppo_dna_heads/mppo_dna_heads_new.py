@@ -1068,8 +1068,8 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
     )
 
     lr_schedule_policy = torch.optim.lr_scheduler.StepLR(optimizer_policy, **steplr_kwargs)
-    lr_schedule_value = torch.optim.lr_scheduler.StepLR(optimizer_policy, **steplr_kwargs)
-    lr_schedule_distill = torch.optim.lr_scheduler.StepLR(optimizer_policy, **steplr_kwargs)
+    lr_schedule_value = torch.optim.lr_scheduler.StepLR(optimizer_value, **steplr_kwargs)
+    lr_schedule_distill = torch.optim.lr_scheduler.StepLR(optimizer_distill, **steplr_kwargs)
 
     clamp_lr = lambda: max(optimizer_policy.param_groups[0]["lr"], train_config["lr_scheduler_min_value"])
 
