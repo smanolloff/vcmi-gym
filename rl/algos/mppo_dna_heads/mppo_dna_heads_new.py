@@ -796,7 +796,7 @@ def train_model(
 
             # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
             #     (if actions differ, masks will differ and KLD will become NaN)
-            new_actdata, new_value = old_model_policy.get_actdata_and_value(mb_obs, action=old_actdata.action)
+            new_actdata, new_value = model.model_policy.get_actdata_and_value(mb_obs, action=old_actdata.action)
 
             # Distillation loss
             distill_actloss = (

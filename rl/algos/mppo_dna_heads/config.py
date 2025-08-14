@@ -60,29 +60,27 @@ config = dict(
         env=dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
-            num_envs=10,
+            num_envs=100,
             kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
         ),
-        # XXX: ep_len_mean=30... try to capture AT LEAST 1 episode per env
-        num_vsteps=100,  # num_steps = num_vsteps * num_envs
-        num_minibatches=20,
-        update_epochs=1,
+        num_vsteps=100,                 # num_steps = num_vsteps * num_envs
+        num_minibatches=20,             # mb_size = num_steps / num_minibatches
+        update_epochs=2,
 
         learning_rate=1e-4,
-        # lr_scheduler_interval_s=5,  # use 1e9 to disable
-        lr_scheduler_interval_s=1e9,  # use 1e9 to disable
-        lr_scheduler_step_mult=0.8,    # => 1e-4...1e-5 in 10 steps
-        lr_scheduler_min_value=1e-4,
+        lr_scheduler_interval_s=600,    # use 1e9 to disable
+        lr_scheduler_step_mult=0.8,     # => 1e-4...1e-5 in 10 steps
+        lr_scheduler_min_value=1e-5,
 
-        gamma=0.8,
-        gae_lambda=0.9,
-        ent_coef=0.01,
-        clip_coef=0.3,
+        gamma=0.95,
+        gae_lambda=0.8,
+        ent_coef=0.03,
+        clip_coef=0.6,
         vf_coef=0.5,
         norm_adv=True,
-        clip_vloss=True,
+        clip_vloss=False,
         target_kl=None,
-        max_grad_norm=0.5,
+        max_grad_norm=4,
         distill_beta=1.0,
 
         torch_autocast=False,
@@ -98,15 +96,19 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 
 # Debug
 if os.getenv("VASTAI", None) != "1":
-    config["train"]["num_vsteps"] = 256
+    config["train"]["num_vsteps"] = 16
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 2
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    config["eval"]["num_vsteps"] = 500
+    config["eval"]["num_vsteps"] = 8
     config["eval"]["env"]["num_envs"] = 1
     config["eval"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
 
     config["eval"]["interval_s"] = 30
     config["wandb_log_interval_s"] = 5
     config["checkpoint"]["interval_s"] = 10
+
+    config["model"]["z_size_other"] = 4
+    config["model"]["z_size_hex"] = 4
+    config["model"]["z_size_merged"] = 16
