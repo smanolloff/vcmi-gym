@@ -28,6 +28,9 @@ from rl.world.util.wandb import setup_wandb
 from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, safe_mean, timer_stats
 
+from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
+from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
+
 from vcmi_gym.envs.v12.pyconnector import (
     STATE_SIZE,
     STATE_SIZE_ONE_HEX,
@@ -511,10 +514,7 @@ class DNAModel(nn.Module):
         return self.model_value.get_value(obs)
 
 
-def create_venv(env_kwargs, num_envs):
-    from vcmi_gym.envs.v12.vcmi_env import VcmiEnv
-    from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
-
+def create_venv(env_kwargs, num_envs, sync=True):
     # AsyncVectorEnv creates a dummy_env() in the main process just to
     # extract metadata, which causes VCMI init pid error afterwards
     pid = os.getpid()
@@ -527,7 +527,7 @@ def create_venv(env_kwargs, num_envs):
     )
 
     def env_creator(i):
-        if os.getpid() == pid:
+        if os.getpid() == pid and not sync:
             return dummy_env
 
         env = VcmiEnv(**env_kwargs)
@@ -537,13 +537,11 @@ def create_venv(env_kwargs, num_envs):
 
     funcs = [partial(env_creator, i) for i in range(num_envs)]
 
-    # SyncVectorEnv won't work when both train and eval env are started in main process
-    # if num_envs > 1:
-    #     vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
-    # else:
-    #     vec_env = gym.vector.SyncVectorEnv(funcs, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+    if sync:
+        vec_env = gym.vector.SyncVectorEnv(funcs, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
+    else:
+        vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
 
-    vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
     vec_env.reset()
 
     return vec_env
@@ -933,10 +931,10 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
     torch.backends.cudnn.benchmark = True
 
-    train_venv = create_venv(train_config["env"]["kwargs"], train_config["env"]["num_envs"])
-    logger.debug("Initialized %d train envs" % train_venv.num_envs)
-    eval_venv = create_venv(eval_config["env"]["kwargs"], eval_config["env"]["num_envs"])
-    logger.debug("Initialized %d eval envs" % eval_venv.num_envs)
+    train_venv = create_venv(train_config["env"]["kwargs"], train_config["env"]["num_envs"], sync=False)
+    logger.info("Initialized %d train envs" % train_venv.num_envs)
+    eval_venv = create_venv(eval_config["env"]["kwargs"], eval_config["env"]["num_envs"], sync=(eval_config["env"]["num_envs"] == 1))
+    logger.info("Initialized %d eval envs" % eval_venv.num_envs)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     num_envs = train_config["env"]["num_envs"]
@@ -1081,6 +1079,9 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
 
     try:
         while state.current_rollout < total_rollouts:
+            state.global_second += int(timers["all"].peek())
+            state.current_second = int(timers["all"].peek())
+
             [v.reset(start=(k == "all")) for k, v in timers.items()]
 
             logger.debug("learning_rate: %s" % optimizer_policy.param_groups[0]['lr'])
@@ -1126,8 +1127,6 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
             state.global_timestep += train_config["num_vsteps"] * num_envs
             state.current_episode += train_sample_stats.num_episodes
             state.global_episode += train_sample_stats.num_episodes
-            state.current_second = int(timers["sample"].peek())
-            state.global_second += int(timers["all"].peek())
 
             model.train()
             with timers["train"], autocast_ctx(True):
