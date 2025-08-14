@@ -35,7 +35,9 @@ def _s3_download(logger, dry_run, s3_config, filename):
             os.unlink(f"{filename}~")
 
     # Download is OK even if --dry-run is given (nothing overwritten)
-    if s3_config and not os.path.exists(filename):
+    if os.path.exists(filename):
+        logger.debug(f"Loading from local file: {filename}")
+    elif s3_config:
         logger.debug("Local file does not exist, try S3")
 
         s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
@@ -45,13 +47,6 @@ def _s3_download(logger, dry_run, s3_config, filename):
             os.unlink(f"{filename}.tmp")
         init_s3_client().download_file(s3_config["bucket_name"], s3_filename, f"{filename}.tmp")
         shutil.move(f"{filename}.tmp", filename)
-
-
-def _cleanup(logger, dry_run, optimize_local_storage, filename):
-    if not dry_run and not optimize_local_storage:
-        backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
-        logger.debug(f"Backup resumed model weights as {backname}")
-        shutil.copy2(filename, backname)
 
 
 # Merge b into a, optionally preventing new keys; does not mutate inputs
@@ -75,39 +70,57 @@ def deepmerge(a: dict, b: dict, in_place=False, allow_new=True, update_existing=
 def load_checkpoint(
     logger,
     dry_run,
-    model,
-    optimizer,
-    scaler,
+    models,         # dict with name=>model
+    optimizers,     # dict with name=>optimizer
+    scalers,        # dict with name=>scaler
     out_dir,
     run_id,
     optimize_local_storage,
     s3_config,
     device,
-    state=None,  # object with .to_json() and .from_json(string)
+    states={},      # dict with name=>obj, where obj has .to_json() and .from_json(string)
 ):
     prefix = run_id
-    f_model = os.path.join(out_dir, f"{prefix}-model.pt")
-    f_optimizer = os.path.join(out_dir, f"{prefix}-optimizer.pt")
-    f_scaler = os.path.join(out_dir, f"{prefix}-scaler.pt")
-    f_state = os.path.join(out_dir, f"{prefix}-state.json")
 
-    logger.info(dict(
-        event="Loading checkpoint...",
-        model=f_model,
-        optimizer=f_optimizer,
-        scaler=f_scaler,
-        state=f_state,
-    ))
+    files = dict(
+        models={
+            os.path.join(out_dir, f"{prefix}-model-{name}.pt"): model
+            for name, model in models.items()
+        },
+        optimizers={
+            os.path.join(out_dir, f"{prefix}-optimizer-{name}.pt"): optimizer
+            for name, optimizer in optimizers.items()
+        },
+        scalers={
+            os.path.join(out_dir, f"{prefix}-scaler-{name}.pt"): scaler
+            for name, scaler in scalers.items()
+        },
+        states={
+            os.path.join(out_dir, f"{prefix}-state-{name}.pt"): state
+            for name, state in states.items()
+        },
+    )
 
-    _s3_download(logger, dry_run, s3_config, f_model)
-    model.load_state_dict(torch.load(f_model, weights_only=True, map_location=device), strict=True)
-    _cleanup(logger, dry_run, optimize_local_storage, f_model)
+    filelist = [k1 for k0, v0 in files.items() for k1, v1 in v0.items()]
+    logger.info(dict(event="Loading checkpoint...", filelist=filelist))
 
-    _s3_download(logger, dry_run, s3_config, f_optimizer)
-    optimizer.load_state_dict(torch.load(f_optimizer, weights_only=True, map_location=device))
-    _cleanup(logger, dry_run, optimize_local_storage, f_optimizer)
+    def _cleanup(filename):
+        if not dry_run and not optimize_local_storage:
+            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+            logger.debug(f"Backup resumed model weights as {backname}")
+            shutil.copy2(filename, backname)
 
-    if scaler:
+    for f_model, model in files["models"].items():
+        _s3_download(logger, dry_run, s3_config, f_model)
+        model.load_state_dict(torch.load(f_model, weights_only=True, map_location=device), strict=True)
+        _cleanup(f_model)
+
+    for f_optimizer, optimizer in files["optimizers"].items():
+        _s3_download(logger, dry_run, s3_config, f_optimizer)
+        optimizer.load_state_dict(torch.load(f_optimizer, weights_only=True, map_location=device))
+        _cleanup(f_optimizer)
+
+    for f_scaler, scaler in files["scalers"].items():
         try:
             _s3_download(logger, dry_run, s3_config, f_scaler)
         except botocore.exceptions.ClientError as e:
@@ -116,22 +129,22 @@ def load_checkpoint(
             else:
                 raise
         scaler.load_state_dict(torch.load(f_scaler, weights_only=True, map_location=device))
-        _cleanup(logger, dry_run, optimize_local_storage, f_scaler)
+        _cleanup(f_scaler)
 
-    if state:
+    for f_state, state in files["states"].items():
         assert callable(state.to_json) and callable(state.from_json)
         _s3_download(logger, dry_run, s3_config, f_state)
         with open(f_state, "r") as f:
             state.from_json(f.read())
-        _cleanup(logger, dry_run, optimize_local_storage, f_state)
+        _cleanup(f_state)
 
 
 def save_checkpoint(
     logger,
     dry_run,
-    model,
-    optimizer,
-    scaler,
+    models,         # dict with name=>model
+    optimizers,     # dict with name=>optimizer
+    scalers,        # dict with name=>scaler
     out_dir,
     run_id,
     optimize_local_storage,
@@ -139,7 +152,7 @@ def save_checkpoint(
     uploading_event,
     permanent=False,
     config=None,
-    state=None,  # object with .to_json() and .from_json(string)
+    states={},      # dict with name=>obj, where obj has .to_json() and .from_json(string)
 ):
     if permanent:
         assert config, "config is also needed for permanent checkpoints"
@@ -147,26 +160,44 @@ def save_checkpoint(
     else:
         prefix = run_id
 
-    f_model = os.path.join(out_dir, f"{prefix}-model.pt")
-    f_optimizer = os.path.join(out_dir, f"{prefix}-optimizer.pt")
-    f_scaler = os.path.join(out_dir, f"{prefix}-scaler.pt")
-    f_state = os.path.join(out_dir, f"{prefix}-state.json")
+    for state in states.values():
+        assert callable(state.to_json) and callable(state.from_json)
 
-    msg = dict(
-        event="Saving checkpoint...",
-        model=f_model,
-        optimizer=f_optimizer,
-        scaler=f_scaler,
-        state=f_state,
+    # Construct a nested files dict:
+    # {
+    #     "models": {
+    #         "jiehqsmd-model-policy.pt": ...,
+    #         "jiehqsmd-model-value.pt": ...,
+    #     },
+    #     "optimizers": {
+    #         "jiehqsmd-optimizer-policy.pt": ...,
+    #         "jiehqsmd-optimizer-value.pt": ...,
+    #         "jiehqsmd-optimizer-distill.pt": ...,
+    #     },
+    #     ...
+    # }
+    files = dict(
+        models={
+            os.path.join(out_dir, f"{prefix}-model-{name}.pt"): model
+            for name, model in models.items()
+        },
+        optimizers={
+            os.path.join(out_dir, f"{prefix}-optimizer-{name}.pt"): optimizer
+            for name, optimizer in optimizers.items()
+        },
+        scalers={
+            os.path.join(out_dir, f"{prefix}-scaler-{name}.pt"): scaler
+            for name, scaler in scalers.items()
+        },
+        states={
+            os.path.join(out_dir, f"{prefix}-state-{name}.pt"): state
+            for name, state in states.items()
+        },
     )
 
-    files = [f_model, f_optimizer]
-    if scaler:
-        files.append(f_scaler)
+    filelist = [k1 for k0, v0 in files.items() for k1, v1 in v0.items()]
 
-    if state:
-        assert callable(state.to_json) and callable(state.from_json)
-        files.append(f_state)
+    msg = dict(event="Saving checkpoint...", filelist=filelist)
 
     if uploading_event.is_set():
         logger.warn("Still uploading previous checkpoint, will not save this one locally or to S3")
@@ -192,48 +223,48 @@ def save_checkpoint(
             # NOTE: bulk create and remove lockfiles to prevent mixing up
             #       different checkpoints when only 1 or 2 files get saved
 
-            pathlib.Path(f"{f_model}~").touch()
-            pathlib.Path(f"{f_optimizer}~").touch()
-            if scaler:
-                pathlib.Path(f"{f_scaler}~").touch()
-            if state:
-                pathlib.Path(f"{f_state}~").touch()
+            for f in filelist:
+                pathlib.Path(f"{f}~").touch()
 
-            torch.save(model.state_dict(), f_model)
-            torch.save(optimizer.state_dict(), f_optimizer)
-            if scaler:
+            for f_model, model in files["models"].items():
+                torch.save(model.state_dict(), f_model)
+
+            for f_optimizer, optimizer in files["optimizers"].items():
+                torch.save(optimizer.state_dict(), f_optimizer)
+
+            for f_scaler, scaler in files["scalers"].items():
                 torch.save(scaler.state_dict(), f_scaler)
-            if state:
+
+            for f_state, state in files["states"].items():
                 with open(os.path.join(out_dir, f_state), "w") as f:
                     f.write(state.to_json())
 
-            os.unlink(f"{f_model}~")
-            os.unlink(f"{f_optimizer}~")
-            if scaler:
-                os.unlink(f"{f_scaler}~")
-            if state:
-                os.unlink(f"{f_state}~")
+            for f in filelist:
+                os.unlink(f"{f}~")
         else:
             # Use temporary files to ensure the original one is always good
             # even if the .save is interrupted
             # NOTE: first save all, then move all, to prevent mixing up
             #       different checkpoints when only 1 or 2 files get saved
-            torch.save(model.state_dict(), f"{f_model}.tmp")
-            torch.save(optimizer.state_dict(), f"{f_optimizer}.tmp")
-            if scaler:
+
+            for f_model, model in files["models"].items():
+                torch.save(model.state_dict(), f"{f_model}.tmp")
+
+            for f_optimizer, optimizer in files["optimizers"].items():
+                torch.save(optimizer.state_dict(), f"{f_optimizer}.tmp")
+
+            for f_scaler, scaler in files["scalers"].items():
                 torch.save(scaler.state_dict(), f"{f_scaler}.tmp")
-            if state:
+
+            for f_state, state in files["states"].items():
                 with open(os.path.join(out_dir, f"{f_state}.tmp"), "w") as f:
                     f.write(state.to_json())
 
-            shutil.move(f"{f_model}.tmp", f_model)
-            shutil.move(f"{f_optimizer}.tmp", f_optimizer)
-            if scaler:
-                shutil.move(f"{f_scaler}.tmp", f_scaler)
-            if state:
-                shutil.move(f"{f_state}.tmp", f_state)
+            for f in filelist:
+                shutil.move(f"{f}.tmp", f)
 
     if not s3_config:
+        logger.debug("No s3_config, will not upoad checkpoint to S3")
         return
 
     if uploading_event.is_set():
@@ -247,10 +278,10 @@ def save_checkpoint(
     s3_dir = s3_config["s3_dir"]
     s3 = init_s3_client()
 
-    files.insert(0, os.path.join(out_dir, f"{prefix}-config.json"))
+    filelist.insert(0, os.path.join(out_dir, f"{prefix}-config.json"))
 
     try:
-        for f in files:
+        for f in filelist:
             key = f"{s3_dir}/{os.path.basename(f)}"
             msg = f"Uploading to s3://{bucket}/{key} ..."
 
@@ -273,6 +304,8 @@ def save_checkpoint(
                     s3.upload_file(f, bucket, key, Config=tc)
 
                 logger.info(f"Uploaded: s3://{bucket}/{key}")
+
+        logger.info("Checkpoint uploaded to S3.")
 
     finally:
         uploading_event.clear()

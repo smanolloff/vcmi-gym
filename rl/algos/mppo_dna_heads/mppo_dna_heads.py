@@ -935,7 +935,7 @@ def main(args, agent=None):
 
         if args.wandb_project:
             import wandb
-            common.setup_wandb(args, agent, __file__, watch=False)
+            common.setup_wandb(args, agent, __file__)
 
             # For wandb.log, commit=True by default
             # for wandb_log, commit=False by default
