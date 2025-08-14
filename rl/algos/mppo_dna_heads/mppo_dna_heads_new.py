@@ -497,10 +497,10 @@ class Model(nn.Module):
 
 
 class DNAModel(nn.Module):
-    def __init__(self, device):
+    def __init__(self, config, device):
         super().__init__()
-        self.model_policy = Model()
-        self.model_value = Model()
+        self.model_policy = Model(config)
+        self.model_value = Model(config)
         self.device = device
         self.to(device)
 
@@ -946,7 +946,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
     storage = TensorStorage(train_venv, train_config["num_vsteps"], device)
     state = State()
 
-    model = DNAModel(device=device)
+    model = DNAModel(config=config["model"], device=device)
 
     optimizer_policy = torch.optim.Adam(model.model_policy.parameters(), lr=learning_rate)
     optimizer_value = torch.optim.Adam(model.model_value.parameters(), lr=learning_rate)
