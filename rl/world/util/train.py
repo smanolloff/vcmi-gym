@@ -7,9 +7,7 @@ import torch
 import time
 import math
 import threading
-import botocore.exceptions
 import pandas as pd
-from functools import partial
 from datetime import datetime
 
 from .dataset_s3 import DatasetS3
