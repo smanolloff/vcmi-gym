@@ -120,7 +120,8 @@ class State:
     def from_json(self, j):
         for k, v in json.loads(j).items():
             attr = getattr(self, k)
-            self.k = deque(v, maxlen=attr.maxlen) if isinstance(attr, deque) else v
+            v = deque(v, maxlen=attr.maxlen) if isinstance(attr, deque) else v
+            setattr(self, k, v)
 
 
 class TensorStorage:

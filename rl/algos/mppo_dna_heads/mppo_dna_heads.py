@@ -1029,7 +1029,7 @@ def main(args, agent=None):
                     done_ids = np.flatnonzero(infos["_final_info"])
                     final_infos = infos["final_info"]
                     agent.state.ep_rew_queue.extend(final_infos["episode"]["r"][done_ids])
-                    agent.state.ep_length_queue.extend(final_infos["episode"]["r"][done_ids])
+                    agent.state.ep_length_queue.extend(final_infos["episode"]["l"][done_ids])
                     agent.state.ep_net_value_queue.extend(final_infos["net_value"][done_ids])
                     agent.state.ep_is_success_queue.extend(final_infos["is_success"][done_ids])
                     agent.state.current_episode += 1
