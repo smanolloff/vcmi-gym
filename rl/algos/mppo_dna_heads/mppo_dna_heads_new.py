@@ -10,6 +10,7 @@ import contextlib
 import gymnasium as gym
 import enum
 import copy
+import importlib
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from collections import deque, OrderedDict
@@ -1092,23 +1093,22 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
     lr_schedule_timer = Timer()
     lr_schedule_timer.start()
 
-    assert train_config["lr_scheduler_min_value"] <= train_config["learning_rate"]
+    if train_config["lr_scheduler_mod"]:
+        lr_scheduler_mod = importlib.import_module(train_config["lr_scheduler_mod"])
+        lr_scheduler_cls = getattr(lr_scheduler_mod, train_config["lr_scheduler_cls"])
 
-    steplr_kwargs = dict(
-        step_size=1,
-        gamma=train_config["lr_scheduler_step_mult"],
-        last_epoch=max(state.global_second//train_config["lr_scheduler_interval_s"] - 1, -1)
-    )
+        lr_schedule_policy = lr_scheduler_cls(optimizer_policy, **train_config["lr_scheduler_kwargs"])
+        lr_schedule_value = lr_scheduler_cls(optimizer_value, **train_config["lr_scheduler_kwargs"])
+        lr_schedule_distill = lr_scheduler_cls(optimizer_distill, **train_config["lr_scheduler_kwargs"])
+    else:
+        lr_schedule_policy = torch.optim.lr_scheduler.LambdaLR(optimizer_policy, lr_lambda=lambda _: 1)
+        lr_schedule_value = torch.optim.lr_scheduler.LambdaLR(optimizer_value, lr_lambda=lambda _: 1)
+        lr_schedule_distill = torch.optim.lr_scheduler.LambdaLR(optimizer_distill, lr_lambda=lambda _: 1)
 
-    lr_schedule_policy = torch.optim.lr_scheduler.StepLR(optimizer_policy, **steplr_kwargs)
-    lr_schedule_value = torch.optim.lr_scheduler.StepLR(optimizer_value, **steplr_kwargs)
-    lr_schedule_distill = torch.optim.lr_scheduler.StepLR(optimizer_distill, **steplr_kwargs)
-
-    clamp_lr = lambda: max(optimizer_policy.param_groups[0]["lr"], train_config["lr_scheduler_min_value"])
-
-    optimizer_policy.param_groups[0]["lr"] = clamp_lr()
-    optimizer_value.param_groups[0]["lr"] = clamp_lr()
-    optimizer_distill.param_groups[0]["lr"] = clamp_lr()
+    for _ in range(state.global_second // train_config["lr_scheduler_interval_s"]):
+        lr_schedule_policy.step()
+        lr_schedule_value.step()
+        lr_schedule_distill.step()
 
     try:
         while state.current_rollout < total_rollouts:
@@ -1123,9 +1123,6 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
                 lr_schedule_policy.step()
                 lr_schedule_value.step()
                 lr_schedule_distill.step()
-                optimizer_policy.param_groups[0]["lr"] = clamp_lr()
-                optimizer_value.param_groups[0]["lr"] = clamp_lr()
-                optimizer_distill.param_groups[0]["lr"] = clamp_lr()
                 logger.info("New learning_rate: %s" % optimizer_policy.param_groups[0]['lr'])
 
             # Evaluate first (for a baseline when resuming with modified params)

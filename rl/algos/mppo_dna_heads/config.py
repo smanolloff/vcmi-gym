@@ -82,9 +82,10 @@ config = dict(
         update_epochs=2,
 
         learning_rate=1e-4,
-        lr_scheduler_interval_s=600,    # use 1e9 to disable
-        lr_scheduler_step_mult=0.8,     # => 1e-4...1e-5 in 10 steps
-        lr_scheduler_min_value=1e-5,
+        lr_scheduler_mod="torch.optim.lr_scheduler",
+        lr_scheduler_cls="LinearLR",
+        lr_scheduler_kwargs=dict(start_factor=1, end_factor=1e-2, total_iters=100),
+        lr_scheduler_interval_s=10,
 
         gamma=0.95,
         gae_lambda=0.8,
@@ -116,6 +117,7 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     config["eval"]["num_vsteps"] = 100
 
+    config["eval"]["env_variants"] = dict(list(config["eval"]["env_variants"].items())[:1])
     for name, envcfg in config["eval"]["env_variants"].items():
         envcfg["num_envs"] = 1
         envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
