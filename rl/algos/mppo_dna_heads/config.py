@@ -85,7 +85,7 @@ config = dict(
         lr_scheduler_mod="torch.optim.lr_scheduler",
         lr_scheduler_cls="LinearLR",
         lr_scheduler_kwargs=dict(start_factor=1, end_factor=1e-2, total_iters=100),
-        lr_scheduler_interval_s=10,
+        lr_scheduler_interval_s=600,
 
         gamma=0.95,
         gae_lambda=0.8,
