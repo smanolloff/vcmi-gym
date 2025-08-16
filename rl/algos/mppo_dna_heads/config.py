@@ -1,6 +1,6 @@
 import os
 
-env_kwargs = dict(
+train_env_kwargs = dict(
     role="defender",
     opponent="StupidAI",
     max_steps=500,
@@ -12,7 +12,7 @@ env_kwargs = dict(
     random_terrain_chance=100,
     tight_formation_chance=0,
     town_chance=10,
-    random_stack_chance=20,
+    random_stack_chance=20,  # makes armies unbalanced
     warmachine_chance=40,
     mana_min=0,
     mana_max=0,
@@ -28,6 +28,17 @@ env_kwargs = dict(
     user_timeout=7200,
     vcmi_timeout=60,
     boot_timeout=30,
+)
+
+eval_variant = lambda **env_kwargs: dict(
+    num_envs=1,
+    sync=False,
+    kwargs=dict(
+        train_env_kwargs,
+        mapname="gym/generated/evaluation/8x512.vmap",
+        random_stack_chance=0,
+        **env_kwargs,
+    )
 )
 
 config = dict(
@@ -48,10 +59,12 @@ config = dict(
         ),
     ),
     eval=dict(
-        env=dict(
-            num_envs=1,
-            kwargs=dict(env_kwargs, mapname="gym/generated/evaluation/8x512.vmap")
-        ),
+        env_variants={
+            "StupidAI.town": eval_variant(opponent="StupidAI", town_chance=100),
+            "StupidAI.open": eval_variant(opponent="StupidAI", town_chance=0),
+            "BattleAI.town": eval_variant(opponent="BattleAI", town_chance=100),
+            "BattleAI.open": eval_variant(opponent="BattleAI", town_chance=0),
+        },
         num_vsteps=1000,
         interval_s=1800,
         at_script_start=False,
@@ -61,7 +74,8 @@ config = dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
             num_envs=100,
-            kwargs=dict(env_kwargs, mapname="gym/generated/4096/4x1024.vmap")
+            sync=False,
+            kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
         ),
         num_vsteps=100,                 # num_steps = num_vsteps * num_envs
         num_minibatches=20,             # mb_size = num_steps / num_minibatches
@@ -76,7 +90,6 @@ config = dict(
         gae_lambda=0.8,
         ent_coef=0.03,
         clip_coef=0.6,
-        vf_coef=0.5,
         norm_adv=True,
         clip_vloss=False,
         target_kl=None,
@@ -102,8 +115,10 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     config["eval"]["num_vsteps"] = 8
-    config["eval"]["env"]["num_envs"] = 1
-    config["eval"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
+
+    for name, envcfg in config["eval"]["env_variants"].items():
+        envcfg["num_envs"] = 1
+        envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
 
     config["eval"]["interval_s"] = 30
     config["wandb_log_interval_s"] = 5

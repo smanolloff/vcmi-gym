@@ -69,8 +69,8 @@ config = {
             "gae_lambda": linlist(0.5, 0.99, n=20),
             "num_minibatches": [4, 8, 16],
             "update_epochs": linlist(1, 5, n=5, dtype=int),
-            "vf_coef": linlist(0.1, 2, n=9),
-            "clip_vloss": [1, 0],  # not used in ppo-dna
+            # "vf_coef": linlist(0.1, 2, n=9),  # not used in ppo_dna
+            "clip_vloss": [1, 0],
             "clip_coef": linlist(0.1, 0.8, n=8),
             "norm_adv": [1, 0],
 
