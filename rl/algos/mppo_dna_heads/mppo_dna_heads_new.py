@@ -13,6 +13,7 @@ import copy
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from collections import deque, OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from types import SimpleNamespace
 
@@ -1135,17 +1136,25 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
 
                 with timers["eval"]:
                     model.eval()
-                    with torch.no_grad():
-                        for name, eval_venv in eval_venv_variants.items():
-                            logger.info("Evaluating env variant: %s" % name)
-                            eval_multistats.add(name, eval_model(
-                                logger=logger,
-                                model=model,
-                                venv=eval_venv,
-                                num_vsteps=eval_config["num_vsteps"],
-                            ))
 
-            with timers["sample"], torch.no_grad(), autocast_ctx(True):
+                    def eval_worker_fn(name, venv, vsteps):
+                        sublogger = logger.sublogger(dict(variant=name))
+                        with torch.inference_mode():
+                            sublogger.info("Start evaluating env variant: %s" % name)
+                            stats = eval_model(logger=sublogger, model=model, venv=venv, num_vsteps=vsteps)
+                            sublogger.info("Done evaluating env variant: %s" % name)
+                            return name, stats
+
+                    with ThreadPoolExecutor(max_workers=100) as ex:
+                        futures = [
+                            ex.submit(eval_worker_fn, name, venv, eval_config["num_vsteps"])
+                            for name, venv in eval_venv_variants.items()
+                        ]
+
+                        for fut in as_completed(futures):
+                            eval_multistats.add(*fut.result())
+
+            with timers["sample"], torch.inference_mode(), autocast_ctx(True):
                 model.eval()
                 train_sample_stats = collect_samples(
                     logger=logger,

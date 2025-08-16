@@ -15,6 +15,9 @@ class StructuredLogger:
         assert level in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
         self.level = level
 
+    def sublogger(self, context={}):
+        return self.__class__(self.level, self.filename, dict(self.context, **context))
+
     def log(self, obj):
         timestamp = datetime.utcnow().isoformat(timespec='milliseconds')
         thread_id = np.base_repr(threading.current_thread().ident, 36).lower()

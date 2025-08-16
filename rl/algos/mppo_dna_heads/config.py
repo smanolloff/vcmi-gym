@@ -31,7 +31,7 @@ train_env_kwargs = dict(
 )
 
 eval_variant = lambda **env_kwargs: dict(
-    num_envs=1,
+    num_envs=5,
     sync=False,
     kwargs=dict(
         train_env_kwargs,
@@ -43,7 +43,7 @@ eval_variant = lambda **env_kwargs: dict(
 
 config = dict(
     name_template="{datetime}-{id}-v12",
-    out_dir_template="data/world/mppo-dna-heads",
+    out_dir_template="data/mppo-dna-heads",
 
     # XXX: s3_dir's "{wandb_group}" substring will be replaced with this value
     wandb_group="mppo-dna-heads",
@@ -114,7 +114,7 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["update_epochs"] = 2
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    config["eval"]["num_vsteps"] = 8
+    config["eval"]["num_vsteps"] = 100
 
     for name, envcfg in config["eval"]["env_variants"].items():
         envcfg["num_envs"] = 1
