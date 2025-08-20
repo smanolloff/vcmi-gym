@@ -405,6 +405,7 @@ class Model(nn.Module):
 
     def _get_actdata(self, obs, z_merged, action=None, deterministic=False):
         B = obs.shape[0]
+        b_inds = torch.arange(B, device=obs.device)
 
         if action is None:
             act0, hex1, hex2 = None, None, None
@@ -471,11 +472,8 @@ class Model(nn.Module):
                 act0 = dist_act0.sample()
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
-        dist_hex1 = CategoricalMasked(
-            logits=hex1_logits,
-            # Fancy (faster) version of mask_hex1[torch.arange(B, device=device), mainact]
-            mask=mask_hex1.gather(1, act0.view(B, 1, 1).expand(B, 1, 165)).squeeze(1)  # (B, 165)
-        )
+        import ipdb; ipdb.set_trace()  # noqa
+        dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
 
         if hex1 is None:
             if deterministic:
@@ -484,15 +482,8 @@ class Model(nn.Module):
                 hex1 = dist_hex1.sample()
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
-        dist_hex2 = CategoricalMasked(
-            logits=hex2_logits,
-            mask=(
-                mask_hex2.gather(1, act0.view(B, 1, 1, 1).expand(B, 1, 165, 165)).
-                squeeze(1).  # (B, 165, 165)
-                gather(1, hex1.view(B, 1, 1).expand(B, 1, 165)).
-                squeeze(1)  # (B, 165)
-            )
-        )
+        import ipdb; ipdb.set_trace()  # noqa
+        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
 
         if hex2 is None:
             if deterministic:
@@ -866,13 +857,14 @@ def prepare_wandb_log(
 ):
     wlog = {}
 
-    wlog.update({
-        "eval/ep_rew_mean": eval_multistats.ep_rew_mean,
-        "eval/ep_value_mean": eval_multistats.ep_value_mean,
-        "eval/ep_len_mean": eval_multistats.ep_len_mean,
-        "eval/ep_success_rate": eval_multistats.ep_is_success_mean,
-        "eval/ep_count": eval_multistats.num_episodes,
-    })
+    if eval_multistats.num_episodes > 0:
+        wlog.update({
+            "eval/ep_rew_mean": eval_multistats.ep_rew_mean,
+            "eval/ep_value_mean": eval_multistats.ep_value_mean,
+            "eval/ep_len_mean": eval_multistats.ep_len_mean,
+            "eval/ep_success_rate": eval_multistats.ep_is_success_mean,
+            "eval/ep_count": eval_multistats.num_episodes,
+        })
 
     for name, eval_sample_stats in eval_multistats.variants.items():
         wlog.update({
@@ -1105,6 +1097,10 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
         lr_schedule_value = torch.optim.lr_scheduler.LambdaLR(optimizer_value, lr_lambda=lambda _: 1)
         lr_schedule_distill = torch.optim.lr_scheduler.LambdaLR(optimizer_distill, lr_lambda=lambda _: 1)
 
+    # TODO: torch LR schedulers are very buggy and cannot be resumed reliably
+    # (they perform just 1 step for StepLR; they change the step size for LinearLR, ...etc)
+    # Also, advancing manually like this raises warning for not calling optimizer.step()
+    # Also, calling .step(N) raises deprecation warning...
     for _ in range(state.global_second // train_config["lr_scheduler_interval_s"]):
         lr_schedule_policy.step()
         lr_schedule_value.step()

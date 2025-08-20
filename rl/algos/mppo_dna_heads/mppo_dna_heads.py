@@ -521,7 +521,7 @@ class AgentNN(nn.Module):
         else:
             act0, hex1, hex2 = self.inverse_table[action].unbind(1)
 
-        action_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([len(MainAction), 165, 165], dim=-1)
+        act0_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([len(MainAction), 165, 165], dim=-1)
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
         mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
@@ -561,18 +561,18 @@ class AgentNN(nn.Module):
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
         # 3. MASK_ACTION - ie. allowed main action mask
-        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
+        mask_act0 = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+        mask_act0[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
-        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
+        mask_act0[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
 
         # Next, we sample:
         #
         # 1. Sample MAIN ACTION
-        dist_act0 = common.CategoricalMasked(logits=action_logits, mask=mask_action)
+        dist_act0 = common.CategoricalMasked(logits=act0_logits, mask=mask_act0)
 
         if act0 is None:
             if deterministic:
@@ -887,6 +887,9 @@ def main(args, agent=None):
 
     common.validate_tags(args.tags)
 
+    printargs = asdict(args).copy()
+    LOG.info("Args (after loading): %s" % printargs)
+
     seed = args.seed
 
     # XXX: seed logic is buggy, do not use
@@ -927,9 +930,20 @@ def main(args, agent=None):
 
     timers = {name: Timer(name) for name in ["all", "env", "forward", "backward", "loss"]}
 
+    # this one is separate and not logged to wandb
+    last_eval_timer = Timer("last_eval")
+    last_eval_timer.start()
+
     try:
         seeds = [np.random.randint(2**31) for i in range(args.num_envs)]
         envs = common.create_venv(VcmiEnv, args, seeds, sync=(args.num_envs == 1))
+
+        eval_args = args.__class__(**vars(args))
+        eval_args.envmaps = ["gym/generated/evaluation/8x512.vmap"]
+        eval_args.opponent_sbm_probs = [0, 1, 0]  # BattleAI
+        eval_args.env.random_stack_chance = 0
+        eval_args.env.num_envs = 1
+        eval_venv = common.create_venv(VcmiEnv, eval_args, seeds, sync=False)
 
         agent.state.seed = seed
 
@@ -996,6 +1010,44 @@ def main(args, agent=None):
 
             # XXX: eval during experience collection
             agent.eval()
+
+            if agent.state.current_rollout == 0 or last_eval_timer.peek() > 1800:
+                last_eval_timer.reset(start=True)
+                eval_log = {
+                    "eval/ep_rew_mean": 0,
+                    "eval/ep_len_mean": 0,
+                    "eval/ep_value_mean": 0,
+                    "eval/ep_is_success_mean": 0,
+                    "eval/num_episodes": 0,
+                }
+
+                with torch.no_grad():
+                    t = lambda x: torch.as_tensor(x, device=device)
+                    LOG.info("Evaluating...")
+                    e_obs, _ = eval_venv.reset()
+                    for vstep in range(0, 1000):
+                        e_obs = t(e_obs)
+                        e_actdata = agent.NN_policy.get_actdata(e_obs)
+                        e_obs, e_rew, e_term, e_trunc, e_info = eval_venv.step(e_actdata.action.cpu().numpy())
+
+                        # See notes/gym_vector.txt
+                        if "_final_info" in e_info:
+                            done_ids = np.flatnonzero(e_info["_final_info"])
+                            final_info = e_info["final_info"]
+                            eval_log["eval/ep_rew_mean"] += float(sum(final_info["episode"]["r"][done_ids]))
+                            eval_log["eval/ep_len_mean"] += float(sum(final_info["episode"]["l"][done_ids]))
+                            eval_log["eval/ep_value_mean"] += float(sum(final_info["net_value"][done_ids]))
+                            eval_log["eval/ep_is_success_mean"] += float(sum(final_info["is_success"][done_ids]))
+                            eval_log["eval/num_episodes"] += len(done_ids)
+
+                if eval_log["eval/num_episodes"] > 0:
+                    eval_log["eval/ep_rew_mean"] /= eval_log["eval/num_episodes"]
+                    eval_log["eval/ep_len_mean"] /= eval_log["eval/num_episodes"]
+                    eval_log["eval/ep_value_mean"] /= eval_log["eval/num_episodes"]
+                    eval_log["eval/ep_is_success_mean"] /= eval_log["eval/num_episodes"]
+
+                LOG.info("Done evaluating: %s" % eval_log)
+                wandb_log(eval_log, commit=True)
 
             # tstart = time.time()
             for step in range(0, args.num_steps):
@@ -1319,7 +1371,7 @@ def debug_args():
         resume=False,
         overwrite=[],
         notes=None,
-        # agent_load_file="/var/folders/m3/8p3yhh9171sbnhc7j_2xpk880000gn/T/x.pt",
+        # agent_load_file="/Users/simo/Projects/vcmi-gym/agent-T4.pt",
         agent_load_file=None,
         vsteps_total=0,
         seconds_total=0,

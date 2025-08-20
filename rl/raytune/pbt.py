@@ -63,10 +63,18 @@ def main(alg, exp_name, resume_path, config_overrides=[]):
     if resume_path:
         import torch
         import wandb
-        agent = torch.load(resume_path, weights_only=False)
+
+        # Force CPU if cuda is n/a (for loading GPU-trained models on mac)
+        map_location = None if torch.cuda.is_available() else "cpu"
+        agent = torch.load(resume_path, weights_only=False, map_location=map_location)
+
         config_overrides.insert(0, f"agent_load_file={repr(resume_path)}")
         run = wandb.Api().run(f"s-manolloff/vcmi-gym/{agent.args.run_id}")
         cfg = copy.deepcopy(run.config)
+
+        del cfg["_start_infos"]
+        del cfg["vastai_instance_id"]
+
         alg = cfg["_raytune"]["algo"]
         exp_name = cfg["_raytune"]["experiment_name"]
 

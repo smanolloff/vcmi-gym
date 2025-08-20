@@ -82,16 +82,31 @@ class CategoricalMasked(Categorical):
     def __init__(self, logits: torch.Tensor, mask: torch.Tensor):
         assert mask is not None
         self.mask = mask
-        self.mask_value = torch.tensor(torch.finfo(logits.dtype).min, dtype=logits.dtype)
-        masked_logits = logits.masked_fill(~mask, self.mask_value)
+        # XXX: With AMP/FP16, very large negative sentinels can underflow.
+        # ChatGPT says to prefer -inf?
+        # (that brings another issue though: NaNs may appear instead at some point later...)
+        # self.mask_value = torch.tensor(torch.finfo(logits.dtype).min, dtype=logits.dtype, device=logits.device)
+        masked_logits = logits.masked_fill(~mask, float("-inf"))
+
+        # Batches where mask has no True values cannot form a Categorical dist
+        # => zero those batches to prevent errors
+        self.invalid_batches = ~(mask.any(dim=-1))
+        masked_logits[self.invalid_batches] = 0
+
         super().__init__(logits=masked_logits)
 
+    # A "normalized" entropy of only the valid choices
+    # i.e. makes the entropy for the below distributions equal:
+    # - Categorical(logits=[2, 3])
+    # - CategoricalMasked(logits=[1, 2, 3], mask=[False, True, True])
+    # - CategoricalMasked(logits=[1, 2, 3, 4], mask=[False, True, True, False])
     def entropy(self):
-        # Highly negative logits don't result in 0 probs, so we must replace
-        # with 0s to ensure 0 contribution to the distribution's entropy
-        p_log_p = self.logits * self.probs
-        masked_p_log_p = p_log_p.masked_fill_(~self.mask, torch.tensor(0, dtype=p_log_p.dtype, device=p_log_p.device))
-        return -masked_p_log_p.sum(-1)
+        ent = super().entropy().masked_fill(self.invalid_batches, 0)
+        n_valid = self.mask.sum(dim=-1)
+        # avoid log(0) and log(1) (return 0 entropy there)
+        denom = torch.log(n_valid.float().clamp(min=2.0))
+        ent_norm = ent / denom
+        return ent_norm.where(n_valid > 1, 0)
 
 
 class SerializableCategoricalMasked:
@@ -207,7 +222,7 @@ def create_venv(env_cls, args, seeds=None, sync=False):
     # if args.num_envs > 1:
     #     vec_env = gym.vector.AsyncVectorEnv(funcs)
     # else:
-    funcs = [partial(env_creator, 0)]
+    funcs = [partial(env_creator, i) for i in range(args.num_envs)]
 
     if sync:
         vec_env = gym.vector.SyncVectorEnv(funcs, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
@@ -453,11 +468,13 @@ def setup_wandb(args, model, src_file):
     git = pygit2.Repository(os.path.dirname(__file__))
     now = datetime.utcnow()
     patch = git.diff().patch
+    patchid = git.diff().patchid
 
     start_info = dict(
         git_head=str(git.head.target),
         git_head_message=git[git.head.target].message,
         git_status={k: v.name for k, v in git.status().items()},
+        git_patchid=patchid,
         timestamp=now.isoformat(timespec='milliseconds'),
         vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"),
     )
@@ -482,12 +499,19 @@ def setup_wandb(args, model, src_file):
     )
 
     start_infos = wandb.config.get("_start_infos", [])
-    start_infos.append(start_info)
-    # Store VastAI instance ID separately (outside of the array) for UI convenience
-    wandb.config.update(dict(vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"), _start_infos=start_infos), allow_val_change=True)
 
-    # Must be after wandb.init
-    if start_info["git_is_dirty"]:
+    # If last start_info is identical to this one, do not insert a new one
+    # Instead, only update "reinit_" fields (to avoid hundreds of start_info
+    # objects with PBT)
+    if (
+        len(start_infos) > 0
+        and start_info["git_head"] == start_infos[-1]["git_head"]
+        and start_info["git_patchid"] == start_infos[-1].get("git_patchid", None)
+    ):
+        reinit_count = start_infos[-1].get("reinit_count", 0)
+        start_infos[-1]["reinit_count"] = reinit_count + 1
+        start_infos[-1]["reinit_timestamp"] = start_info["timestamp"]
+    elif start_info["git_is_dirty"]:
         art = wandb.Artifact(name=start_info["git_diff_artifact"], type="text")
         art.description = f"Git diff for HEAD@{start_info['git_head']} from {start_info['timestamp']}"
         with tempfile.NamedTemporaryFile(mode='w+', delete=True) as temp_file:
@@ -499,7 +523,11 @@ def setup_wandb(args, model, src_file):
             temp_file.flush()
             art.add_file(temp_file.name, name="diff.patch")
             wandb.run.log_artifact(art)
+    else:
+        start_infos.append(start_info)
 
+    # Store VastAI instance ID separately (outside of the array) for UI convenience
+    wandb.config.update(dict(vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"), _start_infos=start_infos), allow_val_change=True)
     wandb.watch(model, log="all", log_graph=True, log_freq=1000)
     return wandb
 
