@@ -1296,5 +1296,5 @@ if __name__ == "__main__":
         loglevel=args.loglevel,
         dry_run=args.dry_run,
         no_wandb=args.no_wandb,
-        seconds_total=10
+        # seconds_total=10
     )
