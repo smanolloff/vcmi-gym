@@ -914,27 +914,18 @@ def prepare_wandb_log(
     return wlog
 
 
-def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=float("inf")):
-    if resume_config:
-        with open(resume_config, "r") as f:
-            print(f"Resuming from config: {f.name}")
-            config = json.load(f)
-
-        run_id = config["run"]["id"]
-        config["run"]["resumed_config"] = resume_config
-    else:
-        run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
-        config["run"] = dict(
-            id=run_id,
-            name=config["name_template"].format(id=run_id, datetime=datetime.utcnow().strftime("%Y%m%d_%H%M%S")),
-            out_dir=os.path.abspath(config["out_dir_template"].format(id=run_id)),
-            resumed_config=None,
-        )
+def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_on_exit=True):
+    run_id = config["run"]["id"]
+    resumed_config = config["run"]["resumed_config"]
 
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
     with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
-        print(f"Saving new config to: {f.name}")
-        json.dump(config, f, indent=4)
+        msg = f"Saving new config to: {f.name}"
+        if dry_run:
+            print(f"{msg} (--dry-run)")
+        else:
+            print(msg)
+            json.dump(config, f, indent=4)
 
     # assert config["checkpoint"]["interval_s"] > config["eval"]["interval_s"]
     assert config["checkpoint"]["permanent_interval_s"] > config["eval"]["interval_s"]
@@ -988,7 +979,7 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
 
     logger.debug("Initialized models and optimizers (autocast=%s)" % train_config["torch_autocast"])
 
-    if resume_config:
+    if resumed_config:
         load_checkpoint(
             logger=logger,
             dry_run=dry_run,
@@ -1006,6 +997,12 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
             s3_config=checkpoint_config["s3"],
             device=device,
         )
+
+        state.current_rollout = 0
+        state.current_timestep = 0
+        state.current_second = 0
+        state.current_episode = 0
+        state.current_vstep = 0
 
         # lr is lost after loading weights
         optimizer_policy.param_groups[0]["lr"] = learning_rate
@@ -1104,10 +1101,36 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
         lr_schedule_value.step()
         lr_schedule_distill.step()
 
+    global_second_start = state.global_second
+
+    save_fn = partial(
+        save_checkpoint,
+        logger=logger,
+        dry_run=dry_run,
+        models={"dna": model},
+        optimizers={
+            "policy": optimizer_policy,
+            "value": optimizer_value,
+            "distill": optimizer_distill,
+        },
+        scalers={"default": scaler},
+        states={"default": state},
+        out_dir=config["run"]["out_dir"],
+        run_id=run_id,
+        optimize_local_storage=checkpoint_config["optimize_local_storage"],
+        s3_config=None,
+        config=config,
+        uploading_event=threading.Event(),  # never skip this upload
+        timestamped=True,
+    )
+
     try:
-        while state.current_rollout < total_rollouts:
-            state.global_second += int(timers["all"].peek())
-            state.current_second = int(timers["all"].peek())
+        while True:
+            state.global_second = global_second_start + int(cumulative_timer_values["all"])
+            state.current_second = int(cumulative_timer_values["all"])
+
+            if state.current_second >= seconds_total:
+                break
 
             [v.reset(start=(k == "all")) for k, v in timers.items()]
 
@@ -1191,47 +1214,13 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
                 else:
                     logger.info("Good checkpoint (eval_net_value=%f, eval_net_value_best=%f), will save it" % (eval_net_value, eval_net_value_best))
                     eval_net_value_best = eval_net_value
-                    thread = threading.Thread(target=save_checkpoint, kwargs=dict(
-                        logger=logger,
-                        dry_run=dry_run,
-                        models={"dna": model},
-                        optimizers={
-                            "policy": optimizer_policy,
-                            "value": optimizer_value,
-                            "distill": optimizer_distill,
-                        },
-                        scalers={"default": scaler},
-                        states={"default": state},
-                        out_dir=config["run"]["out_dir"],
-                        run_id=run_id,
-                        optimize_local_storage=checkpoint_config["optimize_local_storage"],
-                        s3_config=checkpoint_config["s3"],
-                        uploading_event=uploading_event
-                    ))
+                    thread = threading.Thread(target=save_fn, kwargs=dict(uploading_event=uploading_event, config=None))  # no need to save config here
                     thread.start()
 
             if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:
                 permanent_checkpoint_timer.reset(start=True)
                 logger.info("Time for a permanent checkpoint")
-                thread = threading.Thread(target=save_checkpoint, kwargs=dict(
-                    logger=logger,
-                    dry_run=dry_run,
-                    models={"dna": model},
-                    optimizers={
-                        "policy": optimizer_policy,
-                        "value": optimizer_value,
-                        "distill": optimizer_distill,
-                    },
-                    scalers={"default": scaler},
-                    states={"default": state},
-                    out_dir=config["run"]["out_dir"],
-                    run_id=run_id,
-                    optimize_local_storage=checkpoint_config["optimize_local_storage"],
-                    s3_config=checkpoint_config["s3"],
-                    uploading_event=threading.Event(),  # never skip this upload
-                    permanent=True,
-                    config=config,
-                ))
+                thread = threading.Thread(target=save_fn, kwargs=dict(timestamped=True))
                 thread.start()
 
             wlog = prepare_wandb_log(
@@ -1264,27 +1253,33 @@ def main(config, resume_config, loglevel, dry_run, no_wandb, total_rollouts=floa
         ret_rew = safe_mean(list(state.rollout_rew_queue_1000)[-min(300, state.current_rollout):])
         ret_value = safe_mean(list(state.rollout_net_value_queue_1000)[-min(300, state.current_rollout):])
 
-        return ret_rew, ret_value, cumulative_timer_values
+        return ret_rew, ret_value, save_fn
     finally:
-        save_checkpoint(
-            logger=logger,
-            dry_run=dry_run,
-            models={"dna": model},
-            optimizers={
-                "policy": optimizer_policy,
-                "value": optimizer_value,
-                "distill": optimizer_distill,
-            },
-            scalers={"default": scaler},
-            states={"default": state},
-            out_dir=config["run"]["out_dir"],
-            run_id=run_id,
-            optimize_local_storage=checkpoint_config["optimize_local_storage"],
-            s3_config=None,
-            uploading_event=threading.Event(),  # never skip this upload
-            permanent=True,
-            config=config,
+        if save_on_exit:
+            save_fn(timestamped=True)
+
+
+# This is in a separate function to prevent vars from being global
+def init_config(args):
+    if args.dry_run:
+        args.no_wandb = True
+
+    if args.f:
+        with open(args.f, "r") as f:
+            print(f"Resuming from config: {f.name}")
+            config = json.load(f)
+        config["run"]["resumed_config"] = args.f
+    else:
+        from .config import config
+        run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
+        config["run"] = dict(
+            id=run_id,
+            name=config["name_template"].format(id=run_id, datetime=datetime.utcnow().strftime("%Y%m%d_%H%M%S")),
+            out_dir=os.path.abspath(config["out_dir_template"].format(id=run_id)),
+            resumed_config=None,
         )
+
+    return config
 
 
 if __name__ == "__main__":
@@ -1294,15 +1289,12 @@ if __name__ == "__main__":
     parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
     parser.add_argument("--loglevel", metavar="LOGLEVEL", default="INFO", help="DEBUG | INFO | WARN | ERROR")
     args = parser.parse_args()
+    config = init_config(args)
 
-    if args.dry_run:
-        args.no_wandb = True
-
-    from .config import config
     main(
         config=config,
-        resume_config=args.f,
         loglevel=args.loglevel,
         dry_run=args.dry_run,
         no_wandb=args.no_wandb,
+        seconds_total=10
     )

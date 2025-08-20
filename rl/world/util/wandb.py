@@ -4,7 +4,7 @@ import tempfile
 from datetime import datetime
 
 
-def setup_wandb(config, model, src_file):
+def setup_wandb(config, model, src_file, wandb_kwargs={}):
     import wandb
 
     resumed = config["run"]["resumed_config"] is not None
@@ -26,19 +26,22 @@ def setup_wandb(config, model, src_file):
     else:
         start_info.update(git_is_dirty=False)
 
-    wandb.init(
+    kwargs = dict(
         project="vcmi-gym",
         group=config["wandb_group"],
         name=config["run"]["name"],
         id=config["run"]["id"],
-        resume="must" if resumed else "never",
-        # resume="allow",  # XXX: reuse id for insta-failed runs
+        # resume="must" if resumed else "never",
+        resume="allow",  # XXX: reuse id for insta-failed runs
         config=config,
         sync_tensorboard=False,
         save_code=False,  # code saved manually below
         allow_val_change=resumed,
         # settings=wandb.Settings(_disable_stats=True),  # disable System/ stats
     )
+
+    kwargs.update(wandb_kwargs)
+    wandb.init(**kwargs)
 
     start_infos = wandb.config.get("_start_infos", [])
     start_infos.append(start_info)

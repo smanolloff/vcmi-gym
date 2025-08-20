@@ -104,21 +104,21 @@ def load_checkpoint(
     filelist = [k1 for k0, v0 in files.items() for k1, v1 in v0.items()]
     logger.info(dict(event="Loading checkpoint...", filelist=filelist))
 
-    def _cleanup(filename):
+    def _backup(filename):
         if not dry_run and not optimize_local_storage:
             backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
-            logger.debug(f"Backup resumed model weights as {backname}")
+            logger.debug(f"Backup loaded file as {backname}")
             shutil.copy2(filename, backname)
 
     for f_model, model in files["models"].items():
         _s3_download(logger, dry_run, s3_config, f_model)
         model.load_state_dict(torch.load(f_model, weights_only=True, map_location=device), strict=True)
-        _cleanup(f_model)
+        _backup(f_model)
 
     for f_optimizer, optimizer in files["optimizers"].items():
         _s3_download(logger, dry_run, s3_config, f_optimizer)
         optimizer.load_state_dict(torch.load(f_optimizer, weights_only=True, map_location=device))
-        _cleanup(f_optimizer)
+        _backup(f_optimizer)
 
     for f_scaler, scaler in files["scalers"].items():
         try:
@@ -129,14 +129,14 @@ def load_checkpoint(
             else:
                 raise
         scaler.load_state_dict(torch.load(f_scaler, weights_only=True, map_location=device))
-        _cleanup(f_scaler)
+        _backup(f_scaler)
 
     for f_state, state in files["states"].items():
         assert callable(state.to_json) and callable(state.from_json)
         _s3_download(logger, dry_run, s3_config, f_state)
         with open(f_state, "r") as f:
             state.from_json(f.read())
-        _cleanup(f_state)
+        _backup(f_state)
 
 
 def save_checkpoint(
@@ -150,12 +150,12 @@ def save_checkpoint(
     optimize_local_storage,
     s3_config,
     uploading_event,
-    permanent=False,
+    timestamped=False,
     config=None,
     states={},      # dict with name=>obj, where obj has .to_json() and .from_json(string)
 ):
-    if permanent:
-        assert config, "config is also needed for permanent checkpoints"
+    if timestamped:
+        assert config, "config is also needed for timestamped checkpoints"
         prefix = f"{run_id}-{time.time():.0f}"
     else:
         prefix = run_id
@@ -210,7 +210,7 @@ def save_checkpoint(
         logger.info(msg)
         # Prevent corrupted checkpoints if terminated during torch.save
 
-        if permanent:
+        if config:
             with open(os.path.join(out_dir, f"{prefix}-config.json"), "w") as f:
                 logger.debug(f"Saving config to: {f.name}")
                 json.dump(config, f, indent=4, sort_keys=False)
