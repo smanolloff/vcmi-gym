@@ -472,7 +472,6 @@ class Model(nn.Module):
                 act0 = dist_act0.sample()
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
-        import ipdb; ipdb.set_trace()  # noqa
         dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
 
         if hex1 is None:
@@ -482,7 +481,6 @@ class Model(nn.Module):
                 hex1 = dist_hex1.sample()
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
-        import ipdb; ipdb.set_trace()  # noqa
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
 
         if hex2 is None:
