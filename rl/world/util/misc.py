@@ -53,6 +53,7 @@ def aggregate_metrics(queue):
 def timer_stats(timers):
     res = {}
     t_all = timers["all"].peek()
+
     for k, v in timers.items():
         # res[f"timer/{k}"] = v.peek()
         if k != "all":
@@ -60,6 +61,7 @@ def timer_stats(timers):
 
     t_other = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
     res["timer_rel/other"] = t_other / t_all
+    res["timer_abs/all"] = t_all
     return res
 
 

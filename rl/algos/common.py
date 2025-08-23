@@ -78,6 +78,31 @@ class Timer:
 # https://boring-guy.sh/posts/masking-rl/
 # combined with
 # https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/blob/v2.2.1/sb3_contrib/common/maskable/distributions.py#L18
+
+# When to use −inf:
+# - You are feeding logits to softmax/log-softmax (attention, CE) and you can
+# guarantee that each row has at least one unmasked element.
+# - Reason: exp(−inf)=0 gives exact zero probability for masked positions and
+# clean gradients.
+# - Caveat: if an entire row is masked, common softmax implementations compute
+# max=−inf, then subtract → (−inf)−(−inf)=NaN, and the whole row becomes NaN.
+#
+# When to use torch.finfo(dtype).min:
+# - Rows can be fully masked and you do not insert a guaranteed "dummy" valid
+# position, or your kernel does not tolerate rows of all −inf.
+# - With dtype-min (a very large finite negative), the row’s max is finite,
+# subtraction is well-defined, and you avoid the NaN-from-(−inf)−(−inf) pitfall.
+# - Trade-off: masked probabilities are not exactly 0; if the whole row is
+# masked they become uniform (not meaningful). You must then null out the
+# downstream result (e.g., multiply the context by a need mask) and you must
+# not sample from such rows.
+#
+# AMP/FP16 nuance:
+# - Do not use ad-hoc "large negatives" like −1e9 in FP16: they saturate to −inf
+# on cast, bringing back the "all −inf" NaN issue. Use either exact −inf
+# (with a guarantee of at least one valid per row or a dummy token), or use
+# dtype-min if you need finite values.
+
 class CategoricalMasked(Categorical):
     def __init__(self, logits: torch.Tensor, mask: torch.Tensor):
         assert mask is not None

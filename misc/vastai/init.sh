@@ -92,14 +92,14 @@ vastai label instance $VASTAI_INSTANCE_ID initializing
 if ! [ -d aws ]; then
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
     unzip awscliv2.zip
-    ./aws/install
-    mkdir ~/.aws
-    cat <<-EOF >>~/.aws/credentials
+    ./aws/install --update
+    mkdir -p ~/.aws
+    cat <<-EOF >~/.aws/credentials
 [default]
 aws_access_key_id = $AWS_ACCESS_KEY
 aws_secret_access_key = $AWS_SECRET_KEY
 EOF
-    cat <<-EOF >>~/.aws/config
+    cat <<-EOF >~/.aws/config
 [default]
 region = eu-north-1
 output = json
@@ -113,10 +113,9 @@ cd vcmi-gym
 #      => use bleeding edge
 #       (dev version needs to be bumped every 2 months)
 sed -i 's/^torch/#torch/' requirements.txt
-pip install --pre torch==2.8.0.dev20250627+cu128 --index-url https://download.pytorch.org/whl/nightly/cu128
-pip install -r requirements.txt
-pip install jax[cuda12]
-pip install vastai
+pip install --break-system-packages --pre torch==2.8.0.dev20250627+cu128 --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install --break-system-packages -r requirements.txt
+pip install --break-system-packages jax[cuda12]
 
 #
 # ~/.bashrc setup
@@ -139,7 +138,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 export VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
-cd $WORKSPACE/vcmi-gym
+cd /workspace/vcmi-gym
 set -x
 EOF
 
