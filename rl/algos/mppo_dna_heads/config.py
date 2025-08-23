@@ -102,7 +102,11 @@ config = dict(
     model=dict(
         z_size_other=32,
         z_size_hex=32,
-        z_size_merged=1024
+        z_size_merged=1024,
+
+        # mppo_dna_heads_trans only
+        d_model=32,
+        num_layers=1,
     ),
 )
 
@@ -126,6 +130,6 @@ if os.getenv("VASTAI", None) != "1":
     config["wandb_log_interval_s"] = 5
     config["checkpoint"]["interval_s"] = 10
 
-    config["model"]["z_size_other"] = 4
-    config["model"]["z_size_hex"] = 4
+    config["model"]["z_size_other"] = 8
+    config["model"]["z_size_hex"] = 8
     config["model"]["z_size_merged"] = 16

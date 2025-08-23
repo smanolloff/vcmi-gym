@@ -709,7 +709,6 @@ def train_model(
             mb_logprobs = b_logprobs[mb_inds]
 
             newactdata = model.get_actdata(mb_obs, action=mb_actions)
-            newvalue = model.get_value(mb_obs)
 
             logratio = newactdata.logprob - mb_logprobs
             ratio = logratio.exp()
@@ -757,7 +756,6 @@ def train_model(
             mb_actions = b_actions[mb_inds]
             mb_logprobs = b_logprobs[mb_inds]
 
-            newactdata = model.get_actdata(mb_obs, action=mb_actions)
             newvalue = model.get_value(mb_obs)
 
             # Value loss
@@ -804,7 +802,7 @@ def train_model(
             # Compute policy and value targets
             with torch.no_grad():
                 old_actdata = old_model_policy.get_actdata(mb_obs)
-                value_target = model.get_value(mb_obs)
+                value_target = model.model_value.get_value(mb_obs)
 
             # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
             #     (if actions differ, masks will differ and KLD will become NaN)
