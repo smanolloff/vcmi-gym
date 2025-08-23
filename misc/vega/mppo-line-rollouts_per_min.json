@@ -1,0 +1,96 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Line plot of rollouts processed per second.",
+  "data": {"name": "wandb"},
+  "title": {"text": "rollouts/min"},
+  "params": [
+    {
+      "name": "filter_above",
+      "value": "${string:Filter above:10}"
+    }
+  ],
+  "transform": [
+    {"calculate": "datum[\"global/num_rollouts\"]", "as": "num_rollouts"},
+    {"calculate": "toDate(datum._timestamp * 1000)", "as": "time"},
+    {
+      "window": [
+        {"op": "lag", "field": "num_rollouts", "as": "prev_rollouts"},
+        {"op": "lag", "field": "_timestamp", "as": "prev_ts"}
+      ],
+      "frame": [-1, 0]
+    },
+    {
+      "calculate": "60 * (datum.num_rollouts - datum.prev_rollouts) / (datum._timestamp - datum.prev_ts)",
+      "as": "rollouts_per_minute"
+    },
+    {
+      "filter": "filter_above == 0 || (datum.rollouts_per_minute < filter_above)"
+    },
+    {
+      "filter": "isValid(datum.rollouts_per_minute) && datum.rollouts_per_minute > 1"
+    }
+  ],
+
+  "encoding": {
+    "x": {
+      "field": "_step",
+      "type": "quantitative",
+      "axis": {"grid": false, "title": ""}
+    }
+  },
+
+  "layer": [
+    {
+      "encoding": {
+        "y": {
+          "field": "rollouts_per_minute",
+          "type": "quantitative",
+          "axis": {"tickCount": 5, "format": ".3s", "title": ""}
+        }
+      },
+      "layer": [
+        {
+          "selection": {"grid": {"type": "interval", "bind": "scales"}},
+          "mark": "line",
+          "encoding": {
+            "size": {"value": 2}
+          }
+        },
+        {
+          "mark": "point",
+          "transform": [
+            {"filter": {"selection": "hover"}}
+          ],
+          "encoding": {
+            "y": {"field": "rollouts_per_minute", "type": "quantitative"}
+          }
+        }
+      ]
+    },
+    {
+      "mark": {"type": "rule"},
+      "encoding": {
+        "tooltip": [
+          {"field": "_step", "type": "quantitative", "title": "step"},
+          {"field": "time", "type": "temporal", "format": "%b %e %I:%M %p"},
+          {"field": "rollouts_per_minute", "type": "quantitative", "format": ".3s", "title": "rollouts/s"}
+        ],
+        "opacity": {
+          "condition": {"value": 3, "selection": "hover"},
+          "value": 0
+        }
+      },
+      "selection": {
+        "hover": {
+          "type": "single",
+          "fields": ["_step"],
+          "nearest": true,
+          "on": "mouseover",
+          "empty": "none",
+          "clear": "mouseout"
+        }
+      }
+    }
+  ]
+}
+

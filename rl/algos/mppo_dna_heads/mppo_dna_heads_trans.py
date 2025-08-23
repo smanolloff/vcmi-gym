@@ -947,7 +947,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
 
-    torch.autograd.set_detect_anomaly(True)
+    # torch.autograd.set_detect_anomaly(True)  # debug
     torch.set_float32_matmul_precision("high")
     torch.backends.cuda.matmul.allow_tf32 = True
 

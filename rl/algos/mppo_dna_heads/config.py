@@ -60,9 +60,9 @@ config = dict(
     ),
     eval=dict(
         env_variants={
-            "StupidAI.town": eval_variant(opponent="StupidAI", town_chance=100),
-            "StupidAI.open": eval_variant(opponent="StupidAI", town_chance=0),
-            "BattleAI.town": eval_variant(opponent="BattleAI", town_chance=100),
+            # "StupidAI.town": eval_variant(opponent="StupidAI", town_chance=100),
+            # "StupidAI.open": eval_variant(opponent="StupidAI", town_chance=0),
+            # "BattleAI.town": eval_variant(opponent="BattleAI", town_chance=100),
             "BattleAI.open": eval_variant(opponent="BattleAI", town_chance=0),
         },
         num_vsteps=1000,
@@ -73,7 +73,7 @@ config = dict(
         env=dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
-            num_envs=100,
+            num_envs=50,
             sync=False,
             kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
         ),
@@ -81,7 +81,7 @@ config = dict(
         num_minibatches=20,             # mb_size = num_steps / num_minibatches
         update_epochs=2,
 
-        learning_rate=1e-4,
+        learning_rate=1e-3,
         lr_scheduler_mod="torch.optim.lr_scheduler",
         lr_scheduler_cls="LinearLR",
         lr_scheduler_kwargs=dict(start_factor=1, end_factor=1e-2, total_iters=100),
@@ -114,9 +114,9 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 
 # Debug
 if os.getenv("VASTAI", None) != "1":
-    config["train"]["num_vsteps"] = 16
-    config["train"]["num_minibatches"] = 4
-    config["train"]["update_epochs"] = 2
+    config["train"]["num_vsteps"] = 2
+    config["train"]["num_minibatches"] = 1
+    config["train"]["update_epochs"] = 1
     config["train"]["env"]["num_envs"] = 1
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     config["eval"]["num_vsteps"] = 100

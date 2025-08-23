@@ -74,64 +74,47 @@ class Timer:
             res += (time.perf_counter() - self._started_at)
         return res
 
-
-# https://boring-guy.sh/posts/masking-rl/
-# combined with
-# https://github.com/Stable-Baselines-Team/stable-baselines3-contrib/blob/v2.2.1/sb3_contrib/common/maskable/distributions.py#L18
-
-# When to use −inf:
-# - You are feeding logits to softmax/log-softmax (attention, CE) and you can
-# guarantee that each row has at least one unmasked element.
-# - Reason: exp(−inf)=0 gives exact zero probability for masked positions and
-# clean gradients.
-# - Caveat: if an entire row is masked, common softmax implementations compute
-# max=−inf, then subtract → (−inf)−(−inf)=NaN, and the whole row becomes NaN.
-#
-# When to use torch.finfo(dtype).min:
-# - Rows can be fully masked and you do not insert a guaranteed "dummy" valid
-# position, or your kernel does not tolerate rows of all −inf.
-# - With dtype-min (a very large finite negative), the row’s max is finite,
-# subtraction is well-defined, and you avoid the NaN-from-(−inf)−(−inf) pitfall.
-# - Trade-off: masked probabilities are not exactly 0; if the whole row is
-# masked they become uniform (not meaningful). You must then null out the
-# downstream result (e.g., multiply the context by a need mask) and you must
-# not sample from such rows.
-#
-# AMP/FP16 nuance:
-# - Do not use ad-hoc "large negatives" like −1e9 in FP16: they saturate to −inf
-# on cast, bringing back the "all −inf" NaN issue. Use either exact −inf
-# (with a guarantee of at least one valid per row or a dummy token), or use
-# dtype-min if you need finite values.
-
 class CategoricalMasked(Categorical):
-    def __init__(self, logits: torch.Tensor, mask: torch.Tensor):
+    def __init__(self, logits: torch.Tensor, mask: torch.Tensor, sentinel: int = 0):
         assert mask is not None
+        self.sentinel = sentinel  # fallback sample value if mask is all-false
         self.mask = mask
-        # XXX: With AMP/FP16, very large negative sentinels can underflow.
-        # ChatGPT says to prefer -inf?
-        # (that brings another issue though: NaNs may appear instead at some point later...)
-        # self.mask_value = torch.tensor(torch.finfo(logits.dtype).min, dtype=logits.dtype, device=logits.device)
-        masked_logits = logits.masked_fill(~mask, float("-inf"))
-
-        # Batches where mask has no True values cannot form a Categorical dist
-        # => zero those batches to prevent errors
         self.invalid_batches = ~(mask.any(dim=-1))
-        masked_logits[self.invalid_batches] = 0
+
+        # Batches where logits are all -inf cannot form a Categorical dist
+        # => zero those batches to prevent errors
+        masked_logits = (
+            logits
+            .masked_fill(~mask, float("-inf"))
+            .masked_fill(self.invalid_batches.unsqueeze(-1), 0)
+        )
 
         super().__init__(logits=masked_logits)
 
-    # A "normalized" entropy of only the valid choices
+    # Compute a "normalized" entropy of only the valid choices,
     # i.e. makes the entropy for the below distributions equal:
     # - Categorical(logits=[2, 3])
     # - CategoricalMasked(logits=[1, 2, 3], mask=[False, True, True])
     # - CategoricalMasked(logits=[1, 2, 3, 4], mask=[False, True, True, False])
     def entropy(self):
-        ent = super().entropy().masked_fill(self.invalid_batches, 0)
+        # XXX: do NOT call super() here; instead, mask logits first to avoid
+        # NaNs in backprop when autoscaler (and anomaly detection) are enabled.
+        p_log_p = self.probs * self.logits.where(self.mask, 0)
+        ent = -p_log_p.sum(-1)
+
         n_valid = self.mask.sum(dim=-1)
         # avoid log(0) and log(1) (return 0 entropy there)
         denom = torch.log(n_valid.float().clamp(min=2.0))
         ent_norm = ent / denom
         return ent_norm.where(n_valid > 1, 0)
+
+    # Avoid degenerate uniform logprobs for invalid batches
+    def log_prob(self, x):
+        return super().log_prob(x).masked_fill(self.invalid_batches, 0)
+
+    # Return a sentinel value instead of sampling from invalid batches
+    def sample(self):
+        return super().sample().masked_fill(self.invalid_batches, self.sentinel)
 
 
 class SerializableCategoricalMasked:

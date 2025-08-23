@@ -1,0 +1,96 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Line plot of vsteps processed per second.",
+  "data": {"name": "wandb"},
+  "title": {"text": "vsteps/s"},
+  "params": [
+    {
+      "name": "filter_above",
+      "value": "${string:Filter above:1000}"
+    }
+  ],
+  "transform": [
+    {"calculate": "datum[\"global/global_num_timesteps\"]", "as": "num_vsteps"},
+    {"calculate": "toDate(datum._timestamp * 1000)", "as": "time"},
+    {
+      "window": [
+        {"op": "lag", "field": "num_vsteps", "as": "prev_vsteps"},
+        {"op": "lag", "field": "_timestamp", "as": "prev_ts"}
+      ],
+      "frame": [-1, 0]
+    },
+    {
+      "calculate": "(datum.num_vsteps - datum.prev_vsteps) / (datum._timestamp - datum.prev_ts)",
+      "as": "vsteps_per_second"
+    },
+    {
+      "filter": "filter_above == 0 || (datum.vsteps_per_second < filter_above)"
+    },
+    {
+      "filter": "isValid(datum.vsteps_per_second) && datum.vsteps_per_second > 1"
+    }
+  ],
+
+  "encoding": {
+    "x": {
+      "field": "_step",
+      "type": "quantitative",
+      "axis": {"grid": false, "title": ""}
+    }
+  },
+
+  "layer": [
+    {
+      "encoding": {
+        "y": {
+          "field": "vsteps_per_second",
+          "type": "quantitative",
+          "axis": {"tickCount": 5, "format": ".3s", "title": ""}
+        }
+      },
+      "layer": [
+        {
+          "selection": {"grid": {"type": "interval", "bind": "scales"}},
+          "mark": "line",
+          "encoding": {
+            "size": {"value": 2}
+          }
+        },
+        {
+          "mark": "point",
+          "transform": [
+            {"filter": {"selection": "hover"}}
+          ],
+          "encoding": {
+            "y": {"field": "vsteps_per_second", "type": "quantitative"}
+          }
+        }
+      ]
+    },
+    {
+      "mark": {"type": "rule"},
+      "encoding": {
+        "tooltip": [
+          {"field": "_step", "type": "quantitative", "title": "step"},
+          {"field": "time", "type": "temporal", "format": "%b %e %I:%M %p"},
+          {"field": "vsteps_per_second", "type": "quantitative", "format": ".3s", "title": "vsteps/s"}
+        ],
+        "opacity": {
+          "condition": {"value": 3, "selection": "hover"},
+          "value": 0
+        }
+      },
+      "selection": {
+        "hover": {
+          "type": "single",
+          "fields": ["_step"],
+          "nearest": true,
+          "on": "mouseover",
+          "empty": "none",
+          "clear": "mouseout"
+        }
+      }
+    }
+  ]
+}
+
