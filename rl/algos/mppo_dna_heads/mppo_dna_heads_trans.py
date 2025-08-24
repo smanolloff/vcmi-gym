@@ -272,8 +272,8 @@ class Model(nn.Module):
 
         dmodel = config["d_model"]
 
-        self.encoder_other = nn.Sequential(nn.Linear(self.dim_other, dmodel), nn.FP32LayerNorm(dmodel))
-        self.encoder_hexes = nn.Sequential(nn.Linear(STATE_SIZE_ONE_HEX, dmodel), nn.FP32LayerNorm(dmodel))
+        self.encoder_other = nn.Sequential(nn.Linear(self.dim_other, dmodel), nn.LayerNorm(dmodel))
+        self.encoder_hexes = nn.Sequential(nn.Linear(STATE_SIZE_ONE_HEX, dmodel), nn.LayerNorm(dmodel))
         self.pos_hex = nn.Parameter(torch.zeros(165, dmodel))
 
         self.transformer = nn.TransformerEncoder(

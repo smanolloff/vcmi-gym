@@ -1218,7 +1218,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
             if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:
                 permanent_checkpoint_timer.reset(start=True)
                 logger.info("Time for a permanent checkpoint")
-                thread = threading.Thread(target=save_fn, kwargs=dict(timestamped=True))
+                thread = threading.Thread(target=save_fn, kwargs=dict(timestamped=True, s3_config=checkpoint_config["s3"]))
                 thread.start()
 
             wlog = prepare_wandb_log(
