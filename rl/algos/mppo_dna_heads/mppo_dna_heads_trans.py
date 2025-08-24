@@ -356,7 +356,7 @@ class Model(nn.Module):
         tr_in = torch.cat((z_other.unsqueeze(1), z_hexes), dim=1)   # (B, 166, d)
         return self.transformer(tr_in)                              # (B, 166, d)
 
-    def _categorical_masked(logits, mask):
+    def _categorical_masked(self, logits, mask):
         with torch.autocast(logits.device.type, enabled=False):
             return CategoricalMasked(logits=logits.float(), mask=mask)
 
