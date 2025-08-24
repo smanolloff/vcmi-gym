@@ -272,8 +272,8 @@ class Model(nn.Module):
 
         dmodel = config["d_model"]
 
-        self.encoder_other = nn.Sequential(nn.Linear(self.dim_other, dmodel), nn.LayerNorm(dmodel))
-        self.encoder_hexes = nn.Sequential(nn.Linear(STATE_SIZE_ONE_HEX, dmodel), nn.LayerNorm(dmodel))
+        self.encoder_other = nn.Sequential(nn.Linear(self.dim_other, dmodel), nn.FP32LayerNorm(dmodel))
+        self.encoder_hexes = nn.Sequential(nn.Linear(STATE_SIZE_ONE_HEX, dmodel), nn.FP32LayerNorm(dmodel))
         self.pos_hex = nn.Parameter(torch.zeros(165, dmodel))
 
         self.transformer = nn.TransformerEncoder(
@@ -356,6 +356,10 @@ class Model(nn.Module):
         tr_in = torch.cat((z_other.unsqueeze(1), z_hexes), dim=1)   # (B, 166, d)
         return self.transformer(tr_in)                              # (B, 166, d)
 
+    def _categorical_masked(logits, mask):
+        with torch.autocast(logits.device.type, enabled=False):
+            return CategoricalMasked(logits=logits.float(), mask=mask)
+
     def _get_value(self, z):
         z_g = z[:, 0]
         z_h = z[:, 1:]
@@ -372,33 +376,34 @@ class Model(nn.Module):
         z_h = z[:, 1:]
         b_inds = self._idx("B", obs.size(0))
 
-        act0, hex1, hex2 = None, None, None
         mask_act0, mask_hex1, mask_hex2 = self._build_masks(obs)
 
         # act0
         logits_act0 = self._act0_logits(z_g, z_h, mask_hex1)
-        dist_act0 = CategoricalMasked(logits=logits_act0, mask=mask_act0)
+        dist_act0 = self._categorical_masked(logits_act0, mask_act0)
         act0 = dist_act0.sample()
         act0_emb = self.emb_act0(act0)
 
         # hex1 | act0
         logits_hex1 = self._hex1_logits(z_h, act0_emb)
-        dist_hex1 = CategoricalMasked(logits=logits_hex1, mask=mask_hex1[b_inds, act0])
+        dist_hex1 = self._categorical_masked(logits_hex1, mask_hex1[b_inds, act0])
         hex1 = dist_hex1.sample()
 
         # hex2 | (act0, hex1)
         logits_hex2 = self._hex2_logits(z_h, act0_emb, hex1, b_inds)
-        dist_hex2 = CategoricalMasked(logits=logits_hex2, mask=mask_hex2[b_inds, act0, hex1])
+        dist_hex2 = self._categorical_masked(logits_hex2, mask_hex2[b_inds, act0, hex1])
         hex2 = dist_hex2.sample()
 
         action = self.action_table[act0, hex1, hex2]
 
-        return ActionData(
-            act0=act0, act0_dist=dist_act0,
-            hex1=hex1, hex1_dist=dist_hex1,
-            hex2=hex2, hex2_dist=dist_hex2,
-            action=action,
-        )
+        # Compute logprobs in FP32
+        with torch.autocast(obs.device.type, enabled=False):
+            return ActionData(
+                act0=act0, act0_dist=dist_act0,
+                hex1=hex1, hex1_dist=dist_hex1,
+                hex2=hex2, hex2_dist=dist_hex2,
+                action=action,
+            )
 
     # torch compile-friendly (no python conditionals) get_actdata for training
     def _get_actdata_train(self, z, obs, action):
@@ -411,23 +416,25 @@ class Model(nn.Module):
 
         # act0
         logits_act0 = self._act0_logits(z_g, z_h, mask_hex1)
-        dist_act0 = CategoricalMasked(logits=logits_act0, mask=mask_act0)
+        dist_act0 = self._categorical_masked(logits_act0, mask_act0)
         act0_emb = self.emb_act0(act0)
 
         # hex1 | act0
         logits_hex1 = self._hex1_logits(z_h, act0_emb)
-        dist_hex1 = CategoricalMasked(logits=logits_hex1, mask=mask_hex1[b_inds, act0])
+        dist_hex1 = self._categorical_masked(logits_hex1, mask_hex1[b_inds, act0])
 
         # hex2 | (act0, hex1)
         logits_hex2 = self._hex2_logits(z_h, act0_emb, hex1, b_inds)
-        dist_hex2 = CategoricalMasked(logits=logits_hex2, mask=mask_hex2[b_inds, act0, hex1])
+        dist_hex2 = self._categorical_masked(logits_hex2, mask_hex2[b_inds, act0, hex1])
 
-        return ActionData(
-            act0=act0, act0_dist=dist_act0,
-            hex1=hex1, hex1_dist=dist_hex1,
-            hex2=hex2, hex2_dist=dist_hex2,
-            action=action,
-        )
+        # Compute logprobs in FP32
+        with torch.autocast(obs.device.type, enabled=False):
+            return ActionData(
+                act0=act0, act0_dist=dist_act0,
+                hex1=hex1, hex1_dist=dist_hex1,
+                hex2=hex2, hex2_dist=dist_hex2,
+                action=action,
+            )
 
     def _act0_logits(self, z_g, z_h, mask_hex1):
         B, _, d = z_h.shape
@@ -993,6 +1000,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     state = State()
 
     model = DNAModel(config=config["model"], device=device)
+    # model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=True)
 
     optimizer_policy = torch.optim.Adam(model.model_policy.parameters(), lr=learning_rate)
     optimizer_value = torch.optim.Adam(model.model_value.parameters(), lr=learning_rate)
@@ -1253,7 +1261,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
             if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:
                 permanent_checkpoint_timer.reset(start=True)
                 logger.info("Time for a permanent checkpoint")
-                thread = threading.Thread(target=save_fn, kwargs=dict(timestamped=True))
+                thread = threading.Thread(target=save_fn, kwargs=dict(timestamped=True, s3_config=checkpoint_config["s3"]))
                 thread.start()
 
             wlog = prepare_wandb_log(

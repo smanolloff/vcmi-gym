@@ -29,8 +29,6 @@ import tempfile
 from types import SimpleNamespace
 from datetime import datetime
 from functools import partial
-from types import SimpleNamespace
-from functools import partial
 
 import dataclasses
 from torch.distributions.categorical import Categorical
@@ -74,47 +72,71 @@ class Timer:
             res += (time.perf_counter() - self._started_at)
         return res
 
-class CategoricalMasked(Categorical):
-    def __init__(self, logits: torch.Tensor, mask: torch.Tensor, sentinel: int = 0):
-        assert mask is not None
-        self.sentinel = sentinel  # fallback sample value if mask is all-false
-        self.mask = mask
-        self.invalid_batches = ~(mask.any(dim=-1))
 
-        # Batches where logits are all -inf cannot form a Categorical dist
-        # => zero those batches to prevent errors
-        masked_logits = (
-            logits
-            .masked_fill(~mask, float("-inf"))
-            .masked_fill(self.invalid_batches.unsqueeze(-1), 0)
-        )
+# When to use -inf:
+# - You are feeding logits to softmax/log-softmax (attention, CE) and you can
+# guarantee that each row has at least one unmasked element.
+# - Reason: exp(-inf)=0 gives exact zero probability for masked positions and
+# clean gradients.
+# - Caveat: if an entire row is masked, common softmax implementations compute
+# max=-inf, then subtract → (-inf)-(-inf)=NaN, and the whole row becomes NaN.
+#
+# When to use torch.finfo(dtype).min:
+# - Rows can be fully masked and you do not insert a guaranteed "dummy" valid
+# position, or your kernel does not tolerate rows of all -inf.
+# - With dtype-min (a very large finite negative), the row’s max is finite,
+# subtraction is well-defined, and you avoid the NaN-from-(-inf)-(-inf) pitfall.
+# - Trade-off: masked probabilities are not exactly 0; if the whole row is
+# masked they become uniform (not meaningful). You must then null out the
+# downstream result (e.g., multiply the context by a need mask) and you must
+# not sample from such rows.
+#
+# AMP/FP16 nuance:
+# - Do not use ad-hoc "large negatives" like -1e9 in FP16: they saturate to -inf
+# on cast, bringing back the "all -inf" NaN issue. Use either exact -inf
+# (with a guarantee of at least one valid per row or a dummy token), or use
+# dtype-min if you need finite values.
+#
+# XXX: Ultimately, it's better to avoid -infs as that can poison gradients in
+# some situations, resulting in NaNs.
+# ALWAYS compute in float32.
+#
+class CategoricalMasked(Categorical):
+    def __init__(self, logits: torch.Tensor, mask: torch.Tensor, fallback_idx: int = 0):
+        assert mask is not None
+        assert logits.ndim == 2 and mask.ndim == 2
+
+        self.mask = mask
+        self.fallback_idx = fallback_idx
+        self.invalid_batches = ~(mask.any(dim=-1))
+        masked_logits = logits.masked_fill(~mask, torch.finfo(logits.dtype).min)
+
+        # Fallback index 0 for invalid batches (where no index is valid):
+        # - makes probs = [1, 0, 0, ...] (instead of uniform)
+        # - makes log_prob(i) 0 for i=0 and -huge_neg for all other i
+        #   (instead of a fake uniform logprob for any i)
+        # - makes sample() to always return 0 (instead of a uniformly sampled index)
+        #
+        # This eliminates the need for explicit guards in several places.
+        # NOTE: mask is not used outside the dist and can remain all-false.
+        masked_logits[self.invalid_batches, 0] = fallback_idx
 
         super().__init__(logits=masked_logits)
 
-    # Compute a "normalized" entropy of only the valid choices,
-    # i.e. makes the entropy for the below distributions equal:
-    # - Categorical(logits=[2, 3])
-    # - CategoricalMasked(logits=[1, 2, 3], mask=[False, True, True])
-    # - CategoricalMasked(logits=[1, 2, 3, 4], mask=[False, True, True, False])
+    # A "normalized" entropy which does not scale with the number of actions.
+    # Both examples below result in a uniform distribution and it makes sense
+    # to return the same entropy:
+    # - logits=[7, 7]       => entropy=0.69, norm_entropy=1.0
+    # - logits=[7, 7, 7, 7] => entropy=1.39, norm_entropy=1.0
+    # This is preferred for RL with action masking where the number of legal
+    # actions K varies by state.
     def entropy(self):
-        # XXX: do NOT call super() here; instead, mask logits first to avoid
-        # NaNs in backprop when autoscaler (and anomaly detection) are enabled.
-        p_log_p = self.probs * self.logits.where(self.mask, 0)
-        ent = -p_log_p.sum(-1)
-
+        ent = super().entropy()
         n_valid = self.mask.sum(dim=-1)
         # avoid log(0) and log(1) (return 0 entropy there)
-        denom = torch.log(n_valid.float().clamp(min=2.0))
+        denom = torch.log(n_valid.clamp(min=2.0).float())
         ent_norm = ent / denom
         return ent_norm.where(n_valid > 1, 0)
-
-    # Avoid degenerate uniform logprobs for invalid batches
-    def log_prob(self, x):
-        return super().log_prob(x).masked_fill(self.invalid_batches, 0)
-
-    # Return a sentinel value instead of sampling from invalid batches
-    def sample(self):
-        return super().sample().masked_fill(self.invalid_batches, self.sentinel)
 
 
 class SerializableCategoricalMasked:
