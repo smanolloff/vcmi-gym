@@ -131,7 +131,10 @@ class CategoricalMasked(Categorical):
     # This is preferred for RL with action masking where the number of legal
     # actions K varies by state.
     def entropy(self):
-        ent = super().entropy()
+        # Note: if logits is not explicitly masked, NaNs occur during backprop
+        # if GradScaler is enabled (both for -inf and float32.min logits)...
+        ent = -(self.probs * self.logits.where(self.mask, 0)).sum(-1)
+
         n_valid = self.mask.sum(dim=-1)
         # avoid log(0) and log(1) (return 0 entropy there)
         denom = torch.log(n_valid.clamp(min=2.0).float())
