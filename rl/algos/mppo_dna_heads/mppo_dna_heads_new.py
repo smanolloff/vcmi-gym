@@ -40,6 +40,7 @@ from vcmi_gym.envs.v12.pyconnector import (
     N_ACTIONS,
     N_HEX_ACTIONS,
     N_NONHEX_ACTIONS,
+    GLOBAL_ATTR_MAP,
     GLOBAL_ACT_MAP,
     HEX_ATTR_MAP,
     HEX_ACT_MAP,
@@ -454,7 +455,7 @@ class Model(nn.Module):
         mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, self.hex_act_map["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
@@ -524,7 +525,7 @@ class Model(nn.Module):
         mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, self.hex_act_map["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
