@@ -40,7 +40,6 @@ from vcmi_gym.envs.v12.pyconnector import (
     N_ACTIONS,
     N_HEX_ACTIONS,
     N_NONHEX_ACTIONS,
-    GLOBAL_ATTR_MAP,
     GLOBAL_ACT_MAP,
     HEX_ATTR_MAP,
     HEX_ACT_MAP,
@@ -297,7 +296,7 @@ class HexConvResBlock(nn.Module):
             self.layers.append(HexConvResLayer(hex_size))
 
     def forward(self, x):
-        assert x.is_contiguous
+        # assert x.is_contiguous
         return self.layers(x)
 
 
@@ -372,7 +371,10 @@ class Model(nn.Module):
 
         # Init lazy layers (must be before weight/bias init)
         with torch.no_grad():
-            self.get_actdata_and_value(torch.randn([2, STATE_SIZE]))
+            obs = torch.randn([2, STATE_SIZE])
+            z = self.encode(obs)
+            self._get_actdata_eval(z, obs)
+            self._get_value(z)
 
         def kaiming_init(linlayer):
             # Assume LeakyReLU's negative slope is the default
@@ -400,17 +402,14 @@ class Model(nn.Module):
         merged = torch.cat((z_other, z_hexes.flatten(start_dim=1)), dim=1)
         return self.encoder_merged(merged)
 
-    def get_value(self, x):
-        return self.critic(self.encode(x))
+    def _get_value(self, z):
+        return self.critic(z)
 
-    def _get_actdata(self, obs, z_merged, action=None, deterministic=False):
+    def _get_actdata_train(self, z_merged, obs, action):
         B = obs.shape[0]
         b_inds = torch.arange(B, device=obs.device)
 
-        if action is None:
-            act0, hex1, hex2 = None, None, None
-        else:
-            act0, hex1, hex2 = self.inverse_table[action].unbind(1)
+        act0, hex1, hex2 = self.inverse_table[action].unbind(1)
 
         action_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([len(MainAction), 165, 165], dim=-1)
 
@@ -455,7 +454,7 @@ class Model(nn.Module):
         mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+        mask_action[:, 0] = obs[:, self.hex_act_map["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
@@ -465,32 +464,11 @@ class Model(nn.Module):
         # 1. Sample MAIN ACTION
         dist_act0 = CategoricalMasked(logits=action_logits, mask=mask_action)
 
-        if act0 is None:
-            if deterministic:
-                act0 = torch.argmax(dist_act0.probs, dim=1)
-            else:
-                act0 = dist_act0.sample()
-
         # 2. Sample HEX1 (with mask corresponding to the main action)
         dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
 
-        if hex1 is None:
-            if deterministic:
-                hex1 = torch.argmax(dist_hex1.probs, dim=1)
-            else:
-                hex1 = dist_hex1.sample()
-
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
-
-        if hex2 is None:
-            if deterministic:
-                hex2 = torch.argmax(dist_hex2.probs, dim=1)
-            else:
-                hex2 = dist_hex2.sample()
-
-        if action is None:
-            action = self.action_table[act0, hex1, hex2]
 
         return ActionData(
             act0=act0, act0_dist=dist_act0,
@@ -499,15 +477,92 @@ class Model(nn.Module):
             action=action,
         )
 
-    def get_actdata(self, obs, action=None, deterministic=False):
-        z_merged = self.encode(obs)
-        return self._get_actdata(obs, z_merged, action, deterministic)
+    def _get_actdata_eval(self, z_merged, obs):
+        B = obs.shape[0]
+        b_inds = torch.arange(B, device=obs.device)
 
-    def get_actdata_and_value(self, obs, action=None, deterministic=False):
+        action_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([len(MainAction), 165, 165], dim=-1)
+
+        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
+        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
+        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
+
+        # 1.1 for 0=WAIT: nothing to do (all zeros)
+        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
+        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        mask_hex1[:, 1, :] = movemask
+
+        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
+        amovemask = hexobs[:, :, torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
+
+        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
+        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        mask_hex1[:, 3, :] = shootmask
+
+        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
+        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
+
+        # 2.1 for 0=WAIT: nothing to do (all zeros)
+        # 2.2 for 1=MOVE: nothing to do (all zeros)
+        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
+        dest = self.amove_hexes.expand(B, -1, -1)
+        valid = amovemask & self.amove_hexes_valid.expand_as(dest)
+        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
+        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
+
+        # Select only valid triples and write
+        b_sel = b_idx[valid]
+        s_sel = s_idx[valid]
+        t_sel = dest[valid]
+
+        mask_hex2[b_sel, 2, s_sel, t_sel] = True
+
+        # 2.4 for 3=SHOOT: nothing to do (all zeros)
+
+        # 3. MASK_ACTION - ie. allowed main action mask
+        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
+
+        # 0=WAIT
+        mask_action[:, 0] = obs[:, self.hex_act_map["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+
+        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
+        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
+
+        # Next, we sample:
+        #
+        # 1. Sample MAIN ACTION
+        dist_act0 = CategoricalMasked(logits=action_logits, mask=mask_action)
+        act0 = dist_act0.sample()
+
+        # 2. Sample HEX1 (with mask corresponding to the main action)
+        dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
+        hex1 = dist_hex1.sample()
+
+        # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
+        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
+        hex2 = dist_hex2.sample()
+
+        action = self.action_table[act0, hex1, hex2]
+
+        return ActionData(
+            act0=act0, act0_dist=dist_act0,
+            hex1=hex1, hex1_dist=dist_hex1,
+            hex2=hex2, hex2_dist=dist_hex2,
+            action=action,
+        )
+
+    def get_actdata_eval(self, obs):
         z_merged = self.encode(obs)
-        actdata = self._get_actdata(obs, z_merged, action, deterministic)
-        value = self.critic(z_merged)
-        return actdata, value
+        return self._get_actdata_eval(z_merged, obs)
+
+    def get_actdata_train(self, obs, action):
+        z_merged = self.encode(obs)
+        return self._get_actdata_train(z_merged, obs, action)
+
+    def get_value(self, obs):
+        z_merged = self.encode(obs)
+        return self._get_value(z_merged)
 
 
 class DNAModel(nn.Module):
@@ -518,11 +573,168 @@ class DNAModel(nn.Module):
         self.device = device
         self.to(device)
 
-    def get_actdata(self, obs, action=None, deterministic=False):
-        return self.model_policy.get_actdata(obs, action=action, deterministic=deterministic)
 
-    def get_value(self, obs):
+class JitModel(nn.Module):
+    def __init__(self, z_other, z_hex, z_merged):
+        super().__init__()
+        self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
+        self.dim_hexes = STATE_SIZE_HEXES
+        self.state_size_one_hex = STATE_SIZE_ONE_HEX
+        self.hex_attr_map = HEX_ATTR_MAP
+        self.hex_act_map = HEX_ACT_MAP
+        self.register_buffer("action_table", torch.zeros([4, 165, 165], dtype=torch.long))
+        self.register_buffer("inverse_table", torch.zeros([N_ACTIONS, 3], dtype=torch.long))
+        self.register_buffer("amove_hexes", torch.zeros([1, 165, 12], dtype=torch.long))
+        self.register_buffer("amove_hexes_valid", torch.zeros([1, 165, 12], dtype=torch.bool))
+
+
+
+
+        self.register_buffer("hex_attr_map", torch.zeros([1, 165, 12], dtype=torch.bool))
+
+        self.encoder_other = nn.Sequential(OrderedDict({
+            "linear": nn.Linear(STATE_SIZE - STATE_SIZE_HEXES, z_other),
+            "relu": nn.LeakyReLU()
+        }))
+
+        self.encoder_hexes = nn.Sequential(OrderedDict({
+            "unflatten": nn.Unflatten(dim=1, unflattened_size=[165, STATE_SIZE_ONE_HEX]),
+            "hexconv": HexConvResBlock(hex_size=STATE_SIZE_ONE_HEX, depth=3),
+            "linear": nn.Linear(STATE_SIZE_ONE_HEX, z_hex),
+            "relu": nn.LeakyReLU()
+        }))
+
+        self.encoder_merged = nn.Sequential(OrderedDict({
+            "linear": nn.Linear(z_other + 165*z_hex, z_merged),
+            "relu": nn.LeakyReLU()
+        }))
+
+        self.actor = nn.Linear(z_merged, 4+165+165)
+        self.critic = nn.Linear(z_merged, 1)
+
+    @torch.jit.export
+    def encode(self, x) -> torch.Tensor:
+        other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=1)
+        z_other = self.encoder_other(other)
+        z_hexes = self.encoder_hexes(hexes)
+        merged = torch.cat((z_other, z_hexes), dim=1)
+        return self.encoder_merged(merged)
+
+    @torch.jit.export
+    def get_value(self, obs) -> float:
+        b_obs = obs.unsqueeze(dim=0)
+        z_merged = self.encode(b_obs)
+        return self.critic(z_merged).float().item()
+
+    @torch.jit.export
+    def predict(self, obs) -> int:
+        z_merged = self.encode(obs.unsqueeze(dim=0))
+        B = 1
+        b_inds = torch.arange(B, device=obs.device)
+
+        action_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([4, 165, 165], dim=-1)
+
+        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
+        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
+        hexobs = obs[:, -self.dim_hexes:].view([-1, 165, self.state_size_one_hex])
+
+        # 1.1 for 0=WAIT: nothing to do (all zeros)
+        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
+        movemask = hexobs[:, :, self.hex_attr_map["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        mask_hex1[:, 1, :] = movemask
+
+        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
+        amovemask = hexobs[:, :, torch.arange(12) + self.hex_attr_map["ACTION_MASK"][1]].bool()
+        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
+
+        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
+        shootmask = hexobs[:, :, self.hex_attr_map["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        mask_hex1[:, 3, :] = shootmask
+
+        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
+        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
+
+        # 2.1 for 0=WAIT: nothing to do (all zeros)
+        # 2.2 for 1=MOVE: nothing to do (all zeros)
+        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
+        dest = self.model_policy.amove_hexes.expand(B, -1, -1)
+        valid = amovemask & self.model_policy.amove_hexes_valid.expand_as(dest)
+        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
+        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
+
+        # Select only valid triples and write
+        b_sel = b_idx[valid]
+        s_sel = s_idx[valid]
+        t_sel = dest[valid]
+
+        mask_hex2[b_sel, 2, s_sel, t_sel] = True
+
+        # 2.4 for 3=SHOOT: nothing to do (all zeros)
+
+        # 3. MASK_ACTION - ie. allowed main action mask
+        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
+
+        # 0=WAIT
+        mask_action[:, 0] = obs[:, self.hex_act_map["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+
+        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
+        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
+
+        # Next, we sample:
+        #
+        # 1. Sample MAIN ACTION
+        probs_act0 = self._categorical_masked(logits0=action_logits, mask=mask_action)
+        act0 = self._sample(probs=probs_act0, logits=action_logits)
+
+        # 2. Sample HEX1 (with mask corresponding to the main action)
+        probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1[b_inds, act0])
+        hex1 = self._sample(probs=probs_hex1, logits=hex1_logits)
+
+        # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
+        probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
+        hex2 = self._sample(probs=probs_hex2, logits=hex2_logits)
+
+        action = self.action_table[act0, hex1, hex2]
+        return action.int().item()
+
+    # Implement SerializableCategoricalMasked as a function
+    # (lite interpreted does not support instantiating the class)
+    @torch.jit.export
+    def _categorical_masked(self, logits0: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits0.dtype)
+
+        # logits
+        logits1 = torch.where(mask, logits0, mask_value)
+        logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+        return probs
+
+    @torch.jit.export
+    def sample(self, probs: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
+        num_events = logits.size()[-1]
+        probs_2d = probs.reshape(-1, num_events)
+        samples_2d = torch.multinomial(probs_2d, 1, True).T
+        batch_shape = logits.size()[:-1]
+        return samples_2d.reshape(batch_shape)
+
+
+class JitDNAModel(nn.Module):
+    def __init__(self, z_other: int, z_hex: int, z_merged: int):
+        super().__init__()
+        self.model_policy = JitModel(z_other, z_hex, z_merged)
+        self.model_value = JitModel(z_other, z_hex, z_merged)
+
+    @torch.jit.export
+    def get_version(self) -> int:
+        return 12
+
+    @torch.jit.export
+    def get_value(self, obs) -> float:
         return self.model_value.get_value(obs)
+
+    @torch.jit.export
+    def predict(self, obs, _mask) -> int:
+        return self.model_policy.predict(obs)
 
 
 def create_venv(env_kwargs, num_envs, sync=True):
@@ -573,8 +785,8 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         storage.obs[vstep] = storage.next_obs
         storage.dones[vstep] = storage.next_done
 
-        actdata = model.get_actdata(storage.next_obs)
-        value = model.get_value(storage.next_obs)
+        actdata = model.model_policy.get_actdata_eval(storage.next_obs)
+        value = model.model_value.get_value(storage.next_obs)
 
         storage.values[vstep] = value.flatten()
         storage.actions[vstep] = actdata.action
@@ -604,7 +816,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         stats.ep_is_success_mean /= stats.num_episodes
 
     # bootstrap value if not done
-    next_value = model.get_value(storage.next_obs).reshape(1, -1)
+    next_value = model.model_value.get_value(storage.next_obs).reshape(1, -1)
     storage.next_value = next_value.reshape(1, -1)
 
     return stats
@@ -622,7 +834,7 @@ def eval_model(logger, model, venv, num_vsteps):
     for vstep in range(0, num_vsteps):
         logger.debug("(eval) vstep: %d" % vstep)
         obs = t(obs)
-        actdata = model.get_actdata(obs)
+        actdata = model.model_policy.get_actdata_eval(obs)
 
         obs, rew, term, trunc, info = venv.step(actdata.action.cpu().numpy())
 
@@ -708,7 +920,7 @@ def train_model(
             mb_actions = b_actions[mb_inds]
             mb_logprobs = b_logprobs[mb_inds]
 
-            newactdata = model.get_actdata(mb_obs, action=mb_actions)
+            newactdata = model.model_policy.get_actdata_train(mb_obs, mb_actions)
 
             logratio = newactdata.logprob - mb_logprobs
             ratio = logratio.exp()
@@ -756,7 +968,7 @@ def train_model(
             mb_actions = b_actions[mb_inds]
             mb_logprobs = b_logprobs[mb_inds]
 
-            newvalue = model.get_value(mb_obs)
+            newvalue = model.model_value.get_value(mb_obs)
 
             # Value loss
             newvalue = newvalue.view(-1)
@@ -801,12 +1013,14 @@ def train_model(
 
             # Compute policy and value targets
             with torch.no_grad():
-                old_actdata = old_model_policy.get_actdata(mb_obs)
+                old_actdata = old_model_policy.get_actdata_eval(mb_obs)
                 value_target = model.model_value.get_value(mb_obs)
 
             # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
             #     (if actions differ, masks will differ and KLD will become NaN)
-            new_actdata, new_value = model.model_policy.get_actdata_and_value(mb_obs, action=old_actdata.action)
+            new_z = model.model_policy.encode(mb_obs)
+            new_actdata = model.model_policy._get_actdata_train(new_z, mb_obs, old_actdata.action)
+            new_value = model.model_policy._get_value(new_z)
 
             # Distillation loss
             distill_actloss = (
@@ -1032,6 +1246,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
     wandb.log({
         "global/resumes": state.resumes,
+        "train_config/num_envs": num_envs,
         "train_config/num_vsteps": train_config["num_vsteps"],
         "train_config/num_minibatches": train_config["num_minibatches"],
         "train_config/update_epochs": train_config["update_epochs"],

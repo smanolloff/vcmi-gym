@@ -84,7 +84,7 @@ if ! [[ $VASTAI_INSTANCE_ID =~ ^[[:digit:]]+$ ]]; then
     exit 1;
 fi
 
-vastai label instance $VASTAI_INSTANCE_ID initializing
+/opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID initializing
 
 # An alias will not work in non-login shells
 [ -e /usr/bin/python ] || ln -s python3 /usr/bin/python
@@ -222,7 +222,7 @@ cmake -S . -B rel -Wno-dev \
     -D ENABLE_ML=1 \
     -D ENABLE_MMAI=1 \
     -D MMAI_LIBTORCH_PATH=""
-cmake --build rel/ -- -j12
+cmake --build rel/ -- -j32
 
 cd "../vcmi_gym/connectors"
 apt-get -y install libboost-all-dev
@@ -240,4 +240,4 @@ echo "Done in $((finished_at - started_at)) seconds."
 
 # Mark as completed
 touch /workspace/.initialized
-vastai label instance $VASTAI_INSTANCE_ID ready
+/opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID ready
