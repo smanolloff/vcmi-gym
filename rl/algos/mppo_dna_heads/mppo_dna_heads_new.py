@@ -1130,6 +1130,10 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
 
+    # torch.autograd.set_detect_anomaly(True)  # debug
+    torch.set_float32_matmul_precision("high")
+    torch.backends.cuda.matmul.allow_tf32 = True
+
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
     with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
         msg = f"Saving new config to: {f.name}"
