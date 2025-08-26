@@ -2,7 +2,7 @@ import os
 
 train_env_kwargs = dict(
     role="defender",
-    opponent="StupidAI",
+    opponent="BattleAI",
     max_steps=500,
     vcmi_loglevel_global="error",
     vcmi_loglevel_ai="error",
@@ -97,7 +97,9 @@ config = dict(
         max_grad_norm=4,
         distill_beta=1.0,
 
-        torch_autocast=False,
+        torch_autocast=True,
+        torch_cuda_matmul=True,
+        torch_detect_anomaly=False,
     ),
     model=dict(
         z_size_other=32,

@@ -22,6 +22,8 @@ set -x
 
 started_at=$(date +%s)
 
+EFFECTIVE_NUM_CPUS=${1:-12}
+
 #
 # TMUX setup
 # (ctrl+b - shift+p) to enable logging
@@ -122,6 +124,15 @@ pip install --break-system-packages jax[cuda12]
 #
 
 cat <<-EOF >>~/.bashrc
+
+function copy_checkpoint() {
+    [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP"; return 1; }
+
+    for f in *\$1*; do
+        cp \$f \${f:0:8}-\${f:20}
+    done
+}
+
 alias gs='git status'
 alias gl='git log'
 alias gh='git h'

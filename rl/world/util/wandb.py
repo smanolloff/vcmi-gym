@@ -1,6 +1,7 @@
 import pygit2
 import os
 import tempfile
+import json
 from datetime import datetime
 
 
@@ -48,19 +49,27 @@ def setup_wandb(config, model, src_file, wandb_kwargs={}):
     # Store VastAI instance ID separately (outside of the array) for UI convenience
     wandb.config.update(dict(vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"), _start_infos=start_infos), allow_val_change=True)
 
+    art = wandb.Artifact(name=f"startinfo-{start_info['timestamp']}", type="text")
+
     # Must be after wandb.init
     if start_info["git_is_dirty"]:
         art = wandb.Artifact(name=start_info["git_diff_artifact"], type="text")
-        art.description = f"Git diff for HEAD@{start_info['git_head']} from {start_info['timestamp']}"
+        art.description = f"Start info for HEAD@{start_info['git_head']} from {start_info['timestamp']}"
+        art.metadata["timestsamp"] = start_info["timestamp"]
+        art.metadata["head"] = start_info["git_head"]
         with tempfile.NamedTemporaryFile(mode='w+', delete=True) as temp_file:
-            art.metadata["timestsamp"] = start_info["timestamp"]
-            art.metadata["head"] = start_info["git_head"]
             temp_file.write(f"# Head: {start_info['git_head']}\n")
             temp_file.write(f"# Timestamp: {start_info['timestamp']}\n")
             temp_file.write(patch)
             temp_file.flush()
-            art.add_file(temp_file.name, name="diff.patch")
-            wandb.run.log_artifact(art)
+            # mutable = wandb creates a copy (safe to delete this file)
+            art.add_file(temp_file.name, name="diff.patch", policy="mutable")
+
+        with tempfile.NamedTemporaryFile(mode='w+', delete=True) as temp_file:
+            json.dump(config, temp_file)
+            art.add_file(temp_file.name, name="config.json", policy="mutable")
+
+        wandb.run.log_artifact(art)
 
     # XXX: no "Model" will be shown in the W&B UI when .forward()
     #       returns a non-tensor value (e.g. a tuple)
