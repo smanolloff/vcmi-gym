@@ -49,7 +49,7 @@ def setup_wandb(config, model, src_file, wandb_kwargs={}):
     # Store VastAI instance ID separately (outside of the array) for UI convenience
     wandb.config.update(dict(vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"), _start_infos=start_infos), allow_val_change=True)
 
-    art = wandb.Artifact(name=f"startinfo-{start_info['timestamp']}", type="text")
+    art = wandb.Artifact(name=f"startinfo-{now.strftime('%Y%m%d%H%M%S')}", type="text")
 
     # Must be after wandb.init
     if start_info["git_is_dirty"]:
