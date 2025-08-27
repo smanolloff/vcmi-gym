@@ -628,7 +628,6 @@ class ExecuTorchModel(nn.Module):
         self.register_buffer("mask_value", torch.tensor(torch.finfo(torch.float32).min), persistent=False)
         self.register_buffer("hexactmask_inds", torch.as_tensor(torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]), persistent=False)
 
-    @torch.jit.export
     def encode(self, x):
         other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=1)
         z_other = self.encoder_other(other)
@@ -636,13 +635,11 @@ class ExecuTorchModel(nn.Module):
         merged = torch.cat((z_other, z_hexes.flatten(start_dim=1)), dim=1)
         return self.encoder_merged(merged)
 
-    @torch.jit.export
     def get_value(self, obs):
         b_obs = obs.unsqueeze(dim=0)
         z_merged = self.encode(b_obs)
         return self.critic(z_merged)
 
-    @torch.jit.export
     def predict(self, obs):
         obs = obs.unsqueeze(dim=0)
         z_merged = self.encode(obs)
@@ -755,15 +752,12 @@ class ExecuTorchDNAModel(nn.Module):
         self.model_value = ExecuTorchModel(config)
         self.register_buffer("version", torch.tensor(12, dtype=torch.long), persistent=False)
 
-    @torch.jit.export
     def get_version(self):
         return self.version.clone()
 
-    @torch.jit.export
     def get_value(self, obs):
         return self.model_value.get_value(obs)
 
-    @torch.jit.export
     def predict(self, obs):
         return self.model_policy.predict(obs)
 
@@ -1292,7 +1286,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
         "train_config/gae_lambda": train_config["gae_lambda"],
         "train_config/ent_coef": train_config["ent_coef"],
         "train_config/clip_coef": train_config["clip_coef"],
-        "train_config/learning_rate": train_config["learning_rate"],
+        "train_config/learning_rate": train_config["learning_rate"],  # also logged during training
         "train_config/norm_adv": int(train_config["norm_adv"]),
         "train_config/clip_vloss": int(train_config["clip_vloss"]),
         "train_config/max_grad_norm": train_config["max_grad_norm"],
@@ -1491,7 +1485,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
                 wlog.update(aggregate_logs())
                 tstats = timer_stats(timers)
                 wlog.update(tstats)
-                wlog["train/learning_rate"] = optimizer_policy.param_groups[0]['lr']
+                wlog["train_config/learning_rate"] = optimizer_policy.param_groups[0]['lr']
                 wandb.log(wlog, commit=True)
 
             logger.info(wlog)

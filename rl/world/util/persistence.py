@@ -96,7 +96,7 @@ def load_checkpoint(
             for name, scaler in scalers.items()
         },
         states={
-            os.path.join(out_dir, f"{prefix}-state-{name}.pt"): state
+            os.path.join(out_dir, f"{prefix}-state-{name}.json"): state
             for name, state in states.items()
         },
     )
@@ -190,7 +190,7 @@ def save_checkpoint(
             for name, scaler in scalers.items()
         },
         states={
-            os.path.join(out_dir, f"{prefix}-state-{name}.pt"): state
+            os.path.join(out_dir, f"{prefix}-state-{name}.json"): state
             for name, state in states.items()
         },
     )

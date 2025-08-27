@@ -22,10 +22,7 @@ def setup_wandb(config, model, src_file, wandb_kwargs={}):
         vastai_instance_id=os.getenv("VASTAI_INSTANCE_ID"),
     )
 
-    if patch:
-        start_info.update(git_is_dirty=True, git_diff_artifact="gitdiff-%d" % now.timestamp())
-    else:
-        start_info.update(git_is_dirty=False)
+    start_info.update(git_is_dirty=True, git_diff_artifact=f"startinfo-{now.strftime('%Y%m%d%H%M%S')}")
 
     kwargs = dict(
         project="vcmi-gym",
@@ -52,24 +49,25 @@ def setup_wandb(config, model, src_file, wandb_kwargs={}):
     art = wandb.Artifact(name=f"startinfo-{now.strftime('%Y%m%d%H%M%S')}", type="text")
 
     # Must be after wandb.init
+    art = wandb.Artifact(name=start_info["git_diff_artifact"], type="text")
+    art.description = f"Start info for HEAD@{start_info['git_head']} from {start_info['timestamp']}"
+    art.metadata["timestsamp"] = start_info["timestamp"]
+    art.metadata["head"] = start_info["git_head"]
+
+    with tempfile.NamedTemporaryFile(mode='w+', delete=True) as cfg_file:
+        json.dump(config, cfg_file)
+        art.add_file(cfg_file.name, name="config.json", policy="mutable")
+
     if start_info["git_is_dirty"]:
-        art = wandb.Artifact(name=start_info["git_diff_artifact"], type="text")
-        art.description = f"Start info for HEAD@{start_info['git_head']} from {start_info['timestamp']}"
-        art.metadata["timestsamp"] = start_info["timestamp"]
-        art.metadata["head"] = start_info["git_head"]
-        with tempfile.NamedTemporaryFile(mode='w+', delete=True) as temp_file:
-            temp_file.write(f"# Head: {start_info['git_head']}\n")
-            temp_file.write(f"# Timestamp: {start_info['timestamp']}\n")
-            temp_file.write(patch)
-            temp_file.flush()
+        with tempfile.NamedTemporaryFile(mode='w+', delete=True) as diff_file:
+            diff_file.write(f"# Head: {start_info['git_head']}\n")
+            diff_file.write(f"# Timestamp: {start_info['timestamp']}\n")
+            diff_file.write(patch)
+            diff_file.flush()
             # mutable = wandb creates a copy (safe to delete this file)
-            art.add_file(temp_file.name, name="diff.patch", policy="mutable")
+            art.add_file(diff_file.name, name="diff.patch", policy="mutable")
 
-        with tempfile.NamedTemporaryFile(mode='w+', delete=True) as temp_file:
-            json.dump(config, temp_file)
-            art.add_file(temp_file.name, name="config.json", policy="mutable")
-
-        wandb.run.log_artifact(art)
+    wandb.run.log_artifact(art)
 
     # XXX: no "Model" will be shown in the W&B UI when .forward()
     #       returns a non-tensor value (e.g. a tuple)
