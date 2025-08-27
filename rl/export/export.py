@@ -3,14 +3,14 @@ import torch
 from torch.export import export
 from executorch.exir import to_edge_transform_and_lower
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
-from rl.algos.mppo_dna_heads.mppo_dna_heads_new import JitDNAModel
+from rl.algos.mppo_dna_heads.mppo_dna_heads_new import ExecuTorchDNAModel
 from vcmi_gym.envs.v12.pyconnector import STATE_SIZE
 
-filebase = "agicelt2-1756110154"
+filebase = "cgfpenwh-1756282288"
 model_cfg_path = f"{filebase}-config.json"
 model_weights_path = f"{filebase}-model-dna.pt"
 
-MODEL_EXPORT_PATH = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{filebase}.pte"
+MODEL_EXPORT_PATH = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{filebase}-uint8.pte"
 
 
 class ModelWrapper(torch.nn.Module):
@@ -24,7 +24,7 @@ class ModelWrapper(torch.nn.Module):
 
 
 config = json.load(open(model_cfg_path, "r"))["model"]
-model = JitDNAModel(config)
+model = ExecuTorchDNAModel(config)
 weights = torch.load(model_weights_path, weights_only=True, map_location="cpu")
 model.load_state_dict(weights)
 for p in model.parameters():

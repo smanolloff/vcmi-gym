@@ -653,6 +653,9 @@ class ExecuTorchModel(nn.Module):
         mask_hex1 = torch.zeros_like(self.mask_hex1)
         hexobs = obs[:, -self.state_size_hexes:].view([-1, 165, self.state_size_one_hex])
 
+        # XXX: EXPLICIT casting to torch.bool is required to prevent a
+        #      a nasty bug with the mask when the model is loaded in C++
+
         # 1.1 for 0=WAIT: nothing to do (all zeros)
         # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
         movemask = hexobs[:, :, self.hex_move_offset].to(torch.bool)
@@ -735,7 +738,6 @@ class ExecuTorchModel(nn.Module):
         hex2 = torch.argmax(probs_hex2, dim=1)
 
         action = self.action_table[act0, hex1, hex2]
-
         return action
 
     @torch.jit.export

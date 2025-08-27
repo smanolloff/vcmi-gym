@@ -14,8 +14,8 @@
     {"calculate": "toDate(datum._timestamp * 1000)", "as": "time"},
     {
       "window": [
-        {"op": "lag", "field": "num_rollouts", "as": "prev_rollouts"},
-        {"op": "lag", "field": "_timestamp", "as": "prev_ts"}
+        {"op": "lag", "field": "num_rollouts", "as": "prev_rollouts", "param": 10},
+        {"op": "lag", "field": "_timestamp", "as": "prev_ts", "param": 10}
       ],
       "frame": [-1, 0]
     },

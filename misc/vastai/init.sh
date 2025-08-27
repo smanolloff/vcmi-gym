@@ -111,13 +111,8 @@ fi
 git clone --branch dev --single-branch https://github.com/smanolloff/vcmi-gym.git
 cd vcmi-gym
 
-# XXX: torch 2.7.0 still does not support RTX5 cuda
-#      => use bleeding edge
-#       (dev version needs to be bumped every 2 months)
-sed -i 's/^torch/#torch/' requirements.txt
-pip install --break-system-packages --pre torch==2.8.0.dev20250627+cu128 --index-url https://download.pytorch.org/whl/nightly/cu128
 pip install --break-system-packages -r requirements.txt
-pip install --break-system-packages jax[cuda12]
+# pip install --break-system-packages jax[cuda12]
 
 #
 # ~/.bashrc setup
