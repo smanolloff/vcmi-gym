@@ -1,0 +1,217 @@
+1. Use this debug return in ExecuTorchModel's predict method
+    (in rl/algos/mppo_dna_heads/mppo_dna_heads_new.py):
+
+        return (
+            action_logits,                     // [0]
+            hex1_logits,                       // [1]
+            hex2_logits,                       // [2]
+            probs_act0,                        // [3]
+            probs_hex1,                        // [4]
+            probs_hex2,                        // [5]
+            mask_action,                       // [6]
+            mask_hex1[0][act0],                // [7]
+            mask_hex2[0, act0, hex1],          // [8]
+            act0,                              // [9]
+            hex1,                              // [10]
+            hex2,                              // [11]
+            action,                            // [12]
+            obs[:, self.global_wait_offset],   // [13]
+            mask_action[:, 0]                  // [14]
+        )
+
+
+2. Export the model via the export.py
+
+3. Place these functions in in vcmi/AI/MMAI/BAI/model/ExecuTorchModel.cpp
+    and invoke debug_model() as the first statement in the constructor body:
+
+        constexpr auto OBS_PATH = "/path/to/exported/model.pte";
+        constexpr auto MODEL_PATH = "/path/to/obs.np";
+
+        std::vector<float> read_f32_bin(const std::string& path) {
+            std::cout << "reading from file: " << path << "\n";
+            std::ifstream f(path, std::ios::binary);
+            if (!f) throw std::runtime_error("failed to open file");
+
+            f.seekg(0, std::ios::end);
+            std::streampos end = f.tellg();
+            if (end < 0) throw std::runtime_error("tellg failed");
+            const size_t nbytes = static_cast<size_t>(end);
+            if (nbytes % sizeof(float) != 0)
+                throw std::runtime_error("file size not a multiple of sizeof(float)");
+
+            std::vector<float> data(nbytes / sizeof(float));
+            f.seekg(0, std::ios::beg);
+            f.read(reinterpret_cast<char*>(data.data()), nbytes);
+            if (!f) throw std::runtime_error("binary read failed");
+            return data;
+        }
+
+        void print_shape(const executorch::runtime::etensor::Tensor* t) {
+            const auto& s = t->sizes();
+            std::cout << "shape=[";
+            for (size_t i = 0; i < s.size(); ++i) {
+                if (i) std::cout << ", ";
+                std::cout << s[i];
+            }
+            std::cout << "] numel=" << t->numel() << "\n";
+        }
+
+        void print_tensor_f32(const executorch::runtime::etensor::Tensor* t, size_t max_elems=32) {
+            print_shape(t);
+            const float* p = t->const_data_ptr<float>();
+            size_t n = static_cast<size_t>(t->numel());
+            for (size_t i = 0; i < std::min(n, max_elems); ++i) std::cout << p[i] << ",";
+            if (n > max_elems) std::cout << " ...";
+            std::cout << "]\n";
+        }
+
+        void print_tensor_bool(const executorch::runtime::etensor::Tensor* t, size_t max_elems=32) {
+            print_shape(t);
+            const bool* p = t->const_data_ptr<bool>();
+            size_t n = static_cast<size_t>(t->numel());
+            for (size_t i = 0; i < std::min(n, max_elems); ++i) std::cout << p[i] << ",";
+            if (n > max_elems) std::cout << " ...";
+            std::cout << "]\n";
+        }
+
+        void print_tensor_long(const executorch::runtime::etensor::Tensor* t, size_t max_elems=32) {
+            print_shape(t);
+            const uint64_t* p = t->const_data_ptr<uint64_t>();
+            size_t n = static_cast<size_t>(t->numel());
+            for (size_t i = 0; i < std::min(n, max_elems); ++i) std::cout << p[i] << ",";
+            if (n > max_elems) std::cout << " ...";
+            std::cout << "]\n";
+        }
+
+        void debug_model() {
+            auto module = executorch::extension::Module(OBS_PATH);
+            auto buf = read_f32_bin(MODEL_PATH);
+            auto tensor = executorch::extension::from_blob(buf.data(), {28114});
+            auto res = module.execute("predict", tensor);
+
+            auto buf = read_f32_bin("/Users/simo/Projects/vcmi-gym/reobs.np");
+            auto tensor = executorch::extension::from_blob(buf.data(), {28114});
+            // Buggy predicted action (without explicit bool conversion in python): 728, correct: 1
+
+            auto res = mc->execute("predict", tensor);
+            auto ev0 = res->at(0);
+            assert(ev0.isTensor());
+            auto t0 = ev0.toTensor();
+            assert(t0.dtype() == executorch::aten::ScalarType::Float);
+            std::cout << "action_logits t0: ";
+            print_tensor_f32(&t0, 1000);
+
+            auto ev1 = res->at(1);
+            assert(ev1.isTensor());
+            auto t1 = ev1.toTensor();
+            assert(t1.dtype() == executorch::aten::ScalarType::Float);
+            std::cout << "hex1_logits   t1: ";
+            print_tensor_f32(&t1, 1000);
+
+            auto ev2 = res->at(2);
+            assert(ev2.isTensor());
+            auto t2 = ev2.toTensor();
+            assert(t2.dtype() == executorch::aten::ScalarType::Float);
+            std::cout << "hex2_logits   t2: ";
+            print_tensor_f32(&t2, 1000);
+
+            auto ev3 = res->at(3);
+            assert(ev3.isTensor());
+            auto t3 = ev3.toTensor();
+            assert(t3.dtype() == executorch::aten::ScalarType::Float);
+            std::cout << "probs_act0    t3: ";
+            print_tensor_f32(&t3, 1000);
+
+            auto ev4 = res->at(4);
+            assert(ev4.isTensor());
+            auto t4 = ev4.toTensor();
+            assert(t4.dtype() == executorch::aten::ScalarType::Float);
+            std::cout << "probs_hex1    t4: ";
+            print_tensor_f32(&t4, 1000);
+
+            auto ev5 = res->at(5);
+            assert(ev5.isTensor());
+            auto t5 = ev5.toTensor();
+            assert(t5.dtype() == executorch::aten::ScalarType::Float);
+            std::cout << "probs_hex2    t5: ";
+            print_tensor_f32(&t5, 1000);
+
+            auto ev6 = res->at(6);
+            assert(ev6.isTensor());
+            auto t6 = ev6.toTensor();
+            assert(t6.dtype() == executorch::aten::ScalarType::Bool);
+            std::cout << "mask_action   t6: ";
+            print_tensor_bool(&t6, 1000);
+
+            auto ev7 = res->at(7);
+            assert(ev7.isTensor());
+            auto t7 = ev7.toTensor();
+            assert(t7.dtype() == executorch::aten::ScalarType::Bool);
+            std::cout << "mask_hex1     t7: ";
+            print_tensor_bool(&t7, 1000);
+
+            auto ev8 = res->at(8);
+            assert(ev8.isTensor());
+            auto t8 = ev8.toTensor();
+            assert(t8.dtype() == executorch::aten::ScalarType::Bool);
+            std::cout << "mask_hex2     t8: ";
+            print_tensor_bool(&t8, 1000);
+
+            auto ev9 = res->at(9);
+            assert(ev9.isTensor());
+            auto t9 = ev9.toTensor();
+            assert(t9.dtype() == executorch::aten::ScalarType::Long);
+            std::cout << "act0          t9: ";
+            print_tensor_long(&t9, 1000);
+
+            auto ev10 = res->at(10);
+            assert(ev10.isTensor());
+            auto t10 = ev10.toTensor();
+            assert(t10.dtype() == executorch::aten::ScalarType::Long);
+            std::cout << "hex1          t10: ";
+            print_tensor_long(&t10, 1000);
+
+            auto ev11 = res->at(11);
+            assert(ev11.isTensor());
+            auto t11 = ev11.toTensor();
+            assert(t11.dtype() == executorch::aten::ScalarType::Long);
+            std::cout << "hex2          t11: ";
+            print_tensor_long(&t11, 1000);
+
+            auto ev12 = res->at(12);
+            assert(ev12.isTensor());
+            auto t12 = ev12.toTensor();
+            assert(t12.dtype() == executorch::aten::ScalarType::Long);
+            std::cout << "action        t12: ";
+            print_tensor_long(&t12, 1000);
+
+            auto ev13 = res->at(13);
+            assert(ev13.isTensor());
+            auto t13 = ev13.toTensor();
+            assert(t13.dtype() == executorch::aten::ScalarType::Float);
+            std::cout << "action        t13: ";
+            print_tensor_f32(&t13, 1000);
+
+            auto ev14 = res->at(14);
+            assert(ev14.isTensor());
+            auto t14 = ev14.toTensor();
+            assert(t14.dtype() == executorch::aten::ScalarType::Bool);
+            std::cout << "action        t14: ";
+            print_tensor_bool(&t14, 1000);
+
+            throw std::runtime_error("DEBUG: forced quit");
+       }
+
+4. In VCMI's mmai-settings.json set the correct path to the exported model from 1.
+5. Recompile VCMI in PLAY mode (use the `mmai` branch, not `mmai-ml` branch).
+    and start via build/bin/vcmilauncher.
+6. In launcher UI, set Neutral AI to MMAI (experimental) and launch the game
+7. Start a battle. It will invoke the constructor which
+    will print stuff to STDOUT and then fails with a debug runtime error
+    (which will not quit the game, just fallback to StupidAI).
+8. Take the debug output, MANUALLY organize it into cppout.json
+    (remove the final trailing "," from the cpp output)
+9. Run compare.py (might require minor fixes, was refactored a little without testing)
+10. If behaviour is weird (e.g. very different outputs), try isolating the
+    problem with dummy.py

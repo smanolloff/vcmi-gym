@@ -97,8 +97,8 @@ config = dict(
         max_grad_norm=4,
         distill_beta=1.0,
 
-        torch_autocast=True,
-        torch_cuda_matmul=True,
+        torch_autocast=False,
+        torch_cuda_matmul=False,
         torch_detect_anomaly=False,
     ),
     model=dict(

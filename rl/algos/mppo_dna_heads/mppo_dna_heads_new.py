@@ -302,12 +302,8 @@ class HexConvResBlock(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-
-        self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
-        self.dim_hexes = STATE_SIZE_HEXES
-
+    @staticmethod
+    def build_action_tables():
         # Maps [mainact, hex1, hex2] -> VCMI action
         action_table = torch.zeros([4, 165, 165], dtype=torch.long)
         action_table[MainAction.WAIT, :, :] = GLOBAL_ACT_MAP["WAIT"]  # WAIT is irrelevant of hex
@@ -344,6 +340,16 @@ class Model(nn.Module):
                         amove_action = N_NONHEX_ACTIONS + hex1*N_HEX_ACTIONS + amove
                         action_table[MainAction.AMOVE, hex1, hex2] = amove_action
                         inverse_table[amove_action] = torch.tensor([MainAction.AMOVE, hex1, hex2])
+
+        return action_table, inverse_table, amove_hexes
+
+    def __init__(self, config):
+        super().__init__()
+
+        self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
+        self.dim_hexes = STATE_SIZE_HEXES
+
+        action_table, inverse_table, amove_hexes = self.__class__.build_action_tables()
 
         self.register_buffer("amove_hexes", amove_hexes.unsqueeze(0))
         self.register_buffer("amove_hexes_valid", self.amove_hexes != -1)
@@ -575,108 +581,141 @@ class DNAModel(nn.Module):
         self.to(device)
 
 
-class JitModel(nn.Module):
-    def __init__(self, z_other, z_hex, z_merged):
+class ExecuTorchModel(nn.Module):
+    def __init__(self, config):
         super().__init__()
         self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
         self.dim_hexes = STATE_SIZE_HEXES
+        self.state_size_hexes = STATE_SIZE_HEXES
         self.state_size_one_hex = STATE_SIZE_ONE_HEX
-        self.hex_attr_map = HEX_ATTR_MAP
-        self.hex_act_map = HEX_ACT_MAP
-        self.register_buffer("action_table", torch.zeros([4, 165, 165], dtype=torch.long))
-        self.register_buffer("inverse_table", torch.zeros([N_ACTIONS, 3], dtype=torch.long))
-        self.register_buffer("amove_hexes", torch.zeros([1, 165, 12], dtype=torch.long))
-        self.register_buffer("amove_hexes_valid", torch.zeros([1, 165, 12], dtype=torch.bool))
+        self.hex_move_offset = HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]
+        self.hex_shoot_offset = HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]
+        self.global_wait_offset = GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]
+        self.n_main_actions = len(MainAction)
 
+        action_table, inverse_table, amove_hexes = Model.build_action_tables()
 
-
-
-        self.register_buffer("hex_attr_map", torch.zeros([1, 165, 12], dtype=torch.bool))
+        self.register_buffer("amove_hexes", amove_hexes.unsqueeze(0))
+        self.register_buffer("amove_hexes_valid", self.amove_hexes != -1)
+        self.register_buffer("action_table", action_table)
+        self.register_buffer("inverse_table", inverse_table)
 
         self.encoder_other = nn.Sequential(OrderedDict({
-            "linear": nn.Linear(STATE_SIZE - STATE_SIZE_HEXES, z_other),
+            "linear": nn.Linear(STATE_SIZE - STATE_SIZE_HEXES, config["z_size_other"]),
             "relu": nn.LeakyReLU()
         }))
 
         self.encoder_hexes = nn.Sequential(OrderedDict({
             "unflatten": nn.Unflatten(dim=1, unflattened_size=[165, STATE_SIZE_ONE_HEX]),
             "hexconv": HexConvResBlock(hex_size=STATE_SIZE_ONE_HEX, depth=3),
-            "linear": nn.Linear(STATE_SIZE_ONE_HEX, z_hex),
+            "linear": nn.Linear(STATE_SIZE_ONE_HEX, config["z_size_hex"]),
             "relu": nn.LeakyReLU()
         }))
 
         self.encoder_merged = nn.Sequential(OrderedDict({
-            "linear": nn.Linear(z_other + 165*z_hex, z_merged),
+            "linear": nn.Linear(config["z_size_other"] + 165*config["z_size_hex"], config["z_size_merged"]),
             "relu": nn.LeakyReLU()
         }))
 
-        self.actor = nn.Linear(z_merged, 4+165+165)
-        self.critic = nn.Linear(z_merged, 1)
+        self.actor = nn.Linear(config["z_size_merged"], self.n_main_actions+165+165)
+        self.critic = nn.Linear(config["z_size_merged"], 1)
+
+        self.register_buffer("mask_hex1", torch.zeros([1, self.n_main_actions, 165], dtype=torch.bool), persistent=False)
+        self.register_buffer("mask_hex2", torch.zeros([1, self.n_main_actions, 165, 165], dtype=torch.bool), persistent=False)
+        self.register_buffer("mask_action", torch.zeros([1, self.n_main_actions], dtype=torch.bool), persistent=False)
+        self.register_buffer("b_idx", torch.arange(1).view(1, 1, 1).expand_as(self.amove_hexes), persistent=False)
+        self.register_buffer("s_idx", torch.arange(165).view(1, 165, 1).expand_as(self.amove_hexes), persistent=False)
+        self.register_buffer("mask_value", torch.tensor(torch.finfo(torch.float32).min), persistent=False)
+        self.register_buffer("hexactmask_inds", torch.as_tensor(torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]), persistent=False)
 
     @torch.jit.export
-    def encode(self, x) -> torch.Tensor:
+    def encode(self, x):
         other, hexes = torch.split(x, [self.dim_other, self.dim_hexes], dim=1)
         z_other = self.encoder_other(other)
         z_hexes = self.encoder_hexes(hexes)
-        merged = torch.cat((z_other, z_hexes), dim=1)
+        merged = torch.cat((z_other, z_hexes.flatten(start_dim=1)), dim=1)
         return self.encoder_merged(merged)
 
     @torch.jit.export
-    def get_value(self, obs) -> float:
+    def get_value(self, obs):
         b_obs = obs.unsqueeze(dim=0)
         z_merged = self.encode(b_obs)
-        return self.critic(z_merged).float().item()
+        return self.critic(z_merged)
 
     @torch.jit.export
-    def predict(self, obs) -> int:
-        z_merged = self.encode(obs.unsqueeze(dim=0))
-        B = 1
-        b_inds = torch.arange(B, device=obs.device)
+    def predict(self, obs):
+        obs = obs.unsqueeze(dim=0)
+        z_merged = self.encode(obs)
 
-        action_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([4, 165, 165], dim=-1)
+        action_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([self.n_main_actions, 165, 165], dim=-1)
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
-        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
-        hexobs = obs[:, -self.dim_hexes:].view([-1, 165, self.state_size_one_hex])
+        mask_hex1 = torch.zeros_like(self.mask_hex1)
+        hexobs = obs[:, -self.state_size_hexes:].view([-1, 165, self.state_size_one_hex])
 
         # 1.1 for 0=WAIT: nothing to do (all zeros)
         # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-        movemask = hexobs[:, :, self.hex_attr_map["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        movemask = hexobs[:, :, self.hex_move_offset].to(torch.bool)
         mask_hex1[:, 1, :] = movemask
 
         # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(12) + self.hex_attr_map["ACTION_MASK"][1]].bool()
+        amovemask = hexobs[:, :, self.hexactmask_inds].to(torch.bool)
         mask_hex1[:, 2, :] = amovemask.any(dim=-1)
 
         # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
-        shootmask = hexobs[:, :, self.hex_attr_map["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        shootmask = hexobs[:, :, self.hex_shoot_offset].to(torch.bool)
         mask_hex1[:, 3, :] = shootmask
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
+        mask_hex2 = torch.zeros_like(self.mask_hex2)
 
         # 2.1 for 0=WAIT: nothing to do (all zeros)
         # 2.2 for 1=MOVE: nothing to do (all zeros)
         # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
-        dest = self.model_policy.amove_hexes.expand(B, -1, -1)
-        valid = amovemask & self.model_policy.amove_hexes_valid.expand_as(dest)
-        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
-        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
+        valid = amovemask & self.amove_hexes_valid
 
-        # Select only valid triples and write
-        b_sel = b_idx[valid]
-        s_sel = s_idx[valid]
-        t_sel = dest[valid]
+        # # Select only valid triples and write
+        # b_sel = self.b_idx[valid]
+        # s_sel = self.s_idx[valid]
+        # t_sel = self.amove_hexes[valid]
+        # mask_hex2[b_sel, 2, s_sel, t_sel] = True
 
-        mask_hex2[b_sel, 2, s_sel, t_sel] = True
+        # "How do I build mask_hex2[b, 2, s, t] = True when self.amove_hexes
+        # contains -1 entries, without boolean indexing and with static shapes?"
+        # Shapes:
+        # self.mask_hex2: [B, 4, S, T] (bool)  e.g., [B,4,165,165]
+        # self.amove_hexes: [B, S, K] (long)    target t-indices, may contain -1
+        # valid: [B, S, K] (bool)               which triplets are active
+
+        # 1) Plane we will write: channel 2 of the mask
+        plane = torch.zeros_like(self.mask_hex2.select(1, 2))  # [B, S, T], bool
+
+        # 2) Ensure invalid entries are excluded from updates
+        idx = self.amove_hexes                                      # [B, S, K], long
+        valid = valid & (idx >= 0)                                  # drop t == -1
+
+        # 3) Replace -1 by 0 (any in-range index works) but make src zero there,
+        #    so those updates are no-ops on a zero-initialized buffer.
+        safe_idx = torch.where(valid, idx, idx.new_zeros(idx.shape))            # [B,S,K]
+        src_i32 = valid.to(torch.int32)                                         # [B,S,K]
+
+        # 4) Accumulate along T, then binarize
+        accum = torch.zeros((idx.size(0), idx.size(1), plane.size(-1)), dtype=torch.int32,
+                            device=idx.device)                                   # [B,S,T]
+        accum = accum.scatter_add(-1, safe_idx, src_i32)                         # [B,S,T]
+        plane = accum.ne(0)                                                      # bool
+
+        # 5) Write back into the full mask tensor
+        mask_hex2 = torch.zeros_like(self.mask_hex2)                             # [B,4,S,T]
+        mask_hex2[:, 2] = plane
 
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
         # 3. MASK_ACTION - ie. allowed main action mask
-        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
+        mask_action = torch.zeros_like(self.mask_action)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, self.hex_act_map["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+        mask_action[:, 0] = obs[:, self.global_wait_offset].to(torch.bool)
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
@@ -685,56 +724,45 @@ class JitModel(nn.Module):
         #
         # 1. Sample MAIN ACTION
         probs_act0 = self._categorical_masked(logits0=action_logits, mask=mask_action)
-        act0 = self._sample(probs=probs_act0, logits=action_logits)
+        act0 = torch.argmax(probs_act0, dim=1)
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
-        probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1[b_inds, act0])
-        hex1 = self._sample(probs=probs_hex1, logits=hex1_logits)
+        probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1[0, act0])
+        hex1 = torch.argmax(probs_hex1, dim=1)
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
-        probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
-        hex2 = self._sample(probs=probs_hex2, logits=hex2_logits)
+        probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2[0, act0, hex1])
+        hex2 = torch.argmax(probs_hex2, dim=1)
 
         action = self.action_table[act0, hex1, hex2]
-        return action.int().item()
 
-    # Implement SerializableCategoricalMasked as a function
-    # (lite interpreted does not support instantiating the class)
+        return action
+
     @torch.jit.export
-    def _categorical_masked(self, logits0: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        mask_value = torch.tensor(-((2 - 2**-23) * 2**127), dtype=logits0.dtype)
-
-        # logits
-        logits1 = torch.where(mask, logits0, mask_value)
+    def _categorical_masked(self, logits0, mask):
+        logits1 = torch.where(mask, logits0, self.mask_value)
         logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
         probs = torch.nn.functional.softmax(logits, dim=-1)
         return probs
 
-    @torch.jit.export
-    def sample(self, probs: torch.Tensor, logits: torch.Tensor) -> torch.Tensor:
-        num_events = logits.size()[-1]
-        probs_2d = probs.reshape(-1, num_events)
-        samples_2d = torch.multinomial(probs_2d, 1, True).T
-        batch_shape = logits.size()[:-1]
-        return samples_2d.reshape(batch_shape)
 
-
-class JitDNAModel(nn.Module):
-    def __init__(self, z_other: int, z_hex: int, z_merged: int):
+class ExecuTorchDNAModel(nn.Module):
+    def __init__(self, config):
         super().__init__()
-        self.model_policy = JitModel(z_other, z_hex, z_merged)
-        self.model_value = JitModel(z_other, z_hex, z_merged)
+        self.model_policy = ExecuTorchModel(config)
+        self.model_value = ExecuTorchModel(config)
+        self.register_buffer("version", torch.tensor(12, dtype=torch.long), persistent=False)
 
     @torch.jit.export
-    def get_version(self) -> int:
-        return 12
+    def get_version(self):
+        return self.version.clone()
 
     @torch.jit.export
-    def get_value(self, obs) -> float:
+    def get_value(self, obs):
         return self.model_value.get_value(obs)
 
     @torch.jit.export
-    def predict(self, obs, _mask) -> int:
+    def predict(self, obs):
         return self.model_policy.predict(obs)
 
 
@@ -1131,10 +1159,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
 
-    # torch.autograd.set_detect_anomaly(True)  # debug
-    torch.set_float32_matmul_precision("high")
-    torch.backends.cuda.matmul.allow_tf32 = True
-
     os.makedirs(config["run"]["out_dir"], exist_ok=True)
     with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
         msg = f"Saving new config to: {f.name}"
@@ -1159,6 +1183,13 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
     torch.backends.cudnn.benchmark = True
+
+    if train_config.get("torch_detect_anomaly", None):
+        torch.autograd.set_detect_anomaly(True)  # debug
+
+    if train_config.get("torch_cuda_matmul", None):
+        torch.set_float32_matmul_precision("high")
+        torch.backends.cuda.matmul.allow_tf32 = True
 
     train_venv = create_venv(train_config["env"]["kwargs"], train_config["env"]["num_envs"], sync=train_config["env"].get("sync", False))
     logger.info("Initialized %d train envs" % train_venv.num_envs)
