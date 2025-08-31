@@ -50,7 +50,8 @@ config = dict(
     wandb_log_interval_s=60,
 
     checkpoint=dict(
-        interval_s=3600,
+        # Non-permanent checkpoint is made after eval if result is good
+        # Permanent checkpoint is made every X seconds, regardless of eval result
         permanent_interval_s=12*3600,  # disable with int(2e9)
         optimize_local_storage=False,
         s3=dict(
@@ -65,7 +66,7 @@ config = dict(
             # "BattleAI.town": eval_variant(opponent="BattleAI", town_chance=100),
             "BattleAI.open": eval_variant(opponent="BattleAI", town_chance=0),
         },
-        num_vsteps=1000,
+        num_vsteps=5000,
         interval_s=1800,
         at_script_start=False,
     ),

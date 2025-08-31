@@ -737,7 +737,6 @@ class ExecuTorchModel(nn.Module):
         action = self.action_table[act0, hex1, hex2]
         return action
 
-    @torch.jit.export
     def _categorical_masked(self, logits0, mask):
         logits1 = torch.where(mask, logits0, self.mask_value)
         logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
@@ -1310,8 +1309,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     timers["all"].start()
     eval_net_value_best = None
 
-    checkpoint_timer = Timer()
-    checkpoint_timer.start()
     permanent_checkpoint_timer = Timer()
     permanent_checkpoint_timer.start()
     wandb_log_commit_timer = Timer()
@@ -1444,10 +1441,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
                     train_config=train_config,
                 )
 
-            # Checkpoint only if we have eval stats
-            if checkpoint_timer.peek() > config["checkpoint"]["interval_s"] and eval_multistats.num_episodes > 0:
-                logger.info("Time for a checkpoint")
-                checkpoint_timer.reset(start=True)
+            if eval_multistats.num_episodes > 0:
                 eval_net_value = eval_multistats.ep_value_mean
 
                 if eval_net_value_best is None:
@@ -1459,7 +1453,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
                 else:
                     logger.info("Good checkpoint (eval_net_value=%f, eval_net_value_best=%f), will save it" % (eval_net_value, eval_net_value_best))
                     eval_net_value_best = eval_net_value
-                    thread = threading.Thread(target=save_fn, kwargs=dict(uploading_event=uploading_event, config=None))  # no need to save config here
+                    thread = threading.Thread(target=save_fn, kwargs=dict(uploading_event=uploading_event))
                     thread.start()
 
             if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:

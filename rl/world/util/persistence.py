@@ -103,10 +103,11 @@ def load_checkpoint(
 
     filelist = [k1 for k0, v0 in files.items() for k1, v1 in v0.items()]
     logger.info(dict(event="Loading checkpoint...", filelist=filelist))
+    now = time.time()
 
     def _backup(filename):
         if not dry_run and not optimize_local_storage:
-            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), time.time())
+            backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
             logger.debug(f"Backup loaded file as {backname}")
             shutil.copy2(filename, backname)
 
