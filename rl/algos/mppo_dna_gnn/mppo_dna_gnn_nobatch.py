@@ -1304,6 +1304,9 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     finally:
         if save_on_exit:
             save_fn(timestamped=True)
+        if os.getenv("VASTAI_INSTANCE_ID") and not dry_run:
+            import vastai_sdk
+            vastai_sdk.VastAI().label_instance(id=int(os.environ["VASTAI_INSTANCE_ID"]), label="idle")
 
 
 # This is in a separate function to prevent vars from being global

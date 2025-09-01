@@ -62,6 +62,7 @@ def setup_wandb(config, model, src_file, wandb_kwargs={}):
     if os.getenv("VASTAI_INSTANCE_ID") is not None:
         v = vastai_sdk.VastAI()
         instance_id = int(os.environ["VASTAI_INSTANCE_ID"])
+        v.label_instance(id=instance_id, label=config["run"]["id"])
         with tempfile.NamedTemporaryFile(mode="w", delete=True) as instance_file:
             json.dump(v.show_instance(id=instance_id), instance_file)
             art.add_file(instance_file.name, name="vastai.json", policy="mutable")

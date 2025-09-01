@@ -954,7 +954,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
 
-    # torch.autograd.set_detect_anomaly(True)  # debug
+    torch.autograd.set_detect_anomaly(True)  # debug
     torch.set_float32_matmul_precision("high")
     torch.backends.cuda.matmul.allow_tf32 = True
 
@@ -1000,7 +1000,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     state = State()
 
     model = DNAModel(config=config["model"], device=device)
-    # model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=True)
+    model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=True)
 
     optimizer_policy = torch.optim.Adam(model.model_policy.parameters(), lr=learning_rate)
     optimizer_value = torch.optim.Adam(model.model_value.parameters(), lr=learning_rate)
@@ -1298,6 +1298,9 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     finally:
         if save_on_exit:
             save_fn(timestamped=True)
+        if os.getenv("VASTAI_INSTANCE_ID") and not dry_run:
+            import vastai_sdk
+            vastai_sdk.VastAI().label_instance(id=int(os.environ["VASTAI_INSTANCE_ID"]), label="idle")
 
 
 # This is in a separate function to prevent vars from being global
