@@ -2,6 +2,7 @@ import pygit2
 import os
 import tempfile
 import json
+import vastai_sdk
 from datetime import datetime
 
 
@@ -54,12 +55,19 @@ def setup_wandb(config, model, src_file, wandb_kwargs={}):
     art.metadata["timestsamp"] = start_info["timestamp"]
     art.metadata["head"] = start_info["git_head"]
 
-    with tempfile.NamedTemporaryFile(mode='w+', delete=True) as cfg_file:
+    with tempfile.NamedTemporaryFile(mode="w", delete=True) as cfg_file:
         json.dump(config, cfg_file)
         art.add_file(cfg_file.name, name="config.json", policy="mutable")
 
+    if os.getenv("VASTAI_INSTANCE_ID") is not None:
+        v = vastai_sdk.VastAI()
+        instance_id = int(os.environ["VASTAI_INSTANCE_ID"])
+        with tempfile.NamedTemporaryFile(mode="w", delete=True) as instance_file:
+            json.dump(v.show_instance(id=instance_id), instance_file)
+            art.add_file(instance_file.name, name="vastai.json", policy="mutable")
+
     if start_info["git_is_dirty"]:
-        with tempfile.NamedTemporaryFile(mode='w+', delete=True) as diff_file:
+        with tempfile.NamedTemporaryFile(mode="w", delete=True) as diff_file:
             diff_file.write(f"# Head: {start_info['git_head']}\n")
             diff_file.write(f"# Timestamp: {start_info['timestamp']}\n")
             diff_file.write(patch)

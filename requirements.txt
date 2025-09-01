@@ -46,6 +46,7 @@ executorch
 
 ipdb
 vastai
+vastai-sdk
 
 #
 # Python's "torch" package is *not* compiled with CXX11 ABI flag by default.
