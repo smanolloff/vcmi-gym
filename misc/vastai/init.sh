@@ -233,7 +233,7 @@ cmake -S . -B rel -Wno-dev \
     -D ENABLE_LAUNCHER=0 \
     -D ENABLE_ML=1 \
     -D ENABLE_MMAI=1 \
-    -D MMAI_LIBTORCH_PATH=""
+    -D MMAI_EXECUTORCH_PATH=""
 cmake --build rel/ -- -j32
 
 cd "../vcmi_gym/connectors"
