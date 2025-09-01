@@ -101,6 +101,7 @@ config = dict(
         torch_autocast=False,
         torch_cuda_matmul=False,
         torch_detect_anomaly=False,
+        torch_compile=False,
     ),
     model=dict(
         gnn_layers=2,
