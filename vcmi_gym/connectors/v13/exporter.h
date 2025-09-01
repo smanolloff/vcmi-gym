@@ -62,6 +62,7 @@ namespace Connector::V13 {
         virtual const std::vector<AttributeMapping> getGlobalAttributeMapping() const;
         virtual const std::vector<FlagMapping> getStackFlag1Mapping() const;
         virtual const std::vector<FlagMapping> getStackFlag2Mapping() const;
+        virtual const std::vector<std::string> getLinkTypes() const;
 
     protected:
         const std::string getEncodingName(Encoding e) const;

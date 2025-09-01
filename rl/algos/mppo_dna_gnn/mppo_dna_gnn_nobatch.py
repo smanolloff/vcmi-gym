@@ -154,7 +154,7 @@ def to_hdata(obs, done, links):
 
 # b_obs: torch.tensor of shape (B, STATE_SIZE)
 # tuple_links: tuple of B dicts, where each dict is a single obs's "links"
-def to_hdata_batch(b_obs, b_done, tuple_links):
+def to_hdata_list(b_obs, b_done, tuple_links):
     b_hdatas = []
     for obs, done, links in zip(b_obs, b_done, tuple_links):
         b_hdatas.append(to_hdata(obs, done, links))
@@ -163,14 +163,14 @@ def to_hdata_batch(b_obs, b_done, tuple_links):
     #       gives  (330, STATE_SIZE_ONE_HEX)
     #       not sure if that's required for GNN to work?
     #       but it breaks my encode() which uses torch.split()
-    return Batch.from_data_list(b_hdatas)
+    return b_hdatas
 
 
 class Storage:
     def __init__(self, venv, num_vsteps, device):
         v = venv.num_envs
         self.rollout_buffer = []  # contains Batch() objects
-        self.v_next_hdata = to_hdata_batch(
+        self.v_next_hdata_list = to_hdata_list(
             torch.as_tensor(venv.reset()[0], device=device),
             torch.zeros(v, device=device),
             venv.call("links"),
@@ -252,6 +252,18 @@ class ActionData:
         self.action = action
         self.logprob = self.act0_logprob + self.hex1_logprob + self.hex2_logprob
         self.entropy = self.act0_entropy + self.hex1_entropy + self.hex2_entropy
+
+    def cpu(self):
+        for t in ["act0", "hex1", "hex2"]:
+            setattr(self, t, getattr(self, t).cpu())
+            # setattr(self, f"{t}_dist", getattr(self, f"{t}_dist").cpu())
+            setattr(self, f"{t}_logprob", getattr(self, f"{t}_logprob").cpu())
+            setattr(self, f"{t}_entropy", getattr(self, f"{t}_entropy").cpu())
+
+        self.action = self.action.cpu()
+        self.logprob = self.logprob.cpu()
+        self.entropy = self.entropy.cpu()
+        return self
 
 
 class Model(nn.Module):
@@ -350,7 +362,7 @@ class Model(nn.Module):
             obs = torch.randn([2, STATE_SIZE])
             done = torch.zeros(2)
             links = 2 * [VcmiEnv.OBSERVATION_SPACE["links"].sample()]
-            hdata = to_hdata_batch(obs, done, links)
+            hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
             z = self.encode(hdata)
             self._get_actdata_eval(z, obs)
             self._get_value(z)
@@ -599,36 +611,37 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
     assert not torch.is_grad_enabled()
 
     stats = SampleStats()
-    device = model.device
 
     storage.rollout_buffer.clear()
 
     for vstep in range(num_vsteps):
         logger.debug("(train) vstep: %d" % vstep)
 
-        v_hdata = storage.v_next_hdata
+        v_hdata_list = storage.v_next_hdata_list
+        v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
 
-        v_actdata = model.model_policy.get_actdata_eval(v_hdata)
-        v_value = model.model_value.get_value(v_hdata)
+        v_actdata = model.model_policy.get_actdata_eval(v_hdata_batch).cpu()
+        v_value = model.model_value.get_value(v_hdata_batch).flatten().cpu()
+        v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actdata.action.numpy())
+        v_rew = torch.as_tensor(v_rew)
 
-        v_hdata.action[:] = v_actdata.action
-        v_hdata.logprob[:] = v_actdata.logprob
-        v_hdata.value[:] = v_value.flatten()
+        for i, hdata in enumerate(v_hdata_list):
+            hdata.action = v_actdata.action[i]
+            hdata.logprob = v_actdata.logprob[i]
+            hdata.value = v_value[i]
+            hdata.reward = v_rew[i]
 
-        v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actdata.action.cpu().numpy())
+            storage.bv_dones[vstep, i] = hdata.done
+            storage.bv_values[vstep, i] = hdata.value
+            storage.bv_rewards[vstep, i] = hdata.reward
 
-        v_hdata.reward[:] = torch.as_tensor(v_rew, device=device)
-
-        storage.bv_dones[vstep] = v_hdata.done
-        storage.bv_values[vstep] = v_hdata.value
-        storage.bv_rewards[vstep] = v_hdata.reward
-        storage.v_next_hdata = to_hdata_batch(
-            torch.as_tensor(v_obs, device=device),
-            torch.as_tensor(np.logical_or(v_term, v_trunc), device=device),
+        storage.v_next_hdata_list = to_hdata_list(
+            torch.as_tensor(v_obs),
+            torch.as_tensor(np.logical_or(v_term, v_trunc)),
             venv.call("links")
         )
 
-        storage.rollout_buffer.append(v_hdata)
+        storage.rollout_buffer.extend(v_hdata_list)
 
         # See notes/gym_vector.txt
         if "_final_info" in v_info:
@@ -640,7 +653,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             stats.ep_is_success_mean += sum(v_final_info["is_success"][v_done_id])
             stats.num_episodes += len(v_done_id)
 
-    assert len(storage.rollout_buffer) == num_vsteps
+    assert len(storage.rollout_buffer) == num_vsteps * venv.num_envs
 
     if stats.num_episodes > 0:
         stats.ep_rew_mean /= stats.num_episodes
@@ -649,9 +662,11 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         stats.ep_is_success_mean /= stats.num_episodes
 
     # bootstrap value if not done
-    v_next_value = model.model_value.get_value(storage.v_next_hdata).flatten()
+    v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list)
+    v_next_value = model.model_value.get_value(v_next_hdata_batch).flatten()
 
-    storage.v_next_hdata.value[:] = v_next_value
+    for i, hdata in enumerate(storage.v_next_hdata_list):
+        hdata.value = v_next_value[i]
 
     return stats
 
@@ -660,20 +675,16 @@ def eval_model(logger, model, venv, num_vsteps):
     assert torch.is_inference_mode_enabled()
 
     stats = SampleStats()
-    device = model.device
-
-    t = lambda x: torch.as_tensor(x, device=model.device)
-
     v_obs, _ = venv.reset()
-    v_done = torch.zeros(venv.num_envs, dtype=torch.bool, device=device)
+    v_done = torch.zeros(venv.num_envs, dtype=torch.bool)
 
     for vstep in range(0, num_vsteps):
         logger.debug("(eval) vstep: %d" % vstep)
 
-        v_hdata = to_hdata_batch(t(v_obs), t(v_done), venv.call("links"))
-        v_actdata = model.model_policy.get_actdata_eval(v_hdata)
+        v_hdata_list = to_hdata_list(torch.as_tensor(v_obs), v_done, venv.call("links"))
+        v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
+        v_actdata = model.model_policy.get_actdata_eval(v_hdata_batch)
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actdata.action.cpu().numpy())
-        v_done = np.logical_or(v_term, v_trunc)
 
         # See notes/gym_vector.txt
         if "_final_info" in v_info:
@@ -697,6 +708,7 @@ def eval_model(logger, model, venv, num_vsteps):
 def train_model(
     logger,
     model,
+    old_model_policy,
     optimizer_policy,
     optimizer_value,
     optimizer_distill,
@@ -709,15 +721,15 @@ def train_model(
 
     num_vsteps = train_config["num_vsteps"]
     num_envs = train_config["env"]["num_envs"]
-
+    v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list)
     # # compute advantages
     with torch.no_grad():
         lastgaelam = 0
 
         for t in reversed(range(num_vsteps)):
             if t == num_vsteps - 1:
-                nextnonterminal = 1.0 - storage.v_next_hdata.done
-                nextvalues = storage.v_next_hdata.value
+                nextnonterminal = 1.0 - v_next_hdata_batch.done
+                nextvalues = v_next_hdata_batch.value
             else:
                 nextnonterminal = 1.0 - storage.bv_dones[t + 1]
                 nextvalues = storage.bv_values[t + 1]
@@ -726,17 +738,16 @@ def train_model(
         storage.bv_returns[:] = storage.bv_advantages + storage.bv_values
 
         for b in range(num_vsteps):
-            v_hdata = storage.rollout_buffer[b]
-            v_hdata.advantage[:] = storage.bv_advantages[b]
-            v_hdata.ep_return[:] = storage.bv_returns[b]
+            for v in range(num_envs):
+                v_hdata = storage.rollout_buffer[b*v + v]
+                v_hdata.advantage = storage.bv_advantages[b, v]
+                v_hdata.ep_return = storage.bv_returns[b, v]
 
     batch_size = num_vsteps * num_envs
     minibatch_size = int(batch_size // train_config["num_minibatches"])
 
-    # Explode buffer into individual hdatas (dataloader forms a single, large batch)
-    # TODO: maybe clone obs here to prevent inference_mode error?
     dataloader = DataLoader(
-        [hdata for batch in storage.rollout_buffer for hdata in batch.to_data_list()],
+        storage.rollout_buffer,
         batch_size=minibatch_size,
         shuffle=True
     )
@@ -823,9 +834,8 @@ def train_model(
                 optimizer_value.zero_grad()
 
     # Value network to policy network distillation
-    model.model_policy.zero_grad(True)  # don't clone gradients
-    old_model_policy = copy.deepcopy(model.model_policy).to(model.device)
-    old_model_policy.eval()
+    old_model_policy.load_state_dict(model.model_policy.state_dict(), strict=True)
+
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.distill) epoch: %d" % epoch)
         for i, mb in enumerate(dataloader):
@@ -995,10 +1005,11 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     num_steps = train_config["num_vsteps"] * num_envs
     batch_size = int(num_steps)
     assert batch_size % train_config["num_minibatches"] == 0, f"{batch_size} % {train_config['num_minibatches']} == 0"
-    storage = Storage(train_venv, train_config["num_vsteps"], device)
+    storage = Storage(train_venv, train_config["num_vsteps"], torch.device("cpu"))  # force storage on cpu
     state = State()
 
     model = DNAModel(config=config["model"], device=device)
+    old_model_policy = Model(config=config["model"]).to(device)  # for distill
 
     optimizer_policy = torch.optim.Adam(model.model_policy.parameters(), lr=learning_rate)
     optimizer_value = torch.optim.Adam(model.model_value.parameters(), lr=learning_rate)
@@ -1228,6 +1239,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
                 train_stats = train_model(
                     logger=logger,
                     model=model,
+                    old_model_policy=old_model_policy,
                     optimizer_policy=optimizer_policy,
                     optimizer_value=optimizer_value,
                     optimizer_distill=optimizer_distill,

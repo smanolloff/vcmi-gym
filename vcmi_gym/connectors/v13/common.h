@@ -51,9 +51,16 @@ namespace Connector::V13 {
     // XXX: these are also py::array_t, but are 2D
     using P_IntermediateStates = py::array_t<float>;        // shape (d0, STATE_SIZE)
     using P_IntermediateActionMasks = py::array_t<bool>;    // shape (d0, N_ACTIONS)
-    using P_IntermediateActions = py::array_t<long>;        // shape (d0,)
-    using P_Links = py::array_t<float>;                     // shape (165, 165, 6)
+    using P_IntermediateActions = py::array_t<int64_t>;     // shape (d0,)
 
+    using P_LinksDict = py::dict;
+    // {
+    //      "ADJACENT": (
+    //          "index": [[src0, src1, ...], [dst0, dst1, ...]],    // shape (2, num_links)
+    //          "attrs": [[attr0], [attr1], ...],                   // shape (1, num_links,)
+    //      ),
+    //      "REACH": ...
+    // }
 
     MMAI::Schema::Action RandomValidAction(const MMAI::Schema::IState * s);
 
@@ -64,14 +71,14 @@ namespace Connector::V13 {
             P_IntermediateStates intstates_,
             P_IntermediateActionMasks intmasks_,
             P_IntermediateActions intactions_,
-            P_Links links_,
+            P_LinksDict linksDict_,
             const MMAI::Schema::V13::ErrorCode errcode_,
             const std::string ansiRender_
         ) : type(type_)
           , intstates(intstates_)
           , intmasks(intmasks_)
           , intactions(intactions_)
-          , links(links_)
+          , linksDict(linksDict_)
           , errcode(static_cast<int>(errcode_))
           , ansiRender(ansiRender_) {}
 
@@ -81,14 +88,14 @@ namespace Connector::V13 {
         const P_IntermediateStates intstates;
         const P_IntermediateActionMasks intmasks;
         const P_IntermediateActions intactions;
-        const P_Links links;
+        const P_LinksDict linksDict;
         const int errcode;
         const std::string ansiRender;
 
         const P_IntermediateStates get_intermediate_states() const { return intstates; }
         const P_IntermediateActionMasks get_intermediate_action_masks() const { return intmasks; }
         const P_IntermediateActions get_intermediate_actions() const { return intactions; }
-        const P_Links get_links() const { return links; }
+        const P_LinksDict get_links_dict() const { return linksDict; }
 
         const int get_errcode() const { return errcode; }
     };

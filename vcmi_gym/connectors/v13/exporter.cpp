@@ -395,6 +395,29 @@ namespace Connector::V13 {
         }
     }
 
+    const std::vector<std::string> Exporter::getLinkTypes() const {
+        auto res = std::vector<std::string> {};
+        std::string type;
+
+        for (int i=0; i < static_cast<int>(LinkType::_count); i++) {
+            switch (LinkType(i)) {
+            break; case LinkType::ADJACENT:         type = "ADJACENT";
+            break; case LinkType::REACH:            type = "REACH";
+            break; case LinkType::RANGED_MOD:       type = "RANGED_MOD";
+            break; case LinkType::ACTS_BEFORE:      type = "ACTS_BEFORE";
+            break; case LinkType::MELEE_DMG_REL:    type = "MELEE_DMG_REL";
+            break; case LinkType::RETAL_DMG_REL:    type = "RETAL_DMG_REL";
+            break; case LinkType::RANGED_DMG_REL:   type = "RANGED_DMG_REL";
+            break; default:
+                throw std::runtime_error("Unexpected LinkType: " + std::to_string(i));
+            }
+
+            res.push_back(type);
+        }
+
+        return res;
+    }
+
     PYBIND11_MODULE(exporter_v13, m) {
         pybind11::class_<Exporter>(m, "Exporter")
             .def(pybind11::init<>())
@@ -417,6 +440,7 @@ namespace Connector::V13 {
             .def("get_player_attribute_mapping", &Exporter::getPlayerAttributeMapping, "Get attrname => (encname, offset, n, vmax, slope)")
             .def("get_global_attribute_mapping", &Exporter::getGlobalAttributeMapping, "Get attrname => (encname, offset, n, vmax, slope)")
             .def("get_stack_flag1_mapping", &Exporter::getStackFlag1Mapping, "Get flagname => offset")
-            .def("get_stack_flag2_mapping", &Exporter::getStackFlag2Mapping, "Get flagname => offset");
+            .def("get_stack_flag2_mapping", &Exporter::getStackFlag2Mapping, "Get flagname => offset")
+            .def("get_link_types", &Exporter::getLinkTypes, "Get a list of LinkType enum value names");
     }
 }

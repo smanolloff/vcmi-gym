@@ -120,6 +120,12 @@ pip install --break-system-packages -r requirements.txt
 
 cat <<-EOF >>~/.bashrc
 
+function pymod() {
+    local f=\$1
+    shift
+    python -m \$(echo \${f//\//.} | sed 's/\.py$//') "\${@}"
+}
+
 function copy_checkpoint() {
     [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP"; return 1; }
 

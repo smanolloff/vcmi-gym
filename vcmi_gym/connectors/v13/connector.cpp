@@ -12,7 +12,7 @@ namespace Connector::V13 {
             .def("get_intermediate_states", &P_State::get_intermediate_states)
             .def("get_intermediate_action_masks", &P_State::get_intermediate_action_masks)
             .def("get_intermediate_actions", &P_State::get_intermediate_actions)
-            .def("get_links", &P_State::get_links)
+            .def("get_links_dict", &P_State::get_links_dict)
             .def("get_errcode", &P_State::get_errcode);
 
         py::class_<Thread::Connector, std::unique_ptr<Thread::Connector>>(m, "ThreadConnector")

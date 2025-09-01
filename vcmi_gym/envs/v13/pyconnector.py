@@ -52,6 +52,7 @@ GLOBAL_ACT_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action i
 HEX_ACT_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_hex_actions())]))
 HEX_STATE_MAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_hex_states())]))
 SIDE_MAP = types.MappingProxyType(OrderedDict([("LEFT", EXPORTER.get_side_left()), ("RIGHT", EXPORTER.get_side_right())]))
+LINK_TYPES = types.MappingProxyType(OrderedDict([(type, i) for i, type in enumerate(EXPORTER.get_link_types())]))
 
 TRACE = False
 MAXLEN = 80
@@ -75,10 +76,13 @@ def tracelog(func, maxlen=MAXLEN):
 # TODO: this class is redundant, return original result to VcmiEnv instead
 class PyResult():
     def __init__(self, result):
-        self.intstates = result.get_intermediate_states()
-        self.intmasks = result.get_intermediate_action_masks()
-        self.intactions = result.get_intermediate_actions()
-        self.links = result.get_links()
+        # self.intstates = result.get_intermediate_states()
+        # self.intmasks = result.get_intermediate_action_masks()
+        # self.intactions = result.get_intermediate_actions()
+        self.state = result.get_intermediate_states()[0]
+        self.mask = result.get_intermediate_action_masks()[0]
+
+        self.links_dict = result.get_links_dict().items()
         self.errcode = result.get_errcode()
 
 

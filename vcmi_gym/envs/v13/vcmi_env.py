@@ -31,7 +31,8 @@ from .pyconnector import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     N_ACTIONS,
-    HEX_ACT_MAP
+    HEX_ACT_MAP,
+    LINK_TYPES
 )
 
 TRACE = os.getenv("VCMIGYM_DEBUG", "0") == "1"
@@ -79,6 +80,25 @@ class RewardConfig(NamedTuple):
     relval_mult: float
 
 
+class EdgeIndexSpace(gym.spaces.Space):
+    def __init__(self, num_nodes):
+        super().__init__(shape=None, dtype=np.int64)
+        assert num_nodes > 0
+        self.max_index = num_nodes - 1
+
+    def sample(self, num_edges=10):
+        return np.random.uniform(low=0, high=self.max_index, size=(2, num_edges)).astype(np.int64)
+
+
+class EdgeAttrsSpace(gym.spaces.Space):
+    def __init__(self, attrs_space):
+        super().__init__(shape=None, dtype=attrs_space.dtype)
+        self.attrs_space = attrs_space
+
+    def sample(self, num_edges=10):
+        return np.stack([self.attrs_space.sample() for _ in range(num_edges)])
+
+
 class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
@@ -96,17 +116,17 @@ class VcmiEnv(gym.Env):
 
     obs_space = gym.spaces.Box(low=STATE_VALUE_NA, high=1, shape=(STATE_SIZE,), dtype=np.float32)
     actmask_space = gym.spaces.Box(low=0, high=1, shape=(N_ACTIONS,), dtype=bool)
-    links_space = gym.spaces.Box(low=0, high=2, shape=(165, 165, 6), dtype=np.float32)
+    links_space = gym.spaces.Dict({
+        k: gym.spaces.Dict({
+            "index": EdgeIndexSpace(num_nodes=165),
+            "attrs": EdgeAttrsSpace(attrs_space=gym.spaces.Box(low=0, high=2, shape=(1,), dtype=np.float32))
+        })
+        for k in LINK_TYPES.keys()
+    })
 
     OBSERVATION_SPACE = gym.spaces.Dict({
         "observation": obs_space,
         "action_mask": actmask_space,
-        "transitions": gym.spaces.Dict({
-            "observations": gym.spaces.Sequence(obs_space, stack=True),
-            "action_masks": gym.spaces.Sequence(actmask_space, stack=True),
-            "actions": gym.spaces.Sequence(ACTION_SPACE, stack=True),
-            "rewards": gym.spaces.Sequence(REWARD_SPACE, stack=True),
-        }),
         "links": links_space
     })
 
@@ -280,18 +300,17 @@ class VcmiEnv(gym.Env):
                 print(self.render())
                 raise Exception("Invalid action given: %s" % action)
 
-        intbfs = [Decoder.decode(s, only_global=True) for s in res.intstates]
-        term = intbfs[-1].global_stats.BATTLE_WINNER.v is not None
-        intrews = self.__class__.calc_rewards(self.reward_cfg, res.errcode, res.intstates, intbfs)
-        rew = sum(intrews[1:])
-        res.intmasks[:, 0] = False  # prevent retreats for now
-        obs = self.__class__.build_obs(res, intrews)
+        bf = Decoder.decode(res.state, only_global=True)
+        term = bf.global_stats.BATTLE_WINNER.v is not None
+        rew = VcmiEnv.calc_reward(res.errcode, bf, self.reward_cfg)
+        res.mask[0] = False  # prevent retreats for now
+        obs = self.__class__.build_obs(res)
         trunc = self.steps_this_episode >= self.max_steps
 
-        self._update_vars_after_step(action, obs, res, rew, term, trunc, intbfs)
+        self._update_vars_after_step(action, obs, res, rew, term, trunc, bf)
         self._maybe_render()
 
-        info = self.__class__.build_info(res, term, trunc, intbfs[-1], self.steps_this_episode)
+        info = self.__class__.build_info(res, term, trunc, bf, self.steps_this_episode)
 
         return obs, rew, term, trunc, info
 
@@ -300,33 +319,20 @@ class VcmiEnv(gym.Env):
         super().reset(seed=seed)
 
         result = self.connector.reset()
+        bf = Decoder.decode(result.state, only_global=True)
+        result.mask[0] = False  # prevent retreats for now
+        obs = self.__class__.build_obs(result)
 
-        intbfs = [Decoder.decode(s, only_global=True) for s in result.intstates]
-
-        # Typically, there's reward before our first turn
-        # (rew is not even returned by this call)
-        # However, for sample collection purposes, we want the rewards even here
-        # (for reward prediction training)
-        # intrews = np.zeros(result.intstates.shape[0], dtype=np.float32)
-        # intrews[0] = float("nan")
-
-        intbfs = [Decoder.decode(s, only_global=True) for s in result.intstates]
-        intrews = self.__class__.calc_rewards(self.reward_cfg, 0, result.intstates, intbfs)
-
-        result.intmasks[:, 0] = False  # prevent retreats for now
-        obs = self.__class__.build_obs(result, intrews)
-
-        self._reset_vars(result, obs, intbfs)
+        self._reset_vars(result, obs, bf)
         if self.render_each_step:
             print(self.render())
 
-        info = {"side": intbfs[-1].global_stats.BATTLE_SIDE.v}
+        info = {"side": bf.global_stats.BATTLE_SIDE.v}
         return obs, info
 
     @tracelog
     def render(self):
         if self.render_mode == "ansi":
-            bf = self.intbfs[-1]
             return (
                 "%s\n"
                 "Step:          %-5s\n"
@@ -337,8 +343,8 @@ class VcmiEnv(gym.Env):
                 self.steps_this_episode,
                 round(self.reward, 2),
                 round(self.reward_total, 2),
-                bf.enemy_stats.VALUE_LOST_NOW_REL.v - bf.my_stats.VALUE_LOST_NOW_REL.v,
-                bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
+                self.bf.enemy_stats.VALUE_LOST_NOW_REL.v - self.bf.my_stats.VALUE_LOST_NOW_REL.v,
+                self.bf.enemy_stats.VALUE_LOST_ACC_REL0.v - self.bf.my_stats.VALUE_LOST_ACC_REL0.v
             )
         elif self.render_mode == "rgb_array":
             gym.logger.warn("Rendering RGB arrays is not implemented")
@@ -411,7 +417,7 @@ class VcmiEnv(gym.Env):
         self.close()
 
     def decode(self):
-        return self.__class__.decode_obs(self.result.intstates[-1])
+        return self.__class__.decode_obs(self.result.state)
 
     def defend_action(self, bf=None):
         if bf is None:
@@ -451,48 +457,22 @@ class VcmiEnv(gym.Env):
         return chosen_action
 
     @staticmethod
-    def build_obs(pyresult, intrews):
+    def build_obs(pyresult):
         return {
-            "observation": pyresult.intstates[-1],
-            "action_mask": pyresult.intmasks[-1],
-            "transitions": {
-                "observations": pyresult.intstates,
-                "action_masks": pyresult.intmasks,
-                "actions": pyresult.intactions,
-                "rewards": intrews
-            },
-            "links": pyresult.links
+            "observation": pyresult.state,
+            "action_mask": pyresult.mask,
+            "links": dict(pyresult.links_dict),
         }
 
     @staticmethod
     def decode_obs(state):
         return Decoder.decode(state)
 
-    @staticmethod
-    def calc_rewards(reward_cfg, errcode, intstates, intbfs):
-        # Since a "fixed step reward" is ill-defined in a transition context
-        # => set `step_fixed=0` for all but the first transition
-        # i.e. immediately after we act
-        mid_rewcfg = reward_cfg._replace(step_fixed=0)
-
-        def calcrew(err, state, rewcfg, bf):
-            return VcmiEnv.calc_reward(err, bf, rewcfg)
-
-        initial = [float("nan")]
-
-        # NOTE: using [1:2] instead of simply [1] to avoid IndexError after reset
-        first = [calcrew(errcode, s, reward_cfg, bf) for s, bf in zip(intstates[1:2], intbfs[1:2])]
-
-        # NOTE: `rest` is [] when there were no enemy actions after ours
-        rest = [calcrew(0, s, mid_rewcfg, bf) for s, bf in zip(intstates[2:], intbfs[2:])]
-
-        return initial + first + rest
-
     #
     # private
     #
 
-    def _update_vars_after_step(self, action, obs, res, rew, term, trunc, intbfs):
+    def _update_vars_after_step(self, action, obs, res, rew, term, trunc, bf):
         self.last_action = action
         self.steps_this_episode += 1
         self.obs = obs
@@ -501,9 +481,9 @@ class VcmiEnv(gym.Env):
         self.reward_total += rew
         self.terminated = term
         self.truncated = trunc
-        self.intbfs = intbfs
+        self.bf = bf
 
-    def _reset_vars(self, res, obs, intbfs):
+    def _reset_vars(self, res, obs, bf):
         self.last_action = None
         self.steps_this_episode = 0
         self.obs = obs
@@ -514,7 +494,7 @@ class VcmiEnv(gym.Env):
         self.reward_clip_abs_max = 0
         self.terminated = False
         self.truncated = False
-        self.intbfs = intbfs
+        self.bf = bf
 
     def _maybe_render(self):
         if self.render_each_step:

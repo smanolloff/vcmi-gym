@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include "threadconnector.h"
+#include "common.h"
 #include "schema/base.h"
 #include "schema/v13/constants.h"
 #include "schema/v13/types.h"
@@ -295,35 +296,60 @@ namespace Connector::V13::Thread {
         //
         // LINKS
         //
-        auto &links = sup->getLinks();
-        auto plinks = P_Links({165, 165, 6});
 
-        for (int i=0; i<165; ++i) {
-            for (int j=0; j<165; ++j) {
-                auto link = links.at(i).at(j);
-                plinks.mutable_at(i, j, 0) = link->isNeighbour();
-                plinks.mutable_at(i, j, 1) = link->isReachable();
-                plinks.mutable_at(i, j, 2) = link->getRangedMod();
-                plinks.mutable_at(i, j, 3) = link->getRangedDmgFrac();
-                plinks.mutable_at(i, j, 4) = link->getMeleeDmgFrac();
-                plinks.mutable_at(i, j, 5) = link->getRetalDmgFrac();
+        auto pylinks = P_LinksDict();
+
+        for (const auto &[type, links] : sup->getAllLinks()) {
+            py::str pytype;
+
+            switch(type) {
+            break; case MMAI::Schema::V13::LinkType::ADJACENT:
+                pytype = "ADJACENT";
+            break; case MMAI::Schema::V13::LinkType::REACH:
+                pytype = "REACH";
+            break; case MMAI::Schema::V13::LinkType::RANGED_MOD:
+                pytype = "RANGED_MOD";
+            break; case MMAI::Schema::V13::LinkType::ACTS_BEFORE:
+                pytype = "ACTS_BEFORE";
+            break; case MMAI::Schema::V13::LinkType::MELEE_DMG_REL:
+                pytype = "MELEE_DMG_REL";
+            break; case MMAI::Schema::V13::LinkType::RETAL_DMG_REL:
+                pytype = "RETAL_DMG_REL";
+            break; case MMAI::Schema::V13::LinkType::RANGED_DMG_REL:
+                pytype = "RANGED_DMG_REL";
+            break; default:
+                throw std::runtime_error("Unexpected links type: " + std::to_string(EI(type)));
             }
+
+            const auto srcinds = links->getSrcIndex();
+            const auto dstinds = links->getDstIndex();
+            const auto attrs = links->getAttributes();
+
+            // ----------------------------------
+            // view (no copy) -- no speed improvement
+            // auto pyinds = py::array_t<const int64_t>({d0, d1}, inds.data());
+            // auto pyattrs = py::array_t<const float>(d0, attrs.data());
+            // ----------------------------------
+            // copy (safer)
+            if (srcinds.size() != dstinds.size() || srcinds.size() != attrs.size())
+                throw std::runtime_error("inds/attrs size mismatch: " + std::to_string(srcinds.size()) + " / " + std::to_string(dstinds.size()) + " / " + std::to_string(attrs.size()));
+
+            ssize_t n = attrs.size();
+
+            auto pyinds = py::array_t<int64_t>({ssize_t(2), n});
+            std::memcpy(pyinds.mutable_data(), srcinds.data(), n*sizeof(int64_t));
+            std::memcpy(pyinds.mutable_data() + n, dstinds.data(), n*sizeof(int64_t));
+
+            auto pyattrs = py::array_t<float>({n, ssize_t(1)});
+            std::memcpy(pyattrs.mutable_data(), attrs.data(), n*sizeof(float));
+            // ----------------------------------
+
+            // pylinks[pytype] = py::make_tuple(pyinds, pyattrs);
+            auto pytypelinks = py::dict();
+            pytypelinks[py::str("index")] = pyinds;
+            pytypelinks[py::str("attrs")] = pyattrs;
+            pylinks[pytype] = pytypelinks;
         }
-
-        // TODO: check if this is faster and worth the risk
-        // auto mplinks = plinks.mutable_unchecked<3>();
-        // for (int i=0; i<165; ++i) {
-        //     for (int j=0; j<165; ++j) {
-        //         auto link = links.at(i).at(j);
-        //         mplinks(i, j, 0) = link->isNeighbour();
-        //         mplinks(i, j, 1) = link->isReachable();
-        //         mplinks(i, j, 2) = link->getRangedMod();
-        //         mplinks(i, j, 3) = link->getRangedDmgFrac();
-        //         mplinks(i, j, 4) = link->getMeleeDmgFrac();
-        //         mplinks(i, j, 5) = link->getRetalDmgFrac();
-        //     }
-        // }
-
 
         LOG("Creating P_State...");
 
@@ -332,7 +358,7 @@ namespace Connector::V13::Thread {
              intstates,
              intmasks,
              intactions,
-             plinks,
+             pylinks,
              sup->getErrorCode(),
              sup->getAnsiRender()
         );
