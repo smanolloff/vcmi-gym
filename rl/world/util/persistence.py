@@ -36,9 +36,9 @@ def _s3_download(logger, dry_run, s3_config, filename):
 
     # Download is OK even if --dry-run is given (nothing overwritten)
     if os.path.exists(filename):
-        logger.debug(f"Loading from local file: {filename}")
+        logger.info(f"Loading from local file: {filename}")
     elif s3_config:
-        logger.debug("Local file does not exist, try S3")
+        logger.info("Local file does not exist, try S3")
 
         s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
         logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
@@ -108,7 +108,7 @@ def load_checkpoint(
     def _backup(filename):
         if not dry_run and not optimize_local_storage:
             backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
-            logger.debug(f"Backup loaded file as {backname}")
+            logger.info(f"Backup loaded file as {backname}")
             shutil.copy2(filename, backname)
 
     for f_model, model in files["models"].items():
@@ -213,7 +213,7 @@ def save_checkpoint(
 
         if config:
             with open(os.path.join(out_dir, f"{prefix}-config.json"), "w") as f:
-                logger.debug(f"Saving config to: {f.name}")
+                logger.info(f"Saving config to: {f.name}")
                 json.dump(config, f, indent=4, sort_keys=False)
 
         if optimize_local_storage:
@@ -265,7 +265,7 @@ def save_checkpoint(
                 shutil.move(f"{f}.tmp", f)
 
     if not s3_config:
-        logger.debug("No s3_config, will not upoad checkpoint to S3")
+        logger.info("No s3_config, will not upoad checkpoint to S3")
         return
 
     if uploading_event.is_set():

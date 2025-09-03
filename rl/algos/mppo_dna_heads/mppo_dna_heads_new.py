@@ -884,6 +884,7 @@ def eval_model(logger, model, venv, num_vsteps):
 def train_model(
     logger,
     model,
+    old_model_policy,
     optimizer_policy,
     optimizer_value,
     optimizer_distill,
@@ -932,6 +933,10 @@ def train_model(
     entropy_losses = torch.zeros(train_config["num_minibatches"])
     value_losses = torch.zeros(train_config["num_minibatches"])
     distill_losses = torch.zeros(train_config["num_minibatches"])
+
+    # TODO:
+    # Gemini says using differently shuffled indices for policy, value and distill
+    # is destructive for the learning?
 
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.policy) epoch: %d" % epoch)
@@ -1021,9 +1026,9 @@ def train_model(
                 optimizer_value.zero_grad()
 
     # Value network to policy network distillation
-    model.model_policy.zero_grad(True)  # don't clone gradients
-    old_model_policy = copy.deepcopy(model.model_policy).to(model.device)
+    old_model_policy.load_state_dict(model.model_policy.state_dict())
     old_model_policy.eval()
+
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.distill) epoch: %d" % epoch)
         np.random.shuffle(b_inds)
@@ -1055,7 +1060,6 @@ def train_model(
 
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
             distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
-
             distill_losses[i] = distill_loss.detach()
 
             with autocast_ctx(False):
@@ -1125,7 +1129,7 @@ def prepare_wandb_log(
         })
 
     wlog.update({
-        "train/learning_rate": float(optimizer.param_groups[0]["lr"]),
+        "train_config/learning_rate": float(optimizer.param_groups[0]["lr"]),
         "train/value_loss": train_stats.value_loss,
         "train/policy_loss": train_stats.policy_loss,
         "train/entropy_loss": train_stats.entropy_loss,
@@ -1203,6 +1207,10 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     state = State()
 
     model = DNAModel(config=config["model"], device=device)
+
+    old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
+    for p in old_model_policy.parameters():
+        p.requires_grad = False
 
     optimizer_policy = torch.optim.Adam(model.model_policy.parameters(), lr=learning_rate)
     optimizer_value = torch.optim.Adam(model.model_value.parameters(), lr=learning_rate)
@@ -1432,6 +1440,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
                 train_stats = train_model(
                     logger=logger,
                     model=model,
+                    old_model_policy=old_model_policy,
                     optimizer_policy=optimizer_policy,
                     optimizer_value=optimizer_value,
                     optimizer_distill=optimizer_distill,
@@ -1479,7 +1488,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
                 wlog.update(aggregate_logs())
                 tstats = timer_stats(timers)
                 wlog.update(tstats)
-                wlog["train_config/learning_rate"] = optimizer_policy.param_groups[0]['lr']
                 wandb.log(wlog, commit=True)
 
             logger.info(wlog)

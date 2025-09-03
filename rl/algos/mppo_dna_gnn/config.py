@@ -42,7 +42,7 @@ eval_variant = lambda **env_kwargs: dict(
 )
 
 config = dict(
-    name_template="{datetime}-{id}-v12",
+    name_template="{datetime}-{id}-v12-gnn",
     out_dir_template="data/mppo-dna-heads",
 
     # XXX: s3_dir's "{wandb_group}" substring will be replaced with this value
@@ -74,18 +74,18 @@ config = dict(
         env=dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
-            num_envs=50,
+            num_envs=40,
             sync=False,
             kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
         ),
-        num_vsteps=100,                 # num_steps = num_vsteps * num_envs
+        num_vsteps=125,                 # num_steps = num_vsteps * num_envs
         num_minibatches=20,             # mb_size = num_steps / num_minibatches
         update_epochs=2,
 
         learning_rate=1e-4,
         lr_scheduler_mod="torch.optim.lr_scheduler",
         lr_scheduler_cls="LinearLR",
-        lr_scheduler_kwargs=dict(start_factor=1, end_factor=1e-2, total_iters=100),
+        lr_scheduler_kwargs=dict(start_factor=1, end_factor=1e-1, total_iters=100),
         lr_scheduler_interval_s=600,
 
         gamma=0.95,
@@ -93,9 +93,9 @@ config = dict(
         ent_coef=0.03,
         clip_coef=0.6,
         norm_adv=True,
-        clip_vloss=False,
+        clip_vloss=True,
         target_kl=None,
-        max_grad_norm=4,
+        max_grad_norm=1,
         distill_beta=1.0,
 
         torch_autocast=False,
@@ -104,9 +104,11 @@ config = dict(
         torch_compile=False,
     ),
     model=dict(
-        gnn_layers=2,
-        gnn_heads=8,
-        gnn_z_size=64,
+        gnn_num_layers=2,
+        gnn_num_heads=8,
+        gnn_hidden_channels=128,
+        gnn_out_channels=32,
+        z_size_other=32,
         z_size_merged=1024,
     ),
 )
@@ -130,7 +132,9 @@ if os.getenv("VASTAI", None) != "1":
     config["eval"]["interval_s"] = 300
     config["wandb_log_interval_s"] = 180
 
-    config["model"]["gnn_layers"] = 2
-    config["model"]["gnn_heads"] = 4
-    config["model"]["gnn_z_size"] = 32
-    config["model"]["z_size_merged"] = 1024
+    config["model"]["gnn_num_layers"] = 2
+    config["model"]["gnn_num_heads"] = 4
+    config["model"]["gnn_hidden_channels"] = 32
+    config["model"]["gnn_out_channels"] = 16
+    config["model"]["z_size_other"] = 16
+    config["model"]["z_size_merged"] = 50

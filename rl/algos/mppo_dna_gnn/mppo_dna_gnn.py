@@ -144,7 +144,7 @@ def to_hdata(obs, done, links):
     res.advantage = torch.tensor(0., device=device)
     res.ep_return = torch.tensor(0., device=device)
 
-    res["hex"].x = obs[:STATE_SIZE_HEXES].view(165, STATE_SIZE_ONE_HEX)
+    res["hex"].x = obs[-STATE_SIZE_HEXES:].view(165, STATE_SIZE_ONE_HEX)
     for lt in LINK_TYPES.keys():
         res["hex", lt, "hex"].edge_index = torch.as_tensor(links[lt]["index"], device=device)
         res["hex", lt, "hex"].edge_attr = torch.as_tensor(links[lt]["attrs"], device=device)
@@ -266,6 +266,56 @@ class ActionData:
         return self
 
 
+class NonGNNLayer(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x_dict):
+        print(f"Input: {x_dict}")
+        return {k: self.fn(x) for k, x in x_dict.items()}
+
+
+class GNNBlock(nn.Module):
+    # XXX: in_channels must be a tuple of (size_a, size_b) in case of
+    #       bipartite graphs.
+    def __init__(self, num_layers, num_heads, in_channels, hidden_channels, out_channels):
+        super().__init__()
+
+        # at least 1 "hidden" layer is required for shapes to match
+        assert num_layers >= 2
+        assert hidden_channels % num_heads == 0, f"{hidden_channels} % {num_heads} == 0"
+        assert out_channels % num_heads == 0, f"{out_channels} % {num_heads} == 0"
+
+        kwargs = dict(
+            heads=num_heads,
+            edge_dim=1,
+            add_self_loops=True
+        )
+
+        def make_hetero_dict(inchan, outchan):
+            return {
+                ("hex", lt, "hex"): gnn.GATv2Conv(**kwargs, in_channels=inchan, out_channels=outchan // num_heads)
+                for lt in LINK_TYPES
+            }
+
+        layers = []
+
+        for _ in range(num_layers - 1):
+            hetero_dict = make_hetero_dict(in_channels, hidden_channels)
+            layers.append((gnn.HeteroConv(hetero_dict), "x_dict, edge_index_dict, edge_attr_dict -> x_dict"))
+            layers.append((NonGNNLayer(nn.LeakyReLU()), "x_dict -> x_dict"))
+
+        # No activation after last layer
+        hetero_dict = make_hetero_dict(hidden_channels, out_channels)
+        layers.append((gnn.HeteroConv(hetero_dict), "x_dict, edge_index_dict, edge_attr_dict -> x_dict"))
+
+        self.layers = gnn.Sequential("x_dict, edge_index_dict, edge_attr_dict", layers)
+
+    def forward(self, hdata):
+        return self.layers(hdata.x_dict, hdata.edge_index_dict, hdata.edge_attr_dict)
+
+
 class Model(nn.Module):
     @staticmethod
     def build_action_tables():
@@ -312,7 +362,6 @@ class Model(nn.Module):
         super().__init__()
 
         self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
-        self.dim_hexes = STATE_SIZE_HEXES
 
         action_table, inverse_table, amove_hexes = self.__class__.build_action_tables()
 
@@ -321,41 +370,29 @@ class Model(nn.Module):
         self.register_buffer("action_table", action_table)
         self.register_buffer("inverse_table", inverse_table)
 
-        link_types = [
-            "ADJACENT",
-            "REACH",
-            "RANGED_MOD",
-            "ACTS_BEFORE",
-            "MELEE_DMG_REL",
-            "RETAL_DMG_REL",
-            "RANGED_DMG_REL"
-        ]
-
-        gatconv_kwargs = dict(
-            in_channels=(-1, -1),
-            out_channels=config["gnn_z_size"],
-            heads=config["gnn_heads"],
-            add_self_loops=True
-        )
-
         # XXX: todo: over-arching global node connected to all hexes
         #           (for non-hex data)
 
-        self.layers = nn.ModuleList()
-        for _ in range(config["gnn_layers"]):
-            layer = dict()
-            for lt in link_types:
-                layer[("hex", lt, "hex")] = gnn.GATConv(**gatconv_kwargs)
-                # XXX: a leaky_relu is applied after each GATConv, see encode()
-            self.layers.append(gnn.HeteroConv(layer))
-
-        self.encoder_merged = nn.Sequential(
-            nn.LazyLinear(config["z_size_merged"]),
+        self.encoder_other = nn.Sequential(
+            nn.Linear(self.dim_other, config["z_size_other"]),
             nn.LeakyReLU()
         )
 
-        self.actor = nn.LazyLinear(len(MainAction)+165+165)
-        self.critic = nn.LazyLinear(1)
+        self.encoder_hexes = GNNBlock(
+            config["gnn_num_layers"],
+            config["gnn_num_heads"],
+            STATE_SIZE_ONE_HEX,
+            config["gnn_hidden_channels"],
+            config["gnn_out_channels"],
+        )
+
+        self.encoder_merged = nn.Sequential(
+            nn.Linear(config["z_size_other"] + 165*config["gnn_out_channels"], config["z_size_merged"]),
+            nn.LeakyReLU()
+        )
+
+        self.actor = nn.Linear(config["z_size_merged"], len(MainAction)+165+165)
+        self.critic = nn.Linear(config["z_size_merged"], 1)
 
         # Init lazy layers (must be before weight/bias init)
         with torch.no_grad():
@@ -378,6 +415,7 @@ class Model(nn.Module):
             nn.init.zeros_(linlayer.bias)
 
         # For layers followed by ReLU or LeakyReLU, use Kaiming (He).
+        kaiming_init(self.encoder_other[0])
         kaiming_init(self.encoder_merged[0])
 
         # For other layers, use Xavier.
@@ -385,13 +423,10 @@ class Model(nn.Module):
         xavier_init(self.critic)
 
     def encode(self, hdata):
-        x_dict = hdata.x_dict
+        z_other = self.encoder_other(hdata.obs[:, :self.dim_other])
+        z_hexes_dict = self.encoder_hexes(hdata)
+        z_hexes, hmask = to_dense_batch(z_hexes_dict["hex"], hdata["hex"].batch)
 
-        for layer in self.layers:
-            x_dict = layer(x_dict, hdata.edge_index_dict, edge_attr_dict=hdata.edge_attr_dict)
-            x_dict = {key: F.leaky_relu(x) for key, x in x_dict.items()}
-
-        zhex, hmask = to_dense_batch(x_dict["hex"], hdata["hex"].batch)
         # zhex is (B, Nmax, Z)
         # hmask is (B, Nmax)
         # where Nmax is 165 (all graphs have N=165 nodes in this case)
@@ -399,7 +434,8 @@ class Model(nn.Module):
         # Note that this would not be the case if e.g. units were also nodes.
         assert torch.all(hmask)
 
-        return self.encoder_merged(zhex.flatten(start_dim=1))
+        merged = torch.cat((z_other, z_hexes.flatten(start_dim=1)), dim=1)
+        return self.encoder_merged(merged)
 
     def _get_value(self, z):
         return self.critic(z)
@@ -722,9 +758,10 @@ def train_model(
     num_vsteps = train_config["num_vsteps"]
     num_envs = train_config["env"]["num_envs"]
     v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list)
-    # # compute advantages
+
+    # compute advantages
     with torch.no_grad():
-        lastgaelam = 0
+        lastgaelam = torch.zeros_like(storage.bv_advantages[0])
 
         for t in reversed(range(num_vsteps)):
             if t == num_vsteps - 1:
@@ -739,7 +776,7 @@ def train_model(
 
         for b in range(num_vsteps):
             for v in range(num_envs):
-                v_hdata = storage.rollout_buffer[b*v + v]
+                v_hdata = storage.rollout_buffer[b*num_envs + v]
                 v_hdata.advantage = storage.bv_advantages[b, v]
                 v_hdata.ep_return = storage.bv_returns[b, v]
 
@@ -760,6 +797,10 @@ def train_model(
     value_losses = torch.zeros(train_config["num_minibatches"])
     distill_losses = torch.zeros(train_config["num_minibatches"])
 
+    # TODO:
+    # Gemini says using differently shuffled indices for policy, value and distill
+    # is destructive for the learning?
+
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.policy) epoch: %d" % epoch)
         for i, mb in enumerate(dataloader):
@@ -776,6 +817,7 @@ def train_model(
                 approx_kl = ((ratio - 1) - logratio).mean()
                 clipfracs += [((ratio - 1.0).abs() > train_config["clip_coef"]).float().mean().item()]
 
+            mb_advantages = mb.advantage.dtype
             if train_config["norm_adv"]:
                 # The 1e-8 is not numerically safe under autocast
                 # mb_advantages = (mb.advantage - mb.advantage.mean()) / (mb.advantage.std() + 1e-8)
@@ -852,6 +894,7 @@ def train_model(
 
     # Value network to policy network distillation
     old_model_policy.load_state_dict(model.model_policy.state_dict(), strict=True)
+    old_model_policy.eval()
 
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.distill) epoch: %d" % epoch)
@@ -867,7 +910,7 @@ def train_model(
             # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
             #     (if actions differ, masks will differ and KLD will become NaN)
             new_z = model.model_policy.encode(mb)
-            new_actdata = model.model_policy._get_actdata_train(new_z, mb.obs, mb.action)
+            new_actdata = model.model_policy._get_actdata_train(new_z, mb.obs, old_actdata.action)
             new_value = model.model_policy._get_value(new_z)
 
             # Distillation loss
@@ -879,6 +922,37 @@ def train_model(
 
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
             distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
+
+            if distill_loss.isnan().any() or distill_loss.isinf().any():
+                print("NANLOSS / INFLOSS")
+                print(f"distill_loss: {distill_loss}")
+                print(f"distill_vloss: {distill_vloss}")
+                print(f"distill_actloss: {distill_actloss}")
+                print(f"kld(hex2): {kld(old_actdata.hex2_dist, new_actdata.hex2_dist)}")
+                print(f"kld(hex1): {kld(old_actdata.hex1_dist, new_actdata.hex1_dist)}")
+                print(f"kld(act0): {kld(old_actdata.act0_dist, new_actdata.act0_dist)}")
+                print(f"old/new actdata.action: {old_actdata.action} / {new_actdata.action}")
+                print(f"old/new actdata.hex2: {old_actdata.hex2} / {new_actdata.hex2}")
+                print(f"old/new actdata.hex1: {old_actdata.hex1} / {new_actdata.hex1}")
+                print(f"old/new actdata.act0: {old_actdata.act0} / {new_actdata.act0}")
+                print(f"old_actdata.hex2_dist.mask: {old_actdata.hex2_dist.mask}")
+                print(f"new_actdata.hex2_dist.mask: {new_actdata.hex2_dist.mask}")
+                print(f"old_actdata.hex1_dist.mask: {old_actdata.hex1_dist.mask}")
+                print(f"new_actdata.hex1_dist.mask: {new_actdata.hex1_dist.mask}")
+                print(f"old_actdata.act0_dist.mask: {old_actdata.act0_dist.mask}")
+                print(f"new_actdata.act0_dist.mask: {new_actdata.act0_dist.mask}")
+                print(f"old_actdata.hex2_dist.logits: {old_actdata.hex2_dist.logits}")
+                print(f"new_actdata.hex2_dist.logits: {new_actdata.hex2_dist.logits}")
+                print(f"old_actdata.hex1_dist.logits: {old_actdata.hex1_dist.logits}")
+                print(f"new_actdata.hex1_dist.logits: {new_actdata.hex1_dist.logits}")
+                print(f"old_actdata.act0_dist.logits: {old_actdata.act0_dist.logits}")
+                print(f"new_actdata.act0_dist.logits: {new_actdata.act0_dist.logits}")
+                print(f"old_actdata.hex2_dist.probs: {old_actdata.hex2_dist.probs}")
+                print(f"new_actdata.hex2_dist.probs: {new_actdata.hex2_dist.probs}")
+                print(f"old_actdata.hex1_dist.probs: {old_actdata.hex1_dist.probs}")
+                print(f"new_actdata.hex1_dist.probs: {new_actdata.hex1_dist.probs}")
+                print(f"old_actdata.act0_dist.probs: {old_actdata.act0_dist.probs}")
+                print(f"new_actdata.act0_dist.probs: {new_actdata.act0_dist.probs}")
 
             distill_losses[i] = distill_loss.detach()
 
@@ -1027,7 +1101,9 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     state = State()
 
     model = DNAModel(config=config["model"], device=device)
-    old_model_policy = Model(config=config["model"]).to(device)  # for distill
+    old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
+    for p in old_model_policy.parameters():
+        p.requires_grad = False
 
     if train_config["torch_compile"]:
         model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=True)
