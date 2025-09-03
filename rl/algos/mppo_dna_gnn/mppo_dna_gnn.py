@@ -272,7 +272,6 @@ class NonGNNLayer(nn.Module):
         self.fn = fn
 
     def forward(self, x_dict):
-        print(f"Input: {x_dict}")
         return {k: self.fn(x) for k, x in x_dict.items()}
 
 
