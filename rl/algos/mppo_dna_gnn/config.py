@@ -31,7 +31,7 @@ train_env_kwargs = dict(
 )
 
 eval_variant = lambda **env_kwargs: dict(
-    num_envs=5,
+    num_envs=2,
     sync=False,
     kwargs=dict(
         train_env_kwargs,
@@ -66,7 +66,7 @@ config = dict(
             # "BattleAI.town": eval_variant(opponent="BattleAI", town_chance=100),
             "BattleAI.open": eval_variant(opponent="BattleAI", town_chance=0),
         },
-        num_vsteps=5000,
+        num_vsteps=10_000,
         interval_s=1800,
         at_script_start=False,
     ),
