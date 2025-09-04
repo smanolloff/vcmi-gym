@@ -57,15 +57,17 @@ def setup_wandb(config, model, src_file, wandb_kwargs={}):
 
     with tempfile.NamedTemporaryFile(mode="w", delete=True) as cfg_file:
         json.dump(config, cfg_file)
+        cfg_file.flush()
         art.add_file(cfg_file.name, name="config.json", policy="mutable")
 
     if os.getenv("VASTAI_INSTANCE_ID") is not None:
         v = vastai_sdk.VastAI()
         instance_id = int(os.environ["VASTAI_INSTANCE_ID"])
         v.label_instance(id=instance_id, label=config["run"]["id"])
-        with tempfile.NamedTemporaryFile(mode="w", delete=True) as instance_file:
-            json.dump(v.show_instance(id=instance_id), instance_file)
-            art.add_file(instance_file.name, name="vastai.json", policy="mutable")
+        with tempfile.NamedTemporaryFile(mode="w", delete=True) as vastai_file:
+            json.dump(v.show_instance(id=instance_id), vastai_file)
+            vastai_file.flush()
+            art.add_file(vastai_file.name, name="vastai.json", policy="mutable")
 
     if start_info["git_is_dirty"]:
         with tempfile.NamedTemporaryFile(mode="w", delete=True) as diff_file:
