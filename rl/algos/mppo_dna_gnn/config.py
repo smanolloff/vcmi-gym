@@ -2,7 +2,7 @@ import os
 
 train_env_kwargs = dict(
     role="defender",
-    opponent="StupidAI",
+    opponent="BattleAI",
     max_steps=500,
     vcmi_loglevel_global="error",
     vcmi_loglevel_ai="error",

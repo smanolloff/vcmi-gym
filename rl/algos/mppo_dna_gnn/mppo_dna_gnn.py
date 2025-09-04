@@ -299,8 +299,9 @@ class GNNBlock(nn.Module):
 
         layers = []
 
-        for _ in range(num_layers - 1):
-            hetero_dict = make_hetero_dict(in_channels, hidden_channels)
+        for i in range(num_layers - 1):
+            ch_in = in_channels if i == 0 else hidden_channels
+            hetero_dict = make_hetero_dict(ch_in, hidden_channels)
             layers.append((gnn.HeteroConv(hetero_dict), "x_dict, edge_index_dict, edge_attr_dict -> x_dict"))
             layers.append((NonGNNLayer(nn.LeakyReLU()), "x_dict -> x_dict"))
 
