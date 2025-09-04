@@ -108,8 +108,11 @@ config = dict(
         gnn_num_heads=8,
         gnn_hidden_channels=128,
         gnn_out_channels=32,
-        z_size_other=32,
-        z_size_merged=1024,
+
+        z_size_other=32,                # classic only
+        z_size_merged=1024,             # classic only
+
+        critic_hidden_features=128,     # attn only
     ),
 )
 
