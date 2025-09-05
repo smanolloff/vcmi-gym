@@ -130,10 +130,17 @@ function pymod() {
 # Copy a timestamped checkpoint to a regular checkpoint (in current dir)
 #
 function copy_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP"; return 1; }
+    [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP [DIR]"; return 1; }
+    [ -n "\$2" ] && cp_dir="\${2%/}" || cp_dir=./
 
-    for f in *\$1*; do
-        cp \$f \${f:0:8}-\${f:20}
+    if [ -e \$cp_dir/*\$1*.tmp ]; then
+        echo "Incomplete checkpoint -- found .tmp files"
+        return 1
+    fi
+
+    for f in \$cp_dir/*\$1*; do
+        fbase=\${f##*/}
+        cp \$f \$cp_dir/\${fbase:0:8}-\${fbase:20}
     done
 }
 
@@ -166,16 +173,17 @@ function download_checkpoint() {
     [ -n "\$2" ] && s3_dir="\${2%/}" || s3_dir=mppo-dna-heads/models
 
     cfg_json="\$(aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-config.json -)"
+    [ -n "\$cfg_json" ] || { echo "Failed to fetch config.json"; return 1; }
     out_dir=\$(echo "\$cfg_json" | jq -r '.run.out_dir')
     mkdir -p "\$out_dir"
 
     # Copy json files
     echo "\$cfg_json" > \$out_dir/\$rid-\$ts-config.json
-    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-state-default.json \$out_dir/  || { echo "ERROR"; break; }
+    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-state-default.json \$out_dir/  || { echo "ERROR"; return 1; }
 
     # Copy .pt files
     for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
-      aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-\$f.pt \$out_dir/  || { echo "ERROR"; break; }
+      aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-\$f.pt \$out_dir/  || { echo "ERROR"; return 1; }
     done
 }
 
