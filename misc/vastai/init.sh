@@ -126,11 +126,56 @@ function pymod() {
     python -m \$(echo \${f//\//.} | sed 's/\.py$//') "\${@}"
 }
 
+#
+# Copy a timestamped checkpoint to a regular checkpoint (in current dir)
+#
 function copy_checkpoint() {
     [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP"; return 1; }
 
     for f in *\$1*; do
         cp \$f \${f:0:8}-\${f:20}
+    done
+}
+
+#
+# Upload a timestamped checkpoint (from current dir)
+#
+function upload_checkpoint() {
+    [ -n "\${1:-}" ] || { echo "Usage: upload_checkpoint TIMESTAMP"; return 1; }
+
+    cfg_ary=(./*\$1-config.json)  # must use array for globbing
+    cfg="\${cfg_ary[0]}"
+
+    [ -r "\$cfg" ] || { echo "No matches for config file: \$cfg_ary"; return 1; }
+
+    s3_dir=\$(jq -r '.checkpoint.s3.s3_dir' \$cfg)
+
+    for f in *\$1*; do
+        aws s3 cp \$f s3://vcmi-gym/\$s3_dir/
+    done
+}
+
+#
+# Download a timestamped checkpoint (to out_dir as per the config)
+#
+function download_checkpoint() {
+    [ -n "\${1:-}" ] || { echo "Usage: download_checkpoint RUN_ID-TIMESTAMP [S3_DIR]"; return 1; }
+
+    rid=\${1%-*}
+    ts=\${1#*-}
+    [ -n "\$2" ] && s3_dir="\${2%/}" || s3_dir=mppo-dna-heads/models
+
+    cfg_json="\$(aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-config.json -)"
+    out_dir=\$(echo "\$cfg_json" | jq -r '.run.out_dir')
+    mkdir -p "\$out_dir"
+
+    # Copy json files
+    echo "\$cfg_json" > \$out_dir/\$rid-\$ts-config.json
+    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-state-default.json \$out_dir/  || { echo "ERROR"; break; }
+
+    # Copy .pt files
+    for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
+      aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-\$f.pt \$out_dir/  || { echo "ERROR"; break; }
     done
 }
 
