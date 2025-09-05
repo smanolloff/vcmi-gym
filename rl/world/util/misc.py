@@ -53,15 +53,23 @@ def aggregate_metrics(queue):
 def timer_stats(timers):
     res = {}
     t_all = timers["all"].peek()
+    t_other = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
+
+    res["timer_abs/all"] = t_all
+
+    # separate loops just to keep stdout logs in order
+    for k, v in timers.items():
+        if k != "all":
+            res[f"timer_abs/{k}"] = v.peek()
+
+    res["timer_abs/other"] = t_other
 
     for k, v in timers.items():
         if k != "all":
             res[f"timer_rel/{k}"] = v.peek() / t_all
-            res[f"timer_abs/{k}"] = v.peek()
 
-    t_other = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
     res["timer_rel/other"] = t_other / t_all
-    res["timer_abs/all"] = t_all
+
     return res
 
 
