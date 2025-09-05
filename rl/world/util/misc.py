@@ -55,9 +55,9 @@ def timer_stats(timers):
     t_all = timers["all"].peek()
 
     for k, v in timers.items():
-        # res[f"timer/{k}"] = v.peek()
         if k != "all":
             res[f"timer_rel/{k}"] = v.peek() / t_all
+            res[f"timer_abs/{k}"] = v.peek()
 
     t_other = t_all - sum(v.peek() for k, v in timers.items() if k != "all")
     res["timer_rel/other"] = t_other / t_all

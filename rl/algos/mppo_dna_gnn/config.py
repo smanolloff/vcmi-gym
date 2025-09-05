@@ -139,5 +139,6 @@ if os.getenv("VASTAI", None) != "1":
     config["model"]["gnn_num_heads"] = 4
     config["model"]["gnn_hidden_channels"] = 32
     config["model"]["gnn_out_channels"] = 16
+    config["model"]["critic_hidden_features"] = 16
     config["model"]["z_size_other"] = 16
     config["model"]["z_size_merged"] = 50

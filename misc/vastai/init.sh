@@ -86,7 +86,7 @@ if ! [[ $VASTAI_INSTANCE_ID =~ ^[[:digit:]]+$ ]]; then
     exit 1;
 fi
 
-/opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID initializing
+/opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID init...
 
 # An alias will not work in non-login shells
 [ -e /usr/bin/python ] || ln -s python3 /usr/bin/python
@@ -223,7 +223,7 @@ apt-get -y install vim cmake g++ libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev \
     libsdl2-mixer-dev zlib1g-dev libavformat-dev libswscale-dev libboost-dev \
     libboost-filesystem-dev libboost-system-dev libboost-thread-dev libboost-program-options-dev \
     libboost-locale-dev qtbase5-dev libtbb-dev libluajit-5.1-dev qttools5-dev \
-    libsqlite3-dev liblzma-dev python3.10-dev ccache
+    libsqlite3-dev liblzma-dev python3-dev ccache
 
 cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
