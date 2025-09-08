@@ -372,11 +372,6 @@ class Model(nn.Module):
         # XXX: todo: over-arching global node connected to all hexes
         #           (for non-hex data)
 
-        self.encoder_other = nn.Sequential(
-            nn.Linear(self.dim_other, config["z_size_other"]),
-            nn.LeakyReLU()
-        )
-
         self.encoder_hexes = GNNBlock(
             config["gnn_num_layers"],
             config["gnn_num_heads"],
@@ -385,13 +380,26 @@ class Model(nn.Module):
             config["gnn_out_channels"],
         )
 
-        self.encoder_merged = nn.Sequential(
-            nn.Linear(config["z_size_other"] + 165*config["gnn_out_channels"], config["z_size_merged"]),
+        d = config["gnn_out_channels"]
+
+        self.encoder_other = nn.Sequential(
+            nn.Linear(self.dim_other, d),
             nn.LeakyReLU()
         )
 
-        self.actor = nn.Linear(config["z_size_merged"], len(MainAction)+165+165)
-        self.critic = nn.Linear(config["z_size_merged"], 1)
+        self.act0_head = nn.Linear(d, len(MainAction))
+        self.emb_act0 = nn.Embedding(len(MainAction), d)
+        self.Wk_hex1 = nn.Linear(d, d, bias=False)
+        self.Wk_hex2 = nn.Linear(d, d, bias=False)
+        self.Wq_hex1 = nn.Linear(2*d, d)
+        self.Wq_hex2 = nn.Linear(2*d, d)
+
+        self.critic = nn.Sequential(
+            # nn.LayerNorm(d), helps?
+            nn.Linear(d, config["critic_hidden_features"]),
+            nn.LeakyReLU(),
+            nn.Linear(config["critic_hidden_features"], 1)
+        )
 
         # Init lazy layers (must be before weight/bias init)
         with torch.no_grad():
@@ -399,30 +407,35 @@ class Model(nn.Module):
             done = torch.zeros(2)
             links = 2 * [VcmiEnv.OBSERVATION_SPACE["links"].sample()]
             hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
-            z = self.encode(hdata)
-            self._get_actdata_eval(z, obs)
-            self._get_value(z)
+            z_hexes, z_global = self.encode(hdata)
+            self._get_actdata_eval(z_hexes, z_global, obs)
+            self._get_value(z_global)
 
         def kaiming_init(linlayer):
             # Assume LeakyReLU's negative slope is the default
             a = torch.nn.LeakyReLU().negative_slope
             nn.init.kaiming_uniform_(linlayer.weight, nonlinearity='leaky_relu', a=a)
-            nn.init.zeros_(linlayer.bias)
+            if linlayer.bias is not None:
+                nn.init.zeros_(linlayer.bias)
 
         def xavier_init(linlayer):
             nn.init.xavier_uniform_(linlayer.weight)
-            nn.init.zeros_(linlayer.bias)
+            if linlayer.bias is not None:
+                nn.init.zeros_(linlayer.bias)
 
         # For layers followed by ReLU or LeakyReLU, use Kaiming (He).
         kaiming_init(self.encoder_other[0])
-        kaiming_init(self.encoder_merged[0])
 
         # For other layers, use Xavier.
-        xavier_init(self.actor)
-        xavier_init(self.critic)
+        xavier_init(self.act0_head)
+        xavier_init(self.Wk_hex1)
+        xavier_init(self.Wk_hex2)
+        xavier_init(self.Wq_hex1)
+        xavier_init(self.Wq_hex2)
+        kaiming_init(self.critic[0])
+        xavier_init(self.critic[2])
 
     def encode(self, hdata):
-        z_other = self.encoder_other(hdata.obs[:, :self.dim_other])
         z_hexes_dict = self.encoder_hexes(hdata)
         z_hexes, hmask = to_dense_batch(z_hexes_dict["hex"], hdata["hex"].batch)
 
@@ -433,19 +446,21 @@ class Model(nn.Module):
         # Note that this would not be the case if e.g. units were also nodes.
         assert torch.all(hmask)
 
-        merged = torch.cat((z_other, z_hexes.flatten(start_dim=1)), dim=1)
-        return self.encoder_merged(merged)
+        z_other = self.encoder_other(hdata.obs[:, :self.dim_other])
+        z_global = z_other + z_hexes.mean(1)
 
-    def _get_value(self, z):
-        return self.critic(z)
+        return z_hexes, z_global
 
-    def _get_actdata_train(self, z_merged, obs, action):
+    def _get_value(self, z_global):
+        return self.critic(z_global)
+
+    def _get_actdata_train(self, z_hexes, z_global, obs, action):
         B = obs.shape[0]
         b_inds = torch.arange(B, device=obs.device)
 
         act0, hex1, hex2 = self.inverse_table[action].unbind(1)
 
-        action_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([len(MainAction), 165, 165], dim=-1)
+        act0_logits = self.act0_head(z_global)
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
         mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
@@ -496,12 +511,21 @@ class Model(nn.Module):
         # Next, we sample:
         #
         # 1. Sample MAIN ACTION
-        dist_act0 = CategoricalMasked(logits=action_logits, mask=mask_action)
+        dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
+        act0_emb = self.emb_act0(act0)
+        d = act0_emb.size(1)
+        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
+        k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
+        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
         dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
+        z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
+        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
+        k_hex2 = self.Wk_hex2(z_hexes)                                         # (B, 165, d)
+        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
 
         return ActionData(
@@ -511,11 +535,11 @@ class Model(nn.Module):
             action=action,
         )
 
-    def _get_actdata_eval(self, z_merged, obs):
+    def _get_actdata_eval(self, z_hexes, z_global, obs):
         B = obs.shape[0]
         b_inds = torch.arange(B, device=obs.device)
 
-        action_logits, hex1_logits, hex2_logits = self.actor(z_merged).split([len(MainAction), 165, 165], dim=-1)
+        act0_logits = self.act0_head(z_global)
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
         mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
@@ -566,14 +590,23 @@ class Model(nn.Module):
         # Next, we sample:
         #
         # 1. Sample MAIN ACTION
-        dist_act0 = CategoricalMasked(logits=action_logits, mask=mask_action)
+        dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
         act0 = dist_act0.sample()
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
+        act0_emb = self.emb_act0(act0)
+        d = act0_emb.size(1)
+        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
+        k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
+        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
         dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
         hex1 = dist_hex1.sample()
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
+        z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
+        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
+        k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
+        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
         hex2 = dist_hex2.sample()
 
@@ -587,16 +620,16 @@ class Model(nn.Module):
         )
 
     def get_actdata_train(self, hdata):
-        z_merged = self.encode(hdata)
-        return self._get_actdata_train(z_merged, hdata.obs, hdata.action)
+        z_hexes, z_global = self.encode(hdata)
+        return self._get_actdata_train(z_hexes, z_global, hdata.obs, hdata.action)
 
     def get_actdata_eval(self, hdata):
-        z_merged = self.encode(hdata)
-        return self._get_actdata_eval(z_merged, hdata.obs)
+        z_hexes, z_global = self.encode(hdata)
+        return self._get_actdata_eval(z_hexes, z_global, hdata.obs)
 
     def get_value(self, hdata):
-        z_merged = self.encode(hdata)
-        return self._get_value(z_merged)
+        _, z_global = self.encode(hdata)
+        return self._get_value(z_global)
 
 
 class DNAModel(nn.Module):
@@ -908,9 +941,9 @@ def train_model(
 
             # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
             #     (if actions differ, masks will differ and KLD will become NaN)
-            new_z = model.model_policy.encode(mb)
-            new_actdata = model.model_policy._get_actdata_train(new_z, mb.obs, old_actdata.action)
-            new_value = model.model_policy._get_value(new_z)
+            new_z_hexes, new_z_global = model.model_policy.encode(mb)
+            new_actdata = model.model_policy._get_actdata_train(new_z_hexes, new_z_global, mb.obs, old_actdata.action)
+            new_value = model.model_policy._get_value(new_z_global)
 
             # Distillation loss
             distill_actloss = (
@@ -1268,7 +1301,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
         s3_config=None,
         config=config,
         uploading_event=threading.Event(),  # never skip this upload
-        timestamped=True,
+        timestamped=False,
     )
 
     try:

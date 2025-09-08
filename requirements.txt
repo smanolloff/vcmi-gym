@@ -15,12 +15,12 @@ pandas
 millify
 torchviz
 
-mctx
-jax
-flax
-dm-haiku
+#mctx
+#jax
+#flax
+#dm-haiku
 
-ray
+#ray
 #ray[tune]
 #ray[rllib]==2.38.0
 #ray[default]==2.38.0
