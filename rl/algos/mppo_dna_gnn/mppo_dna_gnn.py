@@ -100,6 +100,7 @@ class State:
     global_timestep: int = 0
     current_timestep: int = 0
     current_vstep: int = 0
+    global_rollout: int = 0
     current_rollout: int = 0
     global_second: int = 0
     current_second: int = 0
@@ -1071,6 +1072,7 @@ def prepare_wandb_log(
         "train/ep_success_rate_1000": safe_mean(state.rollout_is_success_queue_1000),
         "global/global_num_timesteps": state.global_timestep,
         "global/global_num_seconds": state.global_second,
+        "global/global_num_rollouts": state.global_rollout,
         "global/num_rollouts": state.current_rollout,
         "global/num_timesteps": state.current_timestep,
         "global/num_seconds": state.current_second,
@@ -1133,9 +1135,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     state = State()
 
     model = DNAModel(config=config["model"], device=device)
-    old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
-    for p in old_model_policy.parameters():
-        p.requires_grad = False
 
     if train_config["torch_compile"]:
         model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=True)
@@ -1192,6 +1191,11 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
         state.resumes += 1
         logger.info("Resumes: %d" % state.resumes)
+
+    # XXX: must create this AFTER loading
+    old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
+    for p in old_model_policy.parameters():
+        p.requires_grad = False
 
     if no_wandb:
         from unittest.mock import Mock
@@ -1427,6 +1431,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
                 cumulative_timer_values[k] += timers[k].peek()
 
             state.current_rollout += 1
+            state.global_rollout += 1
 
         ret_rew = safe_mean(list(state.rollout_rew_queue_1000)[-min(300, state.current_rollout):])
         ret_value = safe_mean(list(state.rollout_net_value_queue_1000)[-min(300, state.current_rollout):])
