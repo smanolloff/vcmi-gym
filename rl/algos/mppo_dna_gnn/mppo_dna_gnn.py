@@ -11,6 +11,7 @@ import gymnasium as gym
 import enum
 import copy
 import importlib
+import math
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from collections import deque
@@ -956,38 +957,12 @@ def train_model(
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
             distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
 
-            if distill_loss.isnan().any() or distill_loss.isinf().any():
-                print("NANLOSS / INFLOSS")
-                print(f"distill_loss: {distill_loss}")
-                print(f"distill_vloss: {distill_vloss}")
-                print(f"distill_actloss: {distill_actloss}")
-                print(f"kld(hex2): {kld(old_actdata.hex2_dist, new_actdata.hex2_dist)}")
-                print(f"kld(hex1): {kld(old_actdata.hex1_dist, new_actdata.hex1_dist)}")
-                print(f"kld(act0): {kld(old_actdata.act0_dist, new_actdata.act0_dist)}")
-                print(f"old/new actdata.action: {old_actdata.action} / {new_actdata.action}")
-                print(f"old/new actdata.hex2: {old_actdata.hex2} / {new_actdata.hex2}")
-                print(f"old/new actdata.hex1: {old_actdata.hex1} / {new_actdata.hex1}")
-                print(f"old/new actdata.act0: {old_actdata.act0} / {new_actdata.act0}")
-                print(f"old_actdata.hex2_dist.mask: {old_actdata.hex2_dist.mask}")
-                print(f"new_actdata.hex2_dist.mask: {new_actdata.hex2_dist.mask}")
-                print(f"old_actdata.hex1_dist.mask: {old_actdata.hex1_dist.mask}")
-                print(f"new_actdata.hex1_dist.mask: {new_actdata.hex1_dist.mask}")
-                print(f"old_actdata.act0_dist.mask: {old_actdata.act0_dist.mask}")
-                print(f"new_actdata.act0_dist.mask: {new_actdata.act0_dist.mask}")
-                print(f"old_actdata.hex2_dist.logits: {old_actdata.hex2_dist.logits}")
-                print(f"new_actdata.hex2_dist.logits: {new_actdata.hex2_dist.logits}")
-                print(f"old_actdata.hex1_dist.logits: {old_actdata.hex1_dist.logits}")
-                print(f"new_actdata.hex1_dist.logits: {new_actdata.hex1_dist.logits}")
-                print(f"old_actdata.act0_dist.logits: {old_actdata.act0_dist.logits}")
-                print(f"new_actdata.act0_dist.logits: {new_actdata.act0_dist.logits}")
-                print(f"old_actdata.hex2_dist.probs: {old_actdata.hex2_dist.probs}")
-                print(f"new_actdata.hex2_dist.probs: {new_actdata.hex2_dist.probs}")
-                print(f"old_actdata.hex1_dist.probs: {old_actdata.hex1_dist.probs}")
-                print(f"new_actdata.hex1_dist.probs: {new_actdata.hex1_dist.probs}")
-                print(f"old_actdata.act0_dist.probs: {old_actdata.act0_dist.probs}")
-                print(f"new_actdata.act0_dist.probs: {new_actdata.act0_dist.probs}")
-
             distill_losses[i] = distill_loss.detach()
+
+            if not torch.isfinite(distill_loss).all():
+                optimizer_distill.zero_grad()
+                print("WARNING: nan/inf values vound in distill_loss! Skipping backprop")
+                continue
 
             with autocast_ctx(False):
                 scaler.scale(distill_loss).backward()
@@ -1061,6 +1036,10 @@ def prepare_wandb_log(
         "train/policy_loss": train_stats.policy_loss,
         "train/entropy_loss": train_stats.entropy_loss,
         "train/distill_loss": train_stats.distill_loss,
+        "train/nan/value_loss": math.isnan(train_stats.value_loss) or math.isinf(train_stats.value_loss),
+        "train/nan/policy_loss": math.isnan(train_stats.policy_loss) or math.isinf(train_stats.policy_loss),
+        "train/nan/entropy_loss": math.isnan(train_stats.entropy_loss) or math.isinf(train_stats.entropy_loss),
+        "train/nan/distill_loss": math.isnan(train_stats.distill_loss) or math.isinf(train_stats.distill_loss),
         "train/approx_kl": train_stats.approx_kl,
         "train/clipfrac": train_stats.clipfrac,
         "train/explained_var": train_stats.explained_var,
@@ -1135,6 +1114,9 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     state = State()
 
     model = DNAModel(config=config["model"], device=device)
+    old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
+    for p in old_model_policy.parameters():
+        p.requires_grad = False
 
     if train_config["torch_compile"]:
         model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=True)
@@ -1191,11 +1173,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
         state.resumes += 1
         logger.info("Resumes: %d" % state.resumes)
-
-    # XXX: must create this AFTER loading
-    old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
-    for p in old_model_policy.parameters():
-        p.requires_grad = False
 
     if no_wandb:
         from unittest.mock import Mock
