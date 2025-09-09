@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.distributions import kl_divergence as kld
+# from torch.distributions import kl_divergence as kld
 from torch_geometric.data import HeteroData, Batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import to_dense_batch
@@ -165,6 +165,19 @@ def to_hdata_list(b_obs, b_done, tuple_links):
     #       not sure if that's required for GNN to work?
     #       but it breaks my encode() which uses torch.split()
     return b_hdatas
+
+
+# https://chatgpt.com/s/t_68c054820f6c8191b7014f54bc574e7b
+def kl_masked(p_logits, q_logits, mask, eps=1e-12):
+    # mask: True where valid for both
+    p_log = p_logits.log_softmax(-1)
+    q_log = q_logits.log_softmax(-1)
+    p = (p_log.exp() * mask).clamp_min(0)
+    q = (q_log.exp() * mask).clamp_min(0)
+    # renormalize on masked set
+    p = p / (p.sum(-1, keepdim=True) + eps)
+    q = q / (q.sum(-1, keepdim=True) + eps)
+    return (p * ((p + eps).log() - (q + eps).log())).sum(-1)
 
 
 class Storage:
@@ -949,9 +962,9 @@ def train_model(
 
             # Distillation loss
             distill_actloss = (
-                kld(old_actdata.act0_dist, new_actdata.act0_dist)
-                + kld(old_actdata.hex1_dist, new_actdata.hex1_dist)
-                + kld(old_actdata.hex2_dist, new_actdata.hex2_dist)
+                kl_masked(old_actdata.act0_dist.logits, new_actdata.act0_dist.logits, new_actdata.act0_dist.mask)
+                + kl_masked(old_actdata.hex1_dist.logits, new_actdata.hex1_dist.logits, new_actdata.hex1_dist.mask)
+                + kl_masked(old_actdata.hex2_dist.logits, new_actdata.hex2_dist.logits, new_actdata.hex2_dist.mask)
             ).mean()
 
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
@@ -1065,12 +1078,14 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
 
-    os.makedirs(config["run"]["out_dir"], exist_ok=True)
-    with open(os.path.join(config["run"]["out_dir"], f"{run_id}-config.json"), "w") as f:
-        msg = f"Saving new config to: {f.name}"
-        if dry_run:
-            print(f"{msg} (--dry-run)")
-        else:
+    fcfg = os.path.join(config["run"]["out_dir"], f"{run_id}-config.json")
+    msg = f"Saving new config to: {fcfg}"
+
+    if dry_run:
+        print(f"{msg} (--dry-run)")
+    else:
+        os.makedirs(config["run"]["out_dir"], exist_ok=True)
+        with open(fcfg, "w") as f:
             print(msg)
             json.dump(config, f, indent=4)
 
