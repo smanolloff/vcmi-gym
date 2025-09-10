@@ -131,7 +131,7 @@ function pymod() {
 #
 function copy_checkpoint() {
     [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP [DIR]"; return 1; }
-    [ -n "\$2" ] && cp_dir="\${2%/}" || cp_dir=./
+    [ -n "\$2" ] && cp_dir="\${2%/}" || cp_dir=.
 
     if [ -e \$cp_dir/*\$1*.tmp ]; then
         echo "Incomplete checkpoint -- found .tmp files"

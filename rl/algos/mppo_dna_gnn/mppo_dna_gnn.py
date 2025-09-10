@@ -167,19 +167,6 @@ def to_hdata_list(b_obs, b_done, tuple_links):
     return b_hdatas
 
 
-# https://chatgpt.com/s/t_68c054820f6c8191b7014f54bc574e7b
-def kl_masked(p_logits, q_logits, mask, eps=1e-12):
-    # mask: True where valid for both
-    p_log = p_logits.log_softmax(-1)
-    q_log = q_logits.log_softmax(-1)
-    p = (p_log.exp() * mask).clamp_min(0)
-    q = (q_log.exp() * mask).clamp_min(0)
-    # renormalize on masked set
-    p = p / (p.sum(-1, keepdim=True) + eps)
-    q = q / (q.sum(-1, keepdim=True) + eps)
-    return (p * ((p + eps).log() - (q + eps).log())).sum(-1)
-
-
 class Storage:
     def __init__(self, venv, num_vsteps, device):
         v = venv.num_envs
@@ -962,9 +949,9 @@ def train_model(
 
             # Distillation loss
             distill_actloss = (
-                kl_masked(old_actdata.act0_dist.logits, new_actdata.act0_dist.logits, new_actdata.act0_dist.mask)
-                + kl_masked(old_actdata.hex1_dist.logits, new_actdata.hex1_dist.logits, new_actdata.hex1_dist.mask)
-                + kl_masked(old_actdata.hex2_dist.logits, new_actdata.hex2_dist.logits, new_actdata.hex2_dist.mask)
+                CategoricalMasked.kld(old_actdata.act0_dist, new_actdata.act0_dist)
+                + CategoricalMasked.kld(old_actdata.hex1_dist, new_actdata.hex1_dist)
+                + CategoricalMasked.kld(old_actdata.hex2_dist, new_actdata.hex2_dist)
             ).mean()
 
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
