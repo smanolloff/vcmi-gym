@@ -14,12 +14,56 @@ def scatter_max(src, index, num_nodes):
     return src.new_zeros(size).scatter_reduce_(0, index, src, reduce='amax', include_self=False)
 
 
-def softmax(src, index, num_nodes):
-    src_max = scatter_max(src.detach(), index, num_nodes)
-    out = src - src_max.index_select(0, index)
+# def softmax(src, index, num_nodes):
+#     src_max = scatter_max(src.detach(), index, num_nodes)
+#     out = src - src_max.index_select(0, index)
+#     out = out.exp()
+#     out_sum = scatter_sum(out, index, num_nodes) + 1e-16
+#     out_sum = out_sum.index_select(0, index)
+#     return out / out_sum
+
+
+def build_nbr(dst, num_nodes, K_max):
+    """
+    Build nbr[v, k] = edge id of k-th incoming edge to node v; -1 if unused.
+    Use this OUTSIDE the exported graph (host-side) for the current edge_index.
+    """
+    nbr = torch.full((num_nodes, K_max), -1, dtype=torch.long, device=dst.device)
+    fill = torch.zeros(num_nodes, dtype=torch.long, device=dst.device)
+    for e, v in enumerate(dst.tolist()):
+        p = int(fill[v])
+        if p >= K_max:
+            raise ValueError(f"node {v} exceeds K_max={K_max}")
+        nbr[v, p] = e
+        fill[v] = p + 1
+    return nbr
+
+
+def scatter_max_via_nbr(src, nbr):
+    """
+    src: (E, H) edge values to reduce
+    nbr: (N, K_max) incoming edge ids per node, -1 padded
+    returns: (N, H) per-node amax
+    """
+    N, K = nbr.shape
+    H = src.size(1)
+    fill_value = torch.finfo(src.dtype).min
+    if src.size(0) == 0 or K == 0:
+        return src.new_full((N, H), fill_value)  # max over empty set -> -inf
+    idx = nbr.clamp_min(0).reshape(-1)                    # (N*K,)
+    gathered = src.index_select(0, idx).reshape(N, K, H)  # (N, K, H)
+    valid = (nbr >= 0).unsqueeze(-1)                      # (N, K, 1)
+    gathered = torch.where(valid, gathered, fill_value)   # mask pads -> -inf
+    return gathered.max(dim=1).values                     # (N, H)
+
+
+def softmax_via_nbr(src, index, num_nodes, nbr):
+    # identical math to your softmax(), but max comes from nbr-based reduction
+    src_max = scatter_max_via_nbr(src.detach(), nbr)              # (N, H)
+    out = src - src_max.index_select(0, index)                    # (E, H)
     out = out.exp()
-    out_sum = scatter_sum(out, index, num_nodes) + 1e-16
-    out_sum = out_sum.index_select(0, index)
+    out_sum = scatter_sum(out, index, num_nodes) + 1e-16          # (N, H)
+    out_sum = out_sum.index_select(0, index)                      # (E, H)
     return out / out_sum
 
 
@@ -48,13 +92,13 @@ class MyGENConv(nn.Module):
             nn.Linear(out_channels*2, out_channels, bias=False),
         )
 
-    def forward(self, x, edge_index, edge_attr):
+    def forward(self, x, edge_index, edge_attr, nbr):
         src = self.lin_src(x)
         dst = self.lin_dst(x)
         x_j = src.index_select(0, edge_index[0])
 
         out = self.message(x_j, edge_attr)
-        out = self.aggregate(out, edge_index[1], x.size(0))
+        out = self.aggregate(out, edge_index[1], x.size(0), nbr)
         out = out + dst
 
         return self.mlp(out)
@@ -64,8 +108,8 @@ class MyGENConv(nn.Module):
         msg = x_j + edge_attr
         return msg.relu() + self.eps
 
-    def aggregate(self, x, index, num_nodes):
-        alpha = softmax(x, index, num_nodes)
+    def aggregate(self, x, index, num_nodes, nbr):
+        alpha = softmax_via_nbr(x, index, num_nodes, nbr)
         res = scatter_sum(x * alpha, index, num_nodes)
         return res
 
@@ -89,16 +133,16 @@ class MyGNNBlock(nn.Module):
 
     def forward(self, x_hex, *edge_args):
         # edge_args = (ei1, ea1, ei2, ea2, ..., eiR, eaR)
-        assert len(edge_args) == 2 * len(self.layers[0]), "Expected 2*num_rels tensors"
-        eis = edge_args[0::2]
-        eas = edge_args[1::2]
-
+        assert len(edge_args) == 3 * len(self.layers[0]), "Expected 3*num_rels tensors"
+        eis = edge_args[0::3]
+        eas = edge_args[1::3]
+        nbr = edge_args[2::3]
         x = x_hex
         L = len(self.layers)
         for i, convs in enumerate(self.layers):
             y = None
             for r, conv in enumerate(convs):
-                yr = conv(x, eis[r], eas[r])
+                yr = conv(x, eis[r], eas[r], nbr[r])
                 y = yr if y is None else y + yr
             x = y
             if i < L - 1:
@@ -107,44 +151,51 @@ class MyGNNBlock(nn.Module):
 
 
 if __name__ == "__main__":
-    import torch_geometric
-    gen = torch_geometric.nn.GENConv(5, 12, edge_dim=1).eval()
-    mygen = MyGENConv(5, 12, 1).eval()
-    mygen.load_state_dict(gen.state_dict(), strict=True)
+    # import torch_geometric
+    # gen = torch_geometric.nn.GENConv(5, 12, edge_dim=1).eval()
+    # mygen = MyGENConv(5, 12, 1).eval()
+    # mygen.load_state_dict(gen.state_dict(), strict=True)
 
-    hd = torch_geometric.data.HeteroData()
-    hd['hex'].x = torch.randn(3, 5)
-    edge_index_lt1 = torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
-    edge_attr_lt1 = torch.tensor([[1.0], [1.0]], dtype=torch.float)
-    edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
-    edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
-    hd['hex', 'lt1', 'hex'].edge_index = edge_index_lt1
-    hd['hex', 'lt1', 'hex'].edge_attr = edge_attr_lt1
-    hd['hex', 'lt2', 'hex'].edge_index = edge_index_lt2
-    hd['hex', 'lt2', 'hex'].edge_attr = edge_attr_lt2
+    # hd = torch_geometric.data.HeteroData()
+    # hd['hex'].x = torch.randn(3, 5)
+    # edge_index_lt1 = torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
+    # edge_attr_lt1 = torch.tensor([[1.0], [1.0]], dtype=torch.float)
+    # edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
+    # edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
+    # hd['hex', 'lt1', 'hex'].edge_index = edge_index_lt1
+    # hd['hex', 'lt1', 'hex'].edge_attr = edge_attr_lt1
+    # hd['hex', 'lt2', 'hex'].edge_index = edge_index_lt2
+    # hd['hex', 'lt2', 'hex'].edge_attr = edge_attr_lt2
 
-    inputs = (hd["hex"].x, hd["hex", "lt1", "hex"].edge_index, hd["hex", "lt1", "hex"].edge_attr)
-    res = gen(*inputs)
-    myres = mygen(*inputs)
+    # inputs = (hd["hex"].x, hd["hex", "lt1", "hex"].edge_index, hd["hex", "lt1", "hex"].edge_attr)
 
-    assert torch.equal(res, myres)
+    # # add NBR to inputs
+    # N = hd["hex"].x.size(0)
+    # K_max = 2  # max number of incoming edges for 1 hex
+    # nbr = build_incoming_nbr_with_cap(hd["hex", "lt1", "hex"].edge_index[1], N, K_max)
+    # my_inputs = inputs + (nbr,)
 
-    from torch.export import export
-    from executorch.exir import to_edge_transform_and_lower
-    from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+    # res = gen(*inputs)
+    # myres = mygen(*my_inputs)
 
-    ep = export(mygen, args=inputs, dynamic_shapes=None, strict=True)
-    edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-    exec_prog = edge.to_executorch()
+    # assert torch.equal(res, myres)
 
-    # test load
-    from executorch.runtime import Runtime
-    rt = Runtime.get()
-    loaded = rt.load_program(exec_prog.buffer)
-    meth = loaded.load_method("forward")               # usually "forward"
-    et_outs = meth.execute(tuple(inputs))          # inputs must match export order/types
-    import ipdb; ipdb.set_trace()  # noqa
-    pass
+    # from torch.export import export
+    # from executorch.exir import to_edge_transform_and_lower
+    # from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+
+    # ep = export(mygen, args=my_inputs, dynamic_shapes=None, strict=True)
+    # edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+    # exec_prog = edge.to_executorch()
+
+    # # test load
+    # from executorch.runtime import Runtime
+    # rt = Runtime.get()
+    # loaded = rt.load_program(exec_prog.buffer)
+    # meth = loaded.load_method("forward")               # usually "forward"
+    # et_outs = meth.execute(tuple(my_inputs))          # inputs must match export order/types
+    # import ipdb; ipdb.set_trace()  # noqa
+    # pass
 
     # with open("gnn_export.pte", "wb") as f:
     #     exec_prog.write_to_file(f)
@@ -156,15 +207,15 @@ if __name__ == "__main__":
     # block = GNNBlock(num_layers=2, in_channels=5, hidden_channels=4, out_channels=3, num_heads=1, link_types=link_types).eval()
     # myblock = MyGNNBlock(num_layers=2, in_channels=5, hidden_channels=4, out_channels=3, edge_dim=1, link_types=link_types).eval()
 
-    # def gnn_to_nn_key(gnn_key, link_types):
-    #     import re
-    #     pattern = re.compile(r"layers.module_(\d+)\.convs\.<hex___(\w+)___hex>\.(.+)")
-    #     match = pattern.match(gnn_key)
-    #     assert match, f"No match: {gnn_key}"
-    #     module_id, link_type, rest = match.groups()
-    #     assert int(module_id) % 2 == 0
-    #     assert link_type in link_types, f"{link_type} not in {link_types}"
-    #     return "layers.%d.%d.%s" % (int(module_id) / 2, link_types.index(link_type), rest)
+    def gnn_to_nn_key(gnn_key, link_types):
+        import re
+        pattern = re.compile(r"layers.module_(\d+)\.convs\.<hex___(\w+)___hex>\.(.+)")
+        match = pattern.match(gnn_key)
+        assert match, f"No match: {gnn_key}"
+        module_id, link_type, rest = match.groups()
+        assert int(module_id) % 2 == 0
+        assert link_type in link_types, f"{link_type} not in {link_types}"
+        return "layers.%d.%d.%s" % (int(module_id) / 2, link_types.index(link_type), rest)
 
     # # my_state_dict = {gnn_to_nn_key(k, link_types): v for k, v in block.state_dict().items()}
     # # myblock.load_state_dict(my_state_dict, strict=True)
@@ -185,57 +236,68 @@ if __name__ == "__main__":
 
 
 
-    # import json
-    # with open("sfcjqcly-1757584171-config.json", "r") as f:
-    #     cfg = json.load(f)
+    import json
+    with open("sfcjqcly-1757584171-config.json", "r") as f:
+        cfg = json.load(f)
 
-    # from torch_geometric.data import Batch
-    # from rl.algos.mppo_dna_gnn.mppo_dna_gnn import DNAModel, to_hdata_list
-    # from vcmi_gym.envs.v13.vcmi_env import VcmiEnv
-    # from vcmi_gym.envs.v13.pyconnector import STATE_SIZE_ONE_HEX, LINK_TYPES
+    from torch_geometric.data import Batch
+    from rl.algos.mppo_dna_gnn.mppo_dna_gnn import DNAModel, to_hdata_list
+    from vcmi_gym.envs.v13.vcmi_env import VcmiEnv
+    from vcmi_gym.envs.v13.pyconnector import STATE_SIZE_ONE_HEX, LINK_TYPES
 
-    # model = DNAModel(cfg["model"], torch.device("cpu"))
-    # model.load_state_dict(torch.load("sfcjqcly-1757584171-model-dna.pt", weights_only=True, map_location="cpu"), strict=True)
-    # gnn = model.model_policy.encoder_hexes.eval()
+    model = DNAModel(cfg["model"], torch.device("cpu"))
+    model.load_state_dict(torch.load("sfcjqcly-1757584171-model-dna.pt", weights_only=True, map_location="cpu"), strict=True)
+    gnn = model.model_policy.encoder_hexes.eval()
 
-    # mygnn = MyGNNBlock(
-    #     num_layers=cfg["model"]["gnn_num_layers"],
-    #     in_channels=STATE_SIZE_ONE_HEX,
-    #     hidden_channels=cfg["model"]["gnn_hidden_channels"],
-    #     out_channels=cfg["model"]["gnn_out_channels"],
-    #     edge_dim=1,
-    #     link_types=list(LINK_TYPES)
-    # ).eval()
-    # my_state_dict = {gnn_to_nn_key(k, list(LINK_TYPES)): v for k, v in gnn.state_dict().items()}
-    # mygnn.load_state_dict(my_state_dict, strict=True)
+    mygnn = MyGNNBlock(
+        num_layers=cfg["model"]["gnn_num_layers"],
+        in_channels=STATE_SIZE_ONE_HEX,
+        hidden_channels=cfg["model"]["gnn_hidden_channels"],
+        out_channels=cfg["model"]["gnn_out_channels"],
+        edge_dim=1,
+        link_types=list(LINK_TYPES)
+    ).eval()
+    my_state_dict = {gnn_to_nn_key(k, list(LINK_TYPES)): v for k, v in gnn.state_dict().items()}
+    mygnn.load_state_dict(my_state_dict, strict=True)
 
-    # env = VcmiEnv()
+    env = VcmiEnv()
 
-    # obs = torch.as_tensor(env.obs["observation"]).unsqueeze(0)
-    # done = torch.zeros(1)
-    # links = [env.obs["links"]]
-    # hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
-    # res = gnn(hdata)
+    obs = torch.as_tensor(env.obs["observation"]).unsqueeze(0)
+    done = torch.zeros(1)
+    links = [env.obs["links"]]
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
+    res = gnn(hdata)
 
-    # myinputs = [hdata["hex"].x]
-    # for lt in LINK_TYPES:
-    #     myinputs.append(hdata["hex", lt, "hex"].edge_index)
-    #     myinputs.append(hdata["hex", lt, "hex"].edge_attr)
+    myinputs = [hdata["hex"].x]
+    for lt in LINK_TYPES:
+        myinputs.append(hdata["hex", lt, "hex"].edge_index)
+        myinputs.append(hdata["hex", lt, "hex"].edge_attr)
+        myinputs.append(build_nbr(hdata["hex", lt, "hex"].edge_index[1], 165, 20))
 
-    # myinputs = tuple(myinputs)
-    # myres = mygnn(*myinputs)
-    # assert torch.equal(res["hex"], myres)
+    myinputs = tuple(myinputs)
+    myres = mygnn(*myinputs)
+    assert torch.equal(res["hex"], myres)
 
-    # from torch.export import export
-    # from executorch.exir import to_edge_transform_and_lower
-    # from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+    from torch.export import export
+    from executorch.exir import to_edge_transform_and_lower
+    from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
 
-    # ep = export(mygnn, args=myinputs, dynamic_shapes=None, strict=True)
-    # edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-    # exec_prog = edge.to_executorch()
+    ep = export(mygnn, args=myinputs, dynamic_shapes=None, strict=True)
+    edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+    exec_prog = edge.to_executorch()
 
-    # import ipdb; ipdb.set_trace()  # noqa
-    # pass
+    # test load
+    from executorch.runtime import Runtime
+    rt = Runtime.get()
+    loaded = rt.load_program(exec_prog.buffer)
+    meth = loaded.load_method("forward")               # usually "forward"
+    et_outs = meth.execute(tuple(myinputs))          # inputs must match export order/types
+
+    # XNNPACK's outputs are never exactly the same
+    assert torch.all((myres - et_outs[0]) < 1e-4)
+
+    import ipdb; ipdb.set_trace()  # noqa
+    pass
 
     # with open("gnn_export.pte", "wb") as f:
     #     exec_prog.write_to_file(f)
