@@ -102,13 +102,13 @@ class Timer:
 # ALWAYS compute in float32.
 #
 class CategoricalMasked(Categorical):
-    @staticmethod
     # A numerically safe version of torch.distributions.kl_divergence().
     # The original produces NaNs whenever the normalized log-probs ie. logits()
     # contain values < ~-104 (-104.exp() underflows to 0.)...
     # maybe a .log() somewhere? (0.log() causes nan).
     # This version does not use .log(), instead relies on .probs
     # and masks the logprobs to ensure no (-inf - -inf) occurs.
+    @staticmethod
     def kld(dist1, dist2):
         assert torch.equal(dist1.mask, dist2.mask)
         p_logp = dist1.logits.where(dist1.mask, 0)

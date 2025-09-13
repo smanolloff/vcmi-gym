@@ -234,19 +234,34 @@ class MainAction(enum.IntEnum):
 
 
 class ActionData:
-    def __init__(self, act0, act0_dist, hex1, hex1_dist, hex2, hex2_dist, action):
+    def __init__(
+        self,
+        act0,
+        act0_logits,
+        act0_dist,
+        hex1,
+        hex1_logits,
+        hex1_dist,
+        hex2,
+        hex2_logits,
+        hex2_dist,
+        action
+    ):
         self.act0 = act0
         self.act0_dist = act0_dist
+        self.act0_logits = act0_logits
         self.act0_logprob = act0_dist.log_prob(act0)
         self.act0_entropy = act0_dist.entropy()
 
         self.hex1 = hex1
         self.hex1_dist = hex1_dist
+        self.hex1_logits = hex1_logits
         self.hex1_logprob = hex1_dist.log_prob(hex1)
         self.hex1_entropy = hex1_dist.entropy()
 
         self.hex2 = hex2
         self.hex2_dist = hex2_dist
+        self.hex2_logits = hex2_logits
         self.hex2_logprob = hex2_dist.log_prob(hex2)
         self.hex2_entropy = hex2_dist.entropy()
 
@@ -258,6 +273,7 @@ class ActionData:
         for t in ["act0", "hex1", "hex2"]:
             setattr(self, t, getattr(self, t).cpu())
             # setattr(self, f"{t}_dist", getattr(self, f"{t}_dist").cpu())
+            setattr(self, f"{t}_logits", getattr(self, f"{t}_logits").cpu())
             setattr(self, f"{t}_logprob", getattr(self, f"{t}_logprob").cpu())
             setattr(self, f"{t}_entropy", getattr(self, f"{t}_entropy").cpu())
 
@@ -279,24 +295,18 @@ class NonGNNLayer(nn.Module):
 class GNNBlock(nn.Module):
     # XXX: in_channels must be a tuple of (size_a, size_b) in case of
     #       bipartite graphs.
-    def __init__(self, num_layers, num_heads, in_channels, hidden_channels, out_channels):
+    def __init__(self, num_layers, in_channels, hidden_channels, out_channels, link_types):
         super().__init__()
 
         # at least 1 "hidden" layer is required for shapes to match
         assert num_layers >= 2
-        assert hidden_channels % num_heads == 0, f"{hidden_channels} % {num_heads} == 0"
-        assert out_channels % num_heads == 0, f"{out_channels} % {num_heads} == 0"
 
-        kwargs = dict(
-            heads=num_heads,
-            edge_dim=1,
-            add_self_loops=True
-        )
+        kwargs = dict(edge_dim=1, add_self_loops=True)
 
         def make_hetero_dict(inchan, outchan):
             return {
-                ("hex", lt, "hex"): gnn.GATv2Conv(**kwargs, in_channels=inchan, out_channels=outchan // num_heads)
-                for lt in LINK_TYPES
+                ("hex", lt, "hex"): gnn.GENConv(**kwargs, in_channels=inchan, out_channels=outchan)
+                for lt in link_types
             }
 
         layers = []
@@ -376,10 +386,10 @@ class Model(nn.Module):
 
         self.encoder_hexes = GNNBlock(
             config["gnn_num_layers"],
-            config["gnn_num_heads"],
             STATE_SIZE_ONE_HEX,
             config["gnn_hidden_channels"],
             config["gnn_out_channels"],
+            LINK_TYPES
         )
 
         d = config["gnn_out_channels"]
@@ -517,7 +527,7 @@ class Model(nn.Module):
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
         act0_emb = self.emb_act0(act0)
-        d = act0_emb.size(1)
+        d = act0_emb.size(-1)
         q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
         k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
@@ -531,13 +541,13 @@ class Model(nn.Module):
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
 
         return ActionData(
-            act0=act0, act0_dist=dist_act0,
-            hex1=hex1, hex1_dist=dist_hex1,
-            hex2=hex2, hex2_dist=dist_hex2,
+            act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
+            hex1=hex1, hex1_logits=hex1_logits, hex1_dist=dist_hex1,
+            hex2=hex2, hex2_logits=hex2_logits, hex2_dist=dist_hex2,
             action=action,
         )
 
-    def _get_actdata_eval(self, z_hexes, z_global, obs):
+    def _get_actdata_eval(self, z_hexes, z_global, obs, deterministic=False):
         B = obs.shape[0]
         b_inds = torch.arange(B, device=obs.device)
 
@@ -593,16 +603,16 @@ class Model(nn.Module):
         #
         # 1. Sample MAIN ACTION
         dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
-        act0 = dist_act0.sample()
+        act0 = dist_act0.probs.argmax(dim=1) if deterministic else dist_act0.sample()  # for testing vs. executorch
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
         act0_emb = self.emb_act0(act0)
-        d = act0_emb.size(1)
+        d = act0_emb.size(-1)
         q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
         k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
         dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
-        hex1 = dist_hex1.sample()
+        hex1 = dist_hex1.probs.argmax(dim=1) if deterministic else dist_hex1.sample()
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
         z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
@@ -610,14 +620,14 @@ class Model(nn.Module):
         k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
-        hex2 = dist_hex2.sample()
+        hex2 = dist_hex2.probs.argmax(dim=1) if deterministic else dist_hex2.sample()  # for testing vs. executorch
 
         action = self.action_table[act0, hex1, hex2]
 
         return ActionData(
-            act0=act0, act0_dist=dist_act0,
-            hex1=hex1, hex1_dist=dist_hex1,
-            hex2=hex2, hex2_dist=dist_hex2,
+            act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
+            hex1=hex1, hex1_logits=hex1_logits, hex1_dist=dist_hex1,
+            hex2=hex2, hex2_logits=hex2_logits, hex2_dist=dist_hex2,
             action=action,
         )
 
@@ -625,13 +635,13 @@ class Model(nn.Module):
         z_hexes, z_global = self.encode(hdata)
         return self._get_actdata_train(z_hexes, z_global, hdata.obs, hdata.action)
 
-    def get_actdata_eval(self, hdata):
+    def get_actdata_eval(self, hdata, deterministic=False):
         z_hexes, z_global = self.encode(hdata)
-        return self._get_actdata_eval(z_hexes, z_global, hdata.obs)
+        return self._get_actdata_eval(z_hexes, z_global, hdata.obs, deterministic)
 
     def get_value(self, hdata):
         _, z_global = self.encode(hdata)
-        return self._get_value(z_global)
+        return self._get_value(z_global), z_global
 
 
 class DNAModel(nn.Module):

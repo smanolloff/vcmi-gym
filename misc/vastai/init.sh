@@ -187,6 +187,25 @@ function download_checkpoint() {
     done
 }
 
+
+#
+# Make a timestamped checkpoint (to out_dir as per the config)
+#
+function backup_checkpoint() {
+    [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP [DIR]"; return 1; }
+    [ -n "\$2" ] && cp_dir="\${2%/}" || cp_dir=.
+
+    ts=\$(date +%s)
+
+    for f in config state-default; do
+      cp \$cp_dir/\$1-\$f{,-\$ts}.json
+    done
+
+    for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
+      cp \$cp_dir/\$1-{,\$ts-}\$f.pt
+    done
+}
+
 alias gs='git status'
 alias gl='git log'
 alias gh='git h'

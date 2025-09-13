@@ -105,13 +105,9 @@ config = dict(
     ),
     model=dict(
         gnn_num_layers=3,
-        gnn_num_heads=8,
         gnn_out_channels=128,
         gnn_hidden_channels=256,
-        critic_hidden_features=256,     # attn only
-
-        z_size_other=32,                # classic only
-        z_size_merged=1024,             # classic only
+        critic_hidden_features=256,
     ),
 )
 
@@ -134,8 +130,8 @@ if os.getenv("VASTAI", None) != "1":
     config["eval"]["interval_s"] = 300
     config["wandb_log_interval_s"] = 180
 
-    config["model"]["gnn_num_layers"] = 2
-    config["model"]["gnn_num_heads"] = 2
+    config["model"]["gnn_num_layers"] = 3
+    config["model"]["gnn_num_heads"] = 1
     config["model"]["gnn_hidden_channels"] = 32
     config["model"]["gnn_out_channels"] = 16
     config["model"]["critic_hidden_features"] = 16
