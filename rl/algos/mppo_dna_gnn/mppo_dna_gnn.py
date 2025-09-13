@@ -641,7 +641,7 @@ class Model(nn.Module):
 
     def get_value(self, hdata):
         _, z_global = self.encode(hdata)
-        return self._get_value(z_global), z_global
+        return self._get_value(z_global)
 
 
 class DNAModel(nn.Module):
