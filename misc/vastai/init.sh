@@ -189,22 +189,32 @@ function download_checkpoint() {
 
 
 #
-# Make a timestamped checkpoint (to out_dir as per the config)
+# Make a timestamped checkpoint
 #
 function backup_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP [DIR]"; return 1; }
-    [ -n "\$2" ] && cp_dir="\${2%/}" || cp_dir=.
+    [ -n "\${1:-}" ] || { echo "Usage: backup_checkpoint ID [TIMESTAMP]"; return 1; }
+    [ -n "\${2:-}" ] && ts=\$2 || ts="\$(date +%s)"
 
-    ts=\$(date +%s)
+    id=\$1
 
+    [[ \$ts =~ ^[0-9]+\$ ]] || { echo "Invalid timestamp: \$ts"; return 1; }
+    [[ \$id =~ ^[a-z]{8}\$ ]] || { echo "Bad id: \$id"; return 1; }
+
+    if [ -e \$id-\$ts-model-dna.pt ]; then
+        echo "File already exists: \$id-\$ts-model-dna.pt"
+        return 1
+    fi
+
+    # 2. CHECK
     for f in config state-default; do
-      cp \$cp_dir/\$1-\$f{,-\$ts}.json
+      cp \$id-{,\$ts-}\$f.json
     done
 
     for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
-      cp \$cp_dir/\$1-{,\$ts-}\$f.pt
+      cp \$id-{,\$ts-}\$f.pt
     done
 }
+
 
 alias gs='git status'
 alias gl='git log'
