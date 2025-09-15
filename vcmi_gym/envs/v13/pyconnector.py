@@ -92,7 +92,7 @@ class PyConnector():
     #
     # MAIN PROCESS
     #
-    def __init__(self, loglevel, maxlogs, user_timeout, vcmi_timeout, boot_timeout, allow_retreat):
+    def __init__(self, loglevel, maxlogs, user_timeout, vcmi_timeout, boot_timeout, allow_retreat, main_connector=None):
         self.loglevel = loglevel
         self.maxlogs = maxlogs
         self.boot_timeout = boot_timeout or 99999
@@ -105,7 +105,13 @@ class PyConnector():
         self.finished = threading.Event()
 
     @tracelog
-    def start(self, *args):
+    def start(self, *args, main_connector=None):
+        if main_connector:
+            self.logger.info("Dual-env setup detected, using primary connector VCMI threadconnector.")
+            self.thread = main_connector.thread
+            self._connector = main_connector._connector
+            return
+
         if self.__class__.VCMI_STARTED:
             warnings.warn(
                 f"A VCMI instance has previously been started in this process (PID={os.getpid()}). "
@@ -134,7 +140,7 @@ class PyConnector():
             if self.finished.is_set():
                 return
 
-            if hasattr(self, "thread"):
+            if hasattr(self, "thread") and not hasattr(self, "main_connector"):
                 try:
                     if self.thread.is_alive():
                         self._connector.shutdown()

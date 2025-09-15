@@ -3,7 +3,7 @@
 #
 #     pip3 freeze -r requirements.txt > requirements.lock
 #
-numpy
+numpy>=2.2
 pyyaml
 wandb
 #gymnasium==0.29.1

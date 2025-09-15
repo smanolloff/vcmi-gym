@@ -143,6 +143,7 @@ class VcmiEnv(gym.Env):
         vcmi_loglevel_ai: str = "error",
         vcmi_loglevel_stats: str = "error",
         vcmienv_loglevel: str = "WARN",
+        vcmienv_logtag: str = "VcmiEnv-v13",
         role: str = "attacker",
         opponent: str = "StupidAI",
         opponent_model: Optional[str] = None,
@@ -170,8 +171,39 @@ class VcmiEnv(gym.Env):
         reward_dmg_mult: float = 1,
         reward_term_mult: float = 1,
         reward_relval_mult: float = 1,
-        nostart: bool = False
+
+        # If this is a secondary env in a dual-env scenario,
+        # the "main" env is to be provided here.
+        main_env: Optional["VcmiEnv"] = None
     ):
+        """
+        In a dual-env setup, env.connect() must be called manually for each env after init.
+        Example:
+
+            def env1_loop(env0, cond):
+                env1 = VcmiEnv(opponent="OTHER_ENV", other_env=env0)
+                with cond:
+                    cond.notify()
+                env1.connect()
+                # env1 can now be used as a regular env
+                env1.reset()
+                obs, rew, term, trunc, info = env1.step(env1.random_action())
+                # ...
+
+            def main():
+                env0 = VcmiEnv(opponent="OTHER_ENV")
+                cond = threading.Condition()
+                env1_thread = threading.Thread(target=env1_loop, args=(env0, cond), daemon=True)
+                with cond:
+                    env1_thread.start()
+                    cond.wait()
+                env0.connect()
+                # env0 can now be used as a regular env
+                env0.reset()
+                obs, rew, term, trunc, info = env0.step(env0.random_action())
+                # ...
+        """
+
         assert vcmi_loglevel_global in self.__class__.VCMI_LOGLEVELS
         assert vcmi_loglevel_ai in self.__class__.VCMI_LOGLEVELS
         assert role in self.__class__.ROLES
@@ -200,25 +232,19 @@ class VcmiEnv(gym.Env):
             relval_mult=float(reward_relval_mult),
         )
 
-        self.logger = log.get_logger("VcmiEnv-v13", vcmienv_loglevel)
-
-        self.connector = PyConnector(
-            vcmienv_loglevel,
-            100,  # maxlogs
-            user_timeout,
-            vcmi_timeout,
-            boot_timeout,
-            allow_retreat,
-        )
+        self.logger = log.get_logger(vcmienv_logtag, vcmienv_loglevel)
+        self.main_env = main_env
 
         if opponent == "OTHER_ENV":
-            opponent = "MMAI_MODEL"
+            opp = "MMAI_USER"
+        else:
+            opp = opponent
 
         if role == "attacker":
             attacker = "MMAI_USER"
-            defender = opponent
+            defender = opp
         else:
-            attacker = opponent
+            attacker = opp
             defender = "MMAI_USER"
 
         if attacker == "MMAI_MODEL":
@@ -230,6 +256,19 @@ class VcmiEnv(gym.Env):
         else:
             attacker_model = ""
             defender_model = ""
+
+        if main_env is not None:
+            self.opponent = "OTHER_ENV"
+            self.role = "defender" if main_env.role == "attacker" else "attacker"
+
+        self.connector = PyConnector(
+            loglevel=vcmienv_loglevel,
+            maxlogs=100,
+            user_timeout=user_timeout,
+            vcmi_timeout=vcmi_timeout,
+            boot_timeout=boot_timeout,
+            allow_retreat=allow_retreat,
+        )
 
         self.connector.start(
             mapname,
@@ -255,16 +294,20 @@ class VcmiEnv(gym.Env):
             vcmi_stats_mode,
             vcmi_stats_storage,
             vcmi_stats_persist_freq,
+            main_connector=main_env.connector if main_env else None
         )
 
-        self.connector.connect_as(role)
+        if opponent == "OTHER_ENV":
+            self.logger.warn("Dual-env setup detected -- will NOT connect automatically.")
+        else:
+            self.connector.connect_as(role)
+            self.reset()  # needed to init vars
 
-        # print("Action space: %s" % self.action_space)
-        # print("Observation space: %s" % self.observation_space)
-
-        # required to init vars
-        # self._reset_vars(self.connector.reset())
-        self.reset()
+    @tracelog
+    def connect(self):
+        assert self.opponent == "OTHER_ENV"
+        self.connector.connect_as(self.role)
+        self.reset()  # needed to init vars
 
     @tracelog
     def step(self, action, fallback=False):

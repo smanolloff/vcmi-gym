@@ -14,24 +14,31 @@
 # limitations under the License.
 # =============================================================================
 
+import os
 import time
-import numpy as np
 import torch
+import json
 import vcmi_gym
+
+from torch_geometric.data import Batch
+from rl.algos.mppo_dna_gnn.mppo_dna_gnn import DNAModel, to_hdata_list
 
 
 def get_action(env, obs, model):
     if model is None:
         return env.random_action()
 
-    raise NotImplementedError("model prediction on v5 env")
-    # return model.predict(
-    #     torch.as_tensor(obs).float(),
-    #     torch.as_tensor(np.array(mask))
-    # )
+    hdata = Batch.from_data_list(to_hdata_list(
+        torch.as_tensor(obs["observation"]).unsqueeze(0),
+        torch.tensor([False]),
+        [obs["links"]]
+    ))
+
+    return model.model_policy.get_actdata_eval(hdata).action
 
 
 def main():
+    oldcwd = os.getcwd()
     total_steps = 1000
     env = vcmi_gym.VcmiEnv_v13(
         #"gym/generated/4096/4096-6stack-100K-01.vmap",
@@ -77,23 +84,19 @@ def main():
     model = None
 
     # Normal torch model
+    # with open(f"{oldcwd}/sfcjqcly-1757757007-config.json", "r") as f:
+    #     cfg = json.load(f)
+    # weights = torch.load(f"{oldcwd}/sfcjqcly-1757757007-model-dna.pt", weights_only=True, map_location="cpu")
+    # model = DNAModel(cfg["model"], torch.device("cpu")).eval()
+    # model.load_state_dict(weights, strict=True)
+
     # model = torch.load("rl/models/Attacker model:v7/agent.pt", weights_only=False)
 
     # JIT torch model (~5% faster)
     #model = torch.jit.load("rl/models/Attacker model:v7/jit-agent.pt")
 
-    num_transitions = torch.zeros(20, dtype=torch.long)
-
     try:
-        if model:
-            actor = model.actor if isinstance(model, torch.jit._script.RecursiveScriptModule) else model.NN.actor
-            if actor.out_features == 2311:
-                print("Legacy model detected -- using LegacyActionSpaceWrapper")
-                env = vcmi_gym.LegacyActionSpaceWrapper(env)
-
         while steps < total_steps:
-            num_transitions[min(19, len(obs["transitions"]["observations"]))] += 1
-
             if term or trunc:
                 assert not was_term
                 was_term = two_users
@@ -141,11 +144,6 @@ def main():
         print("* Total time: %.2f seconds" % s)
         print("* Total steps: %d" % steps)
         print("* Total resets: %d" % resets)
-
-        print("Transitions:")
-        for i, t in enumerate(num_transitions):
-            print("%d: %.1f%% (%d)" % (i, 100 * t / sum(num_transitions), t))
-
     finally:
         env.close()
 

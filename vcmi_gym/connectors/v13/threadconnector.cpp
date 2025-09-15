@@ -390,9 +390,16 @@ namespace Connector::V13::Thread {
 
         std::function<bool()> pred = [this, expstate] { return connstate == expstate || _shutdown; };
 
-        LOGFMT("cond%1%.wait(lock%1%)", side);
-        auto res = cond_wait(funcname, side, cond, lock, vcmiTimeout, pred);
-        LOGFMT("cond%1%.wait(lock%1%): done", side);
+        ReturnCode res;
+
+        {
+            LOG("release Python GIL");
+            py::gil_scoped_release release;
+
+            LOGFMT("cond%1%.wait(lock%1%)", side);
+            res = cond_wait(funcname, side, cond, lock, vcmiTimeout, pred);
+            LOGFMT("cond%1%.wait(lock%1%): done", side);
+        }
 
         if (!_error.empty()) {
             throw VCMIConnectorException(_error);
@@ -501,10 +508,15 @@ namespace Connector::V13::Thread {
         std::unique_lock lock2(m2);
         LOG("obtain lock2: done");
 
-        if (side)
+        if (side) {
+            if (connectedClient1)
+                throw std::runtime_error("A client with side 1 is already connected.");
             connectedClient1 = true;
-        else
+        } else {
+            if (connectedClient0)
+                throw std::runtime_error("A client with side 0 is already connected.");
             connectedClient0 = true;
+        }
 
         LOG("cond2.notify_one()");
         cond2.notify_one();
@@ -522,10 +534,17 @@ namespace Connector::V13::Thread {
 
         ReturnCode res;
 
+
         std::function<bool()> pred = [this, expstate] { return connstate == expstate; };
-        LOGFMT("cond%1%.wait(lock%1%)", side);
-        res = cond_wait(__func__, side, cond, lock, bootTimeout, pred);
-        LOGFMT("cond%1%.wait(lock%1%): done", side);
+
+        {
+            LOG("release Python GIL");
+            py::gil_scoped_release release;
+
+            LOGFMT("cond%1%.wait(lock%1%)", side);
+            res = cond_wait(__func__, side, cond, lock, bootTimeout, pred);
+            LOGFMT("cond%1%.wait(lock%1%): done", side);
+        }
 
         auto pstate = convertState(state);
         LOGFMT("release lock%d (return)", side);
@@ -611,7 +630,7 @@ namespace Connector::V13::Thread {
         if (red == "MMAI_RANDOM") {
             leftModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
         } else if (red == "MMAI_USER") {
-            leftModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction0, f_getValueDummy);
+            leftModel = new ML::ModelWrappers::Function(version(), "MMAI_USER_GYM", f_getAction0, f_getValueDummy);
         } else if (red == "MMAI_MODEL") {
             // BAI will load the actual model based on leftModel->getName()
             leftModel = new ML::ModelWrappers::TorchPath(redModel);
@@ -622,7 +641,7 @@ namespace Connector::V13::Thread {
         if (blue == "MMAI_RANDOM") {
             rightModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
         } else if (blue == "MMAI_USER") {
-            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_MODEL", f_getAction1, f_getValueDummy);
+            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_USER_GYM", f_getAction1, f_getValueDummy);
         } else if (blue == "MMAI_MODEL") {
             // BAI will load the actual model based on rightModel->getName()
             rightModel = new ML::ModelWrappers::TorchPath(blueModel);

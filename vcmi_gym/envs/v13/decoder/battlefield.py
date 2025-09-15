@@ -330,7 +330,7 @@ class Battlefield():
         colwidths[0] = 16  # header col
 
         # Divider column indexes
-        divcolids = (1, v13, 23)
+        divcolids = (1, 12, 23)
 
         for i in divcolids:
             colwidths[i] = 2  # divider col
@@ -397,7 +397,7 @@ class Battlefield():
             row[0] = (nocol, colwidths[0], aname)
 
             # Div cols
-            for i in [1, v13, len(colwidths)-1]:
+            for i in [1, 12, len(colwidths)-1]:
                 row[i] = (nocol, colwidths[i], "|")
 
             # Stack cols
