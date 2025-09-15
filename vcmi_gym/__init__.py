@@ -17,7 +17,6 @@
 import gymnasium
 from .envs.v12.vcmi_env import VcmiEnv as VcmiEnv_v12
 from .envs.v13.vcmi_env import VcmiEnv as VcmiEnv_v13
-from .envs.util.dual_env import DualEnvController, DualEnvClient
 
 
 def register_envs():
@@ -33,6 +32,4 @@ all = [
     register_envs,
     VcmiEnv_v12,
     VcmiEnv_v13,
-    DualEnvController,
-    DualEnvClient,
 ]

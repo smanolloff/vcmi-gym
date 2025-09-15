@@ -558,9 +558,6 @@ namespace Connector::V13::Thread {
         setvbuf(stdout, NULL, _IONBF, 0);
         LOG("start");
 
-        LOG("release Python GIL");
-        py::gil_scoped_release release;
-
         // struct sigaction sa;
         // sa.sa_handler = signal_handler;
         // sa.sa_flags = 0;
@@ -572,6 +569,9 @@ namespace Connector::V13::Thread {
         LOG("obtain lock2");
         std::unique_lock lock2(m2);
         LOG("obtain lock2: done");
+
+        LOG("release Python GIL");
+        py::gil_scoped_release release;
 
         std::function<bool()> predicate = [this] {
             return (connectedClient0 || red != "MMAI_USER")

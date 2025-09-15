@@ -182,8 +182,6 @@ class VcmiEnv(gym.Env):
 
             def env1_loop(env0, cond):
                 env1 = VcmiEnv(opponent="OTHER_ENV", other_env=env0)
-                with cond:
-                    cond.notify()
                 env1.connect()
                 # env1 can now be used as a regular env
                 env1.reset()
@@ -192,11 +190,8 @@ class VcmiEnv(gym.Env):
 
             def main():
                 env0 = VcmiEnv(opponent="OTHER_ENV")
-                cond = threading.Condition()
-                env1_thread = threading.Thread(target=env1_loop, args=(env0, cond), daemon=True)
-                with cond:
-                    env1_thread.start()
-                    cond.wait()
+                env1_thread = Thread(target=env1_loop, args=(env0, cond), daemon=True)
+                env1_thread.start()
                 env0.connect()
                 # env0 can now be used as a regular env
                 env0.reset()
