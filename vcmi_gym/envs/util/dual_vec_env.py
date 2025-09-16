@@ -3,6 +3,7 @@ import enum
 import gymnasium as gym
 import numpy as np
 import multiprocessing
+import ctypes
 import threading
 import torch
 from torch_geometric.data import Batch
@@ -213,7 +214,16 @@ class DualEnvMainWrapper(gym.Wrapper):
         return obs, rew, term, trunc, info
 
 
-def create_dual_venv(env_kwargs, num_envs, model_factory, e_max=3300):
+def create_dual_venv(
+    env_kwargs,
+    num_envs_model,
+    num_envs_stupidai,
+    num_envs_battleai,
+    model_factory,
+    e_max=3300
+):
+    num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai
+
     # AsyncVectorEnv creates a dummy_env() in the main process just to
     # extract metadata, which causes VCMI init pid error afterwards
     pid = os.getpid()
@@ -225,11 +235,11 @@ def create_dual_venv(env_kwargs, num_envs, model_factory, e_max=3300):
         close=lambda: None
     )
 
-    controller = DualEnvController(num_envs, model_factory)
+    controller = DualEnvController(num_envs_model, model_factory)
     threading.Thread(target=controller.run, daemon=True).start()
 
     bot_common_kwargs = dict(
-        num_envs=num_envs,
+        num_envs=num_envs_model,
         e_max=e_max,
         controller_env_cond=controller.controller_env_cond,
         controller_act_cond=controller.controller_act_cond,
@@ -241,32 +251,42 @@ def create_dual_venv(env_kwargs, num_envs, model_factory, e_max=3300):
         shm_name_actions=controller.shm_actions.name,
     )
 
-    def env_creator(env_id):
+    def env_creator_wrapper(env_creator):
         if os.getpid() == pid:
             return dummy_env
 
-        env = VcmiEnv(**env_kwargs, opponent="OTHER_ENV")
+        env = env_creator()
+        env = LegacyObservationSpaceWrapper(env)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        return env
 
+    def env_creator_model(i):
+        env = VcmiEnv(**env_kwargs, opponent="OTHER_ENV")
         threading.Thread(
             target=dual_env_bot,
-            kwargs=dict(bot_common_kwargs, main_env=env, env_id=env_id),
+            kwargs=dict(bot_common_kwargs, main_env=env, env_id=i),
             daemon=True
         ).start()
-
         env = DualEnvMainWrapper(
             env=env,
-            env_id=env_id,
-            num_envs=num_envs,
+            env_id=i,
+            num_envs=num_envs_total,
             controller_env_cond=controller.controller_env_cond,
             shm_name_states=controller.shm_states.name
         )
-
-        env = LegacyObservationSpaceWrapper(env)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-
         return env
 
-    funcs = [partial(env_creator, i) for i in range(num_envs)]
+    def env_creator_stupidai():
+        return VcmiEnv(**env_kwargs, opponent="StupidAI")
+
+    def env_creator_battleai():
+        return VcmiEnv(**env_kwargs, opponent="BattleAI")
+
+    env_creators = []
+    env_creators.extend([partial(env_creator_model, i) for i in range(num_envs_model)])
+    env_creators.extend([env_creator_stupidai for i in range(num_envs_stupidai)])
+    env_creators.extend([env_creator_battleai for i in range(num_envs_battleai)])
+    funcs = [partial(env_creator_wrapper, env_creator) for env_creator in env_creators]
     vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
     return vec_env
 
@@ -285,7 +305,9 @@ if __name__ == "__main__":
 
     venv = create_dual_venv(
         env_kwargs=dict(mapname="gym/A1.vmap"),
-        num_envs=5,
+        num_envs_model=5,
+        num_envs_stupidai=2,
+        num_envs_battleai=2,
         model_factory=model_factory
     )
 
