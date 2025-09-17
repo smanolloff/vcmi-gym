@@ -16,11 +16,8 @@
 
 #pragma once
 
-#include <filesystem>
 #include <condition_variable>
 #include <thread>
-#include <cstdio>
-#include <iostream>
 #include <atomic>
 #include <deque>
 

@@ -30,8 +30,8 @@ namespace Connector::V13 {
     const int Exporter::getStateSizeOnePlayer() const { return BATTLEFIELD_STATE_SIZE_ONE_PLAYER; }
     const int Exporter::getStateSizeGlobal() const { return BATTLEFIELD_STATE_SIZE_GLOBAL; }
     const int Exporter::getStateValueNa() const { return NULL_VALUE_ENCODED; }
-    const int Exporter::getSideLeft() const { return static_cast<int>(MMAI::Schema::V13::Side::LEFT); }
-    const int Exporter::getSideRight() const { return static_cast<int>(MMAI::Schema::V13::Side::RIGHT); }
+    const int Exporter::getSideLeft() const { return static_cast<int>(MMAI::Schema::Side::LEFT); }
+    const int Exporter::getSideRight() const { return static_cast<int>(MMAI::Schema::Side::RIGHT); }
 
     const std::vector<std::string> Exporter::getGlobalActions() const {
         auto actions = std::vector<std::string> {};

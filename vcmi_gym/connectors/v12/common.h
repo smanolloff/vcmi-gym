@@ -16,8 +16,6 @@
 
 #pragma once
 
-// Linux builds fail without this include (used in types.h)
-#include <bitset>
 
 #include "schema/base.h"
 #include "schema/v12/types.h"
@@ -34,6 +32,7 @@
 #endif
 
 #if VERBOSE || LOGCOLLECT
+    #include <boost/format.hpp>
     #define LOG(msg) log(__func__, msg);
     #define LOGFMT(fmt, elems) LOG(boost::str(boost::format(fmt) % elems));
 #else

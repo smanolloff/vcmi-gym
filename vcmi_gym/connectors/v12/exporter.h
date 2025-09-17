@@ -16,12 +16,7 @@
 
 #pragma once
 
-// Linux builds fail without this include (used in types.h)
-#include <bitset>
-
-#include "schema/base.h"
 #include "schema/v12/types.h"
-#include "schema/v12/constants.h"
 
 namespace Connector::V12 {
     using namespace MMAI::Schema;

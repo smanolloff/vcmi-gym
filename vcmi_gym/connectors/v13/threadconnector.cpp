@@ -631,25 +631,25 @@ namespace Connector::V13::Thread {
         };
 
         if (red == "MMAI_RANDOM") {
-            leftModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
+            leftModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", Side::LEFT, f_getRandomAction, f_getValueDummy);
         } else if (red == "MMAI_USER") {
-            leftModel = new ML::ModelWrappers::Function(version(), "MMAI_USER_GYM", f_getAction0, f_getValueDummy);
+            leftModel = new ML::ModelWrappers::Function(version(), "MMAI_USER_GYM", Side::LEFT, f_getAction0, f_getValueDummy);
         } else if (red == "MMAI_MODEL") {
             // BAI will load the actual model based on leftModel->getName()
             leftModel = new ML::ModelWrappers::TorchPath(redModel);
         } else {
-            leftModel = new ML::ModelWrappers::Scripted(red);
+            leftModel = new ML::ModelWrappers::Scripted(red, Side::LEFT);
         }
 
         if (blue == "MMAI_RANDOM") {
-            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", f_getRandomAction, f_getValueDummy);
+            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", Side::RIGHT, f_getRandomAction, f_getValueDummy);
         } else if (blue == "MMAI_USER") {
-            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_USER_GYM", f_getAction1, f_getValueDummy);
+            rightModel = new ML::ModelWrappers::Function(version(), "MMAI_USER_GYM", Side::RIGHT, f_getAction1, f_getValueDummy);
         } else if (blue == "MMAI_MODEL") {
             // BAI will load the actual model based on rightModel->getName()
             rightModel = new ML::ModelWrappers::TorchPath(blueModel);
         } else {
-            rightModel = new ML::ModelWrappers::Scripted(blue);
+            rightModel = new ML::ModelWrappers::Scripted(blue, Side::RIGHT);
         }
 
         // auto oldcwd = std::filesystem::current_path();

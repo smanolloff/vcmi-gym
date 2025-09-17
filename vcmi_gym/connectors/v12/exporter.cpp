@@ -17,6 +17,9 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "schema/base.h"
+#include "schema/v12/constants.h"
+
 #include "exporter.h"
 
 namespace Connector::V12 {
@@ -30,8 +33,8 @@ namespace Connector::V12 {
     const int Exporter::getStateSizeOnePlayer() const { return BATTLEFIELD_STATE_SIZE_ONE_PLAYER; }
     const int Exporter::getStateSizeGlobal() const { return BATTLEFIELD_STATE_SIZE_GLOBAL; }
     const int Exporter::getStateValueNa() const { return NULL_VALUE_ENCODED; }
-    const int Exporter::getSideLeft() const { return static_cast<int>(MMAI::Schema::V12::Side::LEFT); }
-    const int Exporter::getSideRight() const { return static_cast<int>(MMAI::Schema::V12::Side::RIGHT); }
+    const int Exporter::getSideLeft() const { return static_cast<int>(MMAI::Schema::Side::LEFT); }
+    const int Exporter::getSideRight() const { return static_cast<int>(MMAI::Schema::Side::RIGHT); }
 
     const std::vector<std::string> Exporter::getGlobalActions() const {
         auto actions = std::vector<std::string> {};

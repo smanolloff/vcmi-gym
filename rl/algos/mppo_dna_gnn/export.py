@@ -22,8 +22,11 @@ from .mppo_dna_gnn import (
     DNAModel,
     Model,
     MainAction,
+)
+
+from .dual_vec_env import (
     to_hdata_list,
-    create_venv
+    DualVecEnv
 )
 
 
@@ -83,20 +86,19 @@ def transform_key(key, link_types):
 
 
 
-MODEL_SIZES = dict(
-    S=dict(
-        ADJACENT=888,       # fixed
-        REACH=,
-        RANGED_MOD=,
-        ACTS_BEFORE=,
-        MELEE_DMG_REL=,
-        RETAL_DMG_REL=,
-        RANGED_DMG_REL=,
-    )
-)
+# MODEL_SIZES = dict(
+#     S=dict(
+#         ADJACENT=888,       # fixed
+#         REACH=,
+#         RANGED_MOD=,
+#         ACTS_BEFORE=,
+#         MELEE_DMG_REL=,
+#         RETAL_DMG_REL=,
+#         RANGED_DMG_REL=,
+#     )
+# )
 
-def build_einputs(hdata, model_size):
-    sizes =
+def build_einputs(hdata, e_max, k_max):
     eis = []
     eas = []
     nbrs = []
@@ -359,7 +361,7 @@ class ExecuTorchDNAModel(nn.Module):
         return self.version.clone()
 
     # Models are usually trained as either attackers or defenders
-    # (0=attacker, 1=defender)
+    # (0=attacker, 1=defender, 2=both)
     def get_side(self):
         return self.side.clone()
 
@@ -653,8 +655,7 @@ def test_model(cfg_file, weights_file):
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    # venv = create_venv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs=1, sync=False)
-    venv = create_venv(dict(mapname="gym/A1.vmap", role="defender"), num_envs=1, sync=False)
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
@@ -693,13 +694,12 @@ def test_xnn(cfg_file, weights_file):
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
+    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    # venv = create_venv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs=1, sync=False)
-    venv = create_venv(dict(mapname="gym/A1.vmap", role="defender"), num_envs=1, sync=False)
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     hdata = Batch.from_data_list(to_hdata_list(
@@ -750,13 +750,12 @@ def test_xnn_quantized(cfg_file, weights_file):
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
+    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    # venv = create_venv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs=1, sync=False)
-    venv = create_venv(dict(mapname="gym/A1.vmap", role="defender"), num_envs=1, sync=False)
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     hdata = Batch.from_data_list(to_hdata_list(
@@ -836,13 +835,12 @@ def test_load(cfg_file, weights_file):
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
+    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    # venv = create_venv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs=1, sync=False)
-    venv = create_venv(dict(mapname="gym/A1.vmap", role="defender"), num_envs=1, sync=False)
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     hdata = Batch.from_data_list(to_hdata_list(
@@ -905,12 +903,11 @@ def export_model(cfg_file, weights_file):
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
+    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
 
-    # venv = create_venv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs=1, sync=False)
-    venv = create_venv(dict(mapname="gym/A1.vmap", role="defender"), num_envs=1, sync=False)
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     hdata = Batch.from_data_list(to_hdata_list(
@@ -937,6 +934,7 @@ def export_model(cfg_file, weights_file):
         "predict": export(m_predict, einputs, strict=True),
         "get_value": export(m_get_value, einputs, strict=True),
         "get_version": export(m_get_ver, (), strict=True),
+        "get_side": export(m_get_side, (), strict=True),
         "get_e_max": export(m_get_e_max, (), strict=True),
         "get_k_max": export(m_get_k_max, (), strict=True),
     }
@@ -963,7 +961,7 @@ def verify_export(cfg_file, weights_file, exported_model, num_steps=10):
     E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
-    venv = create_venv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs=1, sync=False)
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     print("Testing for %d steps..." % (num_steps))
@@ -995,7 +993,7 @@ def verify_export(cfg_file, weights_file, exported_model, num_steps=10):
 
 if __name__ == "__main__":
     with torch.inference_mode():
-        filebase = "sfcjqcly-1757757007"
+        filebase = "tukbajrv-202509171940"
         model_cfg_path = f"{filebase}-config.json"
         model_weights_path = f"{filebase}-model-dna.pt"
         export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{filebase}.pte"

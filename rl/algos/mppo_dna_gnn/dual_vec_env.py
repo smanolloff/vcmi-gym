@@ -311,14 +311,15 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
     def __init__(
         self,
         env_kwargs,
-        num_envs_stupidai,
-        num_envs_battleai,
-        num_envs_model,
-        model_factory,
+        num_envs_stupidai=0,
+        num_envs_battleai=0,
+        num_envs_model=0,
+        model_factory=None,
         e_max=3300,
         logprefix="",
     ):
-        # num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai
+        num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai
+        assert num_envs_total > 0, f"{num_envs_total} > 0"
 
         # AsyncVectorEnv creates a dummy_env() in the main process just to
         # extract metadata, which causes VCMI init pid error afterwards
