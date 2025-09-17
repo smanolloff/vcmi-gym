@@ -51,7 +51,7 @@ from vcmi_gym.envs.v13.pyconnector import (
     LINK_TYPES,
 )
 
-from .dual_venv import DualVectorEnv, to_hdata_list
+from .dual_vec_env import DualVecEnv, to_hdata_list
 
 
 OFFSETS_0 = [   # even rows offsets  /\    /\    /\    /\    /\
@@ -1073,7 +1073,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     else:
         train_model_factory = None
 
-    train_venv = DualVectorEnv(
+    train_venv = DualVecEnv(
         train_config["env"]["kwargs"],
         train_config["env"]["num_envs_per_opponent"]["StupidAI"],
         train_config["env"]["num_envs_per_opponent"]["BattleAI"],
@@ -1094,7 +1094,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
         else:
             eval_model_factory = None
 
-        eval_venv_variants[name] = DualVectorEnv(
+        eval_venv_variants[name] = DualVecEnv(
             envcfg["kwargs"],
             envcfg["num_envs_per_opponent"]["StupidAI"],
             envcfg["num_envs_per_opponent"]["BattleAI"],

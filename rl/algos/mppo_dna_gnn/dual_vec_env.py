@@ -305,7 +305,7 @@ class DualEnvWrapper(gym.Wrapper):
         return obs, rew, term, trunc, info
 
 
-class DualVectorEnv(gym.vector.AsyncVectorEnv):
+class DualVecEnv(gym.vector.AsyncVectorEnv):
     def __init__(
         self,
         env_kwargs,
@@ -332,7 +332,7 @@ class DualVectorEnv(gym.vector.AsyncVectorEnv):
             # test if model can be loaded (avoids errors in sub-processes)
             model_factory()
 
-            self.controller = DualEnvController(num_envs_model, model_factory, loglevel=env_kwargs["vcmienv_loglevel"])
+            self.controller = DualEnvController(num_envs_model, model_factory, loglevel=env_kwargs.get("vcmienv_loglevel", "INFO"))
             self.controller.start()
 
             dual_kwargs = dict(
@@ -409,3 +409,28 @@ def to_hdata_list(b_obs, b_done, tuple_links):
     #       not sure if that's required for GNN to work?
     #       but it breaks my encode() which uses torch.split()
     return b_hdatas
+
+
+if __name__ == "__main__":
+    import json
+    from rl.algos.mppo_dna_gnn.mppo_dna_gnn import DNAModel
+
+    def model_factory():
+        with open("sfcjqcly-1757757007-config.json", "r") as f:
+            cfg = json.load(f)
+        weights = torch.load("sfcjqcly-1757757007-model-dna.pt", weights_only=True, map_location="cpu")
+        model = DNAModel(cfg["model"], torch.device("cpu")).eval()
+        model.load_state_dict(weights, strict=True)
+        return model
+
+    venv = DualVecEnv(
+        env_kwargs=dict(mapname="gym/A1.vmap"),
+        num_envs_stupidai=2,
+        num_envs_battleai=2,
+        num_envs_model=5,
+        model_factory=model_factory,
+        e_max=3300
+    )
+
+    import ipdb; ipdb.set_trace()  # noqa
+    pass
