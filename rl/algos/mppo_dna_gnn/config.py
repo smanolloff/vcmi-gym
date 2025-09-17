@@ -25,9 +25,10 @@ train_env_kwargs = dict(
     reward_term_mult=0.01,
     reward_relval_mult=0.01,
     swap_sides=0,
+    # With DualVecEnv, all timeouts must be the same (large enough)
     user_timeout=7200,
-    vcmi_timeout=60,
-    boot_timeout=30,
+    vcmi_timeout=7200,
+    boot_timeout=7200,
 )
 
 bot_model = dict(

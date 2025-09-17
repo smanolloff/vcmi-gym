@@ -45,10 +45,10 @@ class EnvState(enum.IntEnum):
 
 
 class DualEnvController():
-    def __init__(self, num_envs, model_factory, loglevel="INFO"):
+    def __init__(self, num_envs, model_factory, logprefix="", loglevel="INFO"):
         self.num_envs = num_envs
         self.model_factory = model_factory
-        self.logger = get_logger("controller", loglevel)
+        self.logger = get_logger(f"{logprefix}controller", loglevel)
         self.logger.debug("Initializing...")
 
         self.controller_env_cond = multiprocessing.Condition()
@@ -135,7 +135,7 @@ class DualEnvController():
 
                     with self.controller_act_cond:
                         self.logger.debug("model.model_policy.get_actdata_eval(hdata)")
-                        self.env_actions[ids] = model.model_policy.get_actdata_eval(hdata).action.numpy()
+                        self.env_actions[ids] = model.model_policy.get_actdata_eval(hdata).action.cpu().numpy()
                         self.logger.debug(f"self.env_states[{ids}] = {EnvState.UNSET}")
                         self.env_states[ids] = EnvState.UNSET
                         self.logger.debug("controller_act_cond.notify_all()")
@@ -157,9 +157,10 @@ class DualEnvWrapper(gym.Wrapper):
         shm_name_link_inds,
         shm_name_link_attrs,
         shm_name_actions,
+        logprefix=""
     ):
         env_logtag = f"{main_env.vcmienv_logtag}-other"
-        logger = get_logger(f"bot({env_logtag})", main_env.vcmienv_loglevel)
+        logger = get_logger(f"{logprefix}bot({env_logtag})", main_env.vcmienv_loglevel)
         logger.debug("initializing...")
 
         shm_actions = SharedMemory(name=shm_name_actions)
@@ -178,7 +179,7 @@ class DualEnvWrapper(gym.Wrapper):
         env_link_attrs = np.ndarray(shape=(num_envs, len(LINK_TYPES), e_max, 1), dtype=np.float32, buffer=shm_link_attrs.buf)
 
         logger.debug("Create other VcmiEnv")
-        env = VcmiEnv(opponent="OTHER_ENV", main_env=main_env, vcmienv_loglevel=main_env.vcmienv_loglevel, vcmienv_logtag=env_logtag)
+        env = VcmiEnv(opponent="OTHER_ENV", main_env=main_env, vcmienv_loglevel=main_env.vcmienv_loglevel, vcmienv_logtag=f"{logprefix}{env_logtag}")
 
         logger.debug("env.connect() -- as %s" % env.role)
         env.connect()
@@ -233,10 +234,11 @@ class DualEnvWrapper(gym.Wrapper):
         shm_name_link_inds,
         shm_name_link_attrs,
         shm_name_actions,
+        logprefix=""
     ):
         super().__init__(env)
 
-        self.logger = get_logger(f"wrapper({env.vcmienv_logtag})", env.vcmienv_loglevel)
+        self.logger = get_logger(f"{logprefix}wrapper({env.vcmienv_logtag})", env.vcmienv_loglevel)
         self.logger.debug("Initializing...")
         self.env_id = env_id
         self.num_envs = num_envs
@@ -313,7 +315,8 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         num_envs_battleai,
         num_envs_model,
         model_factory,
-        e_max=3300
+        e_max=3300,
+        logprefix="",
     ):
         # num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai
 
@@ -332,7 +335,12 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             # test if model can be loaded (avoids errors in sub-processes)
             model_factory()
 
-            self.controller = DualEnvController(num_envs_model, model_factory, loglevel=env_kwargs.get("vcmienv_loglevel", "INFO"))
+            self.controller = DualEnvController(
+                num_envs_model,
+                model_factory,
+                loglevel=env_kwargs.get("vcmienv_loglevel", "INFO"),
+                logprefix=logprefix,
+            )
             self.controller.start()
 
             dual_kwargs = dict(
@@ -346,18 +354,19 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
                 shm_name_link_inds=self.controller.shm_link_inds.name,
                 shm_name_link_attrs=self.controller.shm_link_attrs.name,
                 shm_name_actions=self.controller.shm_actions.name,
+                logprefix=logprefix
             )
 
             def env_creator_model(i):
-                env = VcmiEnv(**env_kwargs, opponent="OTHER_ENV", vcmienv_logtag=f"env.model.{i}")
+                env = VcmiEnv(**env_kwargs, opponent="OTHER_ENV", vcmienv_logtag=f"{logprefix}env.model.{i}")
                 env = DualEnvWrapper(env, env_id=i, **dual_kwargs)
                 return env
 
         def env_creator_stupidai(i):
-            return VcmiEnv(**env_kwargs, opponent="StupidAI", vcmienv_logtag=f"env.stupidai.{i}")
+            return VcmiEnv(**env_kwargs, opponent="StupidAI", vcmienv_logtag=f"{logprefix}env.stupidai.{i}")
 
         def env_creator_battleai(i):
-            return VcmiEnv(**env_kwargs, opponent="BattleAI", vcmienv_logtag=f"env.battleai.{i}")
+            return VcmiEnv(**env_kwargs, opponent="BattleAI", vcmienv_logtag=f"{logprefix}env.battleai.{i}")
 
         def env_creator_wrapper(env_creator):
             if os.getpid() == pid:
@@ -429,7 +438,8 @@ if __name__ == "__main__":
         num_envs_battleai=2,
         num_envs_model=5,
         model_factory=model_factory,
-        e_max=3300
+        logprefix="test-",
+        e_max=3300,
     )
 
     import ipdb; ipdb.set_trace()  # noqa

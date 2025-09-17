@@ -1079,6 +1079,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
         train_config["env"]["num_envs_per_opponent"]["BattleAI"],
         train_config["env"]["num_envs_per_opponent"]["model"],
         train_model_factory,
+        logprefix="train-",
         e_max=3300
     )
 
@@ -1100,6 +1101,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
             envcfg["num_envs_per_opponent"]["BattleAI"],
             envcfg["num_envs_per_opponent"]["model"],
             eval_model_factory,
+            logprefix=f"eval/{name}-",
             e_max=3300
         )
 
