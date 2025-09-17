@@ -38,6 +38,7 @@
 #include <string>
 #include <thread>
 #include <boost/date_time/posix_time/posix_time.hpp>
+#include <unistd.h>
 
 #define ASSERT_STATE(id, want) { \
     if((want) != (connstate)) \
@@ -89,9 +90,11 @@ namespace Connector::V13::Thread {
         //     % msg
         // );
 
-        std::string entry = boost::str(boost::format("++ %s <%s>[GIL=%d] <%s> %s")
+        std::string entry = boost::str(boost::format("++ %s <%ld/%s>[GIL=%d] <%s> %s")
             % boost::posix_time::to_iso_extended_string(t)
-            % std::this_thread::get_id()
+            % static_cast<long>(getpid())
+            // % std::this_thread::get_id()
+            % to_base36(native_thread_id())
             % PyGILState_Check()
             % funcname
             % msg

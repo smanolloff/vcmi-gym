@@ -7,23 +7,22 @@ import string
 import argparse
 import threading
 import contextlib
-import gymnasium as gym
 import enum
 import copy
 import importlib
 import math
+
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
-from types import SimpleNamespace
 
 import numpy as np
 import torch
 import torch.nn as nn
 # from torch.distributions import kl_divergence as kld
-from torch_geometric.data import HeteroData, Batch
+from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import to_dense_batch
 import torch_geometric.nn as gnn
@@ -37,7 +36,6 @@ from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, safe_mean, timer_stats
 
 from vcmi_gym.envs.v13.vcmi_env import VcmiEnv
-from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
 
 from vcmi_gym.envs.v13.pyconnector import (
     STATE_SIZE,
@@ -52,6 +50,8 @@ from vcmi_gym.envs.v13.pyconnector import (
     HEX_ACT_MAP,
     LINK_TYPES,
 )
+
+from .dual_venv import DualVectorEnv, to_hdata_list
 
 
 OFFSETS_0 = [   # even rows offsets  /\    /\    /\    /\    /\
@@ -131,40 +131,6 @@ class State:
             attr = getattr(self, k)
             v = deque(v, maxlen=attr.maxlen) if isinstance(attr, deque) else v
             setattr(self, k, v)
-
-
-def to_hdata(obs, done, links):
-    device = obs.device
-    res = HeteroData()
-    res.obs = obs.unsqueeze(0)
-    res.done = done.unsqueeze(0).float()
-    res.value = torch.tensor(0., device=device)
-    res.action = torch.tensor(0, device=device)
-    res.reward = torch.tensor(0., device=device)
-    res.logprob = torch.tensor(0., device=device)
-    res.advantage = torch.tensor(0., device=device)
-    res.ep_return = torch.tensor(0., device=device)
-
-    res["hex"].x = obs[-STATE_SIZE_HEXES:].view(165, STATE_SIZE_ONE_HEX)
-    for lt in LINK_TYPES.keys():
-        res["hex", lt, "hex"].edge_index = torch.as_tensor(links[lt]["index"], device=device)
-        res["hex", lt, "hex"].edge_attr = torch.as_tensor(links[lt]["attrs"], device=device)
-
-    return res
-
-
-# b_obs: torch.tensor of shape (B, STATE_SIZE)
-# tuple_links: tuple of B dicts, where each dict is a single obs's "links"
-def to_hdata_list(b_obs, b_done, tuple_links):
-    b_hdatas = []
-    for obs, done, links in zip(b_obs, b_done, tuple_links):
-        b_hdatas.append(to_hdata(obs, done, links))
-    # XXX: this concatenates along the first dim
-    # i.e. stacking two (165, STATE_SIZE_ONE_HEX)
-    #       gives  (330, STATE_SIZE_ONE_HEX)
-    #       not sure if that's required for GNN to work?
-    #       but it breaks my encode() which uses torch.split()
-    return b_hdatas
 
 
 class Storage:
@@ -653,39 +619,6 @@ class DNAModel(nn.Module):
         self.to(device)
 
 
-def create_venv(env_kwargs, num_envs, sync=True):
-    # AsyncVectorEnv creates a dummy_env() in the main process just to
-    # extract metadata, which causes VCMI init pid error afterwards
-    pid = os.getpid()
-    dummy_env = SimpleNamespace(
-        metadata={'render_modes': ['ansi', 'rgb_array'], 'render_fps': 30},
-        render_mode='ansi',
-        action_space=VcmiEnv.ACTION_SPACE,
-        observation_space=VcmiEnv.OBSERVATION_SPACE["observation"],
-        close=lambda: None
-    )
-
-    def env_creator(i):
-        if os.getpid() == pid and not sync:
-            return dummy_env
-
-        env = VcmiEnv(**env_kwargs)
-        env = LegacyObservationSpaceWrapper(env)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        return env
-
-    funcs = [partial(env_creator, i) for i in range(num_envs)]
-
-    if sync:
-        vec_env = gym.vector.SyncVectorEnv(funcs, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
-    else:
-        vec_env = gym.vector.AsyncVectorEnv(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
-
-    vec_env.reset()
-
-    return vec_env
-
-
 def collect_samples(logger, model, venv, num_vsteps, storage):
     assert not torch.is_inference_mode_enabled()  # causes issues during training
     assert not torch.is_grad_enabled()
@@ -800,7 +733,7 @@ def train_model(
     assert torch.is_grad_enabled()
 
     num_vsteps = train_config["num_vsteps"]
-    num_envs = train_config["env"]["num_envs"]
+    num_envs = sum(train_config["env"]["num_envs_per_opponent"].values())
     v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list)
 
     # compute advantages
@@ -1099,6 +1032,8 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
     learning_rate = config["train"]["learning_rate"]
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/6
     torch.backends.cudnn.benchmark = True
 
@@ -1109,16 +1044,68 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
         torch.set_float32_matmul_precision("high")
         torch.backends.cuda.matmul.allow_tf32 = True
 
-    train_venv = create_venv(train_config["env"]["kwargs"], train_config["env"]["num_envs"], sync=train_config["env"].get("sync", False))
-    logger.info("Initialized %d train envs" % train_venv.num_envs)
+    def create_bot_model_factory(config_file, weights_file):
+        with open(config_file, "r") as f:
+            loaded_cfg = json.load(f)
+
+        # Bot models must be trained on the opposite side
+        train_role = train_config["env"]["kwargs"]["role"]
+        bot_role = loaded_cfg["train"]["env"]["kwargs"]["role"]
+        assert train_role != bot_role, f"{train_role} != {bot_role}"
+
+        device_type = device.type
+
+        # This function will be called from within another process,
+        # (it must not reference external objects which are non-serializable).
+        def model_factory():
+            weights = torch.load(weights_file, weights_only=True, map_location=device_type)
+            model = DNAModel(loaded_cfg["model"], torch.device(device_type)).eval()
+            model.load_state_dict(weights, strict=True)
+            return model
+
+        return model_factory
+
+    if train_config["env"]["num_envs_per_opponent"]["model"] > 0:
+        train_model_factory = create_bot_model_factory(
+            train_config["env"]["model"]["config_file"],
+            train_config["env"]["model"]["weights_file"],
+        )
+    else:
+        train_model_factory = None
+
+    train_venv = DualVectorEnv(
+        train_config["env"]["kwargs"],
+        train_config["env"]["num_envs_per_opponent"]["StupidAI"],
+        train_config["env"]["num_envs_per_opponent"]["BattleAI"],
+        train_config["env"]["num_envs_per_opponent"]["model"],
+        train_model_factory,
+        e_max=3300
+    )
+
+    logger.info("Initialized %d train envs (%s)" % (train_venv.num_envs, train_config["env"]["num_envs_per_opponent"]))
 
     eval_venv_variants = {}
     for name, envcfg in eval_config["env_variants"].items():
-        eval_venv_variants[name] = create_venv(envcfg["kwargs"], envcfg["num_envs"], sync=envcfg.get("sync", False))
-        logger.info("Initialized %d eval envs for variant: %s" % (envcfg["num_envs"], name))
+        if envcfg["num_envs_per_opponent"]["model"] > 0:
+            eval_model_factory = create_bot_model_factory(
+                envcfg["model"]["config_file"],
+                envcfg["model"]["weights_file"],
+            )
+        else:
+            eval_model_factory = None
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    num_envs = train_config["env"]["num_envs"]
+        eval_venv_variants[name] = DualVectorEnv(
+            envcfg["kwargs"],
+            envcfg["num_envs_per_opponent"]["StupidAI"],
+            envcfg["num_envs_per_opponent"]["BattleAI"],
+            envcfg["num_envs_per_opponent"]["model"],
+            eval_model_factory,
+            e_max=3300
+        )
+
+        logger.info("Initialized %d eval envs (variant '%s', %s)" % (eval_venv_variants[name].num_envs, name, envcfg["num_envs_per_opponent"]))
+
+    num_envs = train_venv.num_envs
     num_steps = train_config["num_vsteps"] * num_envs
     batch_size = int(num_steps)
     assert batch_size % train_config["num_minibatches"] == 0, f"{batch_size} % {train_config['num_minibatches']} == 0"

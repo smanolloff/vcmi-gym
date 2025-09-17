@@ -40,7 +40,63 @@ def transform_key(key, link_types):
     return "%s.%d.%d.%s" % (pre, int(module_id) / 2, link_types.index(link_type), rest)
 
 
-def build_einputs(hdata, e_max, k_max):
+# def build_einputs(hdata, e_max, k_max):
+#     eis = []
+#     eas = []
+#     nbrs = []
+#     for lt in LINK_TYPES:
+#         reldata = hdata["hex", lt, "hex"]
+#         ei, ea = pad_edges(reldata.edge_index, reldata.edge_attr, e_max)
+#         nbr = build_nbr(reldata.edge_index[1], 165, k_max)
+#         eis.append(ei)
+#         eas.append(ea)
+#         nbrs.append(nbr)
+#     return (
+#         hdata.obs[0],
+#         torch.stack(eis, dim=0),
+#         torch.stack(eas, dim=0),
+#         torch.stack(nbrs, dim=0),
+#     )
+
+#
+# Stats (10k steps) - obtained via counter.py:
+#
+#        Num edges (E)   avg   max   p99   p90   p50
+# -------------------------------------------------------
+#             ADJACENT   888   888   888   888   888
+#                REACH   357   1010  825   611   340
+#           RANGED_MOD   423   1768  1438  802   322
+#          ACTS_BEFORE   49    248   186   116   35
+#        MELEE_DMG_REL   42    206   156   97    31
+#        RETAL_DMG_REL   26    143   106   66    18
+#       RANGED_DMG_REL   13    112   66    30    9
+#
+#    Inbound edges (K)   avg   max   p99   p90   p50
+# -------------------------------------------------------
+#             ADJACENT   5.4   6     6     6     6
+#                REACH   2.2   13    9     7     5
+#           RANGED_MOD   2.6   11    9     5     2
+#          ACTS_BEFORE   0.3   22    19    14    8
+#        MELEE_DMG_REL   0.3   10    9     8     5
+#        RETAL_DMG_REL   0.2   10    9     7     5
+#       RANGED_DMG_REL   0.1   8     7     4     2
+
+
+
+MODEL_SIZES = dict(
+    S=dict(
+        ADJACENT=888,       # fixed
+        REACH=,
+        RANGED_MOD=,
+        ACTS_BEFORE=,
+        MELEE_DMG_REL=,
+        RETAL_DMG_REL=,
+        RANGED_DMG_REL=,
+    )
+)
+
+def build_einputs(hdata, model_size):
+    sizes =
     eis = []
     eas = []
     nbrs = []
@@ -284,13 +340,14 @@ class ExecuTorchModel(nn.Module):
 
 
 class ExecuTorchDNAModel(nn.Module):
-    def __init__(self, config, e_max, k_max):
+    def __init__(self, config, e_max, k_max, side):
         super().__init__()
         self.model_policy = ExecuTorchModel(config, e_max, k_max)
         self.model_value = ExecuTorchModel(config, e_max, k_max)
         self.register_buffer("version", torch.tensor(13, dtype=torch.long), persistent=False)
         self.register_buffer("e_max", torch.tensor(e_max, dtype=torch.long), persistent=False)
         self.register_buffer("k_max", torch.tensor(k_max, dtype=torch.long), persistent=False)
+        self.register_buffer("side", torch.tensor(side, dtype=torch.long), persistent=False)
 
     def get_e_max(self):
         return self.e_max.clone()
@@ -300,6 +357,11 @@ class ExecuTorchDNAModel(nn.Module):
 
     def get_version(self):
         return self.version.clone()
+
+    # Models are usually trained as either attackers or defenders
+    # (0=attacker, 1=defender)
+    def get_side(self):
+        return self.side.clone()
 
     def get_value(self, obs, *edge_triplets):
         return self.model_value.get_value(obs, *edge_triplets)
@@ -585,7 +647,8 @@ def test_model(cfg_file, weights_file):
     E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
+    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
+    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
@@ -629,6 +692,7 @@ def test_xnn(cfg_file, weights_file):
     E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
+    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
     emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
@@ -685,6 +749,7 @@ def test_xnn_quantized(cfg_file, weights_file):
     E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
+    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
     emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
@@ -770,6 +835,7 @@ def test_load(cfg_file, weights_file):
     E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
+    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
     emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
@@ -838,6 +904,7 @@ def export_model(cfg_file, weights_file):
     E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
     K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
 
+    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
     emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX).eval()
     eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
     emodel.load_state_dict(eweights, strict=True)
@@ -861,6 +928,7 @@ def export_model(cfg_file, weights_file):
     # m_get_value = ModelWrapper(emodel.model_value, "get_value").eval().cpu()
     m_get_value = ModelWrapper(emodel.model_policy, "get_value").eval().cpu()
     m_get_ver = ModelWrapper(emodel, "get_version").eval().cpu()
+    m_get_side = ModelWrapper(emodel, "get_side").eval().cpu()
     m_get_e_max = ModelWrapper(emodel, "get_e_max").eval().cpu()
     m_get_k_max = ModelWrapper(emodel, "get_k_max").eval().cpu()
 

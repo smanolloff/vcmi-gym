@@ -24,7 +24,7 @@ import random
 class CustomFormatter(logging.Formatter):
     def format(self, record):
         record.reltime = "%.2f" % (record.relativeCreated / 1000)
-        record.thread_id = np.base_repr(threading.current_thread().ident, 36).lower()
+        record.thread_id = np.base_repr(threading.get_native_id(), 36).lower()
         return super().format(record)
 
 

@@ -54,7 +54,7 @@ HEX_STATE_MAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in e
 SIDE_MAP = types.MappingProxyType(OrderedDict([("LEFT", EXPORTER.get_side_left()), ("RIGHT", EXPORTER.get_side_right())]))
 LINK_TYPES = types.MappingProxyType(OrderedDict([(type, i) for i, type in enumerate(EXPORTER.get_link_types())]))
 
-TRACE = False
+TRACE = os.getenv("VCMIGYM_DEBUG", "0") == "1"
 MAXLEN = 80
 
 
@@ -92,13 +92,14 @@ class PyConnector():
     #
     # MAIN PROCESS
     #
-    def __init__(self, loglevel, maxlogs, user_timeout, vcmi_timeout, boot_timeout, allow_retreat, main_connector=None):
+    def __init__(self, loglevel, logtag, maxlogs, user_timeout, vcmi_timeout, boot_timeout, allow_retreat, main_connector=None):
         self.loglevel = loglevel
+        self.logtag = f"PyConnector({logtag})"
         self.maxlogs = maxlogs
         self.boot_timeout = boot_timeout or 99999
         self.vcmi_timeout = vcmi_timeout or 99999
         self.user_timeout = user_timeout or 99999
-        self.logger = log.get_logger("PyConnector", self.loglevel)
+        self.logger = log.get_logger(self.logtag, self.loglevel)
         self.startlock = threading.RLock()
         self.started = threading.Event()
         self.termlock = threading.RLock()

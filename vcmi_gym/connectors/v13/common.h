@@ -41,6 +41,58 @@
     #define LOGFMT(fmt, elems) // noop
 #endif
 
+
+static std::string to_base36(uint64_t v) {
+    if (v == 0) return "0";
+    std::string s;
+    while (v) {
+        unsigned d = static_cast<unsigned>(v % 36);
+        s.push_back(d < 10 ? char('0' + d) : char('a' + (d - 10)));
+        v /= 36;
+    }
+    std::reverse(s.begin(), s.end());
+    return s;
+}
+
+/*
+ * native_thread_id() macro returns a thread ID that should be identical to
+ * Python's threading.get_native_id().
+ * This allows to track thread identities across Python and C++.
+ */
+
+#if defined(_WIN32)
+  #include <windows.h>
+  static uint64_t native_thread_id() { return GetCurrentThreadId(); }
+
+#elif defined(__APPLE__)
+  #include <pthread.h>
+  static uint64_t native_thread_id() {
+      uint64_t tid = 0;
+      pthread_threadid_np(nullptr, &tid);
+      return tid;
+  }
+
+#elif defined(__linux__)
+  #include <sys/syscall.h>
+  #include <unistd.h>
+  static uint64_t native_thread_id() {
+  #ifdef SYS_gettid
+      return static_cast<uint64_t>(syscall(SYS_gettid));
+  #else
+      // Fallback: use a portable C++ id hashed (see below) if SYS_gettid is unavailable.
+      return 0; // signal "no native id" and use the hash path instead
+  #endif
+  }
+
+#else
+  #include <pthread.h>
+  // Last-resort fallback: implementation-defined; do not rely on this across systems.
+  static uint64_t native_thread_id() {
+      return reinterpret_cast<uint64_t>(pthread_self());
+  }
+#endif
+
+
 namespace Connector::V13 {
     namespace py = pybind11;
 

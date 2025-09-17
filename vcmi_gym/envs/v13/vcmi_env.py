@@ -219,6 +219,10 @@ class VcmiEnv(gym.Env):
         self.allow_retreat = allow_retreat
         # </params>
 
+        # accessed externally for vector env creation
+        self.vcmienv_loglevel = vcmienv_loglevel
+        self.vcmienv_logtag = vcmienv_logtag
+
         self.reward_cfg = RewardConfig(
             err_exclusive=float(reward_err_exclusive),
             step_fixed=float(reward_step_fixed),
@@ -228,6 +232,7 @@ class VcmiEnv(gym.Env):
         )
 
         self.logger = log.get_logger(vcmienv_logtag, vcmienv_loglevel)
+        self.logger.debug("Initializing...")
         self.main_env = main_env
 
         if opponent == "OTHER_ENV":
@@ -258,6 +263,7 @@ class VcmiEnv(gym.Env):
 
         self.connector = PyConnector(
             loglevel=vcmienv_loglevel,
+            logtag=vcmienv_logtag,
             maxlogs=100,
             user_timeout=user_timeout,
             vcmi_timeout=vcmi_timeout,

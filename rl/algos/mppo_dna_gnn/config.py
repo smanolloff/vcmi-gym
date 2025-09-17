@@ -1,8 +1,8 @@
 import os
 
 train_env_kwargs = dict(
-    role="defender",
-    opponent="BattleAI",
+    role="attacker",
+    # opponent="",  # overwritten
     max_steps=500,
     vcmi_loglevel_global="error",
     vcmi_loglevel_ai="error",
@@ -30,19 +30,26 @@ train_env_kwargs = dict(
     boot_timeout=30,
 )
 
-eval_variant = lambda **env_kwargs: dict(
-    num_envs=2,
-    sync=False,
+bot_model = dict(
+    config_file="sfcjqcly-1757757007-config.json",
+    weights_file="sfcjqcly-1757757007-model-dna.pt",
+)
+
+gen_num_envs = lambda StupidAI, BattleAI, model: dict(StupidAI=StupidAI, BattleAI=BattleAI, model=model)
+
+eval_variant = lambda num_envs_per_opponent, **env_kwargs: dict(
+    num_envs_per_opponent=num_envs_per_opponent,
     kwargs=dict(
         train_env_kwargs,
         mapname="gym/generated/evaluation/8x512.vmap",
         random_stack_chance=0,
         **env_kwargs,
-    )
+    ),
+    model=bot_model,
 )
 
 config = dict(
-    name_template="{datetime}-{id}-v12-gnn",
+    name_template="{datetime}-{id}-v12-self",
     out_dir_template="data/mppo-dna-heads",
 
     # XXX: s3_dir's "{wandb_group}" substring will be replaced with this value
@@ -61,10 +68,9 @@ config = dict(
     ),
     eval=dict(
         env_variants={
-            # "StupidAI.town": eval_variant(opponent="StupidAI", town_chance=100),
-            # "StupidAI.open": eval_variant(opponent="StupidAI", town_chance=0),
-            # "BattleAI.town": eval_variant(opponent="BattleAI", town_chance=100),
-            "BattleAI.open": eval_variant(opponent="BattleAI", town_chance=0),
+            # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0), town_chance=100),
+            "BattleAI.open": eval_variant(gen_num_envs(0, 2, 0), town_chance=0),
+            "MMAI.open": eval_variant(gen_num_envs(0, 0, 2), town_chance=0),
         },
         num_vsteps=10_000,
         interval_s=1800,
@@ -74,9 +80,9 @@ config = dict(
         env=dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
-            num_envs=40,
-            sync=False,
+            num_envs_per_opponent=dict(StupidAI=0, BattleAI=10, model=30),
             kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
+            model=dict(bot_model)
         ),
         num_vsteps=125,                 # num_steps = num_vsteps * num_envs
         num_minibatches=20,             # mb_size = num_steps / num_minibatches
@@ -118,14 +124,17 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["num_vsteps"] = 50
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 2
-    config["train"]["env"]["num_envs"] = 2
+    config["train"]["env"]["num_envs_per_opponent"] = {k: min(v, 2) for k, v in config["train"]["env"]["num_envs_per_opponent"].items()}
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    config["eval"]["num_vsteps"] = 500
+    # config["train"]["env"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
+    config["eval"]["num_vsteps"] = 500
     config["eval"]["env_variants"] = dict(list(config["eval"]["env_variants"].items())[:1])
     for name, envcfg in config["eval"]["env_variants"].items():
+        envcfg["num_envs_per_opponent"] = {k: min(v, 1) for k, v in envcfg["num_envs_per_opponent"].items()}
         envcfg["num_envs"] = 1
         envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
+        # envcfg["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     config["eval"]["interval_s"] = 300
     config["wandb_log_interval_s"] = 180
