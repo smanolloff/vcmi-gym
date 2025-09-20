@@ -66,33 +66,37 @@ if __name__ == "__main__":
                     print("\r%d%%..." % percentage, end="", flush=True)
 
     print("")
-    print("%20s   avg   max   p99   p90   p50" % "Num edges (E)")
-    print("-" * 55)
+    print("%20s   avg   max   p99   p90   p75   p50   p25" % "Num edges (E)")
+    print("-" * 65)
     for lt, ilt in LINK_TYPES.items():
         e = buf_e[ilt]
-        print("%20s   %-4d  %-4d  %-4d  %-4d  %-4d" % (
+        print("%20s   %-4d  %-4d  %-4d  %-4d  %-4d  %-4d  %-4d" % (
             lt,
             np.mean(e),
             np.max(e),
             np.percentile(e, q=99),
             np.percentile(e, q=90),
+            np.percentile(e, q=75),
             np.percentile(e, q=50),
+            np.percentile(e, q=25),
         ))
 
     print("")
-    print("%20s   avg   max   p99   p90   p50" % "Inbound edges (K)")
-    print("-" * 55)
+    print("%20s   avg   max   p99   p90   p75   p50   p25" % "Inbound edges (K)")
+    print("-" * 65)
     for lt, ilt in LINK_TYPES.items():
         k = buf_k[ilt]
         kmaxs = np.max(k, axis=1)
 
-        print("%20s   %.1f   %-4d  %-4d  %-4d  %-4d" % (
+        print("%20s   %.1f   %-4d  %-4d  %-4d  %-4d  %-4d  %-4d" % (
             lt,
             np.mean(k),
             np.max(k),
             np.percentile(kmaxs, q=99),
             np.percentile(kmaxs, q=90),
+            np.percentile(kmaxs, q=75),
             np.percentile(kmaxs, q=50),
+            np.percentile(kmaxs, q=25),
         ))
 
     # np.percentile(np.max(counters["REACH"]["k"], axis=1), q=10)

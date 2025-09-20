@@ -20,7 +20,7 @@ train_env_kwargs = dict(
     # reward_dmg_mult=1,
     # reward_term_mult=1,
     # reward_relval_mult=1,
-    reward_step_fixed=-0.01,
+    reward_step_fixed=-0.5,
     reward_dmg_mult=0.01,
     reward_term_mult=0.01,
     reward_relval_mult=0.01,
@@ -71,7 +71,7 @@ config = dict(
         env_variants={
             # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0), town_chance=100),
             "BattleAI.open": eval_variant(gen_num_envs(0, 2, 0), town_chance=0),
-            "MMAI.open": eval_variant(gen_num_envs(0, 0, 2), town_chance=0),
+            # "MMAI.open": eval_variant(gen_num_envs(0, 0, 2), town_chance=0),
         },
         num_vsteps=10_000,
         interval_s=1800,
@@ -81,7 +81,7 @@ config = dict(
         env=dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
-            num_envs_per_opponent=dict(StupidAI=0, BattleAI=10, model=30),
+            num_envs_per_opponent=dict(StupidAI=0, BattleAI=40, model=0),
             kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
             model=dict(bot_model)
         ),

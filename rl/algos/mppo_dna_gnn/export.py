@@ -1,4 +1,3 @@
-import os
 import json
 import torch
 import torch.nn as nn
@@ -30,9 +29,9 @@ from .dual_vec_env import (
 )
 
 
-def transform_key(key, link_types):
+def transform_key(key, node_type, link_types):
     import re
-    pattern = re.compile(r"(.+)\.module_(\d+)\.convs\.<hex___(\w+)___hex>\.(.+)")
+    pattern = re.compile(rf"(.+)\.module_(\d+)\.convs\.<{node_type}___(\w+)___{node_type}>\.(.+)")
     match = pattern.match(key)
     if not match:
         return key
@@ -62,62 +61,130 @@ def transform_key(key, link_types):
 #     )
 
 #
-# Stats (10k steps) - obtained via counter.py:
+# Stats (10k steps) - obtained via statscounter.py:
 #
-#        Num edges (E)   avg   max   p99   p90   p50
-# -------------------------------------------------------
-#             ADJACENT   888   888   888   888   888
-#                REACH   357   1010  825   611   340
-#           RANGED_MOD   423   1768  1438  802   322
-#          ACTS_BEFORE   49    248   186   116   35
-#        MELEE_DMG_REL   42    206   156   97    31
-#        RETAL_DMG_REL   26    143   106   66    18
-#       RANGED_DMG_REL   13    112   66    30    9
+#        Num edges (E)   avg   max   p99   p90   p75   p50   p25
+# -----------------------------------------------------------------
+#             ADJACENT   888   888   888   888   888   888   888
+#                REACH   355   988   820   614   478   329   209
+#           RANGED_MOD   408   2403  1285  646   483   322   162
+#          ACTS_BEFORE   51    268   203   118   75    35    15
+#        MELEE_DMG_REL   43    198   160   103   60    31    14
+#        RETAL_DMG_REL   27    165   113   67    38    18    8
+#       RANGED_DMG_REL   12    133   60    29    18    9     4
 #
-#    Inbound edges (K)   avg   max   p99   p90   p50
-# -------------------------------------------------------
-#             ADJACENT   5.4   6     6     6     6
-#                REACH   2.2   13    9     7     5
-#           RANGED_MOD   2.6   11    9     5     2
-#          ACTS_BEFORE   0.3   22    19    14    8
-#        MELEE_DMG_REL   0.3   10    9     8     5
-#        RETAL_DMG_REL   0.2   10    9     7     5
-#       RANGED_DMG_REL   0.1   8     7     4     2
+#    Inbound edges (K)   avg   max   p99   p90   p75   p50   p25
+# -----------------------------------------------------------------
+#             ADJACENT   5.4   6     6     6     6     6     6
+#                REACH   2.2   13    10    8     6     4     3
+#           RANGED_MOD   2.5   15    8     4     3     2     1
+#          ACTS_BEFORE   0.3   23    19    15    12    8     5
+#        MELEE_DMG_REL   0.3   10    9     8     7     5     3
+#        RETAL_DMG_REL   0.2   10    9     8     6     5     3
+#       RANGED_DMG_REL   0.1   8     6     3     2     2     1
 
 
+# Sizes are (E, K) tuples
+ALL_MODEL_SIZES = torch.tensor([
+    [  # 0 (S): p50
+        [888, 6],       # ADJACENT
+        [330, 4],       # REACH
+        [330, 2],       # RANGED_MOD
+        [36, 8],        # ACTS_BEFORE
+        [32, 5],        # MELEE_DMG_REL
+        [20, 5],        # RETAL_DMG_REL
+        [10, 2],        # RANGED_DMG_REL
+    ],
+    [  # 1 (M): p90
+        [888, 6],       # ADJACENT
+        [620, 8],       # REACH
+        [650, 4],       # RANGED_MOD
+        [120, 15],      # ACTS_BEFORE
+        [100, 8],       # MELEE_DMG_REL
+        [70, 8],        # RETAL_DMG_REL
+        [30, 3],        # RANGED_DMG_REL
+    ],
+    [  # 2 (L): p99
+        [888, 6],       # ADJACENT
+        [820, 10],      # REACH
+        [1300, 8],      # RANGED_MOD
+        [200, 19],      # ACTS_BEFORE
+        [160, 9],       # MELEE_DMG_REL
+        [110, 9],       # RETAL_DMG_REL
+        [60, 6],        # RANGED_DMG_REL
+    ],
+    [  # 3 (XL): max+
+        [888, 6],       # ADJACENT
+        [1000, 14],     # REACH
+        [2500, 16],     # RANGED_MOD
+        [300, 24],      # ACTS_BEFORE
+        [250, 11],      # MELEE_DMG_REL
+        [200, 11],      # RETAL_DMG_REL
+        [150, 9],       # RANGED_DMG_REL
+    ],
+    [  # 4 (XXL): fallback (bug?)
+        [888, 6],       # ADJACENT        # fixed
+        [3000, 30],     # REACH           # 20 arch devils, no obstacles: 20*146 = 2920
+        [4000, 30],     # RANGED_MOD      # 24 shooters: 24*165 = 3960
+        [1000, 50],     # ACTS_BEFORE     # 30 stacks: 30*29 = 870
+        [500, 20],      # MELEE_DMG_REL   # 15 wide stacks per side: 15*30 = 450
+        [500, 20],      # RETAL_DMG_REL   # same as MELEE_DMG_REL
+        [250, 15],      # RANGED_DMG_REL  # 15 shooters per side: 15*15 = 225
+    ]
+])
 
-# MODEL_SIZES = dict(
-#     S=dict(
-#         ADJACENT=888,       # fixed
-#         REACH=,
-#         RANGED_MOD=,
-#         ACTS_BEFORE=,
-#         MELEE_DMG_REL=,
-#         RETAL_DMG_REL=,
-#         RANGED_DMG_REL=,
-#     )
-# )
+# Inputs:
+#   hdata: HeteroData
+#   model_sizes: tensor with shape (NUM_LT, 2), e.g. an entry from ALL_MODEL_SIZES
+#
+# Returns:
+#   [ei_flat, ea_flat, nbr_flat]
+#
+# Shapes:
+# ei_flat:  (2, sum_E)
+# ea_flat:  (sum_E, edge_dim)
+# nbr_flat: (num_nodes, sum_K)
+#
+# The exported model will contain a method for these model_sizes which knows
+# exactly how to decompose the flattened tensors.
+#
+def build_edge_inputs(hdata, model_sizes):
+    assert len(hdata.node_types) == 1, hdata.node_types
+    assert model_sizes.ndim == 2
+    assert model_sizes.shape[0] == len(hdata.edge_types)
+    assert all(n == 1 for n in hdata.num_edge_features.values()), hdata.num_edge_features.values()
 
-def build_einputs(hdata, e_max, k_max):
-    eis = []
-    eas = []
-    nbrs = []
+    sum_e = model_sizes[:, 0].sum()
+    sum_k = model_sizes[:, 1].sum()
 
-    for lt in LINK_TYPES:
-        reldata = hdata["hex", lt, "hex"]
-        ei, ea = pad_edges(reldata.edge_index, reldata.edge_attr, e_max)
-        nbr = build_nbr(reldata.edge_index[1], 165, k_max)
+    ei_flat = torch.zeros((2, sum_e), dtype=torch.long)
+    ea_flat = torch.zeros((sum_e, 1), dtype=torch.float32)
+    nbr_flat = torch.zeros((hdata.num_nodes, sum_k), dtype=torch.long)
 
-        eis.append(ei)
-        eas.append(ea)
-        nbrs.append(nbr)
+    e0 = 0
+    k0 = 0
 
-    return (
-        hdata.obs[0],
-        torch.stack(eis, dim=0),
-        torch.stack(eas, dim=0),
-        torch.stack(nbrs, dim=0),
-    )
+    for i, edge_type in enumerate(hdata.edge_types):
+        e = model_sizes[i, 0]
+        k = model_sizes[i, 1]
+        e1 = e0 + e
+        k1 = k0 + k
+
+        reldata = hdata[edge_type]
+        ei, ea = pad_edges(reldata.edge_index, reldata.edge_attr, 1, e)
+        nbr = build_nbr(reldata.edge_index[1], hdata.num_nodes, k)
+
+        ei_flat[:, e0:e1] = ei
+        ea_flat[e0:e1, :] = ea
+        nbr_flat[:, k0:k1] = nbr
+
+        e0 = e1
+        k0 = k1
+
+    assert e0 == sum_e
+    assert k0 == sum_k
+
+    return ei_flat, ea_flat, nbr_flat
 
 
 # Usage: build_nbr(edge_index[1], x.size(0), K_MAX)
@@ -137,21 +204,22 @@ def build_nbr(dst, num_nodes, k_max):
     return nbr
 
 
-def pad_edges(edge_index, edge_attr, e_max):
-    # edge_index: (2, E), long; edge_attr: (E, 1), float
+# NOTE: OK to use 0 for padding (padded positions are not present in NBR)
+def pad_edges(edge_index, edge_attr, edge_dim, e_max):
+    # edge_index: (2, E), long; edge_attr: (E, edge_dim), float
     E = edge_index.size(1)
     if E > e_max:
         raise ValueError(f"E={E} exceeds e_max={e_max}")
     pad = e_max - E
     if pad:
         edge_index = torch.cat([edge_index, edge_index.new_zeros(2, pad)], dim=1)
-        edge_attr = torch.cat([edge_attr, edge_attr.new_zeros(pad, 1)], dim=0)
+        edge_attr = torch.cat([edge_attr, edge_attr.new_zeros(pad, edge_dim)], dim=0)
 
     return edge_index, edge_attr
 
 
 class ExecuTorchModel(nn.Module):
-    def __init__(self, config, e_max, k_max):
+    def __init__(self, config, all_sizes):
         super().__init__()
         self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
         self.dim_hexes = STATE_SIZE_HEXES
@@ -164,6 +232,9 @@ class ExecuTorchModel(nn.Module):
 
         action_table, inverse_table, amove_hexes = Model.build_action_tables()
 
+        # XXX: these should have persistent=False, but due to a bug they were
+        # saved with the weights => load_state_dict() would fail unless they
+        # are persistent here as well.
         self.register_buffer("amove_hexes", amove_hexes.unsqueeze(0))
         self.register_buffer("amove_hexes_valid", self.amove_hexes != -1)
         self.register_buffer("action_table", action_table)
@@ -174,11 +245,8 @@ class ExecuTorchModel(nn.Module):
             in_channels=STATE_SIZE_ONE_HEX,
             hidden_channels=config["gnn_hidden_channels"],
             out_channels=config["gnn_out_channels"],
-            edge_dim=1,
+            all_sizes=all_sizes,
             link_types=list(LINK_TYPES),
-            num_nodes=165,
-            e_max=e_max,
-            k_max=k_max
         ).eval()
 
         d = config["gnn_out_channels"]
@@ -212,25 +280,25 @@ class ExecuTorchModel(nn.Module):
 
     # edge_triplets is [edge_ind1, edge_attr1, edge_nbr1, edge_ind2, edge_attr2, edge_nbr2, ...]
     # (one triplet for each link type)
-    def encode(self, obs, edge_triplets):
+    def encode(self, obs, *gnn_block_args):
         hexes = obs[0, self.dim_other:].view(165, self.state_size_one_hex)
         other = obs[0, :self.dim_other]
-        z_hexes = self.encoder_hexes(hexes, *edge_triplets).unsqueeze(0)
+        z_hexes = self.encoder_hexes(hexes, *gnn_block_args).unsqueeze(0)
         z_other = self.encoder_other(other).unsqueeze(0)
         z_global = z_other + z_hexes.mean(1)
         return z_hexes, z_global
 
-    def get_value(self, obs, *edge_triplets):
+    def get_value(self, obs, *gnn_block_args):
         obs = obs.unsqueeze(dim=0)
-        _, z_global = self.encode(obs, edge_triplets)
+        _, z_global = self.encode(obs, *gnn_block_args)
         return self.critic(z_global), z_global
 
-    def predict(self, obs, *edge_triplets):
-        return self._predict_with_logits(obs, *edge_triplets)[0]
+    def predict(self, *args):
+        return self._predict_with_logits(*args)[0]
 
-    def _predict_with_logits(self, obs, *edge_triplets):
+    def _predict_with_logits(self, obs, *gnn_block_args):
         obs = obs.unsqueeze(dim=0)
-        z_hexes, z_global = self.encode(obs, edge_triplets)
+        z_hexes, z_global = self.encode(obs, *gnn_block_args)
 
         act0_logits = self.act0_head(z_global)
 
@@ -342,20 +410,13 @@ class ExecuTorchModel(nn.Module):
 
 
 class ExecuTorchDNAModel(nn.Module):
-    def __init__(self, config, e_max, k_max, side):
+    def __init__(self, config, side, all_sizes):
         super().__init__()
-        self.model_policy = ExecuTorchModel(config, e_max, k_max)
-        self.model_value = ExecuTorchModel(config, e_max, k_max)
+        self.model_policy = ExecuTorchModel(config, all_sizes)
+        self.model_value = ExecuTorchModel(config, all_sizes)
+
         self.register_buffer("version", torch.tensor(13, dtype=torch.long), persistent=False)
-        self.register_buffer("e_max", torch.tensor(e_max, dtype=torch.long), persistent=False)
-        self.register_buffer("k_max", torch.tensor(k_max, dtype=torch.long), persistent=False)
         self.register_buffer("side", torch.tensor(side, dtype=torch.long), persistent=False)
-
-    def get_e_max(self):
-        return self.e_max.clone()
-
-    def get_k_max(self):
-        return self.k_max.clone()
 
     def get_version(self):
         return self.version.clone()
@@ -365,11 +426,14 @@ class ExecuTorchDNAModel(nn.Module):
     def get_side(self):
         return self.side.clone()
 
-    def get_value(self, obs, *edge_triplets):
-        return self.model_value.get_value(obs, *edge_triplets)
+    def get_all_sizes(self):
+        return self.model_value.encoder_hexes.all_sizes.clone()
 
-    def predict(self, obs, *edge_triplets):
-        return self.model_policy.predict(obs, *edge_triplets)
+    def get_value(self, *args):
+        return self.model_value.get_value(*args)
+
+    def predict(self, *args):
+        return self.model_policy.predict(*args)
 
 
 class ExportableGENConv(nn.Module):
@@ -471,18 +535,13 @@ class ExportableGNNBlock(nn.Module):
         in_channels,
         hidden_channels,
         out_channels,
-        edge_dim,
+        all_sizes,
         link_types,
-        num_nodes,
-        e_max,
-        k_max,
+        edge_dim=1,
     ):
         super().__init__()
 
         layers = []
-        self.num_nodes = num_nodes
-        self.e_max = e_max
-        self.k_max = k_max
 
         # First L-1 layers with activation
         for i in range(num_layers - 1):
@@ -492,40 +551,65 @@ class ExportableGNNBlock(nn.Module):
         # Last layer without extra activation beyond the internal MLP
         layers.append([ExportableGENConv(hidden_channels, out_channels, edge_dim) for _ in link_types])
 
+        # Each layer is a ModuleList of N convs
         self.layers = nn.ModuleList([nn.ModuleList(convs) for convs in layers])
         self.act = nn.LeakyReLU()
 
-    def forward(self, x_hex, edge_inds, edge_attrs, nbrs):
-        nconvs = len(self.layers[0])
-        ei_shape = torch.Size([nconvs, 2, self.e_max])
-        ea_shape = torch.Size([nconvs, self.e_max, 1])
-        nb_shape = torch.Size([nconvs, self.num_nodes, self.k_max])
+        self.register_buffer("all_sizes", all_sizes.long().clone(), persistent=False)
 
-        assert edge_inds.shape == ei_shape, f"Expected edge_inds of shape {ei_shape}, got: {edge_inds.shape}"
-        assert edge_attrs.shape == ea_shape, f"Expected edge_attrs of shape {ea_shape}, got: {edge_attrs.shape}"
-        assert nbrs.shape == nb_shape, f"Expected nbrs of shape {nb_shape}, got: {nbrs.shape}"
+        # Precompute per-size, per-layer [e0,e1,k0,k1] slice tuples as Python ints.
+        # S=num_sizes       (e.g. 4 if S, M, L, XL)
+        # L=num_link_types  (e.g. for VCMI obs, this is 7: REACH, ADJACENT, ...)
+        S, L, _ = all_sizes.shape
 
+        assert L == len(link_types)
+
+        # list of length S; each item is list of L tuples
+        self.all_sizes_segments = []
+
+        for s in range(S):
+            e_sizes = all_sizes[s, :, 0].tolist()  # length L
+            k_sizes = all_sizes[s, :, 1].tolist()  # length L
+            e_off, k_off = [0], [0]
+            for l in range(L):
+                e_off.append(e_off[-1] + int(e_sizes[l]))
+                k_off.append(k_off[-1] + int(k_sizes[l]))
+            segs_s = [(e_off[l], e_off[l+1], k_off[l], k_off[l+1]) for l in range(L)]
+            self.all_sizes_segments.append(segs_s)
+
+    # ei_flat:  (2, sum_E[size_idx])
+    # ea_flat:  (sum_E[size_idx], edge_dim)
+    # nbr_flat: (num_nodes, sum_K[size_idx])
+    # size_idx: (1) - a single-integer tensor
+    def forward(self, x_hex, ei_flat, ea_flat, nbr_flat, size_idx):
         x = x_hex
         L = len(self.layers)
+        segments = self.all_sizes_segments[size_idx]  # list[(e0,e1,k0,k1)] of length L
+
         for i, convs in enumerate(self.layers):
             y = None
-            for r, conv in enumerate(convs):
-                yr = conv(x, edge_inds[r], edge_attrs[r], nbrs[r])
+            for conv, (e0, e1, k0, k1) in zip(convs, segments):
+                edge_inds = ei_flat[:, e0:e1]     # (2, E_i)
+                edge_attrs = ea_flat[e0:e1, :]     # (E_i, D_e)
+                nbrs = nbr_flat[:, k0:k1]    # (N, K_i)
+                yr = conv(x, edge_inds, edge_attrs, nbrs)
                 y = yr if y is None else y + yr
-            x = y
-            if i < L - 1:
-                x = self.act(x)
+
+            x = self.act(y) if i < L - 1 else y
+
         return x
 
 
 class ModelWrapper(torch.nn.Module):
-    def __init__(self, m, method_name: str):
+    def __init__(self, m, method_name, args_head=(), args_tail=()):
         super().__init__()
         self.m = m
         self.method_name = method_name
+        self.args_head = args_head
+        self.args_tail = args_tail
 
-    def forward(self, *args, **kwargs):
-        return getattr(self.m, self.method_name)(*args, **kwargs)
+    def forward(self, *args):
+        return getattr(self.m, self.method_name)(*self.args_head, *args, *self.args_tail)
 
 
 def test_gnn():
@@ -573,32 +657,46 @@ def test_block():
     import torch_geometric
     from .mppo_dna_gnn import GNNBlock
 
-    E_max = 4       # max number of edges
-    K_max = 5       # max number of incoming edges for 1 hex
-    N = 3           # num_nodes
-
+    N = 3       # num_nodes
     hd = torch_geometric.data.HeteroData()
-    hd['hex'].x = torch.randn(N, 5)
+    hd['baba'].x = torch.randn(N, 5)
     edge_index_lt1 = torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
     edge_attr_lt1 = torch.tensor([[1.0], [1.0]], dtype=torch.float)
     edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
     edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
-    hd['hex', 'lt1', 'hex'].edge_index = edge_index_lt1
-    hd['hex', 'lt1', 'hex'].edge_attr = edge_attr_lt1
-    hd['hex', 'lt2', 'hex'].edge_index = edge_index_lt2
-    hd['hex', 'lt2', 'hex'].edge_attr = edge_attr_lt2
+    hd['baba', 'lt1', 'baba'].edge_index = edge_index_lt1
+    hd['baba', 'lt1', 'baba'].edge_attr = edge_attr_lt1
+    hd['baba', 'lt2', 'baba'].edge_index = edge_index_lt2
+    hd['baba', 'lt2', 'baba'].edge_attr = edge_attr_lt2
+    hd.obs = hd['baba'].x
 
     num_layers = 3
-    in_channels = hd["hex"].x.size(1)
+    in_channels = hd["baba"].x.size(1)
     hidden_channels = 6
     out_channels = 7
+
+    assert hd.node_types == ["baba"]
+    node_type = hd.node_types[0]
+    link_types = [lt for (_, lt, _) in hd.edge_types]
+
+    all_model_sizes = torch.tensor([
+        [
+            [10, 5],        # lt1
+            [5, 4],         # lt2
+        ],
+        [
+            [20, 10],       # lt1
+            [8, 9],         # lt2
+        ],
+    ])
 
     block = GNNBlock(
         num_layers=num_layers,
         in_channels=in_channels,
         hidden_channels=hidden_channels,
         out_channels=out_channels,
-        link_types=["lt1", "lt2"],
+        link_types=link_types,
+        node_type=node_type,
     ).eval()
 
     myblock = ExportableGNNBlock(
@@ -606,32 +704,44 @@ def test_block():
         in_channels=in_channels,
         hidden_channels=hidden_channels,
         out_channels=out_channels,
-        edge_dim=1,
-        link_types=["lt1", "lt2"],
-        num_nodes=N,
-        e_max=E_max,
-        k_max=K_max,
+        all_sizes=all_model_sizes,
+        link_types=link_types,
     ).eval()
 
-    mydict = {transform_key(k, ["lt1", "lt2"]): v for k, v in block.state_dict().items()}
+    mydict = {transform_key(k, node_type, link_types): v for k, v in block.state_dict().items()}
     myblock.load_state_dict(mydict, strict=True)
 
-    ei1, ea1 = pad_edges(hd["hex", "lt1", "hex"].edge_index, hd["hex", "lt1", "hex"].edge_attr, e_max=E_max)
-    ei2, ea2 = pad_edges(hd["hex", "lt2", "hex"].edge_index, hd["hex", "lt2", "hex"].edge_attr, e_max=E_max)
+    # Test with two different "sizes"
+    myinputs0 = (hd["baba"].x, *build_edge_inputs(hd, all_model_sizes[0]), 0)
+    myinputs1 = (hd["baba"].x, *build_edge_inputs(hd, all_model_sizes[1]), 1)
 
-    ei = torch.stack([ei1, ei2], dim=0)
-    ea = torch.stack([ea1, ea2], dim=0)
-    nbr = torch.stack([
-        build_nbr(hd["hex", "lt1", "hex"].edge_index[1], N, k_max=K_max),
-        build_nbr(hd["hex", "lt2", "hex"].edge_index[1], N, k_max=K_max),
-    ], dim=0)
+    import ipdb; ipdb.set_trace()  # noqa
 
-    res = block(hd)
-    myres = myblock(hd["hex"].x, ei, ea, nbr)
+    res = block(hd)["baba"]
+    myres0 = myblock(*myinputs0)
+    myres1 = myblock(*myinputs1)
 
-    # import ipdb; ipdb.set_trace()  # noqa
-    assert torch.equal(res, myres)
+    assert torch.equal(res, myres0)
+    assert torch.equal(res, myres1)
     print("test_block: OK")
+
+    print("=== XNN transform ===")
+    print("Exporting...")
+    ep = {
+        "forward0": export(myblock, myinputs0, strict=True),
+        "forward1": export(myblock, myinputs1, strict=True),
+    }
+
+    print("Lowering to XNN...")
+    edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+    exported_forward0 = edge.exported_program("forward0").module()
+    exported_forward1 = edge.exported_program("forward1").module()
+
+    print("Testing...")
+    expmyres0 = exported_forward0(*myinputs0)
+    expmyres1 = exported_forward1(*myinputs1)
+    assert torch.equal(res, expmyres0)
+    assert torch.equal(res, expmyres1)
 
 
 def test_model(cfg_file, weights_file):
@@ -640,105 +750,102 @@ def test_model(cfg_file, weights_file):
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
 
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
+    venv.reset()
+
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
 
     model = DNAModel(cfg["model"], torch.device("cpu")).eval()
     model.load_state_dict(weights, strict=True)
     model = model.model_policy
 
-    E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
-    K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
-
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
-    eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
+    emodel = ExecuTorchDNAModel(cfg["model"], eside, ALL_MODEL_SIZES).eval()
+
+    eweights = {
+        transform_key(k, "hex", list(LINK_TYPES)): v
+        for k, v in weights.items()
+    }
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
-
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
-    venv.reset()
 
     obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
     done = torch.tensor([False])
     links = [venv.call("obs")[0]["links"]]
     hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
-    einputs = build_einputs(hdata, E_MAX, K_MAX)
-    for i, arg in enumerate(einputs):
-        print("Arg %d shape: %s" % (i, arg.shape))
-
     actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, hex1_logits, hex2_logits = emodel._predict_with_logits(*einputs)
 
-    # import ipdb; ipdb.set_trace()  # noqa
-    assert torch.equal(actdata.action, action)
-    assert torch.equal(actdata.act0_logits, act0_logits)
-    assert torch.equal(actdata.hex1_logits, hex1_logits)
-    assert torch.equal(actdata.hex2_logits, hex2_logits)
-    print("test_model: OK")
+    # XXX: limit to first 2 sizes only (XNN export is very slow)
+    # all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
+    all_edge_inputs = [
+        build_edge_inputs(hdata, ALL_MODEL_SIZES[0]),
+        build_edge_inputs(hdata, ALL_MODEL_SIZES[1]),
+    ]
 
+    for i, edge_inputs in enumerate(all_edge_inputs):
+        print("Testing size %d..." % i)
+        einputs = (obs[0], *edge_inputs, i)
+        for i1, arg in enumerate(einputs):
+            print(f"Arg {i1}: ", end="")
+            if isinstance(arg, torch.Tensor):
+                print(f"tensor: {arg.shape}")
+            else:
+                print(f"{arg.__class__.__name__}: {arg}")
 
-def test_xnn(cfg_file, weights_file):
-    """ Tests DNAModel vs the XNN-lowered ExecuTorchDNAModel. """
+        action, act0_logits, hex1_logits, hex2_logits = emodel._predict_with_logits(*einputs)
 
-    with open(cfg_file, "r") as f:
-        cfg = json.load(f)
+        # import ipdb; ipdb.set_trace()  # noqa
+        assert torch.equal(actdata.action, action)
+        assert torch.equal(actdata.act0_logits, act0_logits)
+        assert torch.equal(actdata.hex1_logits, hex1_logits)
+        assert torch.equal(actdata.hex2_logits, hex2_logits)
+        print("(size=%d) test_model: OK" % i)
 
-    weights = torch.load(weights_file, weights_only=True, map_location="cpu")
+    print("=== XNN transform ===")
 
-    model = DNAModel(cfg["model"], torch.device("cpu")).eval()
-    model.load_state_dict(weights, strict=True)
-    model = model.model_policy
-
-    E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
-    K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
-
-    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
-    eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
-    emodel.load_state_dict(eweights, strict=True)
-    emodel = emodel.model_policy
-
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
-    venv.reset()
-
-    hdata = Batch.from_data_list(to_hdata_list(
-        torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0),
-        torch.tensor([False]),
-        [venv.call("obs")[0]["links"]]
-    ))
-
-    einputs = build_einputs(hdata, E_MAX, K_MAX)
-    for i, arg in enumerate(einputs):
-        print("Arg %d shape: %s" % (i, arg.shape))
-
-    m__predict_with_logits = ModelWrapper(emodel, "_predict_with_logits").eval().cpu()
+    # XXX: it should work OK if args_tail == einputs' model size
+    #       it returns incorrect result if args_tail < einputs' model size
+    #       it fails with RuntimeError: index_select(): ... otherwise
 
     print("Exporting...")
-    ep = {
-        "_predict_with_logits": export(m__predict_with_logits, einputs, strict=True),
-    }
+    ep = {}
+    for i, edge_inputs in enumerate(all_edge_inputs):
+        einputs = (obs[0], *edge_inputs)
+        w = ModelWrapper(emodel, "_predict_with_logits", args_tail=(i,)).eval().cpu()
+        ep[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
 
     print("Lowering to XNN...")
     edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-    exported__predict_with_logits = edge.exported_program("_predict_with_logits").module()
 
-    print("Testing...")
-    actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, hex1_logits, hex2_logits = exported__predict_with_logits(*einputs)
+    for i, edge_inputs in enumerate(all_edge_inputs):
+        print("XNN Testing size %d..." % i)
+        einputs = (obs[0], *edge_inputs)
 
-    assert torch.equal(actdata.action, action)
-    assert torch.equal(actdata.act0_logits, act0_logits)
-    assert torch.equal(actdata.hex1_logits, hex1_logits)
-    assert torch.equal(actdata.hex2_logits, hex2_logits)
-    print("test_xnn: OK")
+        for i1, arg in enumerate(einputs):
+            print(f"Arg {i1}: ", end="")
+            if isinstance(arg, torch.Tensor):
+                print(f"tensor: {arg.shape}")
+            else:
+                print(f"{arg.__class__.__name__}: {arg}")
+
+        program = edge.exported_program(f"_predict_with_logits{i}").module()
+        action, act0_logits, hex1_logits, hex2_logits = program(*einputs)
+
+        assert torch.equal(actdata.action, action)
+        assert torch.equal(actdata.act0_logits, act0_logits)
+        assert torch.equal(actdata.hex1_logits, hex1_logits)
+        assert torch.equal(actdata.hex2_logits, hex2_logits)
+        print("XNN (size=%d) test_model: OK" % i)
 
 
-def test_xnn_quantized(cfg_file, weights_file):
+def test_quantized(cfg_file, weights_file):
     """ Tests DNAModel vs the XNN-lowered-and-quantized ExecuTorchDNAModel. """
-
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
+
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
+    venv.reset()
 
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
 
@@ -746,35 +853,34 @@ def test_xnn_quantized(cfg_file, weights_file):
     model.load_state_dict(weights, strict=True)
     model = model.model_policy
 
-    E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
-    K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
-
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
-    eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
+    emodel = ExecuTorchDNAModel(cfg["model"], eside, ALL_MODEL_SIZES).eval()
+
+    eweights = {
+        transform_key(k, "hex", list(LINK_TYPES)): v
+        for k, v in weights.items()
+    }
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
-    venv.reset()
+    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
+    done = torch.tensor([False])
+    links = [venv.call("obs")[0]["links"]]
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
-    hdata = Batch.from_data_list(to_hdata_list(
-        torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0),
-        torch.tensor([False]),
-        [venv.call("obs")[0]["links"]]
-    ))
+    # einputs = build_einputs(hdata, E_MAX, K_MAX)
+    # for i, arg in enumerate(einputs):
+    #     print("Arg %d shape: %s" % (i, arg.shape))
 
-    einputs = build_einputs(hdata, E_MAX, K_MAX)
-    for i, arg in enumerate(einputs):
-        print("Arg %d shape: %s" % (i, arg.shape))
-
+    # XXX: test only with size "S" (quantizing is very slow)
+    einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]), 0)
     m__predict_with_logits = ModelWrapper(emodel, "_predict_with_logits").eval().cpu()
 
     print("Quantizing...")
     # Quantizer
-    # XXX: comparing outputs, is_per_channel=True gives *sligthtly* better results => use it
+    # XXX: is_per_channel seems to have no effect on model accuracy
     q = XNNPACKQuantizer()
-    q.set_global(get_symmetric_quantization_config(is_per_channel=True))
+    q.set_global(get_symmetric_quantization_config(is_per_channel=False))
 
     # --- PT2E prepare/convert ---
     # export_for_training -> .module() for PT2E helpers
@@ -802,7 +908,7 @@ def test_xnn_quantized(cfg_file, weights_file):
 
     print("Testing...")
     actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, hex1_logits, hex2_logits = exported__predict_with_logits(*build_einputs(hdata, E_MAX, K_MAX))
+    action, act0_logits, hex1_logits, hex2_logits = exported__predict_with_logits(*einputs)
 
     err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
     err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
@@ -816,7 +922,7 @@ def test_xnn_quantized(cfg_file, weights_file):
     assert err_act0_logits.max() < 1e-4
     assert err_hex1_logits.max() < 1e-4
     assert err_hex2_logits.max() < 1e-4
-    print("test_xnn_quantized: OK")
+    print("test_quantized: OK")
 
 
 def test_load(cfg_file, weights_file):
@@ -825,33 +931,39 @@ def test_load(cfg_file, weights_file):
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
 
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
+    venv.reset()
+
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
 
     model = DNAModel(cfg["model"], torch.device("cpu")).eval()
     model.load_state_dict(weights, strict=True)
     model = model.model_policy
 
-    E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
-    K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
-
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
-    eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
+    emodel = ExecuTorchDNAModel(cfg["model"], eside, ALL_MODEL_SIZES).eval()
+
+    eweights = {
+        transform_key(k, "hex", list(LINK_TYPES)): v
+        for k, v in weights.items()
+    }
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
-    venv.reset()
+    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
+    done = torch.tensor([False])
+    links = [venv.call("obs")[0]["links"]]
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
-    hdata = Batch.from_data_list(to_hdata_list(
-        torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0),
-        torch.tensor([False]),
-        [venv.call("obs")[0]["links"]]
-    ))
+    # XXX: test only with size "S" (faster)
+    einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]), 0)
 
-    einputs = build_einputs(hdata, E_MAX, K_MAX)
-    for i, arg in enumerate(einputs):
-        print("Arg %d shape: %s" % (i, arg.shape))
+    for i1, arg in enumerate(einputs):
+        print(f"Arg {i1}: ", end="")
+        if isinstance(arg, torch.Tensor):
+            print(f"tensor: {arg.shape}")
+        else:
+            print(f"{arg.__class__.__name__}: {arg}")
 
     m__predict_with_logits = ModelWrapper(emodel, "_predict_with_logits").eval().cpu()
 
@@ -870,7 +982,7 @@ def test_load(cfg_file, weights_file):
 
     print("Testing...")
     actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, hex1_logits, hex2_logits = loaded_predict_with_logits.execute(build_einputs(hdata, E_MAX, K_MAX))
+    action, act0_logits, hex1_logits, hex2_logits = loaded_predict_with_logits.execute(einputs)
 
     err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
     err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
@@ -890,62 +1002,66 @@ def test_load(cfg_file, weights_file):
 
 def export_model(cfg_file, weights_file):
     """ Tests DNAModel vs the loaded XNN-lowered ExecuTorchDNAModel. """
-
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
-
-    weights = torch.load(weights_file, weights_only=True, map_location="cpu")
-
-    model = DNAModel(cfg["model"], torch.device("cpu")).eval()
-    model.load_state_dict(weights, strict=True)
-
-    E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
-    K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
-
-    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExecuTorchDNAModel(cfg["model"], E_MAX, K_MAX, eside).eval()
-    eweights = {transform_key(k, list(LINK_TYPES)): v for k, v in weights.items()}
-    emodel.load_state_dict(eweights, strict=True)
 
     venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
-    hdata = Batch.from_data_list(to_hdata_list(
-        torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0),
-        torch.tensor([False]),
-        [venv.call("obs")[0]["links"]]
-    ))
+    weights = torch.load(weights_file, weights_only=True, map_location="cpu")
 
-    einputs = build_einputs(hdata, E_MAX, K_MAX)
-    for i, arg in enumerate(einputs):
-        print("Arg %d shape: %s" % (i, arg.shape))
+    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
+    emodel = ExecuTorchDNAModel(cfg["model"], eside, ALL_MODEL_SIZES).eval()
 
-    m_predict = ModelWrapper(emodel.model_policy, "predict").eval().cpu()
-    # XXX: cut size in half by excluding model_value (not used anyway)
-    # m_get_value = ModelWrapper(emodel.model_value, "get_value").eval().cpu()
-    m_get_value = ModelWrapper(emodel.model_policy, "get_value").eval().cpu()
-    m_get_ver = ModelWrapper(emodel, "get_version").eval().cpu()
-    m_get_side = ModelWrapper(emodel, "get_side").eval().cpu()
-    m_get_e_max = ModelWrapper(emodel, "get_e_max").eval().cpu()
-    m_get_k_max = ModelWrapper(emodel, "get_k_max").eval().cpu()
-
-    print("Exporting...")
-    ep = {
-        "predict": export(m_predict, einputs, strict=True),
-        "get_value": export(m_get_value, einputs, strict=True),
-        "get_version": export(m_get_ver, (), strict=True),
-        "get_side": export(m_get_side, (), strict=True),
-        "get_e_max": export(m_get_e_max, (), strict=True),
-        "get_k_max": export(m_get_k_max, (), strict=True),
+    eweights = {
+        transform_key(k, "hex", list(LINK_TYPES)): v
+        for k, v in weights.items()
     }
+    emodel.load_state_dict(eweights, strict=True)
+
+    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
+    done = torch.tensor([False])
+    links = [venv.call("obs")[0]["links"]]
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
+
+    all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
+
+    # XXX: it should work OK if args_tail == einputs' model size
+    #       it returns incorrect result if args_tail < einputs' model size
+    #       it fails with RuntimeError: index_select(): ... otherwise
+
+    programs = {}
+
+    print("NOTE: Using get_value from policy model to reduce export size")
+
+    for i, edge_inputs in enumerate(all_edge_inputs):
+        einputs = (obs[0], *edge_inputs)
+
+        w = ModelWrapper(emodel.model_policy, "predict", args_tail=(i,)).eval().cpu()
+        programs[f"predict{i}"] = export(w, einputs, strict=True)
+
+        # w = ModelWrapper(emodel.model_value, "get_value", args_tail=(i,)).eval().cpu()
+        w = ModelWrapper(emodel.model_policy, "get_value", args_tail=(i,)).eval().cpu()
+
+        programs[f"get_value{i}"] = export(w, einputs, strict=True)
+
+    w = ModelWrapper(emodel, "get_version").eval().cpu()
+    programs["get_version"] = export(w, (), strict=True)
+
+    w = ModelWrapper(emodel, "get_side").eval().cpu()
+    programs["get_side"] = export(w, (), strict=True)
+
+    w = ModelWrapper(emodel, "get_all_sizes").eval().cpu()
+    programs["get_all_sizes"] = export(w, (), strict=True)
+
+    print("Exported programs:\n  %s" % "\n  ".join(list(programs.keys())))
 
     print("Lowering to XNN...")
-    edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-
+    edge = to_edge_transform_and_lower(programs, partitioner=[XnnpackPartitioner()])
     return edge.to_executorch()
 
 
-def verify_export(cfg_file, weights_file, exported_model, num_steps=10):
+def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
 
@@ -953,40 +1069,65 @@ def verify_export(cfg_file, weights_file, exported_model, num_steps=10):
     model = DNAModel(cfg["model"], torch.device("cpu")).eval()
     model.load_state_dict(weights, strict=True)
 
-    print("Loading...")
-    rt = Runtime.get()
-    loaded_model = rt.load_program(exported_model.buffer)
-    loaded_predict = loaded_model.load_method("predict")
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
+    venv.reset()
 
-    E_MAX = 3300    # full REACH for 20 units (165 hexes each) = 3300 rels
-    K_MAX = 20      # 20 units with REACH to the same hex seems like a good max
+    loaded_methods = {name: loaded_model.load_method(name) for name in loaded_model.method_names}
+
+    print("Testing metadata methods...")
+
+    # 3 metadata methods + 2*sizes methods (predict & get_value)
+    assert len(loaded_methods) == 3 + 2*len(ALL_MODEL_SIZES), len(loaded_methods)
+
+    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
+
+    assert loaded_methods["get_version"].execute(())[0].item() == 13
+    assert loaded_methods["get_side"].execute(())[0].item() == eside
+    assert torch.equal(loaded_methods["get_all_sizes"].execute(())[0], ALL_MODEL_SIZES)
+
+    print("Testing data methods for %d steps..." % (num_steps))
 
     venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
-    print("Testing for %d steps..." % (num_steps))
+    benchmarks = torch.zeros(len(ALL_MODEL_SIZES))
+
+    from time import perf_counter_ns
+
     for n in range(num_steps):
         print(venv.render()[0])
 
-        hdata = Batch.from_data_list(to_hdata_list(
-            torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0),
-            torch.tensor([False]),
-            [venv.call("obs")[0]["links"]]
-        ))
-
-        einputs = build_einputs(hdata, E_MAX, K_MAX)
+        obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
+        done = torch.tensor([False])
+        links = [venv.call("obs")[0]["links"]]
+        hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
         actdata = model.model_policy.get_actdata_eval(hdata, deterministic=True)
-        action = loaded_predict.execute(einputs)[0]
-        print("(%d) TEST ACTION: %d <> %d" % (n, actdata.action, action.item()))
 
-        # Not testing value (value model excluded)
-        # value = model.get_value(hdata)[0]
-        # myvalue = loaded_get_value.execute(einputs)
-        # print("(%d) TEST VALUE: %.3f <> %.3f" % (n, value.item(), myvalue.item()))
+        all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
 
-        assert actdata.action == action.item()
+        for i, edge_inputs in enumerate(all_edge_inputs):
+            einputs = (obs[0], *edge_inputs)
+
+            t0 = perf_counter_ns()
+            action = loaded_methods[f"predict{i}"].execute(einputs)[0]
+            ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
+            benchmarks[i] += ms
+
+            print("(step=%d, size=%d) TEST ACTION: %d <> %d (%s ms)" % (n, i, actdata.action, action.item(), ms))
+            assert actdata.action == action.item()
+
+            # Not testing value (value model excluded)
+            # value = model.get_value(hdata)[0]
+            # myvalue = loaded_get_value.execute(einputs)
+            # print("(%d) TEST VALUE: %.3f <> %.3f" % (n, value.item(), myvalue.item()))
+
         venv.step([actdata.action])
+
+    print("Total execution time:")
+
+    for i, ms in enumerate(benchmarks):
+        print("  %d: %d ms" % (i, ms.item()))
 
     print("verify_export: OK")
 
@@ -996,17 +1137,20 @@ if __name__ == "__main__":
         filebase = "tukbajrv-202509171940"
         model_cfg_path = f"{filebase}-config.json"
         model_weights_path = f"{filebase}-model-dna.pt"
-        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{filebase}.pte"
+        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{filebase}-sizes.pte"
 
         # test_gnn()
         # test_block()
         # test_model(model_cfg_path, model_weights_path)
-        # test_xnn(model_cfg_path, model_weights_path)
-        # # test_xnn_quantized(model_cfg_path, model_weights_path)
+        # # test_quantized(model_cfg_path, model_weights_path)
         # test_load(model_cfg_path, model_weights_path)
 
         exported_model = export_model(model_cfg_path, model_weights_path)
-        verify_export(model_cfg_path, model_weights_path, exported_model)
+        rt = Runtime.get()
+        loaded_model = rt.load_program(exported_model.buffer)
+        # loaded_model = rt.load_program("/Users/simo/Projects/vcmi-play/Mods/MMAI/models/tukbajrv-202509171940-sizes.pte")
+
+        verify_export(model_cfg_path, model_weights_path, loaded_model)
 
         print("Writing to %s" % export_dst)
         with open(export_dst, "wb") as f:

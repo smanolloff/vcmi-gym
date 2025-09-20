@@ -10,6 +10,10 @@ from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPar
 from rl.algos.mppo_dna_heads.mppo_dna_heads_new import ExecuTorchDNAModel
 
 
+# XXX:
+# This works for simple models which can lower cleanly to XNNPACK instructions.
+# For exporting complex (GNN) models, use the export.py in mppo_dna_gnn/ instead.
+
 class ModelWrapper(torch.nn.Module):
     def __init__(self, m, method_name: str):
         super().__init__()

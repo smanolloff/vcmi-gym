@@ -261,17 +261,28 @@ class NonGNNLayer(nn.Module):
 class GNNBlock(nn.Module):
     # XXX: in_channels must be a tuple of (size_a, size_b) in case of
     #       bipartite graphs.
-    def __init__(self, num_layers, in_channels, hidden_channels, out_channels, link_types):
+    def __init__(
+        self,
+        num_layers,
+        in_channels,
+        hidden_channels,
+        out_channels,
+        link_types=LINK_TYPES.keys(),
+        node_type="hex",
+        edge_dim=1
+    ):
         super().__init__()
 
         # at least 1 "hidden" layer is required for shapes to match
         assert num_layers >= 2
 
-        kwargs = dict(edge_dim=1, add_self_loops=True)
+        kwargs = dict(edge_dim=edge_dim, add_self_loops=True)
 
+        # NOTE: the code below will likely fail if len(node_types) > 1 unless
+        #       all they all have the same shape
         def make_hetero_dict(inchan, outchan):
             return {
-                ("hex", lt, "hex"): gnn.GENConv(**kwargs, in_channels=inchan, out_channels=outchan)
+                (node_type, lt, node_type): gnn.GENConv(**kwargs, in_channels=inchan, out_channels=outchan)
                 for lt in link_types
             }
 
@@ -355,7 +366,6 @@ class Model(nn.Module):
             STATE_SIZE_ONE_HEX,
             config["gnn_hidden_channels"],
             config["gnn_out_channels"],
-            LINK_TYPES
         )
 
         d = config["gnn_out_channels"]
@@ -1027,7 +1037,9 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     train_config = dig(config, "train")
     eval_config = dig(config, "eval")
 
-    logger = StructuredLogger(level=getattr(logging, loglevel), filename=os.path.join(config["run"]["out_dir"], f"{run_id}.log"), context=dict(run_id=run_id))
+    logfilename = None if dry_run else os.path.join(config["run"]["out_dir"], f"{run_id}.log")
+    logger = StructuredLogger(level=getattr(logging, loglevel), filename=logfilename, context=dict(run_id=run_id))
+
     logger.info(dict(config=config))
 
     learning_rate = config["train"]["learning_rate"]
