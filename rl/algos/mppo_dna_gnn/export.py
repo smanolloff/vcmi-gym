@@ -391,8 +391,7 @@ class ExecuTorchModel(nn.Module):
         probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=m_hex1)
         # XXX: ExecuTorch/XNNPACK on Windows can materialize argmax as 32-bit writes
         hex1 = torch.argmax(probs_hex1, dim=1).to(torch.long).contiguous()
-        hex1 = hex1.clamp_(0, z_hexes.size(1) - 1)
-
+        # hex1 = hex1.clamp_(0, z_hexes.size(1) - 1)
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
         z_hex1 = z_hexes[0, hex1, :]                                       # (B, d)
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
@@ -401,7 +400,7 @@ class ExecuTorchModel(nn.Module):
         m_hex2 = mask_hex2[0, act0.long().contiguous(), hex1.long().contiguous()]   # [B,T]
         probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=m_hex2)
         hex2 = torch.argmax(probs_hex2, dim=1).to(torch.long).contiguous()
-        hex2 = hex2.clamp_(0, z_hexes.size(1) - 1)
+        # hex2 = hex2.clamp_(0, z_hexes.size(1) - 1)
 
         action = self.action_table[act0, hex1, hex2]
         return (
@@ -1163,7 +1162,12 @@ if __name__ == "__main__":
     with torch.inference_mode():
         model_cfg_path = f"{MODEL_PREFIX}-config.json"
         model_weights_path = f"{MODEL_PREFIX}-model-dna.pt"
-        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}-logits-fix1.pte"
+
+        # 1: hex1 & hex2 = 0 (clamped)
+        # 2: removed clamp => advanced_index_util.cpp:463: Check failed (index 564654... OOB for dim 0 iwth size 165)
+        fix = 2
+
+        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}-logits-fix{fix}.pte"
 
         # test_gnn()
         # test_block()
