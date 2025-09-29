@@ -353,12 +353,10 @@ class ExecuTorchModel(nn.Module):
         # 3) Replace -1 by 0 (any in-range index works) but make src zero there,
         #    so those updates are no-ops on a zero-initialized buffer.
         safe_idx = torch.where(valid, idx, idx.new_zeros(idx.shape))            # [B,S,K]
-        src_i32 = valid.to(torch.int32)                                         # [B,S,K]
 
         # 4) Accumulate along T, then binarize
-        accum = torch.zeros((idx.size(0), idx.size(1), plane.size(-1)), dtype=torch.int32,
-                            device=idx.device)                                   # [B,S,T]
-        accum = accum.scatter_add(-1, safe_idx, src_i32)                         # [B,S,T]
+        accum = torch.zeros((idx.size(0), idx.size(1), plane.size(-1)), dtype=torch.long)  # [B,S,T]
+        accum = accum.scatter_add(-1, safe_idx, valid.to(torch.long))                         # [B,S,T]
         plane = accum.ne(0)                                                      # bool
 
         # 5) Write back into the full mask tensor
@@ -380,7 +378,8 @@ class ExecuTorchModel(nn.Module):
         #
         # 1. Sample MAIN ACTION
         probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_action)
-        act0 = torch.argmax(probs_act0, dim=1)
+        act0 = torch.argmax(probs_act0, dim=1).to(torch.long).contiguous()
+        act0 = act0.clamp_(0, self.emb_act0.num_embeddings - 1)  # Safety clamp (prevents rare out-of-range writes from numeric noise)
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
         act0_emb = self.emb_act0(act0)
@@ -388,19 +387,32 @@ class ExecuTorchModel(nn.Module):
         q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
         k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1[0, act0])
-        hex1 = torch.argmax(probs_hex1, dim=1)
+        m_hex1 = mask_hex1[0, act0.long().contiguous()]            # [B,S]
+        probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=m_hex1)
+        # XXX: ExecuTorch/XNNPACK on Windows can materialize argmax as 32-bit writes
+        hex1 = torch.argmax(probs_hex1, dim=1).to(torch.long).contiguous()
+        hex1 = hex1.clamp_(0, z_hexes.size(1) - 1)
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
         z_hex1 = z_hexes[0, hex1, :]                                       # (B, d)
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
         k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2[0, act0, hex1])
-        hex2 = torch.argmax(probs_hex2, dim=1)
+        m_hex2 = mask_hex2[0, act0.long().contiguous(), hex1.long().contiguous()]   # [B,T]
+        probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=m_hex2)
+        hex2 = torch.argmax(probs_hex2, dim=1).to(torch.long).contiguous()
+        hex2 = hex2.clamp_(0, z_hexes.size(1) - 1)
 
         action = self.action_table[act0, hex1, hex2]
-        return action, act0_logits, hex1_logits, hex2_logits
+        return (
+            action.long().clone(),
+            act0_logits,
+            act0,
+            hex1_logits,
+            hex1,
+            hex2_logits,
+            hex2
+        )
 
     def _categorical_masked(self, logits0, mask):
         logits1 = torch.where(mask, logits0, self.mask_value)
@@ -715,7 +727,7 @@ def test_block():
     myinputs0 = (hd["baba"].x, *build_edge_inputs(hd, all_model_sizes[0]), 0)
     myinputs1 = (hd["baba"].x, *build_edge_inputs(hd, all_model_sizes[1]), 1)
 
-    import ipdb; ipdb.set_trace()  # noqa
+    # import ipdb; ipdb.set_trace()  # noqa
 
     res = block(hd)["baba"]
     myres0 = myblock(*myinputs0)
@@ -982,7 +994,7 @@ def test_load(cfg_file, weights_file):
 
     print("Testing...")
     actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, hex1_logits, hex2_logits = loaded_predict_with_logits.execute(einputs)
+    action, act0_logits, hex1_logits, hex2_logits, action_table = loaded_predict_with_logits.execute(einputs)
 
     err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
     err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
@@ -1037,6 +1049,7 @@ def export_model(cfg_file, weights_file):
     for i, edge_inputs in enumerate(all_edge_inputs):
         einputs = (obs[0], *edge_inputs)
 
+        print(f"Exporting predict{i}")
         w = ModelWrapper(emodel.model_policy, "predict", args_tail=(i,)).eval().cpu()
         programs[f"predict{i}"] = export(w, einputs, strict=True)
 
@@ -1044,6 +1057,10 @@ def export_model(cfg_file, weights_file):
         w = ModelWrapper(emodel.model_policy, "get_value", args_tail=(i,)).eval().cpu()
 
         programs[f"get_value{i}"] = export(w, einputs, strict=True)
+
+    einputs3 = (obs[0], *(all_edge_inputs[3]))
+    w = ModelWrapper(emodel.model_policy, "_predict_with_logits", args_tail=(3,)).eval().cpu()
+    programs["_predict_with_logits3"] = export(w, einputs3, strict=True)
 
     w = ModelWrapper(emodel, "get_version").eval().cpu()
     programs["get_version"] = export(w, (), strict=True)
@@ -1058,6 +1075,7 @@ def export_model(cfg_file, weights_file):
 
     print("Lowering to XNN...")
     edge = to_edge_transform_and_lower(programs, partitioner=[XnnpackPartitioner()])
+
     return edge.to_executorch()
 
 
@@ -1077,13 +1095,18 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
     print("Testing metadata methods...")
 
     # 3 metadata methods + 2*sizes methods (predict & get_value)
-    assert len(loaded_methods) == 3 + 2*len(ALL_MODEL_SIZES), len(loaded_methods)
+    if "_predict_with_logits3" in loaded_methods:
+        assert len(loaded_methods) == 1 + 3 + 2*len(ALL_MODEL_SIZES), len(loaded_methods)
+    else:
+        assert len(loaded_methods) == 3 + 2*len(ALL_MODEL_SIZES), len(loaded_methods)
 
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
 
     assert loaded_methods["get_version"].execute(())[0].item() == 13
     assert loaded_methods["get_side"].execute(())[0].item() == eside
     assert torch.equal(loaded_methods["get_all_sizes"].execute(())[0], ALL_MODEL_SIZES)
+
+    # import ipdb; ipdb.set_trace()  # noqa
 
     print("Testing data methods for %d steps..." % (num_steps))
 
@@ -1129,15 +1152,18 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
     for i, ms in enumerate(benchmarks):
         print("  %d: %d ms" % (i, ms.item()))
 
+    import ipdb; ipdb.set_trace()  # noqa
+    print("Model role: %s" % cfg["train"]["env"]["kwargs"]["role"])
     print("verify_export: OK")
 
 
 if __name__ == "__main__":
+    MODEL_PREFIX = "nkjrmrsq-202509252116"
+
     with torch.inference_mode():
-        filebase = "tukbajrv-202509171940"
-        model_cfg_path = f"{filebase}-config.json"
-        model_weights_path = f"{filebase}-model-dna.pt"
-        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{filebase}-sizes.pte"
+        model_cfg_path = f"{MODEL_PREFIX}-config.json"
+        model_weights_path = f"{MODEL_PREFIX}-model-dna.pt"
+        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}-logits-fix1.pte"
 
         # test_gnn()
         # test_block()
@@ -1146,6 +1172,7 @@ if __name__ == "__main__":
         # test_load(model_cfg_path, model_weights_path)
 
         exported_model = export_model(model_cfg_path, model_weights_path)
+
         rt = Runtime.get()
         loaded_model = rt.load_program(exported_model.buffer)
         # loaded_model = rt.load_program("/Users/simo/Projects/vcmi-play/Mods/MMAI/models/tukbajrv-202509171940-sizes.pte")
