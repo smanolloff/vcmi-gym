@@ -387,22 +387,36 @@ class ExecuTorchModel(nn.Module):
         q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
         k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        m_hex1 = mask_hex1[0, act0.long().contiguous()]            # [B,S]
+        onehot_a = torch.nn.functional.one_hot(act0.long(), num_classes=4).to(mask_hex1.dtype)
+        m_hex1 = (onehot_a @ mask_hex1[0].to(onehot_a.dtype)).to(torch.bool)          # [B,S]
         probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=m_hex1)
         # XXX: ExecuTorch/XNNPACK on Windows can materialize argmax as 32-bit writes
         hex1 = torch.argmax(probs_hex1, dim=1).to(torch.long).contiguous().clone()
         # hex1 = hex1.clamp_(0, z_hexes.size(1) - 1)
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
-        z_hex1 = z_hexes[0, hex1, :]                                       # (B, d)
+
+        B, S, d = z_hexes.shape  # S==165
+        onehot_h1 = torch.nn.functional.one_hot(hex1.long(), num_classes=S).to(z_hexes.dtype)  # [B,S]
+        z_hex1 = onehot_h1 @ z_hexes[0]  # [B,d], replaces z_hexes[0, hex1, :]
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
         k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        m_hex2 = mask_hex2[0, act0.long().contiguous(), hex1.long().contiguous()]   # [B,T]
+        # m_hex2: first select along action, then along hex1
+        sel_a = torch.einsum("ba,ast->bst", onehot_a.to(mask_hex2.dtype), mask_hex2[0])  # [B,S,T]
+        onehot_h1 = torch.nn.functional.one_hot(hex1.long(), num_classes=S).to(sel_a.dtype)
+        m_hex2 = torch.einsum("bs,bst->bt", onehot_h1, sel_a).to(torch.bool)             # [B,T]
         probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=m_hex2)
         hex2 = torch.argmax(probs_hex2, dim=1).to(torch.long).contiguous().clone()
         # hex2 = hex2.clamp_(0, z_hexes.size(1) - 1)
 
-        action = self.action_table[act0, hex1, hex2]
+        # action_table lookup without advanced indexing
+        onehot_h2 = torch.nn.functional.one_hot(hex2.long(), num_classes=S).to(z_hexes.dtype)
+        sel_a_f = onehot_a.to(self.action_table.dtype)
+        sel_h1_f = onehot_h1.to(self.action_table.dtype)
+        sel_h2_f = onehot_h2.to(self.action_table.dtype)
+        action = torch.einsum("ba,bs,bt,as t->b", sel_a_f, sel_h1_f, sel_h2_f, self.action_table)  # [B]
+        action = action.to(torch.int64)
+
         return (
             action.long().clone(),
             act0_logits,
@@ -1168,9 +1182,9 @@ if __name__ == "__main__":
         # 3: a great troubleshooting by CG:
         #       https://chatgpt.com/s/t_68daff1db78881919d6a32ac91c1e553
         #   3_1: add clone after argmax
-        #   3_2: (TODO) Avoid advanced indexing kernels entirely for z_hex1 (robust workaround)
+        #   3_2: Avoid advanced indexing kernels entirely for z_hex1 (robust workaround)
         #   3_3: (TODO) (not in model) align planned buffers
-        fix = "3_1"
+        fix = "3_2"
 
         export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}-logits-fix{fix}.pte"
 
