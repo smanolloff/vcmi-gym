@@ -378,7 +378,7 @@ class ExecuTorchModel(nn.Module):
         #
         # 1. Sample MAIN ACTION
         probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_action)
-        act0 = torch.argmax(probs_act0, dim=1).to(torch.long).contiguous()
+        act0 = torch.argmax(probs_act0, dim=1).to(torch.long).contiguous().clone()
         act0 = act0.clamp_(0, self.emb_act0.num_embeddings - 1)  # Safety clamp (prevents rare out-of-range writes from numeric noise)
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
@@ -390,7 +390,7 @@ class ExecuTorchModel(nn.Module):
         m_hex1 = mask_hex1[0, act0.long().contiguous()]            # [B,S]
         probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=m_hex1)
         # XXX: ExecuTorch/XNNPACK on Windows can materialize argmax as 32-bit writes
-        hex1 = torch.argmax(probs_hex1, dim=1).to(torch.long).contiguous()
+        hex1 = torch.argmax(probs_hex1, dim=1).to(torch.long).contiguous().clone()
         # hex1 = hex1.clamp_(0, z_hexes.size(1) - 1)
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
         z_hex1 = z_hexes[0, hex1, :]                                       # (B, d)
@@ -399,7 +399,7 @@ class ExecuTorchModel(nn.Module):
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
         m_hex2 = mask_hex2[0, act0.long().contiguous(), hex1.long().contiguous()]   # [B,T]
         probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=m_hex2)
-        hex2 = torch.argmax(probs_hex2, dim=1).to(torch.long).contiguous()
+        hex2 = torch.argmax(probs_hex2, dim=1).to(torch.long).contiguous().clone()
         # hex2 = hex2.clamp_(0, z_hexes.size(1) - 1)
 
         action = self.action_table[act0, hex1, hex2]
@@ -1165,7 +1165,12 @@ if __name__ == "__main__":
 
         # 1: hex1 & hex2 = 0 (clamped)
         # 2: removed clamp => advanced_index_util.cpp:463: Check failed (index 564654... OOB for dim 0 iwth size 165)
-        fix = 2
+        # 3: a great troubleshooting by CG:
+        #       https://chatgpt.com/s/t_68daff1db78881919d6a32ac91c1e553
+        #   3_1: add clone after argmax
+        #   3_2: (TODO) Avoid advanced indexing kernels entirely for z_hex1 (robust workaround)
+        #   3_3: (TODO) (not in model) align planned buffers
+        fix = "3_1"
 
         export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}-logits-fix{fix}.pte"
 
