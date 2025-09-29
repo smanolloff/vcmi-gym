@@ -1,6 +1,7 @@
 import json
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torchao.quantization.pt2e.quantize_pt2e import prepare_pt2e, convert_pt2e
 from torch_geometric.data import Batch
 from torch.export import export, export_for_training
@@ -235,10 +236,10 @@ class ExecuTorchModel(nn.Module):
         # XXX: these should have persistent=False, but due to a bug they were
         # saved with the weights => load_state_dict() would fail unless they
         # are persistent here as well.
-        self.register_buffer("amove_hexes", amove_hexes.unsqueeze(0))
+        self.register_buffer("amove_hexes", amove_hexes.unsqueeze(0).int())
         self.register_buffer("amove_hexes_valid", self.amove_hexes != -1)
-        self.register_buffer("action_table", action_table)
-        self.register_buffer("inverse_table", inverse_table)
+        self.register_buffer("action_table", action_table.int())
+        self.register_buffer("inverse_table", inverse_table.int())
 
         self.encoder_hexes = ExportableGNNBlock(
             num_layers=config["gnn_num_layers"],
@@ -273,10 +274,10 @@ class ExecuTorchModel(nn.Module):
         self.register_buffer("mask_hex1", torch.zeros([1, self.n_main_actions, 165], dtype=torch.bool), persistent=False)
         self.register_buffer("mask_hex2", torch.zeros([1, self.n_main_actions, 165, 165], dtype=torch.bool), persistent=False)
         self.register_buffer("mask_action", torch.zeros([1, self.n_main_actions], dtype=torch.bool), persistent=False)
-        self.register_buffer("b_idx", torch.arange(1).view(1, 1, 1).expand_as(self.amove_hexes), persistent=False)
-        self.register_buffer("s_idx", torch.arange(165).view(1, 165, 1).expand_as(self.amove_hexes), persistent=False)
+        self.register_buffer("b_idx", torch.arange(1).view(1, 1, 1).expand_as(self.amove_hexes).int(), persistent=False)
+        self.register_buffer("s_idx", torch.arange(165).view(1, 165, 1).expand_as(self.amove_hexes).int(), persistent=False)
         self.register_buffer("mask_value", torch.tensor(torch.finfo(torch.float32).min), persistent=False)
-        self.register_buffer("hexactmask_inds", torch.as_tensor(torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]), persistent=False)
+        self.register_buffer("hexactmask_inds", torch.as_tensor(torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]).int(), persistent=False)
 
     # edge_triplets is [edge_ind1, edge_attr1, edge_nbr1, edge_ind2, edge_attr2, edge_nbr2, ...]
     # (one triplet for each link type)
@@ -297,134 +298,88 @@ class ExecuTorchModel(nn.Module):
         return self._predict_with_logits(*args)[0]
 
     def _predict_with_logits(self, obs, *gnn_block_args):
+        def to_i32_fresh(x: torch.Tensor) -> torch.Tensor:
+            # cast, make contiguous, force a fresh buffer (avoids aliasing mishaps)
+            return x.to(torch.int32).contiguous().clone()
+
         obs = obs.unsqueeze(dim=0)
         z_hexes, z_global = self.encode(obs, *gnn_block_args)
 
         act0_logits = self.act0_head(z_global)
 
-        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
+        # ---- masks (same as yours) ----
         mask_hex1 = torch.zeros_like(self.mask_hex1)
         hexobs = obs[:, -self.state_size_hexes:].view([-1, 165, self.state_size_one_hex])
-
-        # XXX: EXPLICIT casting to torch.bool is required to prevent a
-        #      a nasty bug with the mask when the model is loaded in C++
-
-        # 1.1 for 0=WAIT: nothing to do (all zeros)
-        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-        movemask = hexobs[:, :, self.hex_move_offset].to(torch.bool)
-        mask_hex1[:, 1, :] = movemask
-
-        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
+        movemask  = hexobs[:, :, self.hex_move_offset].to(torch.bool)
         amovemask = hexobs[:, :, self.hexactmask_inds].to(torch.bool)
-        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
-
-        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
         shootmask = hexobs[:, :, self.hex_shoot_offset].to(torch.bool)
+        mask_hex1[:, 1, :] = movemask
+        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
         mask_hex1[:, 3, :] = shootmask
 
-        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
         mask_hex2 = torch.zeros_like(self.mask_hex2)
-
-        # 2.1 for 0=WAIT: nothing to do (all zeros)
-        # 2.2 for 1=MOVE: nothing to do (all zeros)
-        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
         valid = amovemask & self.amove_hexes_valid
 
-        # # Select only valid triples and write
-        # b_sel = self.b_idx[valid]
-        # s_sel = self.s_idx[valid]
-        # t_sel = self.amove_hexes[valid]
-        # mask_hex2[b_sel, 2, s_sel, t_sel] = True
-
-        # "How do I build mask_hex2[b, 2, s, t] = True when self.amove_hexes
-        # contains -1 entries, without boolean indexing and with static shapes?"
-        # Shapes:
-        # self.mask_hex2: [B, 4, S, T] (bool)  e.g., [B,4,165,165]
-        # self.amove_hexes: [B, S, K] (long)    target t-indices, may contain -1
-        # valid: [B, S, K] (bool)               which triplets are active
-
-        # 1) Plane we will write: channel 2 of the mask
-        plane = torch.zeros_like(self.mask_hex2.select(1, 2))  # [B, S, T], bool
-
-        # 2) Ensure invalid entries are excluded from updates
-        idx = self.amove_hexes                                      # [B, S, K], long
-        valid = valid & (idx >= 0)                                  # drop t == -1
-
-        # 3) Replace -1 by 0 (any in-range index works) but make src zero there,
-        #    so those updates are no-ops on a zero-initialized buffer.
-        safe_idx = torch.where(valid, idx, idx.new_zeros(idx.shape))            # [B,S,K]
-
-        # 4) Accumulate along T, then binarize
-        accum = torch.zeros((idx.size(0), idx.size(1), plane.size(-1)), dtype=torch.long)  # [B,S,T]
-        accum = accum.scatter_add(-1, safe_idx, valid.to(torch.long))                         # [B,S,T]
-        plane = accum.ne(0)                                                      # bool
-
-        # 5) Write back into the full mask tensor
-        mask_hex2 = torch.zeros_like(self.mask_hex2)                             # [B,4,S,T]
+        plane = torch.zeros_like(self.mask_hex2.select(1, 2))  # [B,S,T]
+        idx = self.amove_hexes                                 # [B,S,K] (expect long originally)
+        valid = valid & (idx >= 0)
+        safe_idx = torch.where(valid, idx, idx.new_zeros(idx.shape))
+        accum = torch.zeros((idx.size(0), idx.size(1), plane.size(-1)),
+                            dtype=torch.long, device=idx.device)
+        accum = accum.scatter_add(-1, safe_idx.long(), valid.to(torch.long))
+        plane = accum.ne(0)
         mask_hex2[:, 2] = plane
 
-        # 2.4 for 3=SHOOT: nothing to do (all zeros)
-
-        # 3. MASK_ACTION - ie. allowed main action mask
         mask_action = torch.zeros_like(self.mask_action)
-
-        # 0=WAIT
-        mask_action[:, 0] = obs[:, self.global_wait_offset].to(torch.bool)
-
-        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
+        mask_action[:, 0]  = obs[:, self.global_wait_offset].to(torch.bool)
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
 
-        # Next, we sample:
-        #
-        # 1. Sample MAIN ACTION
+        # ---- 1) MAIN ACTION -> store as int32 immediately ----
         probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_action)
-        act0 = torch.argmax(probs_act0, dim=1).to(torch.long).contiguous().clone()
-        act0 = act0.clamp_(0, self.emb_act0.num_embeddings - 1)  # Safety clamp (prevents rare out-of-range writes from numeric noise)
+        act0_i32 = to_i32_fresh(torch.argmax(probs_act0, dim=1))
+        # (optional) clamps as safety:
+        # act0_i32.clamp_(0, self.emb_act0.num_embeddings - 1)
 
-        # 2. Sample HEX1 (with mask corresponding to the main action)
-        act0_emb = self.emb_act0(act0)
+        # Embedding requires Long -> upcast only at the call-site
+        act0_emb = self.emb_act0(act0_i32.to(torch.int64))
         d = act0_emb.size(-1)
-        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
-        k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
-        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        onehot_a = torch.nn.functional.one_hot(act0.long(), num_classes=4).to(mask_hex1.dtype)
-        m_hex1 = (onehot_a @ mask_hex1[0].to(onehot_a.dtype)).to(torch.bool)          # [B,S]
+
+        # ---- 2) HEX1 ----
+        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))
+        k_hex1 = self.Wk_hex1(z_hexes)
+        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)
+        # mask indexing needs Long -> use upcast view only here
+        m_hex1 = mask_hex1[0, act0_i32.to(torch.int64)]
         probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=m_hex1)
-        # XXX: ExecuTorch/XNNPACK on Windows can materialize argmax as 32-bit writes
-        hex1 = torch.argmax(probs_hex1, dim=1).to(torch.long).contiguous().clone()
-        # hex1 = hex1.clamp_(0, z_hexes.size(1) - 1)
-        # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
+        hex1_i32 = to_i32_fresh(torch.argmax(probs_hex1, dim=1))
+        # hex1_i32.clamp_(0, z_hexes.size(1) - 1)
 
-        B, S, d = z_hexes.shape  # S==165
-        onehot_h1 = torch.nn.functional.one_hot(hex1.long(), num_classes=S).to(z_hexes.dtype)  # [B,S]
-        z_hex1 = onehot_h1 @ z_hexes[0]  # [B,d], replaces z_hexes[0, hex1, :]
-        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
-        k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
-        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        # m_hex2: first select along action, then along hex1
-        sel_a = torch.einsum("ba,ast->bst", onehot_a.to(mask_hex2.dtype), mask_hex2[0])  # [B,S,T]
-        onehot_h1 = torch.nn.functional.one_hot(hex1.long(), num_classes=S).to(sel_a.dtype)
-        m_hex2 = torch.einsum("bs,bst->bt", onehot_h1, sel_a).to(torch.bool)             # [B,T]
+        # ---- 3) HEX2 ----
+        # z_hexes indexing needs Long -> upcast view only here
+        z_hex1 = z_hexes[0, hex1_i32.to(torch.int64), :]
+        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))
+        k_hex2 = self.Wk_hex2(z_hexes)
+        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)
+        m_hex2 = mask_hex2[0, act0_i32.to(torch.int64), hex1_i32.to(torch.int64)]
         probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=m_hex2)
-        hex2 = torch.argmax(probs_hex2, dim=1).to(torch.long).contiguous().clone()
-        # hex2 = hex2.clamp_(0, z_hexes.size(1) - 1)
+        hex2_i32 = to_i32_fresh(torch.argmax(probs_hex2, dim=1))
+        # hex2_i32.clamp_(0, z_hexes.size(1) - 1)
 
-        # action_table lookup without advanced indexing
-        onehot_h2 = torch.nn.functional.one_hot(hex2.long(), num_classes=S).to(z_hexes.dtype)
-        sel_a_f = onehot_a.to(self.action_table.dtype)
-        sel_h1_f = onehot_h1.to(self.action_table.dtype)
-        sel_h2_f = onehot_h2.to(self.action_table.dtype)
-        action = torch.einsum("ba,bs,bt,as t->b", sel_a_f, sel_h1_f, sel_h2_f, self.action_table)  # [B]
-        action = action.to(torch.int64)
+        # ---- action lookup (indexing -> upcast at call-site) ----
+        action = self.action_table[
+            act0_i32.to(torch.int64),
+            hex1_i32.to(torch.int64),
+            hex2_i32.to(torch.int64),
+        ]
 
         return (
-            action.long().clone(),
+            action.long().clone(),   # final long output
             act0_logits,
-            act0,
+            act0_i32,                # now int32
             hex1_logits,
-            hex1,
+            hex1_i32,                # now int32
             hex2_logits,
-            hex2
+            hex2_i32,                # now int32
         )
 
     def _categorical_masked(self, logits0, mask):
@@ -1171,7 +1126,7 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
 
 
 if __name__ == "__main__":
-    MODEL_PREFIX = "nkjrmrsq-202509252116"
+    MODEL_PREFIX = "tukbajrv-202509171940"
 
     with torch.inference_mode():
         model_cfg_path = f"{MODEL_PREFIX}-config.json"
@@ -1182,9 +1137,9 @@ if __name__ == "__main__":
         # 3: a great troubleshooting by CG:
         #       https://chatgpt.com/s/t_68daff1db78881919d6a32ac91c1e553
         #   3_1: add clone after argmax
-        #   3_2: Avoid advanced indexing kernels entirely for z_hex1 (robust workaround)
+        #   3_2: (TODO) Avoid advanced indexing kernels entirely for z_hex1 (robust workaround)
         #   3_3: (TODO) (not in model) align planned buffers
-        fix = "3_2"
+        fix = "4_1"
 
         export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}-logits-fix{fix}.pte"
 
