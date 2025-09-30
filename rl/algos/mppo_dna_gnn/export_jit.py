@@ -1,12 +1,11 @@
+import io
 import json
 import torch
-from torchao.quantization.pt2e.quantize_pt2e import prepare_pt2e, convert_pt2e
 from torch_geometric.data import Batch
 from torch.export import export, export_for_training
-from executorch.exir import to_edge, to_edge_transform_and_lower
-from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
-from executorch.backends.xnnpack.quantizer.xnnpack_quantizer import XNNPACKQuantizer, get_symmetric_quantization_config
-from executorch.runtime import Runtime
+from torch.utils.mobile_optimizer import optimize_for_mobile
+
+from .mppo_dna_gnn import DNAModel
 
 from .export_common import (
     ALL_MODEL_SIZES,
@@ -16,13 +15,10 @@ from .export_common import (
     ExportableGNNBlock,
     ExportableDNAModel,
     HardcodedModelWrapper,
-    transform_key,
-    pad_edges,
-    build_nbr,
     build_edge_inputs,
+    transform_key,
 )
 
-from .mppo_dna_gnn import DNAModel
 from .dual_vec_env import to_hdata_list, DualVecEnv
 
 
@@ -38,30 +34,26 @@ def test_gnn():
     hd['hex'].x = torch.randn(3, 5)
     edge_index_lt1 = torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
     edge_attr_lt1 = torch.tensor([[1.0], [1.0]], dtype=torch.float)
-    edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
-    edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
+    # edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
+    # edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
     hd['hex', 'lt1', 'hex'].edge_index = edge_index_lt1
     hd['hex', 'lt1', 'hex'].edge_attr = edge_attr_lt1
-    hd['hex', 'lt2', 'hex'].edge_index = edge_index_lt2
-    hd['hex', 'lt2', 'hex'].edge_attr = edge_attr_lt2
+    # hd['hex', 'lt2', 'hex'].edge_index = edge_index_lt2
+    # hd['hex', 'lt2', 'hex'].edge_attr = edge_attr_lt2
+
+    # Emax, Kmax for lt1
+    model_sizes = torch.tensor([[5, 7]], dtype=ALL_MODEL_SIZES.dtype)
 
     inputs = (hd["hex"].x, hd["hex", "lt1", "hex"].edge_index, hd["hex", "lt1", "hex"].edge_attr)
-
-    # add NBR to inputs
-    N = hd["hex"].x.size(0)
-    E_max = 400  # max number of edges
-    K_max = 300  # max number of incoming edges for 1 hex
-
-    ei, ea = pad_edges(hd["hex", "lt1", "hex"].edge_index, hd["hex", "lt1", "hex"].edge_attr, e_max=E_max)
-    nbr = build_nbr(hd["hex", "lt1", "hex"].edge_index[1], N, k_max=K_max)
-
-    myinputs = (hd["hex"].x, ei, ea, nbr)
-
+    myinputs = (hd["hex"].x, *build_edge_inputs(hd, model_sizes))
     res = gen(*inputs)
     myres = mygen(*myinputs)
 
-    # import ipdb; ipdb.set_trace()  # noqa
+    jgen = torch.jit.script(mygen, myinputs)
+    jres = jgen(*myinputs)
+
     assert torch.equal(res, myres)
+    assert torch.equal(res, jres)
     print("test_gnn: OK")
 
 
@@ -102,7 +94,7 @@ def test_block():
             [20, 10],       # lt1
             [8, 9],         # lt2
         ],
-    ])
+    ], dtype=ALL_MODEL_SIZES.dtype)
 
     block = GNNBlock(
         num_layers=num_layers,
@@ -123,6 +115,10 @@ def test_block():
     ).eval()
 
     mydict = {transform_key(k, node_type, link_types): v for k, v in block.state_dict().items()}
+
+    myinputs0 = (hd["baba"].x, *build_edge_inputs(hd, all_model_sizes[0]), 0)
+    myres0 = myblock(*myinputs0)
+
     myblock.load_state_dict(mydict, strict=True)
 
     # Test with two different "sizes"
@@ -137,29 +133,20 @@ def test_block():
 
     assert torch.equal(res, myres0)
     assert torch.equal(res, myres1)
-    print("test_block: OK")
-
-    print("=== XNN transform ===")
-    print("Exporting...")
-    ep = {
-        "forward0": export(myblock, myinputs0, strict=True),
-        "forward1": export(myblock, myinputs1, strict=True),
-    }
-
-    print("Lowering to XNN...")
-    edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-    exported_forward0 = edge.exported_program("forward0").module()
-    exported_forward1 = edge.exported_program("forward1").module()
 
     print("Testing...")
-    expmyres0 = exported_forward0(*myinputs0)
-    expmyres1 = exported_forward1(*myinputs1)
-    assert torch.equal(res, expmyres0)
-    assert torch.equal(res, expmyres1)
+
+    jblock = torch.jit.script(myblock, myinputs0)
+    jres0 = jblock(*myinputs0)
+    jres1 = jblock(*myinputs1)
+    assert torch.equal(res, jres0)
+    assert torch.equal(res, jres1)
+
+    print("test_block: OK")
 
 
-def test_model(cfg_file, weights_file, xnnpack=True):
-    """ Tests DNA Model vs ExecuTorchModel. """
+def test_model(cfg_file, weights_file):
+    """ Tests DNA Model vs ExportableModel. """
 
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
@@ -212,40 +199,25 @@ def test_model(cfg_file, weights_file, xnnpack=True):
         # import ipdb; ipdb.set_trace()  # noqa
         assert torch.equal(actdata.action, action)
         assert torch.equal(actdata.act0_logits, act0_logits)
-        assert torch.equal(actdata.act0, act0)
         assert torch.equal(actdata.hex1_logits, hex1_logits)
-        assert torch.equal(actdata.hex1, hex1)
         assert torch.equal(actdata.hex2_logits, hex2_logits)
-        assert torch.equal(actdata.hex2, hex2)
         print("(size=%d) test_model: OK" % i)
 
-    # XXX: it should work OK if args_tail == einputs' model size
-    #       it returns incorrect result if args_tail < einputs' model size
-    #       it fails with RuntimeError: index_select(): ... otherwise
-
+    print("=== JIT transform ===")
     print("Exporting...")
-
-    hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES[:2])
-
-    for i, edge_inputs in enumerate(all_edge_inputs):
-        getattr(hmw, f"predict{i}")(obs[0], *edge_inputs)
-        getattr(hmw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
-
-    ep = {}
-    for i, edge_inputs in enumerate(all_edge_inputs):
-        einputs = (obs[0], *edge_inputs)
-        w = ModelWrapper(hmw, f"_predict_with_logits{i}")
-        ep[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
-
-    if xnnpack:
-        print("=== XNNPACK lower ===")
-        edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-    else:
-        print("=== Will NOT lower to XNNPACK ===")
-        edge = to_edge(ep)
+    mw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES).eval().cpu()
+    jw = torch.jit.script(mw)
 
     for i, edge_inputs in enumerate(all_edge_inputs):
-        print("Testing size %d... (XNNPACK=%d)" % (i, xnnpack))
+        getattr(jw, f"predict{i}")(obs[0], *edge_inputs)
+        getattr(jw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
+
+    print("Optimizing...")
+    method_names = [f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
+    method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
+    opt = optimize_for_mobile(jw, preserved_methods=method_names)
+
+    for i, edge_inputs in enumerate(all_edge_inputs):
         einputs = (obs[0], *edge_inputs)
 
         for i1, arg in enumerate(einputs):
@@ -255,8 +227,8 @@ def test_model(cfg_file, weights_file, xnnpack=True):
             else:
                 print(f"{arg.__class__.__name__}: {arg}")
 
-        program = edge.exported_program(f"_predict_with_logits{i}").module()
-        action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = program(*einputs)
+        method_name = f"_predict_with_logits{i}"
+        action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = getattr(opt, method_name)(*einputs)
 
         assert torch.equal(actdata.action, action)
         assert torch.equal(actdata.act0, act0)
@@ -275,100 +247,7 @@ def test_model(cfg_file, weights_file, xnnpack=True):
         assert err_hex1_logits.max() < 1e-4
         assert err_hex2_logits.max() < 1e-4
 
-        print("(size=%d) test_model: OK (XNNPACK=%d)" % (i, xnnpack))
-
-
-def test_quantized(cfg_file, weights_file):
-    """ Tests DNAModel vs the XNN-lowered-and-quantized ExportableDNAModel. """
-    with open(cfg_file, "r") as f:
-        cfg = json.load(f)
-
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
-    venv.reset()
-
-    weights = torch.load(weights_file, weights_only=True, map_location="cpu")
-
-    model = DNAModel(cfg["model"], torch.device("cpu")).eval()
-    model.load_state_dict(weights, strict=True)
-    model = model.model_policy
-
-    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExportableDNAModel(cfg["model"], eside, ALL_MODEL_SIZES).eval()
-
-    eweights = {
-        transform_key(k, "hex", list(LINK_TYPES)): v
-        for k, v in weights.items()
-    }
-    emodel.load_state_dict(eweights, strict=True)
-    emodel = emodel.model_policy
-
-    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
-    done = torch.tensor([False])
-    links = [venv.call("obs")[0]["links"]]
-    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
-
-    # einputs = build_einputs(hdata, E_MAX, K_MAX)
-    # for i, arg in enumerate(einputs):
-    #     print("Arg %d shape: %s" % (i, arg.shape))
-
-    # XXX: test only with size "S" (quantizing is very slow)
-    einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]))
-
-    hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES[:1])
-    m__predict_with_logits = ModelWrapper(hmw, "_predict_with_logits0")
-
-    print("Quantizing...")
-    # Quantizer
-    # XXX: is_per_channel seems to have no effect on model accuracy
-    q = XNNPACKQuantizer()
-    q.set_global(get_symmetric_quantization_config(is_per_channel=False))
-
-    # --- PT2E prepare/convert ---
-    # export_for_training -> .module() for PT2E helpers
-    trainable__predict_with_logits = export_for_training(m__predict_with_logits, einputs, strict=True).module()
-
-    # Insert observers
-    prepared__predict_with_logits = prepare_pt2e(trainable__predict_with_logits, q)
-
-    # Calibrate
-    print("Calibrating...")
-    _ = prepared__predict_with_logits(*einputs)
-
-    # Convert to quantized modules
-    converted__predict_with_logits = convert_pt2e(prepared__predict_with_logits)
-
-    print("Exporting...")
-    ep = {
-        "_predict_with_logits": export(converted__predict_with_logits, einputs, strict=True),
-    }
-
-    print("Lowering to XNN...")
-    edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-
-    exported__predict_with_logits = edge.exported_program("_predict_with_logits").module()
-
-    print("Testing...")
-    actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = exported__predict_with_logits(*einputs)
-
-    err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
-    err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
-    err_hex2_logits = (actdata.hex2_logits - hex2_logits) / actdata.hex2_logits
-
-    print("Relative error: act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
-    print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
-    print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
-
-    assert torch.equal(actdata.action, action)
-    assert torch.equal(actdata.act0, act0)
-    assert torch.equal(actdata.hex1, hex1)
-    assert torch.equal(actdata.hex2, hex2)
-
-    assert err_act0_logits.max() < 1e-4
-    assert err_hex1_logits.max() < 1e-4
-    assert err_hex2_logits.max() < 1e-4
-
-    print("test_quantized: OK")
+        print("Optimized (size=%d) test_model: OK" % i)
 
 
 def test_load(cfg_file, weights_file):
@@ -411,28 +290,29 @@ def test_load(cfg_file, weights_file):
         else:
             print(f"{arg.__class__.__name__}: {arg}")
 
-    # XXX: test only with size "S" (quantizing is very slow)
-    einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]))
-
-    hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES[:1])
-    m__predict_with_logits = ModelWrapper(hmw, "_predict_with_logits0")
-
+    print("=== JIT transform ===")
     print("Exporting...")
-    ep = {
-        "_predict_with_logits": export(m__predict_with_logits, einputs, strict=True),
-    }
+    mw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES).eval().cpu()
+    jw = torch.jit.script(mw)
 
-    print("Lowering to XNN...")
-    edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+    getattr(jw, "predict0")(*einputs)
+    getattr(jw, "_predict_with_logits0")(*einputs)
 
-    print("Exporting and loading...")
-    rt = Runtime.get()
-    loaded = rt.load_program(edge.to_executorch().buffer)
-    loaded_predict_with_logits = loaded.load_method("_predict_with_logits")
+    print("Optimizing...")
+    method_names = [f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
+    method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
+    opt = optimize_for_mobile(jw, preserved_methods=method_names)
+
+    loaded = torch.jit.load(io.BytesIO(opt._save_to_buffer_for_lite_interpreter()))
 
     print("Testing...")
     actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loaded_predict_with_logits.execute(einputs)
+    action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loaded._predict_with_logits0(*einputs)
+
+    assert torch.equal(actdata.action, action)
+    assert torch.equal(actdata.act0, act0)
+    assert torch.equal(actdata.hex1, hex1)
+    assert torch.equal(actdata.hex2, hex2)
 
     err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
     err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
@@ -442,11 +322,6 @@ def test_load(cfg_file, weights_file):
     print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
     print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
 
-    assert torch.equal(actdata.action, action)
-    assert torch.equal(actdata.act0, act0)
-    assert torch.equal(actdata.hex1, hex1)
-    assert torch.equal(actdata.hex2, hex2)
-
     assert err_act0_logits.max() < 1e-4
     assert err_hex1_logits.max() < 1e-4
     assert err_hex2_logits.max() < 1e-4
@@ -454,7 +329,7 @@ def test_load(cfg_file, weights_file):
     print("test_load: OK")
 
 
-def export_model(cfg_file, weights_file, xnnpack=True):
+def export_model(cfg_file, weights_file):
     """ Tests DNAModel vs the loaded XNN-lowered ExportableDNAModel. """
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
@@ -472,7 +347,6 @@ def export_model(cfg_file, weights_file, xnnpack=True):
         for k, v in weights.items()
     }
     emodel.load_state_dict(eweights, strict=True)
-    emodel = emodel.model_policy.eval()
 
     obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
     done = torch.tensor([False])
@@ -485,44 +359,27 @@ def export_model(cfg_file, weights_file, xnnpack=True):
     #       it returns incorrect result if args_tail < einputs' model size
     #       it fails with RuntimeError: index_select(): ... otherwise
 
-    programs = {}
-
     print("NOTE: Using get_value from policy model to reduce export size")
 
-    hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES)
+    print("=== JIT transform ===")
+    print("Exporting...")
+    mw = HardcodedModelWrapper(emodel.model_policy, eside, ALL_MODEL_SIZES).eval().cpu()
+    jw = torch.jit.script(mw)
 
     for i, edge_inputs in enumerate(all_edge_inputs):
-        einputs = (obs[0], *edge_inputs)
-        w = ModelWrapper(hmw, f"predict{i}")
-        programs[f"predict{i}"] = export(w, einputs, strict=True)
-        w = ModelWrapper(hmw, f"get_value{i}")
-        programs[f"get_value{i}"] = export(w, einputs, strict=True)
-        w = ModelWrapper(hmw, f"_predict_with_logits{i}")
-        programs[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
+        getattr(jw, f"get_value{i}")(obs[0], *edge_inputs)
+        getattr(jw, f"predict{i}")(obs[0], *edge_inputs)
+        getattr(jw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
 
-    # einputs3 = (obs[0], *(all_edge_inputs[3]))
-    # w = ModelWrapper(emodel, "_predict_with_logits", args_tail=(3,)).eval().cpu()
-    # programs["_predict_with_logits3"] = export(w, einputs3, strict=True)
+    print("Optimizing...")
+    method_names = [f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
+    method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
+    method_names.extend([f"get_value{i}" for i in range(len(ALL_MODEL_SIZES))])
+    method_names.extend(["get_version"])
+    method_names.extend(["get_side"])
+    method_names.extend(["get_all_sizes"])
 
-    w = ModelWrapper(hmw, "get_version").eval().cpu()
-    programs["get_version"] = export(w, (), strict=True)
-
-    w = ModelWrapper(hmw, "get_side").eval().cpu()
-    programs["get_side"] = export(w, (), strict=True)
-
-    w = ModelWrapper(hmw, "get_all_sizes").eval().cpu()
-    programs["get_all_sizes"] = export(w, (), strict=True)
-
-    print("Exported programs:\n  %s" % "\n  ".join(list(programs.keys())))
-
-    if xnnpack:
-        print("Lowering to XNN...")
-        edge = to_edge_transform_and_lower(programs, partitioner=[XnnpackPartitioner()])
-    else:
-        print("Lowering (NON-XNN)...")
-        edge = to_edge(programs)
-
-    return edge.to_executorch()
+    return optimize_for_mobile(jw, preserved_methods=method_names)
 
 
 def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
@@ -536,18 +393,11 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
     venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
-    loaded_methods = {name: loaded_model.load_method(name) for name in loaded_model.method_names}
-
-    print("Testing metadata methods...")
-
-    # # 3 metadata methods + 3*sizes methods (get_value, predict, _predict_with_logits)
-    assert len(loaded_methods) == 3 + 3*len(ALL_MODEL_SIZES), len(loaded_methods)
-
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
 
-    assert loaded_methods["get_version"].execute(())[0].item() == 13
-    assert loaded_methods["get_side"].execute(())[0].item() == eside
-    assert torch.equal(loaded_methods["get_all_sizes"].execute(())[0], ALL_MODEL_SIZES)
+    assert loaded_model.get_version() == 13
+    assert loaded_model.get_side() == eside
+    assert torch.equal(loaded_model.get_all_sizes(), ALL_MODEL_SIZES)
 
     # import ipdb; ipdb.set_trace()  # noqa
 
@@ -576,7 +426,7 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
             einputs = (obs[0], *edge_inputs)
 
             t0 = perf_counter_ns()
-            action = loaded_methods[f"predict{i}"].execute(einputs)[0]
+            action = getattr(loaded_model, f"predict{i}")(*einputs)
             ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
             benchmarks[i] += ms
 
@@ -584,8 +434,8 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
             assert actdata.action == action.item()
 
             # Not testing value (value model excluded)
-            # value = model.get_value(hdata)[0]
-            # myvalue = loaded_get_value.execute(einputs)
+            # value = model.get_value(hdata)
+            # myvalue = loaded_model.get_value(*einputs)
             # print("(%d) TEST VALUE: %.3f <> %.3f" % (n, value.item(), myvalue.item()))
 
         venv.step([actdata.action])
@@ -606,23 +456,19 @@ if __name__ == "__main__":
     with torch.inference_mode():
         model_cfg_path = f"{MODEL_PREFIX}-config.json"
         model_weights_path = f"{MODEL_PREFIX}-model-dna.pt"
-        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}.pte"
+        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}.pts"
 
-        xnnpack = True
-
-        # test_gnn()
-        # test_block()
-        # test_model(model_cfg_path, model_weights_path, xnnpack)
-        # test_quantized(model_cfg_path, model_weights_path)
+        test_gnn()
+        test_block()
+        test_model(model_cfg_path, model_weights_path)
+        # # test_quantized(model_cfg_path, model_weights_path)
         test_load(model_cfg_path, model_weights_path)
-        exported_model = export_model(model_cfg_path, model_weights_path, xnnpack)
+        exported_model = export_model(model_cfg_path, model_weights_path)
 
-        rt = Runtime.get()
-        loaded_model = rt.load_program(exported_model.buffer)
-        # loaded_model = rt.load_program("/Users/simo/Projects/vcmi-play/Mods/MMAI/models/tukbajrv-202509171940-sizes.pte")
+        loaded_model = torch.jit.load(io.BytesIO(exported_model._save_to_buffer_for_lite_interpreter()))
 
         verify_export(model_cfg_path, model_weights_path, loaded_model)
 
+        import ipdb; ipdb.set_trace()  # noqa
         print("Writing to %s" % export_dst)
-        with open(export_dst, "wb") as f:
-            exported_model.write_to_file(f)
+        exported_model._save_for_lite_interpreter(export_dst)
