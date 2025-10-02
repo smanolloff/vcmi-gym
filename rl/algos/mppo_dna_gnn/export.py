@@ -1,9 +1,14 @@
 import json
+import io
 import torch
+import enum
 from torchao.quantization.pt2e.quantize_pt2e import prepare_pt2e, convert_pt2e
+import torch_geometric
+from time import perf_counter_ns
 from torch_geometric.data import Batch
+from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.export import export, export_for_training
-from executorch.exir import to_edge, to_edge_transform_and_lower
+from executorch.exir import to_edge_transform_and_lower
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
 from executorch.backends.xnnpack.quantizer.xnnpack_quantizer import XNNPACKQuantizer, get_symmetric_quantization_config
 from executorch.runtime import Runtime
@@ -22,11 +27,16 @@ from .export_common import (
     build_edge_inputs,
 )
 
-from .mppo_dna_gnn import DNAModel
+from .mppo_dna_gnn import DNAModel, GNNBlock
 from .dual_vec_env import to_hdata_list, DualVecEnv
 
 
-def test_gnn():
+class ExportType(enum.IntEnum):
+    EXECUTORCH = 0
+    LIBTORCH = enum.auto()
+
+
+def test_gnn(exptype):
     """ Tests GENConv vs ExportableGENConv. """
 
     import torch_geometric
@@ -38,38 +48,39 @@ def test_gnn():
     hd['hex'].x = torch.randn(3, 5)
     edge_index_lt1 = torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
     edge_attr_lt1 = torch.tensor([[1.0], [1.0]], dtype=torch.float)
-    edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
-    edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
+    # edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
+    # edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
     hd['hex', 'lt1', 'hex'].edge_index = edge_index_lt1
     hd['hex', 'lt1', 'hex'].edge_attr = edge_attr_lt1
-    hd['hex', 'lt2', 'hex'].edge_index = edge_index_lt2
-    hd['hex', 'lt2', 'hex'].edge_attr = edge_attr_lt2
+    # hd['hex', 'lt2', 'hex'].edge_index = edge_index_lt2
+    # hd['hex', 'lt2', 'hex'].edge_attr = edge_attr_lt2
+
+    # Emax, Kmax for lt1
+    model_sizes = torch.tensor([[5, 7]], dtype=ALL_MODEL_SIZES.dtype)
 
     inputs = (hd["hex"].x, hd["hex", "lt1", "hex"].edge_index, hd["hex", "lt1", "hex"].edge_attr)
-
-    # add NBR to inputs
-    N = hd["hex"].x.size(0)
-    E_max = 400  # max number of edges
-    K_max = 300  # max number of incoming edges for 1 hex
-
-    ei, ea = pad_edges(hd["hex", "lt1", "hex"].edge_index, hd["hex", "lt1", "hex"].edge_attr, e_max=E_max)
-    nbr = build_nbr(hd["hex", "lt1", "hex"].edge_index[1], N, k_max=K_max)
-
-    myinputs = (hd["hex"].x, ei, ea, nbr)
+    myinputs = (hd["hex"].x, *build_edge_inputs(hd, model_sizes))
 
     res = gen(*inputs)
     myres = mygen(*myinputs)
 
-    # import ipdb; ipdb.set_trace()  # noqa
+    print("ExportType type: %s" % exptype.name)
+    if exptype == ExportType.EXECUTORCH:
+        print("=== XNN transform ===")
+        ep = {"forward": export(mygen, myinputs, strict=True)}
+        edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+        expres = edge.exported_program("forward").module()(*myinputs)
+    else:
+        ts = torch.jit.script(mygen, example_inputs=myinputs)
+        expres = ts(*myinputs)
+
     assert torch.equal(res, myres)
+    assert torch.equal(res, expres)
     print("test_gnn: OK")
 
 
-def test_block():
+def test_block(exptype):
     """ Tests GNNBlock vs ExportableGNNBlock. """
-
-    import torch_geometric
-    from .mppo_dna_gnn import GNNBlock
 
     N = 3       # num_nodes
     hd = torch_geometric.data.HeteroData()
@@ -139,26 +150,30 @@ def test_block():
     assert torch.equal(res, myres1)
     print("test_block: OK")
 
-    print("=== XNN transform ===")
-    print("Exporting...")
-    ep = {
-        "forward0": export(myblock, myinputs0, strict=True),
-        "forward1": export(myblock, myinputs1, strict=True),
-    }
+    print("ExportType type: %s" % exptype.name)
+    if exptype == ExportType.EXECUTORCH:
+        print("=== XNN transform ===")
+        ep = {
+            "forward0": export(myblock, myinputs0, strict=True),
+            "forward1": export(myblock, myinputs1, strict=True),
+        }
+        edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+        exported_forward0 = edge.exported_program("forward0").module()
+        exported_forward1 = edge.exported_program("forward1").module()
+        expres0 = exported_forward0(*myinputs0)
+        expres1 = exported_forward1(*myinputs1)
+    else:
+        ts = torch.jit.script(myblock)
+        expres0 = ts(*myinputs0)
+        expres1 = ts(*myinputs1)
 
     print("Lowering to XNN...")
     edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-    exported_forward0 = edge.exported_program("forward0").module()
-    exported_forward1 = edge.exported_program("forward1").module()
-
-    print("Testing...")
-    expmyres0 = exported_forward0(*myinputs0)
-    expmyres1 = exported_forward1(*myinputs1)
-    assert torch.equal(res, expmyres0)
-    assert torch.equal(res, expmyres1)
+    assert torch.equal(res, expres0)
+    assert torch.equal(res, expres1)
 
 
-def test_model(cfg_file, weights_file, xnnpack=True):
+def test_model(cfg_file, weights_file, exptype):
     """ Tests DNA Model vs ExecuTorchModel. """
 
     with open(cfg_file, "r") as f:
@@ -223,26 +238,35 @@ def test_model(cfg_file, weights_file, xnnpack=True):
     #       it returns incorrect result if args_tail < einputs' model size
     #       it fails with RuntimeError: index_select(): ... otherwise
 
-    print("Exporting...")
-
     hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES[:2])
 
-    for i, edge_inputs in enumerate(all_edge_inputs):
-        getattr(hmw, f"predict{i}")(obs[0], *edge_inputs)
-        getattr(hmw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
+    print("ExportType type: %s" % exptype.name)
+    if exptype == ExportType.EXECUTORCH:
+        print("=== XNN transform ===")
 
-    ep = {}
-    for i, edge_inputs in enumerate(all_edge_inputs):
-        einputs = (obs[0], *edge_inputs)
-        w = ModelWrapper(hmw, f"_predict_with_logits{i}")
-        ep[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
+        for i, edge_inputs in enumerate(all_edge_inputs):
+            getattr(hmw, f"predict{i}")(obs[0], *edge_inputs)
+            getattr(hmw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
 
-    if xnnpack:
-        print("=== XNNPACK lower ===")
+        ep = {}
+        for i, edge_inputs in enumerate(all_edge_inputs):
+            einputs = (obs[0], *edge_inputs)
+            w = ModelWrapper(hmw, f"_predict_with_logits{i}")
+            ep[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
         edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
     else:
-        print("=== Will NOT lower to XNNPACK ===")
-        edge = to_edge(ep)
+        print("=== JIT transform ===")
+        mw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES).eval().cpu()
+        jw = torch.jit.script(mw)
+
+        for i, edge_inputs in enumerate(all_edge_inputs):
+            getattr(jw, f"predict{i}")(obs[0], *edge_inputs)
+            getattr(jw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
+
+        print("Optimizing...")
+        method_names = [f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
+        method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
+        edge = optimize_for_mobile(jw, preserved_methods=method_names)
 
     for i, edge_inputs in enumerate(all_edge_inputs):
         print("Testing size %d... (XNNPACK=%d)" % (i, xnnpack))
@@ -255,8 +279,13 @@ def test_model(cfg_file, weights_file, xnnpack=True):
             else:
                 print(f"{arg.__class__.__name__}: {arg}")
 
-        program = edge.exported_program(f"_predict_with_logits{i}").module()
-        action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = program(*einputs)
+        method_name = f"_predict_with_logits{i}"
+
+        if exptype == ExportType.EXECUTORCH:
+            program = edge.exported_program(method_name).module()
+            action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = program(*einputs)
+        else:
+            action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = getattr(edge, method_name)(*einputs)
 
         assert torch.equal(actdata.action, action)
         assert torch.equal(actdata.act0, act0)
@@ -278,8 +307,13 @@ def test_model(cfg_file, weights_file, xnnpack=True):
         print("(size=%d) test_model: OK (XNNPACK=%d)" % (i, xnnpack))
 
 
-def test_quantized(cfg_file, weights_file):
+def test_quantized(cfg_file, weights_file, exptype):
     """ Tests DNAModel vs the XNN-lowered-and-quantized ExportableDNAModel. """
+
+    if exptype != ExportType.EXECUTORCH:
+        print("test_quantized is supported only for EXECUTORCH exports")
+        return
+
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
 
@@ -371,7 +405,7 @@ def test_quantized(cfg_file, weights_file):
     print("test_quantized: OK")
 
 
-def test_load(cfg_file, weights_file):
+def test_load(cfg_file, weights_file, exptype):
     """ Tests DNAModel vs the loaded XNN-lowered ExportableDNAModel. """
 
     with open(cfg_file, "r") as f:
@@ -411,28 +445,35 @@ def test_load(cfg_file, weights_file):
         else:
             print(f"{arg.__class__.__name__}: {arg}")
 
+    actdata = model.get_actdata_eval(hdata, deterministic=True)
+
     # XXX: test only with size "S" (quantizing is very slow)
     einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]))
 
     hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES[:1])
-    m__predict_with_logits = ModelWrapper(hmw, "_predict_with_logits0")
 
-    print("Exporting...")
-    ep = {
-        "_predict_with_logits": export(m__predict_with_logits, einputs, strict=True),
-    }
-
-    print("Lowering to XNN...")
-    edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-
-    print("Exporting and loading...")
-    rt = Runtime.get()
-    loaded = rt.load_program(edge.to_executorch().buffer)
-    loaded_predict_with_logits = loaded.load_method("_predict_with_logits")
-
-    print("Testing...")
-    actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loaded_predict_with_logits.execute(einputs)
+    print("ExportType type: %s" % exptype.name)
+    if exptype == ExportType.EXECUTORCH:
+        print("=== XNN transform ===")
+        mw = ModelWrapper(hmw, "_predict_with_logits0")
+        ep = {"_predict_with_logits0": export(mw, einputs, strict=True)}
+        edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+        rt = Runtime.get()
+        print("Loading...")
+        loaded = rt.load_program(edge.to_executorch().buffer)
+        loaded_predict_with_logits = loaded.load_method("_predict_with_logits0")
+        print("Testing...")
+        action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loaded_predict_with_logits.execute(einputs)
+    else:
+        print("=== JIT transform ===")
+        mw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES).eval().cpu()
+        jw = torch.jit.script(mw)
+        method_names = [f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
+        method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
+        edge = optimize_for_mobile(jw, preserved_methods=method_names)
+        print("Loading...")
+        loaded = torch.jit.load(io.BytesIO(edge._save_to_buffer_for_lite_interpreter()))
+        action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loaded._predict_with_logits0(*einputs)
 
     err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
     err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
@@ -454,7 +495,7 @@ def test_load(cfg_file, weights_file):
     print("test_load: OK")
 
 
-def export_model(cfg_file, weights_file, xnnpack=True):
+def export_model(cfg_file, weights_file, exptype):
     """ Tests DNAModel vs the loaded XNN-lowered ExportableDNAModel. """
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
@@ -491,41 +532,47 @@ def export_model(cfg_file, weights_file, xnnpack=True):
 
     hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES)
 
-    for i, edge_inputs in enumerate(all_edge_inputs):
-        einputs = (obs[0], *edge_inputs)
-        w = ModelWrapper(hmw, f"predict{i}")
-        programs[f"predict{i}"] = export(w, einputs, strict=True)
-        w = ModelWrapper(hmw, f"get_value{i}")
-        programs[f"get_value{i}"] = export(w, einputs, strict=True)
-        w = ModelWrapper(hmw, f"_predict_with_logits{i}")
-        programs[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
-
-    # einputs3 = (obs[0], *(all_edge_inputs[3]))
-    # w = ModelWrapper(emodel, "_predict_with_logits", args_tail=(3,)).eval().cpu()
-    # programs["_predict_with_logits3"] = export(w, einputs3, strict=True)
-
-    w = ModelWrapper(hmw, "get_version").eval().cpu()
-    programs["get_version"] = export(w, (), strict=True)
-
-    w = ModelWrapper(hmw, "get_side").eval().cpu()
-    programs["get_side"] = export(w, (), strict=True)
-
-    w = ModelWrapper(hmw, "get_all_sizes").eval().cpu()
-    programs["get_all_sizes"] = export(w, (), strict=True)
-
-    print("Exported programs:\n  %s" % "\n  ".join(list(programs.keys())))
-
-    if xnnpack:
-        print("Lowering to XNN...")
+    print("ExportType type: %s" % exptype.name)
+    if exptype == ExportType.EXECUTORCH:
+        print("=== XNN transform ===")
+        for i, edge_inputs in enumerate(all_edge_inputs):
+            einputs = (obs[0], *edge_inputs)
+            w = ModelWrapper(hmw, f"predict{i}")
+            programs[f"predict{i}"] = export(w, einputs, strict=True)
+            w = ModelWrapper(hmw, f"get_value{i}")
+            programs[f"get_value{i}"] = export(w, einputs, strict=True)
+            w = ModelWrapper(hmw, f"_predict_with_logits{i}")
+            programs[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
+        w = ModelWrapper(hmw, "get_version")
+        programs["get_version"] = export(w, (), strict=True)
+        w = ModelWrapper(hmw, "get_side")
+        programs["get_side"] = export(w, (), strict=True)
+        w = ModelWrapper(hmw, "get_all_sizes")
+        programs["get_all_sizes"] = export(w, (), strict=True)
         edge = to_edge_transform_and_lower(programs, partitioner=[XnnpackPartitioner()])
+        print("Exported programs:\n  %s" % "\n  ".join(list(programs.keys())))
+        exported_model = edge.to_executorch()
     else:
-        print("Lowering (NON-XNN)...")
-        edge = to_edge(programs)
+        print("=== JIT transform ===")
+        jw = torch.jit.script(hmw)
+        for i, edge_inputs in enumerate(all_edge_inputs):
+            getattr(jw, f"get_value{i}")(obs[0], *edge_inputs)
+            getattr(jw, f"predict{i}")(obs[0], *edge_inputs)
+            getattr(jw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
+        method_names = [f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
+        method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
+        method_names.extend([f"get_value{i}" for i in range(len(ALL_MODEL_SIZES))])
+        method_names.extend(["get_version"])
+        method_names.extend(["get_side"])
+        method_names.extend(["get_all_sizes"])
+        edge = optimize_for_mobile(jw, preserved_methods=method_names)
+        print("Exported methods:\n  %s" % "\n  ".join(method_names))
+        exported_model = optimize_for_mobile(edge, preserved_methods=method_names)
 
-    return edge.to_executorch()
+    return exported_model
 
 
-def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
+def verify_export(cfg_file, weights_file, exptype, loaded_model, num_steps=10):
     with open(cfg_file, "r") as f:
         cfg = json.load(f)
 
@@ -533,32 +580,31 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
     model = DNAModel(cfg["model"], torch.device("cpu")).eval()
     model.load_state_dict(weights, strict=True)
 
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
-    venv.reset()
-
-    loaded_methods = {name: loaded_model.load_method(name) for name in loaded_model.method_names}
-
-    print("Testing metadata methods...")
-
-    # # 3 metadata methods + 3*sizes methods (get_value, predict, _predict_with_logits)
-    assert len(loaded_methods) == 3 + 3*len(ALL_MODEL_SIZES), len(loaded_methods)
-
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
 
-    assert loaded_methods["get_version"].execute(())[0].item() == 13
-    assert loaded_methods["get_side"].execute(())[0].item() == eside
-    assert torch.equal(loaded_methods["get_all_sizes"].execute(())[0], ALL_MODEL_SIZES)
-
-    # import ipdb; ipdb.set_trace()  # noqa
+    print("Testing metadata methods (%s)..." % exptype)
+    if exptype == ExportType.EXECUTORCH:
+        loaded_methods = {name: loaded_model.load_method(name) for name in loaded_model.method_names}
+        # 3 metadata methods + 3*sizes methods (get_value, predict, _predict_with_logits)
+        assert len(loaded_methods) == 3 + 3*len(ALL_MODEL_SIZES), len(loaded_methods)
+        assert loaded_methods["get_version"].execute(())[0].item() == 13
+        assert loaded_methods["get_side"].execute(())[0].item() == eside
+        assert torch.equal(loaded_methods["get_all_sizes"].execute(())[0], ALL_MODEL_SIZES)
+    else:
+        assert loaded_model.get_version().item() == 13
+        assert loaded_model.get_side().item() == eside
+        assert torch.equal(loaded_model.get_all_sizes(), ALL_MODEL_SIZES)
 
     print("Testing data methods for %d steps..." % (num_steps))
 
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
+    # XXX: 4x1024.vmap will cause errors in build_edge_inputs for smaller sizes
+    #       (which is OK, but it's better to test all sizes)
+    # venv = DualVecEnv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs_stupidai=1)
+
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role=cfg["train"]["env"]["kwargs"]["role"]), num_envs_stupidai=1)
     venv.reset()
 
     benchmarks = torch.zeros(len(ALL_MODEL_SIZES))
-
-    from time import perf_counter_ns
 
     for n in range(num_steps):
         print(venv.render()[0])
@@ -576,7 +622,12 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
             einputs = (obs[0], *edge_inputs)
 
             t0 = perf_counter_ns()
-            action = loaded_methods[f"predict{i}"].execute(einputs)[0]
+
+            if exptype == ExportType.EXECUTORCH:
+                action = loaded_methods[f"predict{i}"].execute(einputs)[0]
+            else:
+                action = getattr(loaded_model, f"predict{i}")(*einputs)
+
             ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
             benchmarks[i] += ms
 
@@ -595,9 +646,19 @@ def verify_export(cfg_file, weights_file, loaded_model, num_steps=10):
     for i, ms in enumerate(benchmarks):
         print("  %d: %d ms" % (i, ms.item()))
 
-    import ipdb; ipdb.set_trace()  # noqa
     print("Model role: %s" % cfg["train"]["env"]["kwargs"]["role"])
     print("verify_export: OK")
+
+
+def load_exported_model(exptype, m):
+    is_file = isinstance(m, str)
+
+    if exptype == ExportType.EXECUTORCH:
+        loadable = m if is_file else m.buffer
+        return Runtime.get().load_program(loadable)
+    else:
+        loadable = m if is_file else io.BytesIO(m._save_to_buffer_for_lite_interpreter())
+        return torch.jit.load(loadable)
 
 
 if __name__ == "__main__":
@@ -606,23 +667,45 @@ if __name__ == "__main__":
     with torch.inference_mode():
         model_cfg_path = f"{MODEL_PREFIX}-config.json"
         model_weights_path = f"{MODEL_PREFIX}-model-dna.pt"
-        export_dst = f"/Users/simo/Projects/vcmi-play/Mods/MMAI/models/{MODEL_PREFIX}.pte"
+        export_dir = "/Users/simo/Projects/vcmi-play/Mods/MMAI/models"
+
+        # XXX: NO extension here (added based on exptype)
+        export_basename = f"{MODEL_PREFIX}-no_scatter_sum2"
 
         xnnpack = True
 
-        # test_gnn()
-        # test_block()
-        # test_model(model_cfg_path, model_weights_path, xnnpack)
-        # test_quantized(model_cfg_path, model_weights_path)
-        test_load(model_cfg_path, model_weights_path)
-        exported_model = export_model(model_cfg_path, model_weights_path, xnnpack)
+        # exptypes = [ExportType.EXECUTORCH]
+        exptypes = [ExportType.LIBTORCH]
+        # exptypes = [ExportType.EXECUTORCH, ExportType.LIBTORCH]
 
-        rt = Runtime.get()
-        loaded_model = rt.load_program(exported_model.buffer)
-        # loaded_model = rt.load_program("/Users/simo/Projects/vcmi-play/Mods/MMAI/models/tukbajrv-202509171940-sizes.pte")
+        for exptype in exptypes:
+            #
+            # Tests (for debugging):
+            #
 
-        verify_export(model_cfg_path, model_weights_path, loaded_model)
+            # test_gnn(exptype)
+            # test_block(exptype)
+            # test_model(model_cfg_path, model_weights_path, exptype)
+            # # test_quantized(model_cfg_path, model_weights_path)
+            # test_load(model_cfg_path, model_weights_path, exptype)
 
-        print("Writing to %s" % export_dst)
-        with open(export_dst, "wb") as f:
-            exported_model.write_to_file(f)
+            #
+            # Actual export
+            #
+
+            exported_model = export_model(model_cfg_path, model_weights_path, exptype)
+            loaded_model = load_exported_model(exptype, exported_model)
+            # loaded_model = load_exported_model(exptype, "/Users/simo/Projects/vcmi-play/Mods/MMAI/models/nkjrmrsq-202509252116-logits.pte")
+            # import ipdb; ipdb.set_trace()  # noqa
+            verify_export(model_cfg_path, model_weights_path, exptype, loaded_model)
+
+        for exptype in exptypes:
+            ext = "pte" if exptype == ExportType.EXECUTORCH else "ptl"
+            export_dst = f"{export_dir}/{export_basename}.{ext}"
+            print("Writing to %s" % export_dst)
+
+            if exptype == ExportType.EXECUTORCH:
+                with open(export_dst, "wb") as f:
+                    exported_model.write_to_file(f)
+            else:
+                exported_model._save_for_lite_interpreter(export_dst)

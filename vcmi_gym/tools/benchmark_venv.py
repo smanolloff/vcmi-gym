@@ -24,9 +24,9 @@ from rl.algos.mppo_dna_gnn.dual_vec_env import DualVecEnv
 def main():
     def model_factory():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        with open("sfcjqcly-1757757007-config.json", "r") as f:
+        with open("tukbajrv-202509211112-config.json", "r") as f:
             cfg = json.load(f)
-        weights = torch.load("sfcjqcly-1757757007-model-dna.pt", weights_only=True, map_location="cpu")
+        weights = torch.load("tukbajrv-202509211112-model-dna.pt", weights_only=True, map_location="cpu")
         model = DNAModel(cfg["model"], device).eval()
         model.load_state_dict(weights, strict=True)
         return model
@@ -34,7 +34,10 @@ def main():
     NUM_ENVS = 10
 
     venv_kwargs = dict(
-        env_kwargs=dict(mapname="gym/generated/4096/4x1024.vmap"),
+        env_kwargs=dict(
+            mapname="gym/generated/4096/4x1024.vmap",
+            role="defender",
+        ),
         num_envs_stupidai=0,
         num_envs_battleai=0,
         num_envs_model=NUM_ENVS,
@@ -62,7 +65,6 @@ def main():
         while vsteps < total_vsteps:
             venv.step(venv.call("random_action"))
 
-            # reset is also a "step" (aka. a round-trip to VCMI)
             vsteps += 1
             tmpvsteps += 1
 
