@@ -126,9 +126,9 @@ def build_edge_inputs(hdata, model_sizes):
     sum_e = model_sizes[:, 0].sum()
     sum_k = model_sizes[:, 1].sum()
 
-    ei_flat = torch.zeros((2, sum_e), dtype=torch.long)
+    ei_flat = torch.zeros((2, sum_e), dtype=torch.int32)
     ea_flat = torch.zeros((sum_e, 1), dtype=torch.float32)
-    nbr_flat = torch.zeros((hdata.num_nodes, sum_k), dtype=torch.long)
+    nbr_flat = torch.zeros((hdata.num_nodes, sum_k), dtype=torch.int32)
 
     e0 = 0
     k0 = 0
@@ -162,8 +162,8 @@ def build_nbr(dst, num_nodes, k_max):
     Build nbr[v, k] = edge id of k-th incoming edge to node v; -1 if unused.
     Use this OUTSIDE the exported graph (host-side) for the current edge_index.
     """
-    nbr = torch.full((num_nodes, k_max), -1, dtype=torch.long)
-    fill = torch.zeros(num_nodes, dtype=torch.long)
+    nbr = torch.full((num_nodes, k_max), -1, dtype=torch.int32)
+    fill = torch.zeros(num_nodes, dtype=torch.int32)
     for e, v in enumerate(dst.tolist()):
         p = int(fill[v])
         if p >= k_max:
@@ -201,16 +201,16 @@ class ExportableModel(nn.Module):
 
         action_table, inverse_table, amove_hexes = Model.build_action_tables()
 
-        self.register_buffer("version", torch.tensor(13, dtype=torch.long), persistent=False)
-        self.register_buffer("side", torch.tensor(side, dtype=torch.long), persistent=False)
+        self.register_buffer("version", torch.tensor([13], dtype=torch.int32), persistent=False)
+        self.register_buffer("side", torch.tensor([side], dtype=torch.int32), persistent=False)
 
         # XXX: these should have persistent=False, but due to a bug they were
         # saved with the weights => load_state_dict() would fail unless they
         # are persistent here as well.
-        self.register_buffer("amove_hexes", amove_hexes.unsqueeze(0).long())
+        self.register_buffer("amove_hexes", amove_hexes.unsqueeze(0).int())
         self.register_buffer("amove_hexes_valid", self.amove_hexes != -1)
-        self.register_buffer("action_table", action_table.long())
-        self.register_buffer("inverse_table", inverse_table.long())
+        self.register_buffer("action_table", action_table.int())
+        self.register_buffer("inverse_table", inverse_table.int())
 
         self.encoder_hexes = ExportableGNNBlock(
             num_layers=config["gnn_num_layers"],
@@ -245,11 +245,11 @@ class ExportableModel(nn.Module):
         self.register_buffer("mask_hex1", torch.zeros([1, self.n_main_actions, 165], dtype=torch.bool), persistent=False)
         self.register_buffer("mask_hex2", torch.zeros([1, self.n_main_actions, 165, 165], dtype=torch.bool), persistent=False)
         self.register_buffer("mask_action", torch.zeros([1, self.n_main_actions], dtype=torch.bool), persistent=False)
-        self.register_buffer("b_idx", torch.arange(1).view(1, 1, 1).expand_as(self.amove_hexes).long(), persistent=False)
-        self.register_buffer("s_idx", torch.arange(165).view(1, 165, 1).expand_as(self.amove_hexes).long(), persistent=False)
+        self.register_buffer("b_idx", torch.arange(1).view(1, 1, 1).expand_as(self.amove_hexes).int(), persistent=False)
+        self.register_buffer("s_idx", torch.arange(165).view(1, 165, 1).expand_as(self.amove_hexes).int(), persistent=False)
         # self.register_buffer("mask_value", torch.tensor(torch.finfo(torch.float32).min), persistent=False)
         self.register_buffer("mask_value", torch.tensor(-((2 - 2**-23) * 2**127), dtype=torch.float32), persistent=False)
-        self.register_buffer("hexactmask_inds", torch.as_tensor(torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]).long(), persistent=False)
+        self.register_buffer("hexactmask_inds", torch.as_tensor(torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]).int(), persistent=False)
 
     def get_version(self):
         return self.version.clone()
@@ -277,7 +277,7 @@ class ExportableModel(nn.Module):
     def get_value(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
         obs = obs.unsqueeze(dim=0)
         _, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size_id)
-        return self.critic(z_global), z_global
+        return self.critic(z_global)[0]
 
     @torch.jit.export
     def predict(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
@@ -291,7 +291,7 @@ class ExportableModel(nn.Module):
         act0_logits = self.act0_head(z_global)
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
-        mask_hex1 = torch.zeros_like(self.mask_hex1)
+        mask_hex1 = torch.zeros((1, 4, 165), dtype=torch.int32)
         hexobs = obs[:, -self.state_size_hexes:].view([-1, 165, self.state_size_one_hex])
 
         # XXX: EXPLICIT casting to torch.bool is required to prevent a
@@ -300,18 +300,18 @@ class ExportableModel(nn.Module):
         # 1.1 for 0=WAIT: nothing to do (all zeros)
         # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
         movemask = hexobs[:, :, self.hex_move_offset].to(torch.bool)
-        mask_hex1[:, 1, :] = movemask
+        mask_hex1[:, 1, :] = movemask.to(torch.int32)
 
         # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
         amovemask = hexobs[:, :, self.hexactmask_inds].to(torch.bool)
-        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
+        mask_hex1[:, 2, :] = amovemask.any(dim=-1).to(torch.int32)
 
         # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
         shootmask = hexobs[:, :, self.hex_shoot_offset].to(torch.bool)
-        mask_hex1[:, 3, :] = shootmask
+        mask_hex1[:, 3, :] = shootmask.to(torch.int32)
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        mask_hex2 = torch.zeros_like(self.mask_hex2)
+        mask_hex2 = torch.zeros((1, 4, 165, 165), dtype=torch.int32)
 
         # 2.1 for 0=WAIT: nothing to do (all zeros)
         # 2.2 for 1=MOVE: nothing to do (all zeros)
@@ -335,7 +335,7 @@ class ExportableModel(nn.Module):
         plane = torch.zeros_like(self.mask_hex2.select(1, 2))  # [B, S, T], bool
 
         # 2) Ensure invalid entries are excluded from updates
-        idx = self.amove_hexes.long()                                      # [B, S, K], long
+        idx = self.amove_hexes.int()                                      # [B, S, K], long
         valid = valid & (idx >= 0)                                  # drop t == -1
 
         # 3) Replace -1 by 0 (any in-range index works) but make src zero there,
@@ -349,12 +349,12 @@ class ExportableModel(nn.Module):
         # accum = accum.scatter_add(-1, safe_idx.long(), valid.float())                         # [B,S,T]
 
         # XXX: 4) Option B: avoid scatter_add
-        classes = torch.arange(165).view(1, 1, 1, 165)  # [1,1,1,T]
+        classes = torch.arange(165, dtype=torch.int32).view(1, 1, 1, 165)  # [1,1,1,T]
         onehot = (safe_idx.unsqueeze(-1) == classes)                      # [B,S,K,T], bool
-        src = valid.to(torch.float32).unsqueeze(-1)                       # [B,S,K,1]
-        accum = (onehot.to(src.dtype) * src).sum(dim=-2)                  # [B,S,T]
+        src = valid.to(torch.int32).unsqueeze(-1)                       # [B,S,K,1]
+        accum = (onehot.to(torch.int32) * src).sum(dim=-2)                  # [B,S,T]
 
-        plane = accum.ne(0)                                                      # bool
+        plane = accum.ne(0).to(torch.int32)
 
         # 5) Write back into the full mask tensor
         mask_hex2 = torch.zeros_like(self.mask_hex2)                             # [B,4,S,T]
@@ -363,18 +363,18 @@ class ExportableModel(nn.Module):
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
         # 3. MASK_ACTION - ie. allowed main action mask
-        mask_action = torch.zeros_like(self.mask_action)
+        mask_action = torch.zeros((1, 4), dtype=torch.int32)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, self.global_wait_offset].to(torch.bool)
+        mask_action[:, 0] = obs[:, self.global_wait_offset].to(torch.bool).to(torch.int32)
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
-        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
+        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1).to(torch.int32)
 
         # Next, we sample:
         #
         # 1. Sample MAIN ACTION
-        probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_action)
+        probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_action.to(torch.bool))
         act0 = torch.argmax(probs_act0, dim=1)
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
@@ -383,7 +383,10 @@ class ExportableModel(nn.Module):
         q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
         k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1[0, act0])
+        # Use per-batch gather of the proper action channel; avoid boolean writes
+        # mask_hex1_sel: [B,S]
+        mask_hex1_sel = mask_hex1.gather(1, act0.view(-1, 1, 1).expand(-1, 1, 165)).squeeze(1).to(torch.bool)
+        probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1_sel)
         hex1 = torch.argmax(probs_hex1, dim=1)
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
@@ -391,7 +394,9 @@ class ExportableModel(nn.Module):
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
         k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2[0, act0, hex1])
+        mask_hex2_amove = mask_hex2[:, 2]  # [B,S,T]
+        mask_hex2_sel = mask_hex2_amove.gather(1, hex1.view(-1, 1, 1).expand(-1, 1, 165)).squeeze(1).to(torch.bool)
+        probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2_sel)
         hex2 = torch.argmax(probs_hex2, dim=1)
 
         action = self.action_table[act0, hex1, hex2]
@@ -407,7 +412,8 @@ class ExportableModel(nn.Module):
 
     @torch.jit.export
     def _categorical_masked(self, logits0, mask):
-        logits1 = torch.where(mask, logits0, self.mask_value)
+        neg_inf = _neg_inf_like(logits0)
+        logits1 = torch.where(mask, logits0, neg_inf)
         logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
         probs = torch.nn.functional.softmax(logits, dim=-1)
         return probs
@@ -428,11 +434,25 @@ MIN_BFLOAT16 = torch.finfo(torch.bfloat16).min
 
 
 @torch.jit.export
+def _neg_inf_like(x: torch.Tensor) -> torch.Tensor:
+    if x.dtype == torch.float16:
+        v = -65504.0
+    elif x.dtype == torch.float32:
+        v = -((2 - 2**-23) * 2**127)
+    else:
+        # fallback: cast to fp32, use fp32 -inf, then back
+        v = -((2 - 2**-23) * 2**127)
+        return x.new_full((1,), v, dtype=torch.float32).to(x.dtype)
+    return x.new_full((1,), v, dtype=x.dtype)
+
+
+@torch.jit.export
 def scatter_sum_via_nbr(src, nbr):
     N, K = nbr.shape
     H = src.size(1)
-    idx = nbr.clamp_min(0).reshape(-1)                 # (N*K,)
-    gathered = src.index_select(0, idx).reshape(N, K, H)
+    # idx = nbr.clamp_min(0).reshape(-1)                 # (N*K,)
+    idx64 = nbr.clamp_min(0).to(torch.int64).reshape(-1)       # only here
+    gathered = src.index_select(0, idx64).reshape(N, K, H)
     valid = (nbr >= 0).unsqueeze(-1)
     zeros = src.new_zeros((1, 1, H))
     gathered = torch.where(valid, gathered, zeros)
@@ -443,11 +463,13 @@ def scatter_sum_via_nbr(src, nbr):
 def scatter_max_via_nbr(src, nbr):
     N, K = nbr.shape
     H = src.size(1)
-    idx = nbr.clamp_min(0).reshape(-1)
-    gathered = src.index_select(0, idx).reshape(N, K, H)
+    # idx = nbr.clamp_min(0).reshape(-1)
+    idx64 = nbr.clamp_min(0).to(torch.int64).reshape(-1)
+    gathered = src.index_select(0, idx64).reshape(N, K, H)
     valid = (nbr >= 0).unsqueeze(-1)
     # XXX: torchscript does not allow to use torch.finfo(...)
-    neg_inf = -((2 - 2**-23) * 2**127)
+    # neg_inf = -((2 - 2**-23) * 2**127)
+    neg_inf = _neg_inf_like(src)[0]
     gathered = torch.where(valid, gathered, neg_inf)
     return gathered.max(dim=1).values
 
@@ -455,9 +477,11 @@ def scatter_max_via_nbr(src, nbr):
 @torch.jit.export
 def softmax_via_nbr(src, index, nbr):
     src_max = scatter_max_via_nbr(src, nbr)                    # (N, H)
-    out = (src - src_max.index_select(0, index)).exp()             # (E_max, H)
+    # out = (src - src_max.index_select(0, index)).exp()             # (E_max, H)
+    out = (src - src_max.index_select(0, index.to(torch.int64))).exp()
     out_sum = scatter_sum_via_nbr(out, nbr) + 1e-16            # (N, H)
-    denom = out_sum.index_select(0, index)                         # (E_max, H)
+    # denom = out_sum.index_select(0, index)                         # (E_max, H)
+    denom = out_sum.index_select(0, index.to(torch.int64))
     return out / denom
 
 
@@ -535,7 +559,7 @@ class ExportableGNNBlock(nn.Module):
         self.act = nn.LeakyReLU()
 
         # Keep original sizes as a buffer (useful for verification/debug)
-        self.register_buffer("all_sizes", all_sizes.long().clone(), persistent=False)
+        self.register_buffer("all_sizes", all_sizes.int().clone(), persistent=False)
 
         # ---- precompute constant offsets on CPU as Python lists (Dynamo-friendly) ----
         # e_offsets[s][l] gives the starting column for link l; last entry is total sum_E[s]
@@ -591,52 +615,51 @@ class ExportableGNNBlock(nn.Module):
 
 
 class HardcodedModelWrapper(torch.nn.Module):
-    def __init__(self, m, side, all_sizes):
+    def __init__(self, m, side, all_sizes, m_value=None):
         super().__init__()
         self.m = m.eval().cpu()
-        self.side = side
+        self.m_value = (m_value or m).eval().cpu()
         self.all_sizes = all_sizes
-        self.version = 13
         assert len(ALL_MODEL_SIZES) == 5
 
     def forward(self, obs, ei_flat, ea_flat, nbr_flat):
         return self.predict0(obs, ei_flat, ea_flat, nbr_flat)
 
     @torch.jit.export
-    def get_version(self):
-        return self.m.version.clone()
+    def get_version(self, dummy_input):
+        return (dummy_input.sum() * 0) + self.m.version.clone()
 
     # Models are usually trained as either attackers or defenders
     # (0=attacker, 1=defender, 2=both)
     @torch.jit.export
-    def get_side(self):
-        return self.m.side.clone()
+    def get_side(self, dummy_input):
+        return (dummy_input.sum() * 0) + self.m.side.clone()
 
     @torch.jit.export
-    def get_all_sizes(self):
-        return self.m.encoder_hexes.all_sizes.clone()
+    def get_all_sizes(self, dummy_input):
+        return (dummy_input.sum() * 0) + self.m.encoder_hexes.all_sizes.clone()
 
     # .get_valueN
 
     @torch.jit.export
     def get_value0(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 0)
+        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 0)
 
     @torch.jit.export
     def get_value1(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 1)
+        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 1)
 
     @torch.jit.export
     def get_value2(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 2)
+        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 2)
 
     @torch.jit.export
     def get_value3(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 3)
+        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 3)
 
     @torch.jit.export
     def get_value4(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 4)
+        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 4)
 
     # .predictN
 

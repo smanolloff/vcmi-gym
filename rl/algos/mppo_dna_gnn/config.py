@@ -1,7 +1,7 @@
 import os
 
 train_env_kwargs = dict(
-    role="attacker",
+    role="defender",
     # opponent="",  # overwritten
     max_steps=500,
     vcmi_loglevel_global="error",
@@ -50,7 +50,7 @@ eval_variant = lambda num_envs_per_opponent, **env_kwargs: dict(
 )
 
 config = dict(
-    name_template="{datetime}-{id}-v12-self",
+    name_template="{datetime}-{id}-v12",
     out_dir_template="data/mppo-dna-heads",
 
     # XXX: s3_dir's "{wandb_group}" substring will be replaced with this value
@@ -75,7 +75,7 @@ config = dict(
         },
         num_vsteps=10_000,
         interval_s=1800,
-        at_script_start=False,
+        at_script_start=True,
     ),
     train=dict(
         env=dict(
@@ -115,6 +115,7 @@ config = dict(
         gnn_out_channels=128,
         gnn_hidden_channels=256,
         critic_hidden_features=256,
+        # result_predictor_hidden_features=256,
     ),
 )
 
@@ -122,19 +123,19 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 
 # Debug
 if os.getenv("VASTAI", None) != "1":
-    config["train"]["num_vsteps"] = 50
+    config["train"]["num_vsteps"] = 40
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 2
-    config["train"]["env"]["num_envs_per_opponent"] = {k: min(v, 2) for k, v in config["train"]["env"]["num_envs_per_opponent"].items()}
-    config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
+    config["train"]["env"]["num_envs_per_opponent"] = {k: min(v, 4) for k, v in config["train"]["env"]["num_envs_per_opponent"].items()}
+    # config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     # config["train"]["env"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
-    config["eval"]["num_vsteps"] = 500
+    config["eval"]["num_vsteps"] = 100
     config["eval"]["env_variants"] = dict(list(config["eval"]["env_variants"].items())[:1])
     for name, envcfg in config["eval"]["env_variants"].items():
         envcfg["num_envs_per_opponent"] = {k: min(v, 1) for k, v in envcfg["num_envs_per_opponent"].items()}
-        envcfg["num_envs"] = 1
         envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
+        envcfg["kwargs"]["warmachine_chance"] = 0
         # envcfg["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     config["eval"]["interval_s"] = 300
@@ -145,5 +146,6 @@ if os.getenv("VASTAI", None) != "1":
     config["model"]["gnn_hidden_channels"] = 32
     config["model"]["gnn_out_channels"] = 16
     config["model"]["critic_hidden_features"] = 16
+    config["model"]["result_predictor_hidden_features"] = 16
     config["model"]["z_size_other"] = 16
     config["model"]["z_size_merged"] = 50

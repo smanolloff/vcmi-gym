@@ -21,6 +21,7 @@ from functools import partial
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 # from torch.distributions import kl_divergence as kld
 from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader
@@ -133,6 +134,12 @@ class State:
             setattr(self, k, v)
 
 
+class BattleResult(enum.IntEnum):
+    LOSS = 0
+    WIN = 1
+    NA = 2
+
+
 class Storage:
     def __init__(self, venv, num_vsteps, device):
         v = venv.num_envs
@@ -140,6 +147,7 @@ class Storage:
         self.v_next_hdata_list = to_hdata_list(
             torch.as_tensor(venv.reset()[0], device=device),
             torch.zeros(v, device=device),
+            torch.zeros(v, dtype=torch.int64, device=device),
             venv.call("links"),
         )
 
@@ -151,9 +159,13 @@ class Storage:
         self.bv_advantages = torch.zeros((num_vsteps, venv.num_envs), device=device)
         self.bv_returns = torch.zeros((num_vsteps, venv.num_envs), device=device)
 
+        # Categorical torch storage for BattleResult
+        self.bv_ep_results = torch.zeros((num_vsteps, venv.num_envs), dtype=torch.int64, device=device)
+
 
 @dataclass
 class TrainStats:
+    result_loss: float
     value_loss: float
     policy_loss: float
     entropy_loss: float
@@ -389,12 +401,19 @@ class Model(nn.Module):
             nn.Linear(config["critic_hidden_features"], 1)
         )
 
+        # self.result_predictor = nn.Sequential(
+        #     nn.Linear(d, config["result_predictor_hidden_features"]),
+        #     nn.LeakyReLU(),
+        #     nn.Linear(config["result_predictor_hidden_features"], 2)  # 0=loss, 2=win
+        # )
+
         # Init lazy layers (must be before weight/bias init)
         with torch.no_grad():
             obs = torch.randn([2, STATE_SIZE])
-            done = torch.zeros(2)
+            done = torch.zeros(2, dtype=torch.bool)
+            result = torch.zeros(2, dtype=torch.int64)
             links = 2 * [VcmiEnv.OBSERVATION_SPACE["links"].sample()]
-            hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
+            hdata = Batch.from_data_list(to_hdata_list(obs, done, result, links))
             z_hexes, z_global = self.encode(hdata)
             self._get_actdata_eval(z_hexes, z_global, obs)
             self._get_value(z_global)
@@ -438,6 +457,9 @@ class Model(nn.Module):
         z_global = z_other + z_hexes.mean(1)
 
         return z_hexes, z_global
+
+    def _get_result_prediction(self, z_global):
+        return self.result_predictor(z_global)
 
     def _get_value(self, z_global):
         return self.critic(z_global)
@@ -619,6 +641,10 @@ class Model(nn.Module):
         _, z_global = self.encode(hdata)
         return self._get_value(z_global)
 
+    def get_result_prediction(self, hdata):
+        _, z_global = self.encode(hdata)
+        return self._get_result_prediction(z_global)
+
 
 class DNAModel(nn.Module):
     def __init__(self, config, device):
@@ -657,14 +683,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             storage.bv_dones[vstep, i] = hdata.done
             storage.bv_values[vstep, i] = hdata.value
             storage.bv_rewards[vstep, i] = hdata.reward
-
-        storage.v_next_hdata_list = to_hdata_list(
-            torch.as_tensor(v_obs),
-            torch.as_tensor(np.logical_or(v_term, v_trunc)),
-            venv.call("links")
-        )
-
-        storage.rollout_buffer.extend(v_hdata_list)
+            storage.bv_ep_results[vstep, i] = hdata.ep_result
 
         # See notes/gym_vector.txt
         if "_final_info" in v_info:
@@ -675,6 +694,34 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             stats.ep_value_mean += sum(v_final_info["net_value"][v_done_id])
             stats.ep_is_success_mean += sum(v_final_info["is_success"][v_done_id])
             stats.num_episodes += len(v_done_id)
+
+            print(f"FINAL _INFO? (vstep={vstep}): {v_info['_final_info']}")
+            print(f"FINAL INFO RAW (vstep={vstep}): {v_info['final_info']['is_success']}")
+
+            # v_ep_results:
+            # Shape: (num_envs), dtype: int64
+            # 0=loss, 1=win, 2=NA
+
+            # XXX: gymnasium's vec env returns inconsistent dtype for boolean arrays in info dicts:
+            # - if all values in the array are False, gymnaisium (correctly) returns a dtype=bool dict
+            # - if at least 1 value is True, gymnasium returns a dtype=object dict where False is None instead.
+            # => must convert excplicitly to bool before converting to int
+            v_ep_results = torch.as_tensor(np.where(
+                v_info["_final_info"],
+                v_info["final_info"]["is_success"].astype(bool).astype(np.int64),
+                BattleResult.NA
+            ))
+            # => (num_envs) with dtype=int64 and values: 0=loss, 1=win, 2=NA
+        else:
+            v_ep_results = torch.full((venv.num_envs,), BattleResult.NA.value, dtype=torch.int64)
+
+        storage.v_next_hdata_list = to_hdata_list(
+            torch.as_tensor(v_obs),
+            torch.as_tensor(np.logical_or(v_term, v_trunc)),
+            v_ep_results,
+            venv.call("links")
+        )
+        storage.rollout_buffer.extend(v_hdata_list)
 
     assert len(storage.rollout_buffer) == num_vsteps * venv.num_envs
 
@@ -699,13 +746,27 @@ def eval_model(logger, model, venv, num_vsteps):
 
     stats = SampleStats()
     v_obs, _ = venv.reset()
-    v_done = torch.zeros(venv.num_envs, dtype=torch.bool)
+
+    bv_dones = torch.zeros((num_vsteps, venv.num_envs), dtype=torch.bool)
+    bv_ep_results = torch.zeros((num_vsteps, venv.num_envs), dtype=torch.int64)
+    bv_result_preds = torch.zeros((num_vsteps, venv.num_envs, 2), dtype=torch.int64)
+
+    v_next_hdata_list = to_hdata_list(
+        torch.as_tensor(v_obs),
+        torch.zeros(venv.num_envs, dtype=torch.bool),   # v_done
+        torch.zeros(venv.num_envs, dtype=torch.int64),  # v_result
+        venv.call("links")
+    )
 
     for vstep in range(0, num_vsteps):
         logger.debug("(eval) vstep: %d" % vstep)
 
-        v_hdata_list = to_hdata_list(torch.as_tensor(v_obs), v_done, venv.call("links"))
-        v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
+        v_hdata_batch = Batch.from_data_list(v_next_hdata_list).to(model.device)
+
+        bv_dones[vstep] = v_hdata_batch.done.cpu()
+        bv_ep_results[vstep] = v_hdata_batch.ep_result.cpu()
+        bv_result_preds[vstep] = model.model_value.get_result_prediction(v_hdata_batch).cpu()
+
         v_actdata = model.model_policy.get_actdata_eval(v_hdata_batch)
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actdata.action.cpu().numpy())
 
@@ -719,11 +780,44 @@ def eval_model(logger, model, venv, num_vsteps):
             stats.ep_is_success_mean += sum(v_final_info["is_success"][v_done_id])
             stats.num_episodes += len(v_done_id)
 
+            v_ep_results = torch.as_tensor(np.where(
+                v_info["_final_info"],
+                v_info["final_info"]["is_success"].astype(bool).astype(np.int64),
+                BattleResult.NA
+            ))
+            # => (num_envs) with dtype=int64 and values: 0=loss, 1=win, 2=NA
+        else:
+            v_ep_results = torch.full((venv.num_envs,), BattleResult.NA.value, dtype=torch.int64)
+
+        v_next_hdata_list = to_hdata_list(
+            torch.as_tensor(v_obs),
+            torch.as_tensor(np.logical_or(v_term, v_trunc)),
+            v_ep_results,
+            venv.call("links")
+        )
+
     if stats.num_episodes > 0:
         stats.ep_rew_mean /= stats.num_episodes
         stats.ep_len_mean /= stats.num_episodes
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
+
+        # ep_result is set for the *first* step of the *next* episode
+        # We want is to have it for *all* steps of the *relevant* episode
+        v_next_hdata_batch = Batch.from_data_list(v_next_hdata_list).to(model.device)
+        bv_ep_results_new = torch.full((num_vsteps, venv.num_envs), BattleResult.NA)
+        bv_ep_results_new[-1] = v_next_hdata_batch.ep_result
+
+        for t in reversed(range(num_vsteps - 1)):
+            bv_ep_results_new[t] = torch.where(
+                bv_dones[t + 1].bool(),
+                bv_ep_results[t + 1],
+                bv_ep_results_new[t + 1]
+            )
+
+        bv_ep_results[:] = bv_ep_results_new
+
+        import ipdb; ipdb.set_trace()  # noqa
 
     return stats
 
@@ -750,22 +844,36 @@ def train_model(
     with torch.no_grad():
         lastgaelam = torch.zeros_like(storage.bv_advantages[0])
 
-        for t in reversed(range(num_vsteps)):
-            if t == num_vsteps - 1:
-                nextnonterminal = 1.0 - v_next_hdata_batch.done
-                nextvalues = v_next_hdata_batch.value
-            else:
-                nextnonterminal = 1.0 - storage.bv_dones[t + 1]
-                nextvalues = storage.bv_values[t + 1]
+        nextnonterminal = 1.0 - v_next_hdata_batch.done
+        nextvalues = v_next_hdata_batch.value
+
+        # ep_result is set for the *first* step of the *next* episode
+        # We want is to have it for *all* steps of the *relevant* episode
+        bv_ep_results_new = torch.full_like(storage.bv_ep_results, BattleResult.NA)
+        bv_ep_results_new[-1] = v_next_hdata_batch.ep_result
+
+        for t in reversed(range(num_vsteps - 1)):
+            nextnonterminal = 1.0 - storage.bv_dones[t + 1]
+            nextvalues = storage.bv_values[t + 1]
             delta = storage.bv_rewards[t] + train_config["gamma"] * nextvalues * nextnonterminal - storage.bv_values[t]
             storage.bv_advantages[t] = lastgaelam = delta + train_config["gamma"] * train_config["gae_lambda"] * nextnonterminal * lastgaelam
+
+            # Update results on terminal steps, otherwise keep last result
+            bv_ep_results_new[t] = torch.where(
+                storage.bv_dones[t + 1].bool(),
+                storage.bv_ep_results[t + 1],
+                bv_ep_results_new[t + 1]
+            )
+
         storage.bv_returns[:] = storage.bv_advantages + storage.bv_values
+        storage.bv_ep_results[:] = bv_ep_results_new
 
         for b in range(num_vsteps):
             for v in range(num_envs):
                 v_hdata = storage.rollout_buffer[b*num_envs + v]
                 v_hdata.advantage = storage.bv_advantages[b, v]
                 v_hdata.ep_return = storage.bv_returns[b, v]
+                v_hdata.ep_result = storage.bv_ep_results[b, v]
 
     batch_size = num_vsteps * num_envs
     minibatch_size = int(batch_size // train_config["num_minibatches"])
@@ -782,11 +890,8 @@ def train_model(
     policy_losses = torch.zeros(train_config["num_minibatches"])
     entropy_losses = torch.zeros(train_config["num_minibatches"])
     value_losses = torch.zeros(train_config["num_minibatches"])
+    result_losses = torch.zeros(train_config["num_minibatches"])
     distill_losses = torch.zeros(train_config["num_minibatches"])
-
-    # TODO:
-    # Gemini says using differently shuffled indices for policy, value and distill
-    # is destructive for the learning?
 
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.policy) epoch: %d" % epoch)
@@ -845,6 +950,7 @@ def train_model(
             mb = mb.to(model.device, non_blocking=True)
 
             newvalue = model.model_value.get_value(mb)
+            newrespred = model.model_value.get_result_prediction(mb)
 
             # Value loss
             # XXX: this overflows under autocast since ep_returns values are around ~1000
@@ -869,10 +975,22 @@ def train_model(
                     # XXX: SIMO: SB3 does not multiply by 0.5 here
                     value_loss = 0.5 * ((newvalue - mb.ep_return) ** 2).mean()
 
+                # Result prediction loss
+                # ipdb> mb.ep_result
+                # tensor([1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 0, 1, 1, 2, 1, 1, 2, 2, 1, 1, 1, 0, 1,
+                #         1, 2, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 2, 0, 1, 2, 1, 1, 1, 1, 1, 2, 1,
+                #         1, 1])
+
+                assert BattleResult.LOSS == 0
+                assert BattleResult.WIN == 1
+                assert BattleResult.NA == 2
+                result_loss = F.cross_entropy(newrespred, mb.ep_result, ignore_index=2)
+
             value_losses[i] = value_loss.detach()
+            result_losses[i] = result_loss.detach()
 
             with autocast_ctx(False):
-                scaler.scale(value_loss).backward()
+                scaler.scale(value_loss + result_loss).backward()
                 scaler.unscale_(optimizer_value)  # needed for clip_grad_norm
                 nn.utils.clip_grad_norm_(model.model_value.parameters(), train_config["max_grad_norm"])
                 scaler.step(optimizer_value)
@@ -930,6 +1048,7 @@ def train_model(
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
     return TrainStats(
+        result_loss=result_losses.mean().item(),
         value_loss=value_losses.mean().item(),
         policy_loss=policy_losses.mean().item(),
         entropy_loss=entropy_losses.mean().item(),
