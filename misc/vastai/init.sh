@@ -13,6 +13,8 @@ export PS4='+ [$(date "+%Y-%m-%dT%H:%M:%S%z")] '
 
 set -euxo pipefail
 
+CPU_COUNT=$1
+
 if [ -e /workspace/.initialized ]; then
     echo "Already initialized, nothing to do."
     exit 0
@@ -316,14 +318,14 @@ cmake -S . -B rel -Wno-dev \
     -D ENABLE_ML=1 \
     -D ENABLE_MMAI=1 \
     -D MMAI_EXECUTORCH_PATH=""
-cmake --build rel/ -- -j32
+cmake --build rel/ -- -j$CPU_COUNT
 
 cd "../vcmi_gym/connectors"
 apt-get -y install libboost-all-dev
 cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
-cmake --build rel/ -- -j8
+cmake --build rel/ -- -j$CPU_COUNT
 
 cd ../../
 wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"

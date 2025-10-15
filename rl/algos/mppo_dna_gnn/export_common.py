@@ -270,7 +270,9 @@ class ExportableModel(nn.Module):
         other = obs[0, :self.dim_other]
         z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, nbr_flat, size_id).unsqueeze(0)
         z_other = self.encoder_other(other).unsqueeze(0)
-        z_global = z_other + z_hexes.mean(1)
+        # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
+        # z_global = z_other + z_hexes.mean(1)
+        z_global = z_other + z_hexes.mean(dim=1, keepdim=True).squeeze(1)
         return z_hexes, z_global
 
     @torch.jit.export
@@ -352,7 +354,10 @@ class ExportableModel(nn.Module):
         classes = torch.arange(165, dtype=torch.int32).view(1, 1, 1, 165)  # [1,1,1,T]
         onehot = (safe_idx.unsqueeze(-1) == classes)                      # [B,S,K,T], bool
         src = valid.to(torch.int32).unsqueeze(-1)                       # [B,S,K,1]
-        accum = (onehot.to(torch.int32) * src).sum(dim=-2)                  # [B,S,T]
+
+        # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
+        # accum = (onehot.to(torch.int32) * src).sum(dim=-2)                  # [B,S,T]
+        accum = (onehot.to(torch.int32) * src).sum(dim=-2, keepdim=True).squeeze(-2)
 
         plane = accum.ne(0).to(torch.int32)
 
@@ -415,7 +420,7 @@ class ExportableModel(nn.Module):
         neg_inf = _neg_inf_like(logits0)
         logits1 = torch.where(mask, logits0, neg_inf)
         logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
-        probs = torch.nn.functional.softmax(logits, dim=-1)
+        probs = logits.softmax(dim=-1)
         return probs
 
 
@@ -456,7 +461,10 @@ def scatter_sum_via_nbr(src, nbr):
     valid = (nbr >= 0).unsqueeze(-1)
     zeros = src.new_zeros((1, 1, H))
     gathered = torch.where(valid, gathered, zeros)
-    return gathered.sum(dim=1)                  # (N, H)
+
+    # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
+    # return gathered.sum(dim=1)                  # (N, H)
+    return gathered.sum(dim=1, keepdim=True).squeeze(1)                  # (N, H)
 
 
 @torch.jit.export
@@ -627,17 +635,21 @@ class HardcodedModelWrapper(torch.nn.Module):
 
     @torch.jit.export
     def get_version(self, dummy_input):
-        return (dummy_input.sum() * 0) + self.m.version.clone()
+        # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
+        # return (dummy_input.sum() * 0) + self.m.version.clone()
+        return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.version.clone()
 
     # Models are usually trained as either attackers or defenders
     # (0=attacker, 1=defender, 2=both)
     @torch.jit.export
     def get_side(self, dummy_input):
-        return (dummy_input.sum() * 0) + self.m.side.clone()
+        # return (dummy_input.sum() * 0) + self.m.side.clone()
+        return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.side.clone()
 
     @torch.jit.export
     def get_all_sizes(self, dummy_input):
-        return (dummy_input.sum() * 0) + self.m.encoder_hexes.all_sizes.clone()
+        # return (dummy_input.sum() * 0) + self.m.encoder_hexes.all_sizes.clone()
+        return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.encoder_hexes.all_sizes.clone()
 
     # .get_valueN
 

@@ -10,8 +10,11 @@ from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.export import export, export_for_training
 from executorch.exir import to_edge_transform_and_lower
 from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
-from executorch.backends.apple.coreml.partition import CoreMLPartitioner
 from executorch.backends.xnnpack.quantizer.xnnpack_quantizer import XNNPACKQuantizer, get_symmetric_quantization_config
+from executorch.backends.apple.coreml.partition import CoreMLPartitioner
+from executorch.backends.apple.coreml.compiler import CoreMLBackend
+from executorch.backends.vulkan.partitioner.vulkan_partitioner import VulkanPartitioner
+import coremltools
 from executorch.runtime import Runtime
 
 from .export_common import (
@@ -71,9 +74,11 @@ def test_gnn(exptype):
 
     print("ExportType type: %s" % exptype.name)
     if exptype == ExportType.EXECUTORCH:
-        print("=== XNN transform ===")
         ep = {"forward": export(mygen, myinputs, strict=True)}
+
+        print("=== XNN transform ===")
         edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+
         expres = edge.exported_program("forward").module()(*myinputs)
     else:
         ts = torch.jit.script(mygen, example_inputs=myinputs)
@@ -157,12 +162,14 @@ def test_block(exptype):
 
     print("ExportType type: %s" % exptype.name)
     if exptype == ExportType.EXECUTORCH:
-        print("=== XNN transform ===")
         ep = {
             "forward0": export(myblock, myinputs0, strict=True),
             "forward1": export(myblock, myinputs1, strict=True),
         }
+
+        print("=== XNN transform ===")
         edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+
         exported_forward0 = edge.exported_program("forward0").module()
         exported_forward1 = edge.exported_program("forward1").module()
         expres0 = exported_forward0(*myinputs0)
@@ -242,10 +249,8 @@ def test_model(cfg, weights_file, exptype):
 
     hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES[:2])
 
-    print("ExportType type: %s" % exptype.name)
+    print("Exporting (exptype: %s)" % exptype.name)
     if exptype == ExportType.EXECUTORCH:
-        print("=== XNN transform ===")
-
         for i, edge_inputs in enumerate(all_edge_inputs):
             getattr(hmw, f"predict{i}")(obs[0], *edge_inputs)
             getattr(hmw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
@@ -265,9 +270,33 @@ def test_model(cfg, weights_file, exptype):
             einputs = (obs[0], *edge_inputs)
             w = ModelWrapper(hmw, f"_predict_with_logits{i}")
             ep[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
+
+        # # XNNPACK
+        # # slow at runtime :(
+        # print("=== XNNPACK transform ===")
         # edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
-        edge = to_edge_transform_and_lower(ep, partitioner=[CoreMLPartitioner()])
-        print("Test save/load")
+
+        # # CoreML
+        # # Example: force iOS16 to avoid CoreML7 (which requires iOS17/macOS14)
+        # print("=== CoreML transform ===")
+        # coreml_specs = CoreMLBackend.generate_compile_specs(
+        #     minimum_deployment_target=coremltools.target.iOS16,   # choose iOS15/16 as needed
+        #     compute_unit=coremltools.ComputeUnit.ALL,             # optional
+        #     compute_precision=coremltools.precision.FLOAT16       # optional
+        # )
+        # edge = to_edge_transform_and_lower(ep, partitioner=[CoreMLPartitioner(
+        #     compile_specs=coreml_specs,
+        #     # If export still picks a newer opset, remove them from the model or allow partial delegation:
+        #     # lower_full_graph=False
+        # )])
+
+        # Vulkan
+        # Android 7.0+ with Vulkan driver. Performance varies by GPU and driver.
+        # No "min API" knob in export; gate at install (minSdkVersion) and at runtime via Vulkan presence.
+        print("=== Vulkan transform ===")
+        edge = to_edge_transform_and_lower(ep, partitioner=[VulkanPartitioner()])
+
+        print("=== Test save/load ===")
         exported_model = edge.to_executorch()
         load_exported_model(exptype, exported_model)
         # import ipdb; ipdb.set_trace()  # noqa
@@ -480,10 +509,12 @@ def test_load(cfg, weights_file, exptype):
 
     print("ExportType type: %s" % exptype.name)
     if exptype == ExportType.EXECUTORCH:
-        print("=== XNN transform ===")
         mw = ModelWrapper(hmw, "_predict_with_logits0")
         ep = {"_predict_with_logits0": export(mw, einputs, strict=True)}
+
+        print("=== XNN transform ===")
         edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
+
         rt = Runtime.get()
         print("Loading...")
         loaded = rt.load_program(edge.to_executorch().buffer)
@@ -556,9 +587,8 @@ def export_model(cfg, weights_file, exptype, is_tiny):
 
     hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES, emodel0.model_value)
 
-    print("ExportType type: %s" % exptype.name)
+    print("Exporting (exptype: %s)" % exptype.name)
     if exptype == ExportType.EXECUTORCH:
-        print("=== XNN transform ===")
         for i, edge_inputs in enumerate(all_edge_inputs):
             einputs = (obs[0], *edge_inputs)
             w = ModelWrapper(hmw, f"predict{i}")
@@ -581,8 +611,31 @@ def export_model(cfg, weights_file, exptype, is_tiny):
         #         print(str(n.target))
         #         if "aten.slice_scatter" in str(n.target) or "copy_" in str(n.target):
         #             print("FOUND SCATTER: %s" % n.format_node())  # shows producer, dtype, shapes
-        edge = to_edge_transform_and_lower(programs, partitioner=[CoreMLPartitioner()])
+
+        # # XNNPACK
+        # print("=== XNNPACK transform ===")
         # edge = to_edge_transform_and_lower(programs, partitioner=[XnnpackPartitioner()])
+
+        # # CoreML
+        # # Example: force iOS16 to avoid CoreML7 (which requires iOS17/macOS14)
+        # print("=== CoreML transform ===")
+        # coreml_specs = CoreMLBackend.generate_compile_specs(
+        #     minimum_deployment_target=coremltools.target.iOS16,   # choose iOS15/16 as needed
+        #     compute_unit=coremltools.ComputeUnit.ALL,             # optional
+        #     compute_precision=coremltools.precision.FLOAT16       # optional
+        # )
+        # edge = to_edge_transform_and_lower(programs, partitioner=[CoreMLPartitioner(
+        #     compile_specs=coreml_specs,
+        #     # If export still picks a newer opset, remove them from the model or allow partial delegation:
+        #     # lower_full_graph=False
+        # )])
+
+        # Vulkan
+        # Android 7.0+ with Vulkan driver. Performance varies by GPU and driver.
+        # No "min API" knob in export; gate at install (minSdkVersion) and at runtime via Vulkan presence.
+        print("=== Vulkan transform ===")
+        edge = to_edge_transform_and_lower(programs, partitioner=[VulkanPartitioner()])
+
         print("Exported programs:\n  %s" % "\n  ".join(list(programs.keys())))
         exported_model = edge.to_executorch()
     else:
@@ -591,7 +644,7 @@ def export_model(cfg, weights_file, exptype, is_tiny):
         for i, edge_inputs in enumerate(all_edge_inputs):
             getattr(jw, f"predict{i}")(obs[0], *edge_inputs)
             if not is_tiny:
-                getattr(jw, f"get_value{i}")(obs[0], *edge_inputs)
+                # getattr(jw, f"get_value{i}")(obs[0], *edge_inputs)
                 getattr(jw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
         method_names = [f"predict{i}" for i in range(len(ALL_MODEL_SIZES))]
         if not is_tiny:
@@ -618,6 +671,7 @@ def verify_export(cfg, weights_file, exptype, loaded_model, is_tiny, num_steps=1
     if exptype == ExportType.EXECUTORCH:
         loaded_methods = {name: loaded_model.load_method(name) for name in loaded_model.method_names}
         if is_tiny:
+            # 3 metadata methods + 1*sizes methods (predict)
             assert len(loaded_methods) == 3 + 1*len(ALL_MODEL_SIZES), len(loaded_methods)
         else:
             # 3 metadata methods + 3*sizes methods (get_value, predict, _predict_with_logits)
@@ -727,10 +781,10 @@ def main():
             export_dir = "/Users/simo/Projects/vcmi-play/Mods/MMAI/models"
 
             # XXX: NO extension here (added based on exptype)
-            export_basename = f"{prefix}-coreml"
+            export_basename = f"{prefix}-vulkan"
 
             # For faster ET exports: no get_value, no _predict_with_logis
-            tiny = False
+            tiny = True
 
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
@@ -759,10 +813,10 @@ def main():
                 #
 
                 exported_model = export_model(cfg, model_weights_path, exptype, tiny)
-                loaded_model = load_exported_model(exptype, exported_model)
+                # loaded_model = load_exported_model(exptype, exported_model)
                 # loaded_model = load_exported_model(exptype, "/Users/simo/Projects/vcmi-play/Mods/MMAI/models/attacker-nkjrmrsq-202509231549-tiny.pte")
                 # import ipdb; ipdb.set_trace()  # noqa
-                verify_export(cfg, model_weights_path, exptype, loaded_model, tiny)
+                # verify_export(cfg, model_weights_path, exptype, loaded_model, tiny)
 
                 save_exported_model(exptype, exported_model, export_dir, export_basename)
 
