@@ -121,6 +121,12 @@ pip install --break-system-packages -r requirements.txt
 #
 
 cat <<-EOF >>~/.bashrc
+# Need a separate simorc (called explicitly from nonlogin shells)
+source ~/.simorc
+EOF
+
+cat <<-EOF >>~/.simorc
+set -x
 
 function pymod() {
     local f=\$1
@@ -131,18 +137,24 @@ function pymod() {
 #
 # Copy a timestamped checkpoint to a regular checkpoint (in current dir)
 #
-function copy_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: copy_checkpoint TIMESTAMP [DIR]"; return 1; }
-    [ -n "\$2" ] && cp_dir="\${2%/}" || cp_dir=.
+function link_checkpoint() {
+    [ -n "\${1:-}" ] || { echo "Usage: link_checkpoint TIMESTAMP [DIR]"; return 1; }
+    [ -n "\$2" ] && link_dir="\${2%/}" || link_dir=.
 
-    if [ -e \$cp_dir/*\$1*.tmp ]; then
-        echo "Incomplete checkpoint -- found .tmp files"
-        return 1
-    fi
+    [[ \$1 =~ ^[0-9]+\$ ]] || { echo "Invalid timestamp: \$1"; return 1; }
 
-    for f in \$cp_dir/*\$1*; do
+    confirmed=no
+
+    for f in \$link_dir/*\$1*; do
+        flink=\$link_dir/\${fbase:0:8}-\${fbase:20}
+        if [ -e \$flink -a \$confirmed != yes ]; then
+            echo -n "File exists, type 'yes' to continue: "
+            read -r confirmed
+            [ "\$confirmed" = "yes" ] || return 0
+        fi
+
         fbase=\${f##*/}
-        cp \$f \$cp_dir/\${fbase:0:8}-\${fbase:20}
+        ln -fs \$(basename \$f) \$link_dir/\${fbase:0:8}-\${fbase:20}
     done
 }
 
@@ -151,6 +163,7 @@ function copy_checkpoint() {
 #
 function upload_checkpoint() {
     [ -n "\${1:-}" ] || { echo "Usage: upload_checkpoint TIMESTAMP"; return 1; }
+    [[ \$1 =~ ^[0-9]+\$ ]] || { echo "Invalid timestamp: \$1"; return 1; }
 
     cfg_ary=(./*\$1-config.json)  # must use array for globbing
     cfg="\${cfg_ary[0]}"
@@ -189,7 +202,6 @@ function download_checkpoint() {
     done
 }
 
-
 #
 # Make a timestamped checkpoint
 #
@@ -217,6 +229,67 @@ function backup_checkpoint() {
     done
 }
 
+function setboot() {
+    repl="\$*; /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID IDLE"
+    [[ \$repl =~ [\\"\\'\\\$\\\\] ]] && { echo "special characters found"; return 1; } || :
+
+    cat <<EOL >/root/onstart.sh
+#!/bin/bash
+set -x
+/opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID REBOOTED
+
+df  # for logging
+mb=\\\$(df --output=avail -m / | tail -1 | awk '{print \\\$1}')
+if ! [[ \\\$mb =~ ^[0-9]$ ]]; then
+    echo "Failed to determine free space: '\\\$mb'"
+    /opt/instance-tools/bin/vastai label instance ERROR
+    return 1
+fi
+
+if [ \\\$mb -lt 500 ]; then
+    /opt/instance-tools/bin/vastai label instance NO_SPACE
+    return 1
+fi
+
+tmux new-session -d "source ~/.simorc; cd \$PWD; \$repl; exec \$SHELL"
+EOL
+}
+
+function train_gnn() {
+    # To start a new run, pass "" explicitly, e.g.
+    [ "\$#" -eq 1 ] || [ "\$#" -eq 2 -a "\$2" = "--dry-run" ] || {
+        cat <<-USAGE
+Usage: train_gnn run_id [--dry-run]
+USAGE
+        return 1
+    }
+
+    run_id="\$1"
+
+    if [ -z "\$run_id" ]; then
+        # New run
+        LC_ALL=C run_id=\$(tr -dc 'a-z' </dev/urandom | head -c8)
+        args="--run-id \$run_id"
+    else
+        # Resume run
+        f=data/mppo-dna-heads/\$run_id-config.json
+        [ -r "\$f" ] || { echo "No such file: \$f"; return 1; }
+        args="-f \$f"
+    fi
+
+    basecmd="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn"
+
+    if [ -z "\$2" ]; then
+        # Resume from the latest checkpoint on restart
+        setboot \$basecmd -f data/mppo-dna-heads/\$run_id-config.json
+    else
+        # --dry-run => no resume (let it transition to IDLE)
+        setboot :
+        args+=" --dry-run"
+    fi
+
+    bash -xc "\$basecmd \$args"
+}
 
 alias gs='git status'
 alias gl='git log'
@@ -235,7 +308,6 @@ export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 export VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
 cd /workspace/vcmi-gym
-set -x
 EOF
 
 # does not work (fails with unbound variable)

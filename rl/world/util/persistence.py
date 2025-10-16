@@ -105,6 +105,9 @@ def load_checkpoint(
     logger.info(dict(event="Loading checkpoint...", filelist=filelist))
     now = time.time()
 
+    # XXX: disk space is scarse on vastai runners, don't backup on load.
+    #      optimize_local_storage must be false, though, as it may corrupt
+    #      the last loadable checkpoint when disk space runs out.
     def _backup(filename):
         if not dry_run and not optimize_local_storage:
             backname = "%s-%d.pt" % (filename.removesuffix(".pt"), now)
@@ -114,12 +117,12 @@ def load_checkpoint(
     for f_model, model in files["models"].items():
         _s3_download(logger, dry_run, s3_config, f_model)
         model.load_state_dict(torch.load(f_model, weights_only=True, map_location=device), strict=True)
-        _backup(f_model)
+        # _backup(f_model)
 
     for f_optimizer, optimizer in files["optimizers"].items():
         _s3_download(logger, dry_run, s3_config, f_optimizer)
         optimizer.load_state_dict(torch.load(f_optimizer, weights_only=True, map_location=device))
-        _backup(f_optimizer)
+        # _backup(f_optimizer)
 
     for f_scaler, scaler in files["scalers"].items():
         try:
@@ -130,14 +133,14 @@ def load_checkpoint(
             else:
                 raise
         scaler.load_state_dict(torch.load(f_scaler, weights_only=True, map_location=device))
-        _backup(f_scaler)
+        # _backup(f_scaler)
 
     for f_state, state in files["states"].items():
         assert callable(state.to_json) and callable(state.from_json)
         _s3_download(logger, dry_run, s3_config, f_state)
         with open(f_state, "r") as f:
             state.from_json(f.read())
-        _backup(f_state)
+        # _backup(f_state)
 
 
 def save_checkpoint(
@@ -151,15 +154,29 @@ def save_checkpoint(
     optimize_local_storage,
     s3_config,
     uploading_event,
-    timestamped=False,
-    config=None,
+    config,
+    tag,
     states={},      # dict with name=>obj, where obj has .to_json() and .from_json(string)
 ):
-    if timestamped:
-        assert config, "config is also needed for timestamped checkpoints"
-        prefix = f"{run_id}-{time.time():.0f}"
-    else:
-        prefix = run_id
+    assert tag, "tag is required"
+    prefix = f"{run_id}-{tag}"
+
+    def create_symlink(f):
+        # Create symlinks
+        #   runid-model.pt -> runid-tag-model.pt
+        fbase = os.path.basename(f)
+        fdir = os.path.dirname(f)
+
+        lbase = run_id + fbase.removeprefix(prefix)
+        link_name = f"{fdir}/{lbase}"
+        target = fbase
+        # print(f"f={f} prefix={prefix} fbase={fbase} fdir={fdir} lbase={lbase} link_name={link_name} target={target}")
+
+        try:
+            os.unlink(link_name)
+        except FileNotFoundError:
+            pass
+        os.symlink(src=target, dst=link_name)
 
     for state in states.values():
         assert callable(state.to_json) and callable(state.from_json)
@@ -200,8 +217,9 @@ def save_checkpoint(
 
     msg = dict(event="Saving checkpoint...", filelist=filelist)
 
+    # Prevent overwriting files that are currently being uploaded
     if uploading_event.is_set():
-        logger.warn("Still uploading previous checkpoint, will not save this one locally or to S3")
+        logger.warn("Still uploading previous checkpoint, will not save this one locally nor S3")
         return
 
     if dry_run:
@@ -209,14 +227,14 @@ def save_checkpoint(
         logger.info(msg)
     else:
         logger.info(msg)
-        # Prevent corrupted checkpoints if terminated during torch.save
 
-        if config:
-            with open(os.path.join(out_dir, f"{prefix}-config.json"), "w") as f:
-                logger.info(f"Saving config to: {f.name}")
-                json.dump(config, f, indent=4, sort_keys=False)
+        fcfg = os.path.join(out_dir, f"{prefix}-config.json")
+        with open(fcfg, "w") as f:
+            logger.info(f"Saving config to: {f.name}")
+            json.dump(config, f, indent=4, sort_keys=False)
 
         if optimize_local_storage:
+            # *Mark* corrupted checkpoints if terminated during torch.save
             # Use "...~" as a lockfile
             # While the lockfile exists, the original file is corrupted
             # (i.e. save() was interrupted => S3 download is needed to load())
@@ -242,7 +260,9 @@ def save_checkpoint(
 
             for f in filelist:
                 os.unlink(f"{f}~")
+                create_symlink(f)
         else:
+            # *Prevent* corrupted checkpoints if terminated during torch.save
             # Use temporary files to ensure the original one is always good
             # even if the .save is interrupted
             # NOTE: first save all, then move all, to prevent mixing up
@@ -263,13 +283,12 @@ def save_checkpoint(
 
             for f in filelist:
                 shutil.move(f"{f}.tmp", f)
+                create_symlink(f)
+
+        create_symlink(fcfg)
 
     if not s3_config:
         logger.info("No s3_config, will not upoad checkpoint to S3")
-        return
-
-    if uploading_event.is_set():
-        logger.warn("Still uploading previous checkpoint, will not upload this one to S3")
         return
 
     uploading_event.set()
