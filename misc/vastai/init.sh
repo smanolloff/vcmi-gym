@@ -122,7 +122,7 @@ pip install --break-system-packages -r requirements.txt
 
 cat <<-EOF >>~/.bashrc
 # Need a separate simorc (called explicitly from nonlogin shells)
-source ~/.simorc
+. ~/.simorc
 EOF
 
 cat <<-EOF >>~/.simorc
@@ -135,17 +135,17 @@ function pymod() {
 }
 
 #
-# Copy a timestamped checkpoint to a regular checkpoint (in current dir)
+# Link a tagged checkpoint
 #
 function link_checkpoint() {
     [ -n "\${1:-}" ] || { echo "Usage: link_checkpoint TIMESTAMP [DIR]"; return 1; }
     [ -n "\$2" ] && link_dir="\${2%/}" || link_dir=.
 
-    [[ \$1 =~ ^[0-9]+\$ ]] || { echo "Invalid timestamp: \$1"; return 1; }
+    [ \$1 = best ] || [[ \$1 =~ ^[0-9]+\$ ]] || { echo "Invalid tag: \$1"; return 1; }
 
     confirmed=no
 
-    for f in \$link_dir/*\$1*; do
+    for f in \$link_dir/*-\$1-*; do
         flink=\$link_dir/\${fbase:0:8}-\${fbase:20}
         if [ -e \$flink -a \$confirmed != yes ]; then
             echo -n "File exists, type 'yes' to continue: "
@@ -235,6 +235,8 @@ function setboot() {
 
     cat <<EOL >/root/onstart.sh
 #!/bin/bash
+# Logs are in /var/log/onstart.log
+
 set -x
 /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID REBOOTED
 
@@ -243,12 +245,12 @@ mb=\\\$(df --output=avail -m / | tail -1 | awk '{print \\\$1}')
 if ! [[ \\\$mb =~ ^[0-9]$ ]]; then
     echo "Failed to determine free space: '\\\$mb'"
     /opt/instance-tools/bin/vastai label instance ERROR
-    return 1
+    exit 1
 fi
 
 if [ \\\$mb -lt 500 ]; then
     /opt/instance-tools/bin/vastai label instance NO_SPACE
-    return 1
+    exit 1
 fi
 
 tmux new-session -d "source ~/.simorc; cd \$PWD; \$repl; exec \$SHELL"
