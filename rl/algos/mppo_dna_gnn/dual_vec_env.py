@@ -131,8 +131,7 @@ class DualEnvController():
                 with torch.inference_mode():
                     b_obs = torch.as_tensor(self.env_obs[ids])
                     b_done = torch.zeros(len(ids))
-                    b_result = torch.zeros(len(ids, dtype=torch.int64))
-                    hdata = Batch.from_data_list(to_hdata_list(b_obs, b_done, b_result, b_links)).to(model.device)
+                    hdata = Batch.from_data_list(to_hdata_list(b_obs, b_done, b_links)).to(model.device)
 
                     with self.controller_act_cond:
                         self.logger.debug("model.model_policy.get_actdata_eval(hdata)")
@@ -388,7 +387,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         super().__init__(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
 
 
-def to_hdata(obs, done, result, links):
+def to_hdata(obs, done, links):
     device = obs.device
     res = HeteroData()
     res.obs = obs.unsqueeze(0)
@@ -399,7 +398,6 @@ def to_hdata(obs, done, result, links):
     res.logprob = torch.tensor(0., device=device)
     res.advantage = torch.tensor(0., device=device)
     res.ep_return = torch.tensor(0., device=device)
-    res.ep_result = result.unsqueeze(0)
 
     res["hex"].x = obs[-STATE_SIZE_HEXES:].view(165, STATE_SIZE_ONE_HEX)
     for lt in LINK_TYPES.keys():
@@ -411,10 +409,10 @@ def to_hdata(obs, done, result, links):
 
 # b_obs: torch.tensor of shape (B, STATE_SIZE)
 # tuple_links: tuple of B dicts, where each dict is a single obs's "links"
-def to_hdata_list(b_obs, b_done, b_ep_result, tuple_links):
+def to_hdata_list(b_obs, b_done, tuple_links):
     b_hdatas = []
-    for obs, done, ep_result, links in zip(b_obs, b_done, b_ep_result, tuple_links):
-        b_hdatas.append(to_hdata(obs, done, ep_result, links))
+    for obs, done, links in zip(b_obs, b_done, tuple_links):
+        b_hdatas.append(to_hdata(obs, done, links))
     # XXX: this concatenates along the first dim
     # i.e. stacking two (165, STATE_SIZE_ONE_HEX)
     #       gives  (330, STATE_SIZE_ONE_HEX)
