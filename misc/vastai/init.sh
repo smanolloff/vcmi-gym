@@ -146,6 +146,7 @@ function link_checkpoint() {
     confirmed=no
 
     for f in \$link_dir/*-\$1-*; do
+        fbase=\${f##*/}
         flink=\$link_dir/\${fbase:0:8}-\${fbase:20}
         if [ -e \$flink -a \$confirmed != yes ]; then
             echo -n "File exists, type 'yes' to continue: "
@@ -153,8 +154,10 @@ function link_checkpoint() {
             [ "\$confirmed" = "yes" ] || return 0
         fi
 
-        fbase=\${f##*/}
-        ln -fs \$(basename \$f) \$link_dir/\${fbase:0:8}-\${fbase:20}
+        abstarget="\$link_dir/\$fbase"
+        [ -e "\$abstarget" ] || { echo "Error: target not found: \$abstarget"; return 1; }
+
+        ln -fs \$fbase \$link_dir/\${fbase:0:8}-\${fbase:20}
     done
 }
 
