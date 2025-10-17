@@ -208,9 +208,8 @@ def test_model(cfg, weights_file, exptype):
 
     obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
     done = torch.tensor([False])
-    result = torch.tensor([0])
     links = [venv.call("obs")[0]["links"]]
-    hdata = Batch.from_data_list(to_hdata_list(obs, done, result, links))
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
     actdata = model.get_actdata_eval(hdata, deterministic=True)
 
@@ -394,9 +393,8 @@ def test_quantized(cfg, weights_file, exptype):
 
     obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
     done = torch.tensor([False])
-    result = torch.tensor([0])
     links = [venv.call("obs")[0]["links"]]
-    hdata = Batch.from_data_list(to_hdata_list(obs, done, result, links))
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
     # einputs = build_einputs(hdata, E_MAX, K_MAX)
     # for i, arg in enumerate(einputs):
@@ -486,9 +484,8 @@ def test_load(cfg, weights_file, exptype):
 
     obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
     done = torch.tensor([False])
-    result = torch.tensor([0])
     links = [venv.call("obs")[0]["links"]]
-    hdata = Batch.from_data_list(to_hdata_list(obs, done, result, links))
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
     # XXX: test only with size "S" (faster)
     einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]))
@@ -571,9 +568,8 @@ def export_model(cfg, weights_file, exptype, is_tiny):
 
     obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
     done = torch.tensor([False])
-    result = torch.tensor([0])
     links = [venv.call("obs")[0]["links"]]
-    hdata = Batch.from_data_list(to_hdata_list(obs, done, result, links))
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
     all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
 
@@ -612,17 +608,17 @@ def export_model(cfg, weights_file, exptype, is_tiny):
         #         if "aten.slice_scatter" in str(n.target) or "copy_" in str(n.target):
         #             print("FOUND SCATTER: %s" % n.format_node())  # shows producer, dtype, shapes
 
-        # # XNNPACK
-        # print("=== XNNPACK transform ===")
-        # edge = to_edge_transform_and_lower(programs, partitioner=[XnnpackPartitioner()])
+        # XNNPACK (cross-platform, but buggy on windows)
+        print("=== XNNPACK transform ===")
+        edge = to_edge_transform_and_lower(programs, partitioner=[XnnpackPartitioner()])
 
-        # # CoreML
-        # # Example: force iOS16 to avoid CoreML7 (which requires iOS17/macOS14)
+        # # CoreML (apple only)
+        # # iOS17/macOS14+ (exports for iOS16 crashed on my iOS17)
         # print("=== CoreML transform ===")
         # coreml_specs = CoreMLBackend.generate_compile_specs(
-        #     minimum_deployment_target=coremltools.target.iOS16,   # choose iOS15/16 as needed
+        #     minimum_deployment_target=coremltools.target.iOS16,   # choose iOS15/16 as needed; XXX: crashes on ios17
         #     compute_unit=coremltools.ComputeUnit.ALL,             # optional
-        #     compute_precision=coremltools.precision.FLOAT16       # optional
+        #     compute_precision=coremltools.precision.FLOAT16       # optional; ~10% speed-up on ios17
         # )
         # edge = to_edge_transform_and_lower(programs, partitioner=[CoreMLPartitioner(
         #     compile_specs=coreml_specs,
@@ -630,11 +626,12 @@ def export_model(cfg, weights_file, exptype, is_tiny):
         #     # lower_full_graph=False
         # )])
 
-        # Vulkan
-        # Android 7.0+ with Vulkan driver. Performance varies by GPU and driver.
-        # No "min API" knob in export; gate at install (minSdkVersion) and at runtime via Vulkan presence.
-        print("=== Vulkan transform ===")
-        edge = to_edge_transform_and_lower(programs, partitioner=[VulkanPartitioner()])
+        # # Vulkan (android only)
+        # # Android 7.0+ with Vulkan driver. Performance varies by GPU and driver.
+        # # No "min API" knob in export; gate at install (minSdkVersion) and at runtime via Vulkan presence.
+        # # XXX: Vulkan models fail to load due to missing shader for sum_int32 (and possibly others)
+        # print("=== Vulkan transform ===")
+        # edge = to_edge_transform_and_lower(programs, partitioner=[VulkanPartitioner()])
 
         print("Exported programs:\n  %s" % "\n  ".join(list(programs.keys())))
         exported_model = edge.to_executorch()
@@ -700,9 +697,8 @@ def verify_export(cfg, weights_file, exptype, loaded_model, is_tiny, num_steps=1
 
         obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
         done = torch.tensor([False])
-        result = torch.tensor([0])
         links = [venv.call("obs")[0]["links"]]
-        hdata = Batch.from_data_list(to_hdata_list(obs, done, result, links))
+        hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
         actdata = model.model_policy.get_actdata_eval(hdata, deterministic=True)
 
@@ -766,11 +762,11 @@ def main():
     MODEL_PREFIXES = [
       # "nkjrmrsq-202509231549",
       # "nkjrmrsq-202509252116",
-      # "nkjrmrsq-202509291846",
-      "tukbajrv-202509171940",
+      "nkjrmrsq-202509291846",
+      # "tukbajrv-202509171940",
       # "tukbajrv-202509211112",
       # "tukbajrv-202509222128",
-      # "tukbajrv-202509241418",
+      "tukbajrv-202509241418",
       # "lcfcwxbc-202510020051",
     ]
 
@@ -783,8 +779,8 @@ def main():
             # XXX: NO extension here (added based on exptype)
             export_basename = f"{prefix}-vulkan"
 
-            # For faster ET exports: no get_value, no _predict_with_logis
-            tiny = True
+            # For faster ET exports: no get_value, no _predict_with_logits
+            tiny = False
 
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
@@ -792,8 +788,8 @@ def main():
             export_basename = "%s-%s" % (cfg["train"]["env"]["kwargs"]["role"], export_basename)
             export_basename += ("-tiny" if tiny else "")
 
-            exptypes = [ExportType.EXECUTORCH]
-            # exptypes = [ExportType.LIBTORCH]
+            # exptypes = [ExportType.EXECUTORCH]
+            exptypes = [ExportType.LIBTORCH]
             # exptypes = [ExportType.EXECUTORCH, ExportType.LIBTORCH]
 
             for exptype in exptypes:
@@ -803,8 +799,8 @@ def main():
 
                 # test_gnn(exptype)
                 # test_block(exptype)
-                # test_model(cfg, model_weights_path, exptype)
-                # assert 0
+                test_model(cfg, model_weights_path, exptype)
+                assert 0
                 # # test_quantized(cfg, model_weights_path)
                 # test_load(cfg, model_weights_path, exptype)
 
