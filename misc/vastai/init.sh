@@ -208,8 +208,8 @@ function download_checkpoint() {
 #
 # Make a timestamped checkpoint
 #
-function backup_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: backup_checkpoint ID [TIMESTAMP]"; return 1; }
+function backup_best_checkpoint() {
+    [ -n "\${1:-}" ] || { echo "Usage: backup_best_checkpoint ID [TIMESTAMP]"; return 1; }
     [ -n "\${2:-}" ] && ts=\$2 || ts="\$(date +%s)"
 
     id=\$1
@@ -222,13 +222,12 @@ function backup_checkpoint() {
         return 1
     fi
 
-    # 2. CHECK
     for f in config state-default; do
-      cp \$id-{,\$ts-}\$f.json
+      cp \$id-{best-,\$ts-}\$f.json
     done
 
     for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
-      cp \$id-{,\$ts-}\$f.pt
+      cp \$id-{best-,\$ts-}\$f.pt
     done
 }
 
@@ -242,6 +241,9 @@ function setboot() {
 
 set -x
 /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID REBOOTED
+
+# For tracking reboots
+date +'BOOTED_AT=%FT%T%z' >> ~/.bashrc
 
 df  # for logging
 mb=\\\$(df --output=avail -m / | tail -1 | awk '{print \\\$1}')
