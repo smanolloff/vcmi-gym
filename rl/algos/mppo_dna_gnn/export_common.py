@@ -244,7 +244,7 @@ class ExportableModel(nn.Module):
 
         self.register_buffer("mask_hex1", torch.zeros([1, self.n_main_actions, 165], dtype=torch.bool), persistent=False)
         self.register_buffer("mask_hex2", torch.zeros([1, self.n_main_actions, 165, 165], dtype=torch.bool), persistent=False)
-        self.register_buffer("mask_action", torch.zeros([1, self.n_main_actions], dtype=torch.bool), persistent=False)
+        self.register_buffer("mask_act0", torch.zeros([1, self.n_main_actions], dtype=torch.bool), persistent=False)
         self.register_buffer("b_idx", torch.arange(1).view(1, 1, 1).expand_as(self.amove_hexes).int(), persistent=False)
         self.register_buffer("s_idx", torch.arange(165).view(1, 165, 1).expand_as(self.amove_hexes).int(), persistent=False)
         # self.register_buffer("mask_value", torch.tensor(torch.finfo(torch.float32).min), persistent=False)
@@ -260,7 +260,7 @@ class ExportableModel(nn.Module):
         return self.side.clone()
 
     def get_all_sizes(self):
-        return self.model_value.encoder_hexes.all_sizes.clone()
+        return self.encoder_hexes.all_sizes.clone()
 
     # edge_triplets is [edge_ind1, edge_attr1, edge_nbr1, edge_ind2, edge_attr2, edge_nbr2, ...]
     # (one triplet for each link type)
@@ -283,10 +283,10 @@ class ExportableModel(nn.Module):
 
     @torch.jit.export
     def predict(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
-        return self._predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size_id)[0]
+        return self.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size_id)[0]
 
     @torch.jit.export
-    def _predict_with_logits(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
+    def predict_with_logits(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
         obs = obs.unsqueeze(dim=0)
         z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size_id)
 
@@ -362,24 +362,24 @@ class ExportableModel(nn.Module):
         plane = accum.ne(0).to(torch.int32)
 
         # 5) Write back into the full mask tensor
-        mask_hex2 = torch.zeros_like(self.mask_hex2)                             # [B,4,S,T]
+        mask_hex2 = torch.zeros_like(mask_hex2)                             # [B,4,S,T]
         mask_hex2[:, 2] = plane
 
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
         # 3. MASK_ACTION - ie. allowed main action mask
-        mask_action = torch.zeros((1, 4), dtype=torch.int32)
+        mask_act0 = torch.zeros((1, 4), dtype=torch.int32)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, self.global_wait_offset].to(torch.bool).to(torch.int32)
+        mask_act0[:, 0] = obs[:, self.global_wait_offset].to(torch.bool).to(torch.int32)
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
-        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1).to(torch.int32)
+        mask_act0[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1).to(torch.int32)
 
         # Next, we sample:
         #
         # 1. Sample MAIN ACTION
-        probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_action.to(torch.bool))
+        probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_act0.to(torch.bool))
         act0 = torch.argmax(probs_act0, dim=1)
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
@@ -405,14 +405,18 @@ class ExportableModel(nn.Module):
         hex2 = torch.argmax(probs_hex2, dim=1)
 
         action = self.action_table[act0, hex1, hex2]
+
         return (
-            action.clone(),
-            act0_logits,
-            act0,
-            hex1_logits,
-            hex1,
-            hex2_logits,
-            hex2
+            action.int().clone(),
+            act0_logits.float(),
+            hex1_logits.float(),
+            hex2_logits.float(),
+            mask_act0.int(),
+            mask_hex1.int(),
+            mask_hex2.int(),
+            act0.int(),
+            hex1.int(),
+            hex2.int()
         )
 
     @torch.jit.export
@@ -623,10 +627,11 @@ class ExportableGNNBlock(nn.Module):
 
 
 class HardcodedModelWrapper(torch.nn.Module):
-    def __init__(self, m, side, all_sizes, m_value=None):
+    def __init__(self, m, side, all_sizes):
         super().__init__()
         self.m = m.eval().cpu()
-        self.m_value = (m_value or m).eval().cpu()
+        # XXX: assigning self.m_value = self.m and calling self.m_value(...)
+        #       still doubles the exported model size
         self.all_sizes = all_sizes
         assert len(ALL_MODEL_SIZES) == 5
 
@@ -651,27 +656,33 @@ class HardcodedModelWrapper(torch.nn.Module):
         # return (dummy_input.sum() * 0) + self.m.encoder_hexes.all_sizes.clone()
         return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.encoder_hexes.all_sizes.clone()
 
+    @torch.jit.export
+    def get_action_table(self, dummy_input):
+        return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.action_table.clone()
+
     # .get_valueN
+    # XXX: NOT USED: this value is heavily influenced by the step_reward_fixed
+    #       during training, which makes those values confusing for players.
 
     @torch.jit.export
     def get_value0(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 0)
+        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 0)
 
     @torch.jit.export
     def get_value1(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 1)
+        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 1)
 
     @torch.jit.export
     def get_value2(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 2)
+        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 2)
 
     @torch.jit.export
     def get_value3(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 3)
+        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 3)
 
     @torch.jit.export
     def get_value4(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m_value.get_value(obs, ei_flat, ea_flat, nbr_flat, 4)
+        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 4)
 
     # .predictN
 
@@ -695,27 +706,27 @@ class HardcodedModelWrapper(torch.nn.Module):
     def predict4(self, obs, ei_flat, ea_flat, nbr_flat):
         return self.m.predict(obs, ei_flat, ea_flat, nbr_flat, 4)
 
-    # ._predict_with_logitsN
+    # .predict_with_logitsN
 
     @torch.jit.export
-    def _predict_with_logits0(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m._predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 0)
+    def predict_with_logits0(self, obs, ei_flat, ea_flat, nbr_flat):
+        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 0)
 
     @torch.jit.export
-    def _predict_with_logits1(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m._predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 1)
+    def predict_with_logits1(self, obs, ei_flat, ea_flat, nbr_flat):
+        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 1)
 
     @torch.jit.export
-    def _predict_with_logits2(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m._predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 2)
+    def predict_with_logits2(self, obs, ei_flat, ea_flat, nbr_flat):
+        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 2)
 
     @torch.jit.export
-    def _predict_with_logits3(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m._predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 3)
+    def predict_with_logits3(self, obs, ei_flat, ea_flat, nbr_flat):
+        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 3)
 
     @torch.jit.export
-    def _predict_with_logits4(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m._predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 4)
+    def predict_with_logits4(self, obs, ei_flat, ea_flat, nbr_flat):
+        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 4)
 
 
 class ModelWrapper(torch.nn.Module):

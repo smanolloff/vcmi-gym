@@ -230,7 +230,18 @@ def test_model(cfg, weights_file, exptype):
             else:
                 print(f"{arg.__class__.__name__}: {arg}")
 
-        action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = emodel._predict_with_logits(*einputs)
+        (
+            action,
+            act0_logits,
+            hex1_logits,
+            hex2_logits,
+            mask_act0,
+            mask_hex1,
+            mask_hex2,
+            act0,
+            hex1,
+            hex2
+        ) = emodel.predict_with_logits(*einputs)
 
         # import ipdb; ipdb.set_trace()  # noqa
         assert torch.equal(actdata.action, action)
@@ -252,7 +263,7 @@ def test_model(cfg, weights_file, exptype):
     if exptype == ExportType.EXECUTORCH:
         for i, edge_inputs in enumerate(all_edge_inputs):
             getattr(hmw, f"predict{i}")(obs[0], *edge_inputs)
-            getattr(hmw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
+            getattr(hmw, f"predict_with_logits{i}")(obs[0], *edge_inputs)
 
         ep = {}
 
@@ -265,10 +276,13 @@ def test_model(cfg, weights_file, exptype):
         w = ModelWrapper(hmw, "get_side")
         ep["get_side"] = export(w, DUMMY_INPUTS, strict=True)
 
+        w = ModelWrapper(hmw, "get_action_table")
+        ep["get_action_table"] = export(w, DUMMY_INPUTS, strict=True)
+
         for i, edge_inputs in enumerate(all_edge_inputs):
             einputs = (obs[0], *edge_inputs)
-            w = ModelWrapper(hmw, f"_predict_with_logits{i}")
-            ep[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
+            w = ModelWrapper(hmw, f"predict_with_logits{i}")
+            ep[f"predict_with_logits{i}"] = export(w, einputs, strict=True)
 
         # # XNNPACK
         # # slow at runtime :(
@@ -307,9 +321,9 @@ def test_model(cfg, weights_file, exptype):
 
         for i, edge_inputs in enumerate(all_edge_inputs):
             getattr(jw, f"predict{i}")(obs[0], *edge_inputs)
-            getattr(jw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
+            getattr(jw, f"predict_with_logits{i}")(obs[0], *edge_inputs)
         print("Optimizing...")
-        method_names = [f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
+        method_names = [f"predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
         method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
         edge = optimize_for_mobile(jw, preserved_methods=method_names)
 
@@ -327,14 +341,28 @@ def test_model(cfg, weights_file, exptype):
             else:
                 print(f"{arg.__class__.__name__}: {arg}")
 
-        method_name = f"_predict_with_logits{i}"
+        method_name = f"predict_with_logits{i}"
 
         t0 = perf_counter_ns()
         if exptype == ExportType.EXECUTORCH:
+            # XXX: predict_with_logits returning bool masks is not tested with ET
             program = edge.exported_program(method_name).module()
-            action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = program(*einputs)
+            call = lambda: program(*einputs)
         else:
-            action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = getattr(edge, method_name)(*einputs)
+            call = lambda: getattr(edge, method_name)(*einputs)
+
+        (
+            action,
+            act0_logits,
+            hex1_logits,
+            hex2_logits,
+            mask_act0,
+            mask_hex1,
+            mask_hex2,
+            act0,
+            hex1,
+            hex2
+        ) = call()
 
         ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
         print("Predict time: %d ms" % ms)
@@ -404,7 +432,7 @@ def test_quantized(cfg, weights_file, exptype):
     einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]))
 
     hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES[:1])
-    m__predict_with_logits = ModelWrapper(hmw, "_predict_with_logits0")
+    m_predict_with_logits = ModelWrapper(hmw, "predict_with_logits0")
 
     print("Quantizing...")
     # Quantizer
@@ -414,31 +442,31 @@ def test_quantized(cfg, weights_file, exptype):
 
     # --- PT2E prepare/convert ---
     # export_for_training -> .module() for PT2E helpers
-    trainable__predict_with_logits = export_for_training(m__predict_with_logits, einputs, strict=True).module()
+    trainable_predict_with_logits = export_for_training(m_predict_with_logits, einputs, strict=True).module()
 
     # Insert observers
-    prepared__predict_with_logits = prepare_pt2e(trainable__predict_with_logits, q)
+    prepared_predict_with_logits = prepare_pt2e(trainable_predict_with_logits, q)
 
     # Calibrate
     print("Calibrating...")
-    _ = prepared__predict_with_logits(*einputs)
+    _ = prepared_predict_with_logits(*einputs)
 
     # Convert to quantized modules
-    converted__predict_with_logits = convert_pt2e(prepared__predict_with_logits)
+    converted_predict_with_logits = convert_pt2e(prepared_predict_with_logits)
 
     print("Exporting...")
     ep = {
-        "_predict_with_logits": export(converted__predict_with_logits, einputs, strict=True),
+        "predict_with_logits": export(converted_predict_with_logits, einputs, strict=True),
     }
 
     print("Lowering to XNN...")
     edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
 
-    exported__predict_with_logits = edge.exported_program("_predict_with_logits").module()
+    exported_predict_with_logits = edge.exported_program("predict_with_logits").module()
 
     print("Testing...")
     actdata = model.get_actdata_eval(hdata, deterministic=True)
-    action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = exported__predict_with_logits(*einputs)
+    action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = exported_predict_with_logits(*einputs)
 
     err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
     err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
@@ -506,8 +534,8 @@ def test_load(cfg, weights_file, exptype):
 
     print("ExportType type: %s" % exptype.name)
     if exptype == ExportType.EXECUTORCH:
-        mw = ModelWrapper(hmw, "_predict_with_logits0")
-        ep = {"_predict_with_logits0": export(mw, einputs, strict=True)}
+        mw = ModelWrapper(hmw, "predict_with_logits0")
+        ep = {"predict_with_logits0": export(mw, einputs, strict=True)}
 
         print("=== XNN transform ===")
         edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
@@ -515,18 +543,43 @@ def test_load(cfg, weights_file, exptype):
         rt = Runtime.get()
         print("Loading...")
         loaded = rt.load_program(edge.to_executorch().buffer)
-        loaded_predict_with_logits = loaded.load_method("_predict_with_logits0")
+        loadedpredict_with_logits = loaded.load_method("predict_with_logits0")
         print("Testing...")
-        action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loaded_predict_with_logits.execute(einputs)
+
+        (
+            action,
+            act0_logits,
+            hex1_logits,
+            hex2_logits,
+            mask_act0,
+            mask_hex1,
+            mask_hex2,
+            act0,
+            hex1,
+            hex2
+        ) = action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loadedpredict_with_logits.execute(einputs)
+
     else:
         print("=== JIT transform ===")
         jw = torch.jit.script(hmw)
-        method_names = [f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
+        method_names = [f"predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
         method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
         edge = optimize_for_mobile(jw, preserved_methods=method_names)
         print("Loading...")
         loaded = torch.jit.load(io.BytesIO(edge._save_to_buffer_for_lite_interpreter()))
-        action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loaded._predict_with_logits0(*einputs)
+
+        (
+            action,
+            act0_logits,
+            hex1_logits,
+            hex2_logits,
+            mask_act0,
+            mask_hex1,
+            mask_hex2,
+            act0,
+            hex1,
+            hex2
+        ) = emodel.predict_with_logits(*einputs)
 
     err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
     err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
@@ -580,8 +633,7 @@ def export_model(cfg, weights_file, exptype, is_tiny):
     programs = {}
 
     print("NOTE: Using get_value from policy model to reduce export size")
-
-    hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES, emodel0.model_value)
+    hmw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES)  #, emodel0.model_value)
 
     print("Exporting (exptype: %s)" % exptype.name)
     if exptype == ExportType.EXECUTORCH:
@@ -592,14 +644,16 @@ def export_model(cfg, weights_file, exptype, is_tiny):
             if not is_tiny:
                 w = ModelWrapper(hmw, f"get_value{i}")
                 programs[f"get_value{i}"] = export(w, einputs, strict=True)
-                w = ModelWrapper(hmw, f"_predict_with_logits{i}")
-                programs[f"_predict_with_logits{i}"] = export(w, einputs, strict=True)
+                w = ModelWrapper(hmw, f"predict_with_logits{i}")
+                programs[f"predict_with_logits{i}"] = export(w, einputs, strict=True)
         w = ModelWrapper(hmw, "get_version")
         programs["get_version"] = export(w, DUMMY_INPUTS, strict=True)
         w = ModelWrapper(hmw, "get_side")
         programs["get_side"] = export(w, DUMMY_INPUTS, strict=True)
         w = ModelWrapper(hmw, "get_all_sizes")
         programs["get_all_sizes"] = export(w, DUMMY_INPUTS, strict=True)
+        w = ModelWrapper(hmw, "get_action_table")
+        programs["get_action_table"] = export(w, DUMMY_INPUTS, strict=True)
 
         # for name, program in programs.items():
         #     print("Program: %s" % name)
@@ -642,14 +696,15 @@ def export_model(cfg, weights_file, exptype, is_tiny):
             getattr(jw, f"predict{i}")(obs[0], *edge_inputs)
             if not is_tiny:
                 # getattr(jw, f"get_value{i}")(obs[0], *edge_inputs)
-                getattr(jw, f"_predict_with_logits{i}")(obs[0], *edge_inputs)
+                getattr(jw, f"predict_with_logits{i}")(obs[0], *edge_inputs)
         method_names = [f"predict{i}" for i in range(len(ALL_MODEL_SIZES))]
         if not is_tiny:
-            method_names.extend([f"_predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))])
+            method_names.extend([f"predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))])
             method_names.extend([f"get_value{i}" for i in range(len(ALL_MODEL_SIZES))])
         method_names.extend(["get_version"])
         method_names.extend(["get_side"])
         method_names.extend(["get_all_sizes"])
+        method_names.extend(["get_action_table"])
         edge = optimize_for_mobile(jw, preserved_methods=method_names)
         print("Exported methods:\n  %s" % "\n  ".join(method_names))
         exported_model = optimize_for_mobile(edge, preserved_methods=method_names)
@@ -671,15 +726,17 @@ def verify_export(cfg, weights_file, exptype, loaded_model, is_tiny, num_steps=1
             # 3 metadata methods + 1*sizes methods (predict)
             assert len(loaded_methods) == 3 + 1*len(ALL_MODEL_SIZES), len(loaded_methods)
         else:
-            # 3 metadata methods + 3*sizes methods (get_value, predict, _predict_with_logits)
+            # 3 metadata methods + 3*sizes methods (get_value, predict, predict_with_logits)
             assert len(loaded_methods) == 3 + 3*len(ALL_MODEL_SIZES), len(loaded_methods)
         assert loaded_methods["get_version"].execute(DUMMY_INPUTS)[0].item() == 13
         assert loaded_methods["get_side"].execute(DUMMY_INPUTS)[0].item() == eside
         assert torch.equal(loaded_methods["get_all_sizes"].execute(DUMMY_INPUTS)[0], ALL_MODEL_SIZES)
+        assert torch.equal(loaded_methods["get_action_table"].execute(DUMMY_INPUTS)[0], model.model_policy.action_table.int())
     else:
-        assert loaded_model.get_version().item() == 13
-        assert loaded_model.get_side().item() == eside
-        assert torch.equal(loaded_model.get_all_sizes(), ALL_MODEL_SIZES)
+        assert loaded_model.get_version(DUMMY_INPUTS[0]).item() == 13
+        assert loaded_model.get_side(DUMMY_INPUTS[0]).item() == eside
+        assert torch.equal(loaded_model.get_all_sizes(DUMMY_INPUTS[0]), ALL_MODEL_SIZES)
+        assert torch.equal(loaded_model.get_action_table(DUMMY_INPUTS[0]), model.model_policy.action_table.int())
 
     print("Testing data methods for %d steps..." % (num_steps))
 
@@ -777,9 +834,9 @@ def main():
             export_dir = "/Users/simo/Projects/vcmi-play/Mods/MMAI/models"
 
             # XXX: NO extension here (added based on exptype)
-            export_basename = f"{prefix}-vulkan"
+            export_basename = f"{prefix}"
 
-            # For faster ET exports: no get_value, no _predict_with_logits
+            # For faster ET exports: no get_value, no predict_with_logits
             tiny = False
 
             with open(model_cfg_path, "r") as f:
@@ -799,8 +856,8 @@ def main():
 
                 # test_gnn(exptype)
                 # test_block(exptype)
-                test_model(cfg, model_weights_path, exptype)
-                assert 0
+                # test_model(cfg, model_weights_path, exptype)
+                # assert 0
                 # # test_quantized(cfg, model_weights_path)
                 # test_load(cfg, model_weights_path, exptype)
 
@@ -809,10 +866,10 @@ def main():
                 #
 
                 exported_model = export_model(cfg, model_weights_path, exptype, tiny)
-                # loaded_model = load_exported_model(exptype, exported_model)
+                loaded_model = load_exported_model(exptype, exported_model)
                 # loaded_model = load_exported_model(exptype, "/Users/simo/Projects/vcmi-play/Mods/MMAI/models/attacker-nkjrmrsq-202509231549-tiny.pte")
                 # import ipdb; ipdb.set_trace()  # noqa
-                # verify_export(cfg, model_weights_path, exptype, loaded_model, tiny)
+                verify_export(cfg, model_weights_path, exptype, loaded_model, tiny)
 
                 save_exported_model(exptype, exported_model, export_dir, export_basename)
 
