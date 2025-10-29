@@ -165,17 +165,22 @@ function link_checkpoint() {
 # Upload a timestamped checkpoint (from current dir)
 #
 function upload_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: upload_checkpoint TIMESTAMP"; return 1; }
-    [[ \$1 =~ ^[0-9]+\$ ]] || { echo "Invalid timestamp: \$1"; return 1; }
+    [ -n "\${1:-}" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG"; return 1; }
 
-    cfg_ary=(./*\$1-config.json)  # must use array for globbing
-    cfg="\${cfg_ary[0]}"
+    rid=\${1%-*}
+    tag=\${1#*-}
+    s3_dir=mppo-dna-heads/models
 
-    [ -r "\$cfg" ] || { echo "No matches for config file: \$cfg_ary"; return 1; }
+    [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG"; return 1; }
 
-    s3_dir=\$(jq -r '.checkpoint.s3.s3_dir' \$cfg)
+    files=()
+    for suffix in config.json state-default.json model-dna.pt optimizer-distill.pt optimizer-policy.pt optimizer-value.pt scaler-default.pt; do
+        f=\$rid-\$tag-\$suffix
+        [ -r \$f ] || { echo "Not found: \$f"; return 1; }
+        files+=(\$f)
+    done
 
-    for f in *\$1*; do
+    for f in \${files[@]}; do
         aws s3 cp \$f s3://vcmi-gym/\$s3_dir/
     done
 }
@@ -184,24 +189,29 @@ function upload_checkpoint() {
 # Download a timestamped checkpoint (to out_dir as per the config)
 #
 function download_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: download_checkpoint RUN_ID-TIMESTAMP [S3_DIR]"; return 1; }
+    [ -n "\${1:-}" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
 
     rid=\${1%-*}
-    ts=\${1#*-}
-    [ -n "\$2" ] && s3_dir="\${2%/}" || s3_dir=mppo-dna-heads/models
+    tag=\${1#*-}
+    s3_dir=mppo-dna-heads/models
 
-    cfg_json="\$(aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-config.json -)"
+    [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
+
+    cfg_json="\$(aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$tag-config.json -)"
     [ -n "\$cfg_json" ] || { echo "Failed to fetch config.json"; return 1; }
     out_dir=\$(echo "\$cfg_json" | jq -r '.run.out_dir')
     mkdir -p "\$out_dir"
 
-    # Copy json files
-    echo "\$cfg_json" > \$out_dir/\$rid-\$ts-config.json
-    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-state-default.json \$out_dir/  || { echo "ERROR"; return 1; }
+    # Copy config separately (already downloaded as text)
+    echo "\$cfg_json" > \$out_dir/\$rid-\$tag-config.json
 
-    # Copy .pt files
-    for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
-      aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$ts-\$f.pt \$out_dir/  || { echo "ERROR"; return 1; }
+    files=()
+    for suffix in state-default.json model-dna.pt optimizer-distill.pt optimizer-policy.pt optimizer-value.pt scaler-default.pt; do
+        files+=(\$rid-\$tag-\$suffix)
+    done
+
+    for f in \${files[@]}; do
+      aws s3 cp s3://vcmi-gym/\$s3_dir/\$f \$out_dir/  || { echo "ERROR"; return 1; }
     done
 }
 
@@ -232,34 +242,34 @@ function backup_best_checkpoint() {
 }
 
 function setboot() {
-    repl="\$*; /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID IDLE"
-    [[ \$repl =~ [\\"\\'\\\$\\\\] ]] && { echo "special characters found"; return 1; } || :
-
     cat <<EOL >/root/onstart.sh
 #!/bin/bash
 # Logs are in /var/log/onstart.log
 
 set -x
-/opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID REBOOTED
 
 # For tracking reboots
 date +'BOOTED_AT=%FT%T%z' >> ~/.bashrc
 
-df  # for logging
-mb=\\\$(df --output=avail -m / | tail -1 | awk '{print \\\$1}')
-if ! [[ \\\$mb =~ ^[0-9]$ ]]; then
-    echo "Failed to determine free space: '\\\$mb'"
-    /opt/instance-tools/bin/vastai label instance ERROR
-    exit 1
-fi
-
-if [ \\\$mb -lt 500 ]; then
-    /opt/instance-tools/bin/vastai label instance NO_SPACE
-    exit 1
-fi
-
-tmux new-session -d "source ~/.simorc; cd \$PWD; \$repl; exec \$SHELL"
+tmux new-session -d "source ~/.simorc; cd \$PWD; \$*; exec \$SHELL"
 EOL
+}
+
+function retry_until_sigint() {
+    local i=0
+    while true; do
+        bash -x ~/runcmd.sh \$*
+        if [ \$? -eq 130 ]; then
+            echo "Interrupt detected, will NOT retry"
+            /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID IDLE
+            break
+        else
+            echo "Interrupt NOT detected, will retry in 10s..."
+            let ++i
+            /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID CRASHED_\$i
+            sleep 10
+        fi
+    done
 }
 
 function train_gnn() {
@@ -287,15 +297,15 @@ USAGE
     basecmd="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn"
 
     if [ -z "\$2" ]; then
-        # Resume from the latest checkpoint on restart
-        setboot \$basecmd -f data/mppo-dna-heads/\$run_id-config.json
+        # Always resume from the latest checkpoint on restart (don't use args here)
+        setboot retry_until_sigint \$basecmd -f data/mppo-dna-heads/\$run_id-config.json
     else
         # --dry-run => no resume (let it transition to IDLE)
         setboot :
         args+=" --dry-run"
     fi
 
-    bash -xc "\$basecmd \$args"
+    retry_until_sigint \$basecmd \$args
 }
 
 alias gs='git status'
@@ -315,6 +325,30 @@ export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 export VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
 cd /workspace/vcmi-gym
+EOF
+
+cat <<-EOF >~/runcmd.sh
+#!/bin/bash
+trap 'echo "INTERRUPT DETECTED, EXIT 130"; exit 130' INT
+
+df  # for logging
+mb=\$(df --output=avail -m / | tail -1 | awk '{print \$1}')
+if ! [[ \$mb =~ ^[0-9]+\$ ]]; then
+    echo "Failed to determine free space: '\$mb'"
+    /opt/instance-tools/bin/vastai label instance ERROR
+    return 1
+fi
+
+if [ \$mb -lt 500 ]; then
+    echo "Less than 500MB of free space: '\$mb'"
+    /opt/instance-tools/bin/vastai label instance NO_SPACE
+    return 1
+fi
+
+# XXX: do NOT use exec here (does not call trap)
+\$@
+
+echo "PROGRAM EXIT CODE: \$?"
 EOF
 
 # does not work (fails with unbound variable)
