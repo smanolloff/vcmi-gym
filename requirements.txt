@@ -41,6 +41,9 @@ torch==2.8.0
 #executorch==0.6.0
 executorch
 
+onnx
+onnxscript
+
 # XXX: there seems to be a better way now, see https://stackoverflow.com/a/78723182
 #torch @ https://download.pytorch.org/whl/cpu-cxx11-abi/torch-2.3.1%2Bcpu.cxx11.abi-cp312-cp312-linux_x86_64.whl
 

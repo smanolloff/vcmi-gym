@@ -250,6 +250,7 @@ class ExportableModel(nn.Module):
         # self.register_buffer("mask_value", torch.tensor(torch.finfo(torch.float32).min), persistent=False)
         self.register_buffer("mask_value", torch.tensor(-((2 - 2**-23) * 2**127), dtype=torch.float32), persistent=False)
         self.register_buffer("hexactmask_inds", torch.as_tensor(torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]).int(), persistent=False)
+        self.register_buffer("sizemarks", all_sizes.sum(dim=1)[:, 1].int(), persistent=False)
 
     def get_version(self):
         return self.version.clone()
@@ -589,6 +590,11 @@ class ExportableGNNBlock(nn.Module):
             self.e_offsets.append(e_off)
             self.k_offsets.append(k_off)
 
+        # Adding these for ONNX which does not support plain lists.
+        # Not sure why I needed plain lists in the first place, maybe executorch stuff?
+        self.register_buffer("e_offsets_tensor", torch.tensor(self.e_offsets, dtype=torch.int64), persistent=False)
+        self.register_buffer("k_offsets_tensor", torch.tensor(self.k_offsets, dtype=torch.int64), persistent=False)
+
     def forward(
         self,
         x_hex: torch.Tensor,
@@ -599,8 +605,8 @@ class ExportableGNNBlock(nn.Module):
     ) -> torch.Tensor:
         x = x_hex
         num_layers = len(self.layers)
-        e_off = self.e_offsets[size_idx]
-        k_off = self.k_offsets[size_idx]
+        e_off = self.e_offsets_tensor[size_idx]
+        k_off = self.k_offsets_tensor[size_idx]
 
         for i, convs in enumerate(self.layers):
             y_init = False
@@ -739,3 +745,13 @@ class ModelWrapper(torch.nn.Module):
 
     def forward(self, *args):
         return getattr(self.m, self.method_name)(*self.args_head, *args, *self.args_tail)
+
+
+class ModelSizelessWrapper(torch.nn.Module):
+    def __init__(self, m):
+        super().__init__()
+        self.m = m
+
+    def forward(self, obs, ei_flat, ea_flat, nbr_flat):
+        bucket_id = (self.m.sizemarks < nbr_flat.size(1)).sum()
+        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, bucket_id)

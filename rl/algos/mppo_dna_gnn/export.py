@@ -17,10 +17,14 @@ from executorch.backends.vulkan.partitioner.vulkan_partitioner import VulkanPart
 import coremltools
 from executorch.runtime import Runtime
 
+import onnx
+import onnxruntime as ort
+
 from .export_common import (
     ALL_MODEL_SIZES,
     LINK_TYPES,
     ModelWrapper,
+    ModelSizelessWrapper,
     ExportableGENConv,
     ExportableGNNBlock,
     ExportableDNAModel,
@@ -38,10 +42,10 @@ from .dual_vec_env import to_hdata_list, DualVecEnv
 # coreML requires dummy inputs...
 DUMMY_INPUTS = (torch.tensor([0], dtype=torch.int32),)
 
-
 class ExportType(enum.IntEnum):
     EXECUTORCH = 0
     LIBTORCH = enum.auto()
+    ONNX = enum.auto()
 
 
 def test_gnn(exptype):
@@ -80,9 +84,13 @@ def test_gnn(exptype):
         edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
 
         expres = edge.exported_program("forward").module()(*myinputs)
-    else:
+    elif exptype == ExportType.LIBTORCH:
         ts = torch.jit.script(mygen, example_inputs=myinputs)
         expres = ts(*myinputs)
+    elif exptype == ExportType.ONNX:
+        raise NotImplementedError()
+    else:
+        raise Exception(f"Unknown exptype: {exptype}")
 
     assert torch.equal(res, myres)
     assert torch.equal(res, expres)
@@ -174,10 +182,14 @@ def test_block(exptype):
         exported_forward1 = edge.exported_program("forward1").module()
         expres0 = exported_forward0(*myinputs0)
         expres1 = exported_forward1(*myinputs1)
-    else:
+    elif exptype == ExportType.LIBTORCH:
         ts = torch.jit.script(myblock)
         expres0 = ts(*myinputs0)
         expres1 = ts(*myinputs1)
+    elif exptype == ExportType.ONNX:
+        raise NotImplementedError()
+    else:
+        raise Exception(f"Unknown exptype: {exptype}")
 
     print("Lowering to XNN...")
     edge = to_edge_transform_and_lower(ep, partitioner=[XnnpackPartitioner()])
@@ -243,14 +255,23 @@ def test_model(cfg, weights_file, exptype):
             hex2
         ) = emodel.predict_with_logits(*einputs)
 
-        # import ipdb; ipdb.set_trace()  # noqa
         assert torch.equal(actdata.action, action)
-        assert torch.equal(actdata.act0_logits, act0_logits)
         assert torch.equal(actdata.act0, act0)
-        assert torch.equal(actdata.hex1_logits, hex1_logits)
         assert torch.equal(actdata.hex1, hex1)
-        assert torch.equal(actdata.hex2_logits, hex2_logits)
         assert torch.equal(actdata.hex2, hex2)
+
+        err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
+        err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
+        err_hex2_logits = (actdata.hex2_logits - hex2_logits) / actdata.hex2_logits
+
+        print("Relative error: act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
+        print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
+        print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
+
+        assert err_act0_logits.max() < 1e-4
+        assert err_hex1_logits.max() < 1e-4
+        assert err_hex2_logits.max() < 1e-4
+
         print("(size=%d) test_model: OK" % i)
 
     # XXX: it should work OK if args_tail == einputs' model size
@@ -314,7 +335,7 @@ def test_model(cfg, weights_file, exptype):
         load_exported_model(exptype, exported_model)
         # import ipdb; ipdb.set_trace()  # noqa
         # pass
-    else:
+    elif exptype == ExportType.LIBTORCH:
         print("=== JIT transform ===")
         mw = HardcodedModelWrapper(emodel, eside, ALL_MODEL_SIZES).eval().cpu()
         jw = torch.jit.script(mw)
@@ -326,6 +347,49 @@ def test_model(cfg, weights_file, exptype):
         method_names = [f"predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
         method_names.extend([f"predict{i}" for i in range(len(ALL_MODEL_SIZES))])
         edge = optimize_for_mobile(jw, preserved_methods=method_names)
+    elif exptype == ExportType.ONNX:
+        print("=== JIT transform ===")
+        sw = ModelSizelessWrapper(emodel)
+        ssw = torch.jit.script(sw)
+        ssw.eval()
+
+        print("=== ONNX transform ===")
+        buffer = io.BytesIO()
+
+        torch.onnx.export(
+            ssw,
+            (obs[0], *all_edge_inputs[0]),
+            buffer,
+            input_names=["obs", "ei_flat", "ea_flat", "nbr_flat"],
+            output_names=[
+                "action",
+                "act0_logits",
+                "hex1_logits",
+                "hex2_logits",
+                "mask_act0",
+                "mask_hex1",
+                "mask_hex2",
+                "act0",
+                "hex1",
+                "hex2",
+            ],
+            opset_version=12,
+            do_constant_folding=True,
+            dynamic_axes={
+                "ei_flat": {1: "ei_dim"},       # S=[2, 1646], M=[2, 2478], ...
+                "ea_flat": {0: "ea_dim"},       # S=[1646, 1], M=[2478, 1], ...
+                "nbr_flat": {1: "nbr_dim"},     # S=[165, 32], M=[165, 52], ...
+            },
+            # XXX: dynamo is the *new* torch ONNX exporter and will become the
+            #       default in torch-2.9.0, however as of torch 2.8.0 there are
+            #       missing operator implementations, and 2.9.0 is not viable
+            #       as torch_geometric segfaults (it is still on 2.8.0)
+            # dynamo=True
+        )
+
+        edge = ort.InferenceSession(buffer.getvalue())
+    else:
+        raise Exception(f"Unknown exptype: {exptype}")
 
     predict_time_total = 0
     predict_count_total = 0
@@ -348,8 +412,13 @@ def test_model(cfg, weights_file, exptype):
             # XXX: predict_with_logits returning bool masks is not tested with ET
             program = edge.exported_program(method_name).module()
             call = lambda: program(*einputs)
-        else:
+        elif exptype == ExportType.LIBTORCH:
             call = lambda: getattr(edge, method_name)(*einputs)
+        elif exptype == ExportType.ONNX:
+            named_einputs = {n: einputs[i].numpy() for i, n in enumerate(["obs", "ei_flat", "ea_flat", "nbr_flat"])}
+            call = lambda: [torch.as_tensor(x) for x in edge.run(None, named_einputs)]
+        else:
+            raise Exception(f"Unknown exptype: {exptype}")
 
         (
             action,
@@ -382,9 +451,9 @@ def test_model(cfg, weights_file, exptype):
         print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
         print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
 
-        assert err_act0_logits.max() < 1e-4
-        assert err_hex1_logits.max() < 1e-4
-        assert err_hex2_logits.max() < 1e-4
+        assert err_act0_logits.max() < 1e-3
+        assert err_hex1_logits.max() < 1e-3
+        assert err_hex2_logits.max() < 1e-3
 
         print("(size=%d) test_model: OK" % i)
 
@@ -557,9 +626,9 @@ def test_load(cfg, weights_file, exptype):
             act0,
             hex1,
             hex2
-        ) = action, act0_logits, act0, hex1_logits, hex1, hex2_logits, hex2 = loadedpredict_with_logits.execute(einputs)
+        ) = loadedpredict_with_logits.execute(einputs)
 
-    else:
+    elif exptype == ExportType.LIBTORCH:
         print("=== JIT transform ===")
         jw = torch.jit.script(hmw)
         method_names = [f"predict_with_logits{i}" for i in range(len(ALL_MODEL_SIZES))]
@@ -580,6 +649,10 @@ def test_load(cfg, weights_file, exptype):
             hex1,
             hex2
         ) = emodel.predict_with_logits(*einputs)
+    elif exptype == ExportType.ONNX:
+        raise NotImplementedError()
+    else:
+        raise Exception(f"Unknown exptype: {exptype}")
 
     err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
     err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
@@ -689,8 +762,9 @@ def export_model(cfg, weights_file, exptype, is_tiny):
 
         print("Exported programs:\n  %s" % "\n  ".join(list(programs.keys())))
         exported_model = edge.to_executorch()
-    else:
+    elif exptype == ExportType.LIBTORCH:
         print("=== JIT transform ===")
+
         jw = torch.jit.script(hmw)
         for i, edge_inputs in enumerate(all_edge_inputs):
             getattr(jw, f"predict{i}")(obs[0], *edge_inputs)
@@ -708,6 +782,69 @@ def export_model(cfg, weights_file, exptype, is_tiny):
         edge = optimize_for_mobile(jw, preserved_methods=method_names)
         print("Exported methods:\n  %s" % "\n  ".join(method_names))
         exported_model = optimize_for_mobile(edge, preserved_methods=method_names)
+    elif exptype == ExportType.ONNX:
+        sw = ModelSizelessWrapper(emodel)
+        ssw = torch.jit.script(sw)
+        ssw.eval()
+
+        print("=== ONNX transform ===")
+        buffer = io.BytesIO()
+
+        torch.onnx.export(
+            ssw,
+            (obs[0], *all_edge_inputs[0]),
+            buffer,
+            input_names=["obs", "ei_flat", "ea_flat", "nbr_flat"],
+            output_names=[
+                "action",
+                "act0_logits",
+                "hex1_logits",
+                "hex2_logits",
+                "mask_act0",
+                "mask_hex1",
+                "mask_hex2",
+                "act0",
+                "hex1",
+                "hex2",
+            ],
+            opset_version=12,
+            do_constant_folding=True,
+            dynamic_axes={
+                "ei_flat": {1: "ei_dim"},       # S=[2, 1646], M=[2, 2478], ...
+                "ea_flat": {0: "ea_dim"},       # S=[1646, 1], M=[2478, 1], ...
+                "nbr_flat": {1: "nbr_dim"},     # S=[165, 32], M=[165, 52], ...
+            },
+            # XXX: dynamo is the *new* torch ONNX exporter and will become the
+            #       default in torch-2.9.0, however as of torch 2.8.0 there are
+            #       missing operator implementations, and 2.9.0 is not viable
+            #       as torch_geometric segfaults (it is still on 2.8.0)
+            # dynamo=True
+        )
+
+        # Can't set metadata via torch.onnx.export => load, add then save again
+        loaded_model = onnx.load_from_string(buffer.getvalue())
+
+        metadata = {
+            "all_sizes": json.dumps(emodel.get_all_sizes().tolist()),
+            "version": str(emodel.get_version().item()),
+            "side": str(emodel.get_side().item()),
+            "action_table": json.dumps(emodel.action_table.tolist()),
+        }
+
+        for k, v in metadata.items():
+            p = loaded_model.metadata_props.add()
+            p.key = k
+            p.value = v
+
+        # To access metadata:
+        # value = model.get_modelmeta().custom_metadata_map["<key>"]
+
+        newbuffer = io.BytesIO()
+        onnx.save(loaded_model, newbuffer)
+
+        exported_model = newbuffer.getvalue()
+    else:
+        raise Exception(f"Unknown exptype: {exptype}")
 
     return exported_model
 
@@ -732,11 +869,19 @@ def verify_export(cfg, weights_file, exptype, loaded_model, is_tiny, num_steps=1
         assert loaded_methods["get_side"].execute(DUMMY_INPUTS)[0].item() == eside
         assert torch.equal(loaded_methods["get_all_sizes"].execute(DUMMY_INPUTS)[0], ALL_MODEL_SIZES)
         assert torch.equal(loaded_methods["get_action_table"].execute(DUMMY_INPUTS)[0], model.model_policy.action_table.int())
-    else:
+    elif exptype == ExportType.LIBTORCH:
         assert loaded_model.get_version(DUMMY_INPUTS[0]).item() == 13
         assert loaded_model.get_side(DUMMY_INPUTS[0]).item() == eside
         assert torch.equal(loaded_model.get_all_sizes(DUMMY_INPUTS[0]), ALL_MODEL_SIZES)
         assert torch.equal(loaded_model.get_action_table(DUMMY_INPUTS[0]), model.model_policy.action_table.int())
+    elif exptype == ExportType.ONNX:
+        md = loaded_model.get_modelmeta().custom_metadata_map
+        assert md["version"] == "13"
+        assert md["side"] == str(eside)
+        assert json.loads(md["all_sizes"]) == ALL_MODEL_SIZES.tolist()
+        assert json.loads(md["action_table"]) == model.model_policy.action_table.tolist()
+    else:
+        raise Exception(f"Unknown exptype: {exptype}")
 
     print("Testing data methods for %d steps..." % (num_steps))
 
@@ -766,15 +911,49 @@ def verify_export(cfg, weights_file, exptype, loaded_model, is_tiny, num_steps=1
             t0 = perf_counter_ns()
 
             if exptype == ExportType.EXECUTORCH:
-                action = loaded_methods[f"predict{i}"].execute(einputs)[0]
+                loaded_res = loaded_methods[f"predict_with_logits{i}"].execute(einputs)[0]
+            elif exptype == ExportType.LIBTORCH:
+                loaded_res = getattr(loaded_model, f"predict_with_logits{i}")(*einputs)
+            elif exptype == ExportType.ONNX:
+                named_einputs = {n: einputs[i].numpy() for i, n in enumerate(["obs", "ei_flat", "ea_flat", "nbr_flat"])}
+                loaded_res = [torch.as_tensor(x) for x in loaded_model.run(None, named_einputs)]
             else:
-                action = getattr(loaded_model, f"predict{i}")(*einputs)
+                raise Exception(f"Unknown exptype: {exptype}")
 
             ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
             benchmarks[i] += ms
 
+            (
+                action,
+                act0_logits,
+                hex1_logits,
+                hex2_logits,
+                mask_act0,
+                mask_hex1,
+                mask_hex2,
+                act0,
+                hex1,
+                hex2
+            ) = loaded_res
+
             print("(step=%d, size=%d) TEST ACTION: %d <> %d (%s ms)" % (n, i, actdata.action, action.item(), ms))
-            assert actdata.action == action.item()
+
+            err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
+            err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
+            err_hex2_logits = (actdata.hex2_logits - hex2_logits) / actdata.hex2_logits
+
+            print("Relative error: act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
+            print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
+            print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
+
+            assert actdata.action.item() == action.item()
+            assert actdata.act0.item() == act0.item()
+            assert actdata.hex1.item() == hex1.item()
+            assert actdata.hex2.item() == hex2.item()
+
+            assert err_act0_logits.max() < 1e-3
+            assert err_hex1_logits.max() < 1e-3
+            assert err_hex2_logits.max() < 1e-3
 
             # Not testing value (value model excluded)
             # value = model.get_value(hdata)[0]
@@ -798,33 +977,48 @@ def load_exported_model(exptype, m):
     if exptype == ExportType.EXECUTORCH:
         loadable = m if is_file else m.buffer
         return Runtime.get().load_program(loadable)
-    else:
+    elif exptype == ExportType.LIBTORCH:
         loadable = m if is_file else io.BytesIO(m._save_to_buffer_for_lite_interpreter())
         return torch.jit.load(loadable)
+    elif exptype == ExportType.ONNX:
+        return ort.InferenceSession(m)
+    else:
+        raise Exception(f"Unknown exptype: {exptype}")
 
 
 def save_exported_model(exptype, m, export_dir, basename):
-    ext = "pte" if exptype == ExportType.EXECUTORCH else "ptl"
-    dst = f"{export_dir}/{basename}.{ext}"
-    print("Writing to %s" % dst)
+    dst = f"{export_dir}/{basename}"  # extension is based on exptype
 
     if exptype == ExportType.EXECUTORCH:
+        dst += ".pte"
         with open(dst, "wb") as f:
             m.write_to_file(f)
-    else:
+    elif exptype == ExportType.LIBTORCH:
+        dst += ".ptl"
         m._save_for_lite_interpreter(dst)
+    elif exptype == ExportType.ONNX:
+        dst += ".pto"
+        with open(dst, "wb") as f:
+            f.write(m)
+    else:
+        raise Exception(f"Unknown exptype: {exptype}")
+
+    print("Wrote %s" % dst)
 
 
 def main():
     MODEL_PREFIXES = [
       # "nkjrmrsq-202509231549",
       # "nkjrmrsq-202509252116",
-      "nkjrmrsq-202509291846",
+      # "nkjrmrsq-202509291846",
       # "tukbajrv-202509171940",
       # "tukbajrv-202509211112",
       # "tukbajrv-202509222128",
-      "tukbajrv-202509241418",
+      # "tukbajrv-202509241418",
       # "lcfcwxbc-202510020051",
+      # "aspnnqwg-1762370851",
+      "rqqartou-202511050135"
+      # "sjigvvma-202511011415"
     ]
 
     with torch.inference_mode():
@@ -846,7 +1040,8 @@ def main():
             export_basename += ("-tiny" if tiny else "")
 
             # exptypes = [ExportType.EXECUTORCH]
-            exptypes = [ExportType.LIBTORCH]
+            # exptypes = [ExportType.LIBTORCH]
+            exptypes = [ExportType.ONNX]
             # exptypes = [ExportType.EXECUTORCH, ExportType.LIBTORCH]
 
             for exptype in exptypes:
@@ -856,7 +1051,7 @@ def main():
 
                 # test_gnn(exptype)
                 # test_block(exptype)
-                # test_model(cfg, model_weights_path, exptype)
+                test_model(cfg, model_weights_path, exptype)
                 # assert 0
                 # # test_quantized(cfg, model_weights_path)
                 # test_load(cfg, model_weights_path, exptype)

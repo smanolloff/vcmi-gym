@@ -151,7 +151,9 @@ class PyConnector():
                         else:
                             raise Exception("VCMI shutdown timed out after 5s")
                 except Exception as e:
-                    self.logger.error("Could not join self.thread: %s" % str(e))
+                    # XXX: the VCMI thread [[noreturn]] and terminates only through exceptions
+                    # self.logger.error("Could not join self.thread: %s" % str(e))
+                    self.logger.info("self.thread terminated with: %s" % str(e))
 
             self.finished.set()
 

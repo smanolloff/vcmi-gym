@@ -306,6 +306,7 @@ USAGE
     fi
 
     retry_until_sigint \$basecmd \$args
+    setboot :
 }
 
 alias gs='git status'
@@ -335,14 +336,12 @@ df  # for logging
 mb=\$(df --output=avail -m / | tail -1 | awk '{print \$1}')
 if ! [[ \$mb =~ ^[0-9]+\$ ]]; then
     echo "Failed to determine free space: '\$mb'"
-    /opt/instance-tools/bin/vastai label instance ERROR
-    return 1
+    exit 1
 fi
 
 if [ \$mb -lt 500 ]; then
     echo "Less than 500MB of free space: '\$mb'"
-    /opt/instance-tools/bin/vastai label instance NO_SPACE
-    return 1
+    exit 1
 fi
 
 # XXX: do NOT use exec here (does not call trap)
