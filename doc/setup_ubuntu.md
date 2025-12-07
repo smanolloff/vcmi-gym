@@ -14,23 +14,28 @@ instructions for MacOS.
 
 ### Build VCMI
 
-Please follow the instructions in [this guide](https://github.com/smanolloff/vcmi/blob/mmai/docs/setup_ubuntu.md).
+Please follow the instructions in [this guide](https://github.com/smanolloff/vcmi/blob/mmai/docs/developers/Building_Linux.md).
 
 ### Build vcmi-gym C++ libs
 
 Custom-made libraries that "connect" VCMI with the gym env:
 
 ```bash
-$ cd "$VCMIGYM/vcmi_gym/connectors"
+export VCMIGYM="$PWD"
+export VCMI="$PWD/vcmi"
+```
+
+```bash
+cd "$VCMIGYM/vcmi_gym/connectors"
 # TODO: libboost-all-dev has libgfortran5 dependency
 #       ...which creeps as a libtorch dependency during libtorch builds
 #       must find a less-generic boost package to install
-$ sudo apt install libboost-all-dev
-$ cmake -S . -B rel -Wno-dev \
+sudo apt install libboost-all-dev
+cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 
-$ cmake --build rel/
+cmake --build rel/
 ```
 ### Python env and deps
 
@@ -43,7 +48,7 @@ Auto-generated maps for the purposes of training combat AIs must be symlinked
 in order to make them visible in VCMI:
 
 ```bash
-$ ln -s "$VCMIGYM/maps/gym" "${XDG_DATA_HOME:-$HOME/.local/share}/vcmi/Maps/gym"
+ln -s "$VCMIGYM/maps/gym" "${XDG_DATA_HOME:-$HOME/.local/share}/vcmi/Maps/gym"
 ```
 
 ### Manual test
