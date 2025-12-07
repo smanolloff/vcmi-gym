@@ -10,10 +10,10 @@ The setup guide below is tested with Python 3.10.12 on MacOS 14.0.
 ### Checkout code
 
 ```bash
-$ git clone --recurse-submodules https://github.com/smanolloff/vcmi-gym.git
-$ cd vcmi-gym
-$ export VCMIGYM="$PWD"
-$ export VCMI="$PWD/vcmi"
+git clone --recurse-submodules https://github.com/smanolloff/vcmi-gym.git
+cd vcmi-gym
+export VCMIGYM="$PWD"
+export VCMI="$PWD/vcmi"
 ```
 
 ### Python env and deps
@@ -22,15 +22,15 @@ To avoid polluting your system with vcmi-gym dependencies, it's best to create
 a [Python virtual env](https://docs.python.org/3/library/venv.html):
 
 ```bash
-$ cd "$VCMIGYM"
-$ python3 -m venv .venv
+cd "$VCMIGYM"
+python3 -m venv .venv
 ```
 
 The newly created virtual environment is contained within the local `.venv`
 directory. Instruct your terminal to use it for this session:
 
 ```bash
-$ source .venv/bin/activate
+source .venv/bin/activate
 ```
 > [!NOTE]
 > A `(.venv)` appears in your prompt to inform you that the python virtual
@@ -50,20 +50,20 @@ Please follow the instructions in [this guide](https://github.com/smanolloff/vcm
 These libraries are the "link" between the gym env and VCMI itself.
 
 ```bash
-$ cd "$VCMIGYM/vcmi_gym/connectors"
-$ conan install . \
+cd "$VCMIGYM/vcmi_gym/connectors"
+conan install . \
     --install-folder=conan-generated \
     --no-imports \
     --build=missing \
     --profile:build=default \
     --profile:host=default
 
-$ cmake -S . -B rel -Wno-dev \
+cmake -S . -B rel -Wno-dev \
     -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
     -D CMAKE_BUILD_TYPE=Release \
     -D CMAKE_EXPORT_COMPILE_COMMANDS=0
 
-$ cmake --build rel/
+cmake --build rel/
 ```
 
 ### Gym maps
