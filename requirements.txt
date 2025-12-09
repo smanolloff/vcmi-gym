@@ -74,3 +74,5 @@ vastai-sdk
 #   https://download.pytorch.org/whl/cpu-cxx11-abi/torch/
 #
 
+# vcmi connector
+conan==2.21.0

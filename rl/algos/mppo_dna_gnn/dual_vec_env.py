@@ -20,6 +20,8 @@ from vcmi_gym.envs.v13.pyconnector import (
     STATE_SIZE_ONE_HEX,
 )
 
+from abc import ABC, abstractmethod
+
 
 TRACE = os.getenv("VCMIGYM_DEBUG", "0") == "1"
 
@@ -38,6 +40,20 @@ def tracelog(func, maxlen=80):
     return wrapper
 
 
+class AbstractModelLoader(ABC):
+    @abstractmethod
+    def configure(self, config_file: str):
+        ...
+
+    @abstractmethod
+    def load(self, weights_file: str):
+        ...
+
+    @abstractmethod
+    def get_model(self) -> torch.nn.Module:
+        ...
+
+
 class EnvState(enum.IntEnum):
     UNSET = 0
     AWAITING_ACTION = enum.auto()
@@ -45,9 +61,9 @@ class EnvState(enum.IntEnum):
 
 
 class DualEnvController():
-    def __init__(self, num_envs, model_factory, logprefix="", loglevel="INFO"):
+    def __init__(self, num_envs, model_loader: AbstractModelLoader, logprefix="", loglevel="INFO"):
         self.num_envs = num_envs
-        self.model_factory = model_factory
+        self.model_loader = model_loader
         self.logger = get_logger(f"{logprefix}controller", loglevel)
         self.logger.debug("Initializing...")
 
@@ -86,6 +102,7 @@ class DualEnvController():
         self.env_actions = ary(dummy, self.shm_actions)
 
         self.thread = threading.Thread(target=self._run, daemon=True)
+        self.reload_lock = threading.RLock()
 
     def start(self):
         self.logger.debug("Starting runner thread")
@@ -94,9 +111,6 @@ class DualEnvController():
     # XXX: this runs in a thread
     def _run(self):
         self.logger.debug("Creating model")
-
-        with torch.inference_mode():
-            model = self.model_factory()
 
         def no_unsets():
             self.logger.debug(f"[no_unsets]: env_states = {self.env_states}")
@@ -131,15 +145,22 @@ class DualEnvController():
                 with torch.inference_mode():
                     b_obs = torch.as_tensor(self.env_obs[ids])
                     b_done = torch.zeros(len(ids))
-                    hdata = Batch.from_data_list(to_hdata_list(b_obs, b_done, b_links)).to(model.device)
+                    hdata = Batch.from_data_list(to_hdata_list(b_obs, b_done, b_links)).to(self.model_loader.get_model().device)
 
                     with self.controller_act_cond:
                         self.logger.debug("model.model_policy.get_actdata_eval(hdata)")
-                        self.env_actions[ids] = model.model_policy.get_actdata_eval(hdata).action.cpu().numpy()
+                        self.env_actions[ids] = self.model_loader.get_model().model_policy.get_actdata_eval(hdata).action.cpu().numpy()
                         self.logger.debug(f"self.env_states[{ids}] = {EnvState.UNSET}")
                         self.env_states[ids] = EnvState.UNSET
                         self.logger.debug("controller_act_cond.notify_all()")
                         self.controller_act_cond.notify_all()
+
+    def reload_model(self):
+        if not self.model_loader:
+            return
+
+        with self.controller_act_cond:
+            self.model_loader.load()
 
 
 class DualEnvWrapper(gym.Wrapper):
@@ -269,6 +290,7 @@ class DualEnvWrapper(gym.Wrapper):
 
         # .connect() calls .reset() internally
         # => must explicitly notify controller
+        self.logger.debug("[init] with self.controller_env_cond")
         with self.controller_env_cond:
             self.logger.debug(f"env_states[{self.env_id}] = {EnvState.DONE}")
             self.env_states[self.env_id] = EnvState.DONE
@@ -290,7 +312,6 @@ class DualEnvWrapper(gym.Wrapper):
     def step(self, *args, **kwargs):
         self.logger.debug("[step] %s %s" % (str(args), str(kwargs)))
         obs, rew, term, trunc, info = self.env.step(*args, **kwargs)
-        self.logger.debug("[step] with self.controller_env_cond")
 
         if term or trunc:
             # Setting DONE here would cause controller to re-set ALL states to UNSET.
@@ -299,6 +320,7 @@ class DualEnvWrapper(gym.Wrapper):
             #    but the other envs are are UNSET => controller won't wake up.
             self.logger.debug("terminal step -- not setting DONE flag (expecting reset)")
         else:
+            self.logger.debug("[step] with self.controller_env_cond")
             with self.controller_env_cond:
                 self.logger.debug(f"env_states[{self.env_id}] = {EnvState.DONE}")
                 self.env_states[self.env_id] = EnvState.DONE
@@ -314,7 +336,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         num_envs_stupidai=0,
         num_envs_battleai=0,
         num_envs_model=0,
-        model_factory=None,
+        model_loader: AbstractModelLoader = None,
         e_max=3300,
         logprefix="",
     ):
@@ -333,12 +355,12 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         )
 
         if num_envs_model > 0:
-            # test if model can be loaded (avoids errors in sub-processes)
-            model_factory()
+            # test model exists (avoids errors in sub-processes)
+            model_loader.get_model()
 
             self.controller = DualEnvController(
                 num_envs_model,
-                model_factory,
+                model_loader,
                 loglevel=env_kwargs.get("vcmienv_loglevel", "INFO"),
                 logprefix=logprefix,
             )
@@ -386,6 +408,9 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
 
         super().__init__(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
 
+    def reload_model(self):
+        self.controller.reload_model()
+
 
 def to_hdata(obs, done, links):
     device = obs.device
@@ -425,23 +450,40 @@ if __name__ == "__main__":
     import json
     from rl.algos.mppo_dna_gnn.mppo_dna_gnn import DNAModel
 
-    def model_factory():
-        with open("sfcjqcly-1757757007-config.json", "r") as f:
-            cfg = json.load(f)
-        weights = torch.load("sfcjqcly-1757757007-model-dna.pt", weights_only=True, map_location="cpu")
-        model = DNAModel(cfg["model"], torch.device("cpu")).eval()
-        model.load_state_dict(weights, strict=True)
-        return model
+    class TestModelLoader(AbstractModelLoader):
+        def __init__(self):
+            self.model = False
 
+        def configure(self, config_file):
+            with open(config_file, "r") as f:
+                self.config = json.load(f)
+
+        # This function will be called from within another process
+        # (referenced non-local objects must be serializable for IPC).
+        def load(self, weights_file):
+            print(f"[TestModelLoader] Loading model weights from {weights_file}")
+            with torch.inference_mode():
+                weights = torch.load(weights_file, weights_only=True, map_location="cpu")
+                if not self.model:
+                    self.model = DNAModel(self.config["model"], torch.device("cpu")).eval()
+                self.model.load_state_dict(weights, strict=True)
+
+        def get_model(self):
+            return self.model
+
+    model_loader = TestModelLoader()
     venv = DualVecEnv(
         env_kwargs=dict(mapname="gym/A1.vmap"),
-        num_envs_stupidai=2,
-        num_envs_battleai=2,
-        num_envs_model=5,
-        model_factory=model_factory,
+        num_envs_stupidai=0,
+        num_envs_battleai=0,
+        num_envs_model=1,
+        model_loader=model_loader,
         logprefix="test-",
         e_max=3300,
     )
+
+    model_loader.configure("tukbajrv-1758611103-config.json")
+    model_loader.load("tukbajrv-1758611103-model-dna.pt")
 
     import ipdb; ipdb.set_trace()  # noqa
     pass

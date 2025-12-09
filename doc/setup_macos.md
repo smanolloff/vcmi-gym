@@ -51,13 +51,7 @@ These libraries are the "link" between the gym env and VCMI itself.
 
 ```bash
 $ cd "$VCMIGYM/vcmi_gym/connectors"
-$ conan install . \
-    --install-folder=conan-generated \
-    --no-imports \
-    --build=missing \
-    --profile:build=default \
-    --profile:host=default
-
+$ conan install . --output-folder=conan-generated --profile=../../vcmi/dependencies/conan_profiles/macos-arm
 $ cmake -S . -B rel -Wno-dev \
     -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
     -D CMAKE_BUILD_TYPE=Release \

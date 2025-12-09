@@ -22,7 +22,7 @@
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"
-#include "ML/model_wrappers/torchpath.h"
+#include "ML/model_wrappers/path.h"
 #include "exporter.h"
 #include <algorithm>
 
@@ -636,7 +636,7 @@ namespace Connector::V13::Thread {
             leftModel = new ML::ModelWrappers::Function(version(), "MMAI_USER_GYM", Side::LEFT, f_getAction0, f_getValueDummy);
         } else if (red == "MMAI_MODEL") {
             // BAI will load the actual model based on leftModel->getName()
-            leftModel = new ML::ModelWrappers::TorchPath(redModel);
+            leftModel = new ML::ModelWrappers::Path(redModel);
         } else {
             leftModel = new ML::ModelWrappers::Scripted(red, Side::LEFT);
         }
@@ -647,7 +647,7 @@ namespace Connector::V13::Thread {
             rightModel = new ML::ModelWrappers::Function(version(), "MMAI_USER_GYM", Side::RIGHT, f_getAction1, f_getValueDummy);
         } else if (blue == "MMAI_MODEL") {
             // BAI will load the actual model based on rightModel->getName()
-            rightModel = new ML::ModelWrappers::TorchPath(blueModel);
+            rightModel = new ML::ModelWrappers::Path(blueModel);
         } else {
             rightModel = new ML::ModelWrappers::Scripted(blue, Side::RIGHT);
         }

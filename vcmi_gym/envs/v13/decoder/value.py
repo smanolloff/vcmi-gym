@@ -65,29 +65,7 @@ class Value:
         if enctype.endswith("MASKING_NULL") and raw_nonnull[0] == NA:
             return
 
-        if "EXPBIN" in enctype:
-            if "ACCUMULATING" in enctype:
-                eb_index = raw_nonnull.argmin() - 1
-            else:
-                eb_index = raw_nonnull.argmax()
-
-            eb_xlow = float(eb_index) / n
-            eb_low = math.ceil((math.exp(slope * eb_xlow) - 1) / (math.exp(slope) - 1) * vmax)
-            eb_xhigh = (eb_index + 1) / n
-            eb_high = math.ceil((math.exp(slope * eb_xhigh) - 1) / (math.exp(slope) - 1) * vmax) - 1
-            self.vrange = (eb_low, eb_high)
-            self.v = sum(self.vrange) / 2
-        elif "LINBIN" in enctype:
-            if "ACCUMULATING" in enctype:
-                lb_index = raw_nonnull.argmin() - 1
-            else:
-                lb_index = raw_nonnull.argmax()
-
-            lb_low = math.ceil(lb_index * slope)
-            lb_high = math.ceil((lb_index + 1) * slope) - 1
-            self.vrange = (lb_low, lb_high)
-            self.v = sum(self.vrange) / 2
-        elif enctype.startswith("ACCUMULATING"):
+        if enctype.startswith("ACCUMULATING"):
             self.v = raw_nonnull.argmin() - 1
         elif enctype.startswith("BINARY"):
             self.v = raw_nonnull.astype(int)

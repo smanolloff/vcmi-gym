@@ -9,6 +9,8 @@ import json
 import copy
 import boto3
 import botocore.exceptions
+import datetime as dt
+import re
 from boto3.s3.transfer import TransferConfig
 
 
@@ -36,7 +38,7 @@ def _s3_download(logger, dry_run, s3_config, filename):
 
     # Download is OK even if --dry-run is given (nothing overwritten)
     if os.path.exists(filename):
-        logger.info(f"Loading from local file: {filename}")
+        logger.info(f"Found local file: {filename}")
     elif s3_config:
         logger.info("Local file does not exist, try S3")
 
@@ -67,6 +69,60 @@ def deepmerge(a: dict, b: dict, in_place=False, allow_new=True, update_existing=
     return a
 
 
+def download_latest_model(
+    logger,
+    dry_run,
+    out_dir,
+    run_id,
+    optimize_local_storage,
+    s3_config,
+    timestamp
+) -> (dt.datetime, str, str):
+    assert isinstance(timestamp, dt.datetime)
+    assert timestamp.tzinfo
+
+    s3 = init_s3_client()
+
+    # Normalize s3_path and build prefix for listing
+    prefix = f"{s3_config['s3_dir']}/{run_id}-"
+    suffix = "-model-dna.pt"
+    paginator = s3.get_paginator("list_objects_v2")
+
+    logger.info(f"Listing S3 objects with prefix={prefix}")
+    pattern = re.compile(r"%s([0-9]+)%s" % (re.escape(prefix), re.escape(suffix)))
+
+    latest_ts = timestamp
+    latest_key = None
+    n = 0
+
+    for page in paginator.paginate(Bucket=s3_config["bucket_name"], Prefix=prefix):
+        for obj in page.get("Contents", []):
+            n += 1
+            key = obj["Key"]
+            match = pattern.match(key)
+            if not match:
+                continue
+
+            ts = obj["LastModified"]
+
+            if ts > latest_ts:
+                latest_ts = ts
+                latest_key = key
+
+    logger.info(dict(objects=n, latest_key=latest_key, latest_ts=latest_ts.isoformat(timespec="seconds")))
+
+    if latest_key is None:
+        return None, None, None
+
+    myts = pattern.match(latest_key).group(1)
+    config_path = os.path.join(out_dir, f"{run_id}-{myts}-config.json")
+    weights_path = os.path.join(out_dir, f"{run_id}-{myts}-model-dna.pt")
+    _s3_download(logger, dry_run, s3_config, config_path)
+    _s3_download(logger, dry_run, s3_config, weights_path)
+
+    return latest_ts, config_path, weights_path
+
+
 def load_checkpoint(
     logger,
     dry_run,
@@ -80,6 +136,9 @@ def load_checkpoint(
     device,
     states={},      # dict with name=>obj, where obj has .to_json() and .from_json(string)
 ):
+    # XXX: PROBLEM:
+    # this works only for loading local checkpoint
+    # if no such, will try to download a non-timestamped model and will fail
     prefix = run_id
 
     files = dict(

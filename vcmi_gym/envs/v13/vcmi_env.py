@@ -328,8 +328,8 @@ class VcmiEnv(gym.Env):
 
         res = self.connector.step(action)
 
-        if action in [-1, 0]:
-            self._reset_vars(res)
+        # if action in [-1, 0]:
+        #     self._reset_vars(res)
 
         if res.errcode > 0:
             if self.allow_invalid_actions:

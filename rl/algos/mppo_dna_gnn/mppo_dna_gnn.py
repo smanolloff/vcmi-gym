@@ -13,13 +13,14 @@ import enum
 import copy
 import importlib
 import math
+import traceback
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 
+import datetime as dt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -32,7 +33,7 @@ import torch_geometric.nn as gnn
 
 from rl.algos.common import CategoricalMasked
 from rl.world.util.structured_logger import StructuredLogger
-from rl.world.util.persistence import load_checkpoint, save_checkpoint
+from rl.world.util.persistence import load_checkpoint, save_checkpoint, download_latest_model
 from rl.world.util.wandb import setup_wandb
 from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, safe_mean, timer_stats
@@ -53,7 +54,7 @@ from vcmi_gym.envs.v13.pyconnector import (
     LINK_TYPES,
 )
 
-from .dual_vec_env import DualVecEnv, to_hdata_list
+from .dual_vec_env import DualVecEnv, AbstractModelLoader, to_hdata_list
 
 
 OFFSETS_0 = [   # even rows offsets  /\    /\    /\    /\    /\
@@ -91,6 +92,7 @@ OFFSETS_1D_1 = [y * 15 + x for y, x in OFFSETS_1]
 if os.getenv("PYDEBUG", None) == "1":
     def excepthook(exc_type, exc_value, tb):
         import ipdb
+        print("\n".join(traceback.format_exception(exc_value)))
         ipdb.post_mortem(tb)
 
     sys.excepthook = excepthook
@@ -631,6 +633,49 @@ class DNAModel(nn.Module):
         self.to(device)
 
 
+class ModelLoader(AbstractModelLoader):
+    def __init__(self, device_type, role, loglevel="INFO"):
+        assert role in ["attacker", "defender"]
+        self.device_type = device_type
+        self.role = role
+        self.logger = StructuredLogger(level=getattr(logging, loglevel), context=dict(name="model_loader"))
+        self.model = None
+
+    def configure(self, config_file):
+        assert not self.model, "Cannot call .configure() after .load()"
+        self.config_file = config_file
+        self.logger.debug(f"Loading model config from file: {config_file}")
+        with open(config_file, "r") as f:
+            self.config = json.load(f)
+
+        loaded_role = self.config["train"]["env"]["kwargs"]["role"]
+        assert loaded_role == self.role, f"{loaded_role} == {self.role}"
+
+    # This function will be called from within another process
+    # (referenced non-local objects must be serializable for IPC).
+    def load(self, weights_file):
+        self.logger.info(f"Loading model weights from {weights_file}")
+        weights = torch.load(weights_file, weights_only=True, map_location=self.device_type)
+        if not self.model:
+            self.model = DNAModel(self.config["model"], torch.device(self.device_type)).eval()
+        self.model.load_state_dict(weights, strict=True)
+
+    def get_model(self):
+        return self.model
+
+
+@dataclass
+class ModelLoaderInfo():
+    # model_loader => (run_id, reload_at, run_id, weights_file)
+    model_loader: ModelLoader
+    model_ts: dt.datetime
+    loaded_at: dt.datetime
+    reload_interval_s: int
+    run_id: str
+    config_file: str
+    weights_file: str
+
+
 def collect_samples(logger, model, venv, num_vsteps, storage):
     assert not torch.is_inference_mode_enabled()  # causes issues during training
     assert not torch.is_grad_enabled()
@@ -1016,6 +1061,70 @@ def prepare_wandb_log(
     return wlog
 
 
+def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
+    if env_config["num_envs_per_opponent"]["model"] == 0:
+        return None
+
+    # Wanted bot role based on train role
+    bot_roles = dict(defender="attacker", attacker="defender")
+    bot_role = bot_roles[env_config["kwargs"]["role"]]
+    model_loader = ModelLoader(device.type, role=bot_role)
+
+    modelcfg = env_config["model"]
+    assert modelcfg, str(modelcfg)
+    assert modelcfg["type"] in ["static", "dynamic"]
+
+    if modelcfg["type"] == "static":
+        # For "static" models, config and weights are hard-coded in config
+        config_file = modelcfg["config_file"]
+        weights_file = modelcfg["weights_file"]
+        logger.info(f"Loading static model config from {config_file}")
+        model_loader.configure(config_file)
+        logger.info(f"Loading static model weights from {weights_file}")
+        model_loader.load(weights_file)
+        # These models will never be reloaded => set a huge reload interval
+        latest_ts = None
+        reload_interval_s = 1e9
+    else:
+        # BEGIN: DEBUG
+        print("*** DEBUG: force local model ***")
+        latest_ts = dt.datetime(2000, 1, 1).astimezone(dt.timezone.utc)
+        config_file = [f for f in os.listdir(".") if "nkjrmrsq" in f and f.endswith(".json")][0]
+        weights_file = [f for f in os.listdir(".") if "nkjrmrsq" in f and f.endswith(".pt")][0]
+        # EOF: DEBUG
+
+        # # For "dynamic" models, config and weights may change on each download
+        # latest_ts, config_file, weights_file = download_latest_model(
+        #     logger,
+        #     dry_run=dry_run,
+        #     out_dir=config["run"]["out_dir"],
+        #     run_id=modelcfg["run_id"],
+        #     optimize_local_storage=checkpoint_config["optimize_local_storage"],
+        #     s3_config=checkpoint_config["s3"],
+        #     # Force download via a timestamp in the distant past
+        #     timestamp=dt.datetime(2000, 1, 1).astimezone(dt.timezone.utc)
+        # )
+
+        logger.info(f"Loading dynamic model config from {config_file} / {latest_ts.isoformat()}")
+        model_loader.configure(config_file)
+        logger.info(f"Loading dynamic model weights from {weights_file}")
+        model_loader.load(weights_file)
+        reload_interval_s = modelcfg["reload_interval_s"]
+
+    with open(config_file, "r") as f:
+        run_id = json.load(f)["run"]["id"]
+
+    return ModelLoaderInfo(
+        model_loader=model_loader,
+        model_ts=latest_ts,
+        loaded_at=dt.datetime.now().astimezone(dt.timezone.utc),
+        reload_interval_s=reload_interval_s,
+        run_id=run_id,
+        config_file=config_file,
+        weights_file=weights_file
+    )
+
+
 def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_on_exit=True):
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
@@ -1058,41 +1167,22 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
         torch.set_float32_matmul_precision("high")
         torch.backends.cuda.matmul.allow_tf32 = True
 
-    def create_bot_model_factory(config_file, weights_file):
-        with open(config_file, "r") as f:
-            loaded_cfg = json.load(f)
+    loader_infos = []
 
-        # Bot models must be trained on the opposite side
-        train_role = train_config["env"]["kwargs"]["role"]
-        bot_role = loaded_cfg["train"]["env"]["kwargs"]["role"]
-        assert train_role != bot_role, f"{train_role} != {bot_role}"
+    train_loader_info = init_model_loader(train_config["env"], checkpoint_config, logger, dry_run, device)
 
-        device_type = device.type
-
-        # This function will be called from within another process,
-        # (it must not reference external objects which are non-serializable).
-        def model_factory():
-            weights = torch.load(weights_file, weights_only=True, map_location=device_type)
-            model = DNAModel(loaded_cfg["model"], torch.device(device_type)).eval()
-            model.load_state_dict(weights, strict=True)
-            return model
-
-        return model_factory
-
-    if train_config["env"]["num_envs_per_opponent"]["model"] > 0:
-        train_model_factory = create_bot_model_factory(
-            train_config["env"]["model"]["config_file"],
-            train_config["env"]["model"]["weights_file"],
-        )
+    if train_loader_info:
+        loader_infos.append(train_loader_info)
+        train_model_loader = train_loader_info.model_loader
     else:
-        train_model_factory = None
+        train_model_loader = None
 
     train_venv = DualVecEnv(
         train_config["env"]["kwargs"],
         train_config["env"]["num_envs_per_opponent"]["StupidAI"],
         train_config["env"]["num_envs_per_opponent"]["BattleAI"],
         train_config["env"]["num_envs_per_opponent"]["model"],
-        train_model_factory,
+        train_model_loader,
         logprefix="train-",
         e_max=3300
     )
@@ -1101,20 +1191,19 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
     eval_venv_variants = {}
     for name, envcfg in eval_config["env_variants"].items():
-        if envcfg["num_envs_per_opponent"]["model"] > 0:
-            eval_model_factory = create_bot_model_factory(
-                envcfg["model"]["config_file"],
-                envcfg["model"]["weights_file"],
-            )
+        eval_loader_info = init_model_loader(envcfg, checkpoint_config, logger, dry_run, device)
+        if eval_loader_info:
+            loader_infos.append(eval_loader_info)
+            eval_model_loader = eval_loader_info.model_loader
         else:
-            eval_model_factory = None
+            eval_model_loader = None
 
         eval_venv_variants[name] = DualVecEnv(
             envcfg["kwargs"],
             envcfg["num_envs_per_opponent"]["StupidAI"],
             envcfg["num_envs_per_opponent"]["BattleAI"],
             envcfg["num_envs_per_opponent"]["model"],
-            eval_model_factory,
+            eval_model_loader,
             logprefix=f"eval/{name}-",
             e_max=3300
         )
@@ -1320,6 +1409,47 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
                 lr_schedule_distill.step()
                 logger.info("New learning_rate: %s" % optimizer_policy.param_groups[0]['lr'])
 
+            now = dt.datetime.now().astimezone(dt.timezone.utc)
+            for loader_info in loader_infos:
+                next_check_at = loader_info.loaded_at + dt.timedelta(seconds=loader_info.reload_interval_s)
+                if now < next_check_at:
+                    continue
+
+                logger.info(f"Check if newer model exists for {loader_info.run_id} / {loader_info.model_ts.isoformat()}")
+                try:
+                    latest_ts, _, weights_file = download_latest_model(
+                        logger=logger,
+                        dry_run=dry_run,
+                        out_dir=config["run"]["out_dir"],
+                        run_id=loader_info.run_id,
+                        optimize_local_storage=checkpoint_config["optimize_local_storage"],
+                        s3_config=checkpoint_config["s3"],
+                        timestamp=loader_info.model_ts
+                    )
+
+                    if latest_ts is None or latest_ts <= loader_info.model_ts:
+                        logger.info(f"No newer model found for {loader_info.run_id}")
+                        continue
+
+                    loader_info.model_ts = latest_ts
+
+                    # Remove old weights
+                    if weights_file != loader_info.weights_file and os.path.exists(loader_info.weights_file):
+                        msg = f"Removing old weights at {loader_info.weights_file}"
+                        if dry_run:
+                            logger.info(msg + " (--dry-run)")
+                        else:
+                            logger.info(msg)
+                            os.unlink(loader_info.weights_file)
+
+                    loader_info.weights_file = weights_file
+                    loader_info.model_loader.load(weights_file)
+                    loader_info.loaded_at = now
+                except Exception as e:
+                    logger.error("Error while trying to update model %s: %s\n%s" % (
+                        loader_info.run_id, e, "\n".join(traceback.format_exception(e))
+                    ))
+
             # Evaluate first (for a baseline when resuming with modified params)
             eval_multistats = MultiStats()
 
@@ -1464,7 +1594,7 @@ def init_config(args):
 
         config["run"] = dict(
             id=run_id,
-            name=config["name_template"].format(id=run_id, datetime=datetime.utcnow().strftime("%Y%m%d_%H%M%S")),
+            name=config["name_template"].format(id=run_id, datetime=dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")),
             out_dir=os.path.abspath(config["out_dir_template"].format(id=run_id)),
             resumed_config=None,
         )

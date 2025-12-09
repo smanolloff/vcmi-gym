@@ -267,6 +267,8 @@ function retry_until_sigint() {
             echo "Interrupt NOT detected, will retry in 10s..."
             let ++i
             /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID CRASHED_\$i
+            # FIXME: if there are other runs on the same instance, this will kill them as well
+            killall python
             sleep 10
         fi
     done
@@ -441,6 +443,8 @@ cmake --build rel/ -- -j$CPU_COUNT
 
 cd ../../
 wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
+
+pip cache purge
 
 finished_at=$(date +%s)
 

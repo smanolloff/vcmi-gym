@@ -369,26 +369,6 @@ namespace Connector::V13 {
         break; case E::LINNORM_MASKING_NULL:                return "LINNORM_MASKING_NULL";
         break; case E::LINNORM_STRICT_NULL:                 return "LINNORM_STRICT_NULL";
         break; case E::LINNORM_ZERO_NULL:                   return "LINNORM_ZERO_NULL";
-        break; case E::EXPBIN_EXPLICIT_NULL:                return "EXPBIN_EXPLICIT_NULL";
-        break; case E::EXPBIN_IMPLICIT_NULL:                return "EXPBIN_IMPLICIT_NULL";
-        break; case E::EXPBIN_MASKING_NULL:                 return "EXPBIN_MASKING_NULL";
-        break; case E::EXPBIN_STRICT_NULL:                  return "EXPBIN_STRICT_NULL";
-        break; case E::EXPBIN_ZERO_NULL:                    return "EXPBIN_ZERO_NULL";
-        break; case E::ACCUMULATING_EXPBIN_EXPLICIT_NULL:   return "ACCUMULATING_EXPBIN_EXPLICIT_NULL";
-        break; case E::ACCUMULATING_EXPBIN_IMPLICIT_NULL:   return "ACCUMULATING_EXPBIN_IMPLICIT_NULL";
-        break; case E::ACCUMULATING_EXPBIN_MASKING_NULL:    return "ACCUMULATING_EXPBIN_MASKING_NULL";
-        break; case E::ACCUMULATING_EXPBIN_STRICT_NULL:     return "ACCUMULATING_EXPBIN_STRICT_NULL";
-        break; case E::ACCUMULATING_EXPBIN_ZERO_NULL:       return "ACCUMULATING_EXPBIN_ZERO_NULL";
-        break; case E::LINBIN_EXPLICIT_NULL:                return "LINBIN_EXPLICIT_NULL";
-        break; case E::LINBIN_IMPLICIT_NULL:                return "LINBIN_IMPLICIT_NULL";
-        break; case E::LINBIN_MASKING_NULL:                 return "LINBIN_MASKING_NULL";
-        break; case E::LINBIN_STRICT_NULL:                  return "LINBIN_STRICT_NULL";
-        break; case E::LINBIN_ZERO_NULL:                    return "LINBIN_ZERO_NULL";
-        break; case E::ACCUMULATING_LINBIN_EXPLICIT_NULL:   return "ACCUMULATING_LINBIN_EXPLICIT_NULL";
-        break; case E::ACCUMULATING_LINBIN_IMPLICIT_NULL:   return "ACCUMULATING_LINBIN_IMPLICIT_NULL";
-        break; case E::ACCUMULATING_LINBIN_MASKING_NULL:    return "ACCUMULATING_LINBIN_MASKING_NULL";
-        break; case E::ACCUMULATING_LINBIN_STRICT_NULL:     return "ACCUMULATING_LINBIN_STRICT_NULL";
-        break; case E::ACCUMULATING_LINBIN_ZERO_NULL:       return "ACCUMULATING_LINBIN_ZERO_NULL";
         break; case E::RAW:                                 return "RAW";
         break; default:
             throw std::runtime_error("Unexpected encoding: " + std::to_string(static_cast<int>(e)));

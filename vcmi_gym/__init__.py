@@ -15,13 +15,12 @@
 # =============================================================================
 
 import gymnasium
-from .envs.v12.vcmi_env import VcmiEnv as VcmiEnv_v12
 from .envs.v13.vcmi_env import VcmiEnv as VcmiEnv_v13
 
 
 def register_envs():
     common_opts = dict(disable_env_checker=True, order_enforce=False)
-    for v in [12, 13]:
+    for v in [13]:
         env_id = f"VCMI-v{v}"
         entry_point = f"vcmi_gym:VcmiEnv_v{v}"
         if env_id not in gymnasium.envs.registration.registry:
@@ -30,6 +29,5 @@ def register_envs():
 
 all = [
     register_envs,
-    VcmiEnv_v12,
     VcmiEnv_v13,
 ]

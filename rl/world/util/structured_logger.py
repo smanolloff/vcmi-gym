@@ -10,7 +10,7 @@ class StructuredLogger:
         self.level = level
         self.filename = filename
         self.context = context
-        self.info(dict(filename=filename))
+        self.info(dict(event="logger init", filename=filename))
 
         assert level in [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR]
         self.level = level
