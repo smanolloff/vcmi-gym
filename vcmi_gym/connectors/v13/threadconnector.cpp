@@ -221,7 +221,7 @@ namespace Connector::V13::Thread {
 
     const MMAI::Schema::V13::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
         LOG("Extracting supplementary data...");
-        auto &any = s->getSupplementaryData();
+        auto any = s->getSupplementaryData();
         if(!any.has_value()) throw std::runtime_error("extractSupplementaryData: supdata is empty");
         auto &t = typeid(const MMAI::Schema::V13::ISupplementaryData*);
         auto err = MMAI::Schema::AnyCastError(any, typeid(const MMAI::Schema::V13::ISupplementaryData*));

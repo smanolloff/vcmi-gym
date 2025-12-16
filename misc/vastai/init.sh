@@ -90,9 +90,6 @@ fi
 
 /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID init...
 
-# An alias will not work in non-login shells
-[ -e /usr/bin/python ] || ln -s python3 /usr/bin/python
-
 if ! [ -d aws ]; then
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
     unzip awscliv2.zip
@@ -110,22 +107,30 @@ output = json
 EOF
 fi
 
-git clone --branch dev --single-branch https://github.com/smanolloff/vcmi-gym.git
+[ -d vcmi-gym ] || git clone --single-branch https://github.com/smanolloff/vcmi-gym.git
 cd vcmi-gym
 
-pip install --break-system-packages -r requirements.txt
+apt-get update
+apt-get -y install python3-venv
+
+# An alias will not work in non-login shells
+[ -e /usr/bin/python ] || ln -s python3 /usr/bin/python
+[ -d .venv ] || python3 -m venv .venv
+. /workspace/vcmi-gym/.venv/bin/activate
+
+pip install -r requirements.txt
 # pip install --break-system-packages jax[cuda12]
 
 #
 # ~/.bashrc setup
 #
 
-cat <<-EOF >>~/.bashrc
+grep ". ~/.simorc" ~/.bashrc || cat <<-EOF >>~/.bashrc
 # Need a separate simorc (called explicitly from nonlogin shells)
 . ~/.simorc
 EOF
 
-cat <<-EOF >>~/.simorc
+cat <<-EOF >~/.simorc
 set -x
 
 function pymod() {
@@ -283,31 +288,45 @@ USAGE
         return 1
     }
 
-    run_id="\$1"
-
-    if [ -z "\$run_id" ]; then
-        # New run
+    if [ -z "\$1" ]; then
         LC_ALL=C run_id=\$(tr -dc 'a-z' </dev/urandom | head -c8)
-        args="--run-id \$run_id"
     else
-        # Resume run
-        f=data/mppo-dna-heads/\$run_id-config.json
-        [ -r "\$f" ] || { echo "No such file: \$f"; return 1; }
-        args="-f \$f"
+        run_id="\$1"
     fi
+
+    f="data/mppo-dna-heads/\$run_id-config.json"
 
     basecmd="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn"
 
     if [ -z "\$2" ]; then
-        # Always resume from the latest checkpoint on restart (don't use args here)
-        setboot retry_until_sigint \$basecmd -f data/mppo-dna-heads/\$run_id-config.json
+        setboot retry_until_sigint \$basecmd -f \$f
+        extra_args=
     else
-        # --dry-run => no resume (let it transition to IDLE)
+        # --dry-run => don't resume on boot (let it transition to IDLE)
         setboot :
-        args+=" --dry-run"
+        basecmd+=" --dry-run"
     fi
 
-    retry_until_sigint \$basecmd \$args
+    if ! [ -r "\$f" ]; then
+        echo "This is a new run -- will start ONCE with --run-id to create it"
+        bash -x ~/runcmd.sh \$basecmd --run-id \$run_id
+
+        if [ \$? -eq 130 ]; then
+            echo "Interrupt detected, will NOT retry"
+            /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID IDLE
+            # run was interrupted, no need to resume on boot
+            setboot :
+            return 0
+        fi
+
+        # The config file should now be created, can enter the regular retry loop
+        echo "Interrupt NOT detected, will enter retry loop"
+        /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID CRASHED
+        killall python
+        sleep 10
+    fi
+
+    retry_until_sigint \$basecmd -f \$f
     setboot :
 }
 
@@ -328,6 +347,7 @@ export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 export VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
 cd /workspace/vcmi-gym
+. /workspace/vcmi-gym/.venv/bin/activate
 EOF
 
 cat <<-EOF >~/runcmd.sh
@@ -345,6 +365,8 @@ if [ \$mb -lt 500 ]; then
     echo "Less than 500MB of free space: '\$mb'"
     exit 1
 fi
+
+. /workspace/vcmi-gym/.venv/bin/activate
 
 # XXX: do NOT use exec here (does not call trap)
 \$@
@@ -402,26 +424,38 @@ EOF
 git submodule update --init --recursive
 cd vcmi
 
-cat <<-PYEOF | python3
+if ! [ -f h3.tar ]; then
+    cat <<-PYEOF | python3
 import os
 import boto3
 s3 = boto3.client("s3", aws_access_key_id=os.environ["AWS_ACCESS_KEY"], aws_secret_access_key=os.environ["AWS_SECRET_KEY"], region_name="eu-north-1")
 s3.download_file("vcmi-gym", "h3.tar.zip", "h3.tar.zip")
 PYEOF
 
-unzip -P "$VCMI_ARCHIVE_KEY" h3.tar.zip
+    unzip -P "$VCMI_ARCHIVE_KEY" h3.tar.zip
+fi
+rm -rf data
 tar -xf h3.tar
-rm h3.tar*
 mkdir -p data/config
 cp ML/configs/*.json data/config
 ln -s ../../../maps/gym data/Maps/
 
-apt-get update
-apt-get -y install vim cmake g++ libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev \
-    libsdl2-mixer-dev zlib1g-dev libavformat-dev libswscale-dev libboost-dev \
-    libboost-filesystem-dev libboost-system-dev libboost-thread-dev libboost-program-options-dev \
-    libboost-locale-dev qtbase5-dev libtbb-dev libluajit-5.1-dev qttools5-dev \
-    libsqlite3-dev liblzma-dev python3-dev ccache
+# Copied from vcmi/CI/before_install/linux_common.sh
+ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
+ONNXRUNTIME_ROOT=/opt/onnxruntime
+mkdir -p "$ONNXRUNTIME_ROOT"
+curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
+
+# Everything after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
+apt-get -y install vim ccache cmake g++ liblzma-dev \
+  libboost-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev \
+  libboost-program-options-dev libboost-locale-dev libboost-iostreams-dev \
+  libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+  qtbase5-dev qtbase5-dev-tools qttools5-dev qttools5-dev-tools \
+  libqt5svg5-dev \
+  ninja-build zlib1g-dev libavformat-dev libswscale-dev libtbb-dev \
+  libluajit-5.1-dev libminizip-dev libfuzzylite-dev libsqlite3-dev \
+  libsquish-dev
 
 cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
@@ -434,7 +468,7 @@ cmake -S . -B rel -Wno-dev \
     -D MMAI_EXECUTORCH_PATH=""
 cmake --build rel/ -- -j$CPU_COUNT
 
-cd "../vcmi_gym/connectors"
+cd ../vcmi_gym/connectors
 apt-get -y install libboost-all-dev
 cmake -S . -B rel -Wno-dev \
     -D CMAKE_BUILD_TYPE=Release \
