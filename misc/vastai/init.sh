@@ -116,7 +116,9 @@ apt-get -y install python3-venv
 # An alias will not work in non-login shells
 [ -e /usr/bin/python ] || ln -s python3 /usr/bin/python
 [ -d .venv ] || python3 -m venv .venv
+set +x
 . /workspace/vcmi-gym/.venv/bin/activate
+set -x
 
 pip install -r requirements.txt
 # pip install --break-system-packages jax[cuda12]
@@ -347,7 +349,9 @@ export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 export VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
 cd /workspace/vcmi-gym
+set +x
 . /workspace/vcmi-gym/.venv/bin/activate
+set -x
 EOF
 
 cat <<-EOF >~/runcmd.sh
@@ -366,7 +370,9 @@ if [ \$mb -lt 500 ]; then
     exit 1
 fi
 
+set +x
 . /workspace/vcmi-gym/.venv/bin/activate
+set -x
 
 # XXX: do NOT use exec here (does not call trap)
 \$@
@@ -440,11 +446,13 @@ mkdir -p data/config
 cp ML/configs/*.json data/config
 ln -s ../../../maps/gym data/Maps/
 
-# Copied from vcmi/CI/before_install/linux_common.sh
-ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
-ONNXRUNTIME_ROOT=/opt/onnxruntime
-mkdir -p "$ONNXRUNTIME_ROOT"
-curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
+if ! [ -d /opt/onnxruntime/lib/libonnxruntime.so ]; then
+    # Copied from vcmi/CI/before_install/linux_common.sh
+    ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
+    ONNXRUNTIME_ROOT=/opt/onnxruntime
+    mkdir -p "$ONNXRUNTIME_ROOT"
+    curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
+fi
 
 # Everything after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
 apt-get -y install vim ccache cmake g++ liblzma-dev \
