@@ -1581,7 +1581,7 @@ def init_config(args):
 
     if args.f:
         assert args.run_id is None, "Cannot pass both --run-id and -f"
-        assert args.suffix is None, "Cannot pass both --suffix and -f"
+        # assert args.suffix is None, "Cannot pass both --suffix and -f"
         with open(args.f, "r") as f:
             print(f"Resuming from config: {f.name}")
             config = json.load(f)

@@ -282,36 +282,46 @@ function retry_until_sigint() {
 }
 
 function train_gnn() {
-    # To start a new run, pass "" explicitly, e.g.
-    [ "\$#" -eq 1 ] || [ "\$#" -eq 2 -a "\$2" = "--dry-run" ] || {
+    local run_id=\$1
+    shift
+    local rest=\$*
+
+    if [ -z "\$run_id" ]; then
+        LC_ALL=C run_id=\$(tr -dc 'a-z' </dev/urandom | head -c8)
+    fi
+
+    [[ \$run_id =~ ^[a-z]{8}\$ ]] || {
         cat <<-USAGE
-Usage: train_gnn run_id [--dry-run]
+Usage: train_gnn run_id [opts]
 USAGE
         return 1
     }
 
-    if [ -z "\$1" ]; then
-        LC_ALL=C run_id=\$(tr -dc 'a-z' </dev/urandom | head -c8)
-    else
-        run_id="\$1"
-    fi
+    local dry_run
+    echo \$* | grep -- --dry-run && dry_run=true || dry_run=false
 
-    f="data/mppo-dna-heads/\$run_id-config.json"
+    local f="data/mppo-dna-heads/\$run_id-config.json"
+    local new_run
+    [ -r "\$f" ] && new_run=false || new_run=true
 
-    basecmd="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn"
+    local basecmd="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn"
+    local newcmd="\$basecmd --run-id \$run_id \$rest"
 
-    if [ -z "\$2" ]; then
-        setboot retry_until_sigint \$basecmd -f \$f
-        extra_args=
-    else
-        # --dry-run => don't resume on boot (let it transition to IDLE)
+    # Resuming does not use any args except -f and (optionally) --dry-run
+    local resumecmd="\$basecmd -f \$f"
+    if \$dry_run; then
+        resumecmd+=" --dry-run"
+
+        # don't resume on boot (let it transition to IDLE)
         setboot :
-        basecmd+=" --dry-run"
+    else
+        # must not start a new run on boot => use resumecmd
+        setboot retry_until_sigint \$resumecmd
     fi
 
-    if ! [ -r "\$f" ]; then
+    if \$new_run; then
         echo "This is a new run -- will start ONCE with --run-id to create it"
-        bash -x ~/runcmd.sh \$basecmd --run-id \$run_id
+        bash -x ~/runcmd.sh \$newcmd
 
         if [ \$? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
@@ -328,7 +338,7 @@ USAGE
         sleep 10
     fi
 
-    retry_until_sigint \$basecmd -f \$f
+    retry_until_sigint \$resumecmd
     setboot :
 }
 
