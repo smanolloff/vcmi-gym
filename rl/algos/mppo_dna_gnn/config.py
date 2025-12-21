@@ -61,7 +61,7 @@ eval_variant = lambda num_envs_per_opponent, model, **env_kwargs: dict(
 )
 
 config = dict(
-    name_template="{datetime}-{id}-v12",
+    name_template="{datetime}-{id}-{suffix}",
     out_dir_template="data/mppo-dna-heads",
 
     # XXX: s3_dir's "{wandb_group}" substring will be replaced with this value
@@ -81,17 +81,17 @@ config = dict(
     eval=dict(
         env_variants={
             # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0), town_chance=100),
-            # "BattleAI.open": eval_variant(
-            #     num_envs_per_opponent=gen_num_envs(0, 2, 0),
-            #     model=None,
-            #     town_chance=0,
-            # ),
-            "MMAI.open": eval_variant(
-                num_envs_per_opponent=gen_num_envs(0, 0, 1),
-                model=dynamic_bot("nkjrmrsq", 5),
-                # model=static_bot("nkjrmrsq-202509291846"),
+            "BattleAI.open": eval_variant(
+                num_envs_per_opponent=gen_num_envs(0, 2, 0),
+                model=None,
                 town_chance=0,
             ),
+            # "MMAI.open": eval_variant(
+            #     num_envs_per_opponent=gen_num_envs(0, 0, 1),
+            #     model=dynamic_bot("nkjrmrsq", 5),
+            #     # model=static_bot("nkjrmrsq-202509291846"),
+            #     town_chance=0,
+            # ),
         },
         num_vsteps=10_000,
         interval_s=1800,
@@ -102,11 +102,11 @@ config = dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
             kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
-            # num_envs_per_opponent=dict(StupidAI=0, BattleAI=40, model=0),
+            num_envs_per_opponent=dict(StupidAI=0, BattleAI=40, model=0),
 
-            num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, model=1),
+            # num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, model=1),
             # model=static_bot("data/mppo-dna-heads/tukbajrv-202509241418"),
-            model=static_bot("nkjrmrsq-202509291846"),
+            # model=static_bot("nkjrmrsq-202509291846"),
         ),
         num_vsteps=125,                 # num_steps = num_vsteps * num_envs
         num_minibatches=20,             # mb_size = num_steps / num_minibatches
@@ -134,11 +134,13 @@ config = dict(
         torch_compile=False,
     ),
     model=dict(
+        critic_hidden_features=256,
         gnn_num_layers=3,
         gnn_out_channels=128,
         gnn_hidden_channels=256,
-        critic_hidden_features=256,
-        # result_predictor_hidden_features=256,
+        gnn_kwargs=dict(
+            add_self_loops=True,
+        )
     ),
 )
 

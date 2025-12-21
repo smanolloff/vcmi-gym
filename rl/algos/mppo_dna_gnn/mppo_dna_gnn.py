@@ -271,6 +271,7 @@ class GNNBlock(nn.Module):
         in_channels,
         hidden_channels,
         out_channels,
+        gnn_kwargs,
         link_types=LINK_TYPES.keys(),
         node_type="hex",
         edge_dim=1
@@ -280,7 +281,7 @@ class GNNBlock(nn.Module):
         # at least 1 "hidden" layer is required for shapes to match
         assert num_layers >= 2
 
-        kwargs = dict(edge_dim=edge_dim, add_self_loops=True)
+        kwargs = dict(gnn_kwargs, edge_dim=edge_dim)
 
         # NOTE: the code below will likely fail if len(node_types) > 1 unless
         #       all they all have the same shape
@@ -370,6 +371,7 @@ class Model(nn.Module):
             STATE_SIZE_ONE_HEX,
             config["gnn_hidden_channels"],
             config["gnn_out_channels"],
+            config.get("gnn_kwargs", {}),
         )
 
         d = config["gnn_out_channels"]
@@ -1579,6 +1581,7 @@ def init_config(args):
 
     if args.f:
         assert args.run_id is None, "Cannot pass both --run-id and -f"
+        assert args.suffix is None, "Cannot pass both --suffix and -f"
         with open(args.f, "r") as f:
             print(f"Resuming from config: {f.name}")
             config = json.load(f)
@@ -1594,7 +1597,11 @@ def init_config(args):
 
         config["run"] = dict(
             id=run_id,
-            name=config["name_template"].format(id=run_id, datetime=dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")),
+            name=config["name_template"].format(
+                id=run_id,
+                datetime=dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S"),
+                suffix="v13" if args.suffix is None else args.suffix
+            ),
             out_dir=os.path.abspath(config["out_dir_template"].format(id=run_id)),
             resumed_config=None,
         )
@@ -1605,6 +1612,7 @@ def init_config(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-id", metavar="RUN_ID", help="run id to use (incompatible with -f)")
+    parser.add_argument("--suffix", metavar="SUFFIX", help="wandb run name template suffix value")
     parser.add_argument("-f", metavar="FILE", help="config file to resume or test")
     parser.add_argument("--dry-run", action="store_true", help="do not save anything to disk (implies --no-wandb)")
     parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
