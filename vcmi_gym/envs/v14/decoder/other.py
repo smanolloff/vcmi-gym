@@ -8,28 +8,20 @@
 #    http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
-# distanceributed under the License is distanceributed on an "AS IS" BASIS,
+# distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # =============================================================================
 
-import gymnasium
-from .envs.v13.vcmi_env import VcmiEnv as VcmiEnv_v13
-from .envs.v14.vcmi_env import VcmiEnv as VcmiEnv_v14
+from types import SimpleNamespace
 
+from ..pyconnector import (
+    HEX_ACT_MAP,
+    HEX_STATE_MAP,
+    SIDE_MAP,
+)
 
-def register_envs():
-    common_opts = dict(disable_env_checker=True, order_enforce=False)
-    for v in [13, 14]:
-        env_id = f"VCMI-v{v}"
-        entry_point = f"vcmi_gym:VcmiEnv_v{v}"
-        if env_id not in gymnasium.envs.registration.registry:
-            gymnasium.register(id=env_id, entry_point=entry_point, **common_opts)
-
-
-all = [
-    register_envs,
-    VcmiEnv_v13,
-    VcmiEnv_v14,
-]
+HexAction = SimpleNamespace(**HEX_ACT_MAP)
+HexState = SimpleNamespace(**HEX_STATE_MAP)
+Side = SimpleNamespace(**SIDE_MAP)

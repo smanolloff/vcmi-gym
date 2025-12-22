@@ -1341,7 +1341,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     wandb_log_commit_timer._started_at = 0  # force first trigger
     eval_timer = Timer()
     eval_timer.start()
-    if config["eval"]["at_script_start"]:
+    if config["eval"]["at_script_start"] and not dry_run:
         eval_timer._started_at = 0  # force first trigger
 
     lr_schedule_timer = Timer()
