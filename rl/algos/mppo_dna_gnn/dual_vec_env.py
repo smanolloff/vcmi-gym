@@ -12,8 +12,8 @@ from multiprocessing.managers import SharedMemoryManager
 from types import SimpleNamespace
 from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
 from vcmi_gym.envs.util.log import get_logger, trunc
-from vcmi_gym.envs.v13.vcmi_env import VcmiEnv
-from vcmi_gym.envs.v13.pyconnector import (
+from vcmi_gym.envs.v14.vcmi_env import VcmiEnv
+from vcmi_gym.envs.v14.pyconnector import (
     LINK_TYPES,
     STATE_SIZE,
     STATE_SIZE_HEXES,

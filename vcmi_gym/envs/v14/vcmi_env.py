@@ -52,21 +52,6 @@ def tracelog(func, maxlen=80):
     return wrapper
 
 
-class InfoDict(dict):
-    SCALAR_VALUES = [
-        "net_value",
-        "is_success",
-        # "reward_clip_abs_total",
-        # "reward_clip_abs_max",
-    ]
-
-    ALL_KEYS = ["side"] + SCALAR_VALUES
-
-    def __setitem__(self, k, v):
-        assert k in InfoDict.ALL_KEYS, f"Unknown info key: '{k}'"
-        super().__setitem__(k, v)
-
-
 # NOTE:
 # Typical episode returns for step_fixed=0, dmg_mult=0, term_mult=0 (no errors):
 # (-60, 60)
@@ -81,6 +66,16 @@ class RewardConfig(NamedTuple):
     dmg_mult: float
     term_mult: float
     relval_mult: float
+
+
+class RewardValues(NamedTuple):
+    step_fixed: float = 0.0
+    step_round_mult: float = 0.0
+    round_fixed: float = 0.0
+    round_round_mult: float = 0.0
+    dmg_mult: float = 0.0
+    term_mult: float = 0.0
+    relval_mult: float = 0.0
 
 
 class EdgeIndexSpace(gym.spaces.Space):
@@ -357,15 +352,16 @@ class VcmiEnv(gym.Env):
 
         bf = Decoder.decode(res.state, only_global=True)
         term = bf.global_stats.BATTLE_WINNER.v is not None
-        rew = VcmiEnv.calc_reward(res.errcode, bf, self.bf, self.reward_cfg)
+        rewvals = VcmiEnv.calc_reward(res.errcode, bf, self.bf, self.reward_cfg)
+        rew = sum(rewvals)
         res.mask[0] = False  # prevent retreats for now
         obs = self.__class__.build_obs(res)
         trunc = self.steps_this_episode >= self.max_steps
 
-        self._update_vars_after_step(action, obs, res, rew, term, trunc, bf)
+        self._update_vars_after_step(action, obs, res, rew, term, trunc, bf, rewvals)
         self._maybe_render()
 
-        info = self.__class__.build_info(res, term, trunc, bf, self.steps_this_episode)
+        info = self.__class__.build_info(res, term, trunc, bf, self.steps_this_episode, self.rewvals_total)
 
         return obs, rew, term, trunc, info
 
@@ -527,13 +523,15 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def _update_vars_after_step(self, action, obs, res, rew, term, trunc, bf):
+    def _update_vars_after_step(self, action, obs, res, rew, term, trunc, bf, rewvals):
         self.last_action = action
         self.steps_this_episode += 1
         self.obs = obs
         self.result = res
         self.reward = rew
         self.reward_total += rew
+        self.rewvals = rewvals
+        self.rewvals_total = RewardValues(*map(sum, zip(self.rewvals_total, rewvals)))  # element-wise sum
         self.terminated = term
         self.truncated = trunc
         self.bf = bf
@@ -545,6 +543,8 @@ class VcmiEnv(gym.Env):
         self.result = res
         self.reward = 0
         self.reward_total = 0
+        self.rewvals = RewardValues()
+        self.rewvals_total = RewardValues()
         self.reward_clip_abs_total = 0
         self.reward_clip_abs_max = 0
         self.terminated = False
@@ -561,19 +561,26 @@ class VcmiEnv(gym.Env):
     # One-time values will be lost, put only only cumulatives/totals/etc.
     #
     @staticmethod
-    def build_info(res, term, trunc, bf, steps_this_episode):
+    def build_info(res, term, trunc, bf, steps_this_episode, rewvals_total):
         # Performance optimization
         if not (term or trunc):
-            return {"side": bf.global_stats.BATTLE_SIDE.v, "step": steps_this_episode}
+            return dict(side=bf.global_stats.BATTLE_SIDE.v, step=steps_this_episode)
 
-        # XXX: do not use constructor args (bypasses validations)
-        info = InfoDict()
-        info["side"] = bf.global_stats.BATTLE_SIDE.v
-        info["net_value"] = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
-        info["is_success"] = bf.is_battle_won or False  # can be None if truncated
+        return dict(
+            side=bf.global_stats.BATTLE_SIDE.v,
+            step=steps_this_episode,
 
-        # Return regular dict (wrappers insert arbitary keys)
-        return dict(info)
+            round=bf.global_stats.BATTLE_ROUND.v,
+            net_value=bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v,
+            is_success=bf.is_battle_won or False,  # can be None if truncated
+            reward_step_fixed=rewvals_total.step_fixed,
+            reward_step_round_mult=rewvals_total.step_round_mult,
+            reward_round_fixed=rewvals_total.round_fixed,
+            reward_round_round_mult=rewvals_total.round_round_mult,
+            reward_dmg_mult=rewvals_total.dmg_mult,
+            reward_term_mult=rewvals_total.term_mult,
+            reward_relval_mult=rewvals_total.relval_mult,
+        )
 
     @staticmethod
     def calc_reward(errcode, bf, bf_old, cfg: RewardConfig):
@@ -584,19 +591,16 @@ class VcmiEnv(gym.Env):
         net_value = bf.enemy_stats.VALUE_LOST_NOW_REL.v - bf.my_stats.VALUE_LOST_NOW_REL.v
         net_dmg = bf.enemy_stats.DMG_RECEIVED_NOW_REL.v - bf.my_stats.DMG_RECEIVED_NOW_REL.v
         net_value_acc = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
-        ended = bf.global_stats.BATTLE_WINNER.v is not None
-        term_rew = net_value_acc if ended else 0
 
+        is_ended = bf.global_stats.BATTLE_WINNER.v is not None
         is_new_round = battle_round > bf_old.global_stats.BATTLE_ROUND.v
-        # print(f"net_value: {net_value}, net_dmg: {net_dmg}, step_fixed: {cfg.step_fixed}")
-        # print("REWARD: net_value=%d (%d - %d)" % (net_value, bf.enemy_stats.VALUE_LOST_REL.v, bf.my_stats.VALUE_LOST_REL.v))
 
-        return (
-            cfg.step_fixed
-            + cfg.step_round_mult * battle_round
-            + is_new_round * cfg.round_fixed
-            + is_new_round * cfg.round_round_mult * battle_round
-            + net_value * cfg.relval_mult
-            + net_dmg * cfg.dmg_mult
-            + term_rew * cfg.term_mult
+        return RewardValues(
+            step_fixed=cfg.step_fixed,
+            step_round_mult=cfg.step_round_mult * battle_round,
+            round_fixed=is_new_round * cfg.round_fixed,
+            round_round_mult=is_new_round * cfg.round_round_mult * battle_round,
+            dmg_mult=net_dmg * cfg.dmg_mult,
+            term_mult=is_ended * net_value_acc,
+            relval_mult=net_value * cfg.relval_mult,
         )
