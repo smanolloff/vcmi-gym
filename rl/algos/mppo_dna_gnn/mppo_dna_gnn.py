@@ -38,9 +38,9 @@ from rl.world.util.wandb import setup_wandb
 from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, safe_mean, timer_stats
 
-from vcmi_gym.envs.v14.vcmi_env import VcmiEnv
+from vcmi_gym.envs.v13.vcmi_env import VcmiEnv
 
-from vcmi_gym.envs.v14.pyconnector import (
+from vcmi_gym.envs.v13.pyconnector import (
     STATE_SIZE,
     STATE_SIZE_ONE_HEX,
     STATE_SIZE_HEXES,
@@ -1042,69 +1042,35 @@ def prepare_wandb_log(
     wlog = {}
 
     if eval_multistats.num_episodes > 0:
-        reward_abs_tot = (
-            abs(eval_multistats.ep_rew_step_fixed_mean)
-            + abs(eval_multistats.ep_rew_step_round_mult_mean)
-            + abs(eval_multistats.ep_rew_round_fixed_mean)
-            + abs(eval_multistats.ep_rew_round_round_mult_mean)
-            + abs(eval_multistats.ep_rew_dmg_mult_mean)
-            + abs(eval_multistats.ep_rew_term_mult_mean)
-            + abs(eval_multistats.ep_rew_relval_mult_mean)
-        )
-
         wlog.update({
             "eval/ep_rew_mean": eval_multistats.ep_rew_mean,
             "eval/ep_value_mean": eval_multistats.ep_value_mean,
             "eval/ep_len_mean": eval_multistats.ep_len_mean,
             "eval/ep_success_rate": eval_multistats.ep_is_success_mean,
             "eval/ep_count": eval_multistats.num_episodes,
-            "eval/reward_abs/step_fixed": eval_multistats.ep_rew_step_fixed_mean,
-            "eval/reward_abs/step_round_mult": eval_multistats.ep_rew_step_round_mult_mean,
-            "eval/reward_abs/round_fixed": eval_multistats.ep_rew_round_fixed_mean,
-            "eval/reward_abs/round_round_mult": eval_multistats.ep_rew_round_round_mult_mean,
-            "eval/reward_abs/dmg_mult": eval_multistats.ep_rew_dmg_mult_mean,
-            "eval/reward_abs/term_mult": eval_multistats.ep_rew_term_mult_mean,
-            "eval/reward_abs/relval_mult": eval_multistats.ep_rew_relval_mult_mean,
-            "eval/reward_rel/step_fixed": abs(eval_multistats.ep_rew_step_fixed_mean) / reward_abs_tot,
-            "eval/reward_rel/step_round_mult": abs(eval_multistats.ep_rew_step_round_mult_mean) / reward_abs_tot,
-            "eval/reward_rel/round_fixed": abs(eval_multistats.ep_rew_round_fixed_mean) / reward_abs_tot,
-            "eval/reward_rel/round_round_mult": abs(eval_multistats.ep_rew_round_round_mult_mean) / reward_abs_tot,
-            "eval/reward_rel/dmg_mult": abs(eval_multistats.ep_rew_dmg_mult_mean) / reward_abs_tot,
-            "eval/reward_rel/term_mult": abs(eval_multistats.ep_rew_term_mult_mean) / reward_abs_tot,
-            "eval/reward_rel/relval_mult": abs(eval_multistats.ep_rew_relval_mult_mean) / reward_abs_tot,
+            "eval/reward/step_fixed": eval_multistats.ep_rew_step_fixed_mean,
+            "eval/reward/step_round_mult": eval_multistats.ep_rew_step_round_mult_mean,
+            "eval/reward/round_fixed": eval_multistats.ep_rew_round_fixed_mean,
+            "eval/reward/round_round_mult": eval_multistats.ep_rew_round_round_mult_mean,
+            "eval/reward/dmg_mult": eval_multistats.ep_rew_dmg_mult_mean,
+            "eval/reward/term_mult": eval_multistats.ep_rew_term_mult_mean,
+            "eval/reward/relval_mult": eval_multistats.ep_rew_relval_mult_mean,
         })
 
     for name, eval_sample_stats in eval_multistats.variants.items():
-        reward_abs_tot = (
-            abs(eval_sample_stats.ep_rew_step_fixed_mean)
-            + abs(eval_sample_stats.ep_rew_step_round_mult_mean)
-            + abs(eval_sample_stats.ep_rew_round_fixed_mean)
-            + abs(eval_sample_stats.ep_rew_round_round_mult_mean)
-            + abs(eval_sample_stats.ep_rew_dmg_mult_mean)
-            + abs(eval_sample_stats.ep_rew_term_mult_mean)
-            + abs(eval_sample_stats.ep_rew_relval_mult_mean)
-        )
-
         wlog.update({
             f"eval/{name}/ep_rew_mean": eval_sample_stats.ep_rew_mean,
             f"eval/{name}/ep_value_mean": eval_sample_stats.ep_value_mean,
             f"eval/{name}/ep_len_mean": eval_sample_stats.ep_len_mean,
             f"eval/{name}/ep_success_rate": eval_sample_stats.ep_is_success_mean,
             f"eval/{name}/ep_count": eval_sample_stats.num_episodes,
-            f"eval/{name}/reward_abs/step_fixed_mean": eval_sample_stats.ep_rew_step_fixed_mean,
-            f"eval/{name}/reward_abs/step_round_mult_mean": eval_sample_stats.ep_rew_step_round_mult_mean,
-            f"eval/{name}/reward_abs/round_fixed_mean": eval_sample_stats.ep_rew_round_fixed_mean,
-            f"eval/{name}/reward_abs/round_round_mult_mean": eval_sample_stats.ep_rew_round_round_mult_mean,
-            f"eval/{name}/reward_abs/dmg_mult_mean": eval_sample_stats.ep_rew_dmg_mult_mean,
-            f"eval/{name}/reward_abs/term_mult_mean": eval_sample_stats.ep_rew_term_mult_mean,
-            f"eval/{name}/reward_abs/relval_mult_mean": eval_sample_stats.ep_rew_relval_mult_mean,
-            f"eval/{name}/reward_rel/step_fixed": abs(eval_sample_stats.ep_rew_step_fixed_mean) / reward_abs_tot,
-            f"eval/{name}/reward_rel/step_round_mult": abs(eval_sample_stats.ep_rew_step_round_mult_mean) / reward_abs_tot,
-            f"eval/{name}/reward_rel/round_fixed": abs(eval_sample_stats.ep_rew_round_fixed_mean) / reward_abs_tot,
-            f"eval/{name}/reward_rel/round_round_mult": abs(eval_sample_stats.ep_rew_round_round_mult_mean) / reward_abs_tot,
-            f"eval/{name}/reward_rel/dmg_mult": abs(eval_sample_stats.ep_rew_dmg_mult_mean) / reward_abs_tot,
-            f"eval/{name}/reward_rel/term_mult": abs(eval_sample_stats.ep_rew_term_mult_mean) / reward_abs_tot,
-            f"eval/{name}/reward_rel/relval_mult": abs(eval_sample_stats.ep_rew_relval_mult_mean) / reward_abs_tot,
+            f"eval/{name}/reward/step_fixed_mean": eval_sample_stats.ep_rew_step_fixed_mean,
+            f"eval/{name}/reward/step_round_mult_mean": eval_sample_stats.ep_rew_step_round_mult_mean,
+            f"eval/{name}/reward/round_fixed_mean": eval_sample_stats.ep_rew_round_fixed_mean,
+            f"eval/{name}/reward/round_round_mult_mean": eval_sample_stats.ep_rew_round_round_mult_mean,
+            f"eval/{name}/reward/dmg_mult_mean": eval_sample_stats.ep_rew_dmg_mult_mean,
+            f"eval/{name}/reward/term_mult_mean": eval_sample_stats.ep_rew_term_mult_mean,
+            f"eval/{name}/reward/relval_mult_mean": eval_sample_stats.ep_rew_relval_mult_mean,
         })
 
     if train_sample_stats.num_episodes > 0:
@@ -1690,7 +1656,7 @@ def init_config(args):
             name=config["name_template"].format(
                 id=run_id,
                 datetime=dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S"),
-                suffix="v14" if args.suffix is None else args.suffix
+                suffix="v13" if args.suffix is None else args.suffix
             ),
             out_dir=os.path.abspath(config["out_dir_template"].format(id=run_id)),
             resumed_config=None,

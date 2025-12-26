@@ -266,10 +266,10 @@ class ExportableModel(nn.Module):
     # edge_triplets is [edge_ind1, edge_attr1, edge_nbr1, edge_ind2, edge_attr2, edge_nbr2, ...]
     # (one triplet for each link type)
     @torch.jit.export
-    def encode(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
+    def encode(self, obs, ei_flat, ea_flat, nbr_flat, size):
         hexes = obs[0, self.dim_other:].view(165, self.state_size_one_hex)
         other = obs[0, :self.dim_other]
-        z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, nbr_flat, size_id).unsqueeze(0)
+        z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, nbr_flat, size).unsqueeze(0)
         z_other = self.encoder_other(other).unsqueeze(0)
         # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
         # z_global = z_other + z_hexes.mean(1)
@@ -277,19 +277,19 @@ class ExportableModel(nn.Module):
         return z_hexes, z_global
 
     @torch.jit.export
-    def get_value(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
+    def get_value(self, obs, ei_flat, ea_flat, nbr_flat, size):
         obs = obs.unsqueeze(dim=0)
-        _, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size_id)
+        _, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size)
         return self.critic(z_global)[0]
 
     @torch.jit.export
-    def predict(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
-        return self.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size_id)[0]
+    def predict(self, obs, ei_flat, ea_flat, nbr_flat, size):
+        return self.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size)[0]
 
     @torch.jit.export
-    def predict_with_logits(self, obs, ei_flat, ea_flat, nbr_flat, size_id: int):
+    def predict_with_logits(self, obs, ei_flat, ea_flat, nbr_flat, size):
         obs = obs.unsqueeze(dim=0)
-        z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size_id)
+        z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size)
 
         act0_logits = self.act0_head(z_global)
 
@@ -595,26 +595,65 @@ class ExportableGNNBlock(nn.Module):
         self.register_buffer("e_offsets_tensor", torch.tensor(self.e_offsets, dtype=torch.int64), persistent=False)
         self.register_buffer("k_offsets_tensor", torch.tensor(self.k_offsets, dtype=torch.int64), persistent=False)
 
+    # def forward(
+    #     self,
+    #     x_hex: torch.Tensor,
+    #     ei_flat: torch.Tensor,   # (2, sum_E[size])
+    #     ea_flat: torch.Tensor,   # (sum_E[size], edge_dim)
+    #     nbr_flat: torch.Tensor,  # (N, sum_K[size])
+    #     size_idx: int
+    # ) -> torch.Tensor:
+    #     x = x_hex
+    #     num_layers = len(self.layers)
+    #     e_off = self.e_offsets_tensor[size_idx]
+    #     k_off = self.k_offsets_tensor[size_idx]
+
+    #     for i, convs in enumerate(self.layers):
+    #         y_init = False
+    #         y = torch.empty(0, device=x.device)
+
+    #         for l, conv in enumerate(convs):
+    #             e0, e1 = e_off[l], e_off[l + 1]
+    #             k0, k1 = k_off[l], k_off[l + 1]
+
+    #             edge_inds = ei_flat[:, e0:e1]
+    #             edge_attrs = ea_flat[e0:e1, :]
+    #             nbrs = nbr_flat[:, k0:k1]
+
+    #             out = conv(x, edge_inds, edge_attrs, nbrs)
+    #             if not y_init:
+    #                 y = out
+    #                 y_init = True
+    #             else:
+    #                 y = y + out
+
+    #         x = self.act(y) if i < num_layers - 1 else y
+
+    #     return x
+
     def forward(
         self,
         x_hex: torch.Tensor,
-        ei_flat: torch.Tensor,   # (2, sum_E[size])
-        ea_flat: torch.Tensor,   # (sum_E[size], edge_dim)
-        nbr_flat: torch.Tensor,  # (N, sum_K[size])
-        size_idx: int
+        ei_flat: torch.Tensor,   # (2, sum_E)
+        ea_flat: torch.Tensor,   # (sum_E, edge_dim)
+        nbr_flat: torch.Tensor,  # (N, sum_K)
+        size: torch.Tensor       # (L, 2) where last dim is {E, K}
     ) -> torch.Tensor:
         x = x_hex
         num_layers = len(self.layers)
-        e_off = self.e_offsets_tensor[size_idx]
-        k_off = self.k_offsets_tensor[size_idx]
 
         for i, convs in enumerate(self.layers):
             y_init = False
             y = torch.empty(0, device=x.device)
 
+            cur_e = 0
+            cur_k = 0
+
             for l, conv in enumerate(convs):
-                e0, e1 = e_off[l], e_off[l + 1]
-                k0, k1 = k_off[l], k_off[l + 1]
+                e0, e1 = cur_e, cur_e + size[l][0]
+                k0, k1 = cur_k, cur_k + size[l][1]
+                cur_e = e1
+                cur_k = k1
 
                 edge_inds = ei_flat[:, e0:e1]
                 edge_attrs = ea_flat[e0:e1, :]
@@ -632,126 +671,10 @@ class ExportableGNNBlock(nn.Module):
         return x
 
 
-class HardcodedModelWrapper(torch.nn.Module):
-    def __init__(self, m, side, all_sizes):
-        super().__init__()
-        self.m = m.eval().cpu()
-        # XXX: assigning self.m_value = self.m and calling self.m_value(...)
-        #       still doubles the exported model size
-        self.all_sizes = all_sizes
-        assert len(ALL_MODEL_SIZES) == 5
-
-    def forward(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.predict0(obs, ei_flat, ea_flat, nbr_flat)
-
-    @torch.jit.export
-    def get_version(self, dummy_input):
-        # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
-        # return (dummy_input.sum() * 0) + self.m.version.clone()
-        return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.version.clone()
-
-    # Models are usually trained as either attackers or defenders
-    # (0=attacker, 1=defender, 2=both)
-    @torch.jit.export
-    def get_side(self, dummy_input):
-        # return (dummy_input.sum() * 0) + self.m.side.clone()
-        return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.side.clone()
-
-    @torch.jit.export
-    def get_all_sizes(self, dummy_input):
-        # return (dummy_input.sum() * 0) + self.m.encoder_hexes.all_sizes.clone()
-        return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.encoder_hexes.all_sizes.clone()
-
-    @torch.jit.export
-    def get_action_table(self, dummy_input):
-        return dummy_input.sum(dim=0, keepdim=True).squeeze(0) + self.m.action_table.clone()
-
-    # .get_valueN
-    # XXX: NOT USED: this value is heavily influenced by the step_reward_fixed
-    #       during training, which makes those values confusing for players.
-
-    @torch.jit.export
-    def get_value0(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 0)
-
-    @torch.jit.export
-    def get_value1(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 1)
-
-    @torch.jit.export
-    def get_value2(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 2)
-
-    @torch.jit.export
-    def get_value3(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 3)
-
-    @torch.jit.export
-    def get_value4(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.get_value(obs, ei_flat, ea_flat, nbr_flat, 4)
-
-    # .predictN
-
-    @torch.jit.export
-    def predict0(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict(obs, ei_flat, ea_flat, nbr_flat, 0)
-
-    @torch.jit.export
-    def predict1(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict(obs, ei_flat, ea_flat, nbr_flat, 1)
-
-    @torch.jit.export
-    def predict2(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict(obs, ei_flat, ea_flat, nbr_flat, 2)
-
-    @torch.jit.export
-    def predict3(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict(obs, ei_flat, ea_flat, nbr_flat, 3)
-
-    @torch.jit.export
-    def predict4(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict(obs, ei_flat, ea_flat, nbr_flat, 4)
-
-    # .predict_with_logitsN
-
-    @torch.jit.export
-    def predict_with_logits0(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 0)
-
-    @torch.jit.export
-    def predict_with_logits1(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 1)
-
-    @torch.jit.export
-    def predict_with_logits2(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 2)
-
-    @torch.jit.export
-    def predict_with_logits3(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 3)
-
-    @torch.jit.export
-    def predict_with_logits4(self, obs, ei_flat, ea_flat, nbr_flat):
-        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, 4)
-
-
-class ModelWrapper(torch.nn.Module):
-    def __init__(self, m, method_name, args_head=(), args_tail=()):
-        super().__init__()
-        self.m = m
-        self.method_name = method_name
-        self.args_head = args_head
-        self.args_tail = args_tail
-
-    def forward(self, *args):
-        return getattr(self.m, self.method_name)(*self.args_head, *args, *self.args_tail)
-
-
 class ModelSizelessWrapper(torch.nn.Module):
     def __init__(self, m):
         super().__init__()
         self.m = m
 
-    def forward(self, obs, ei_flat, ea_flat, nbr_flat):
-        bucket_id = (self.m.sizemarks < nbr_flat.size(1)).sum()
-        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, bucket_id)
+    def forward(self, obs, ei_flat, ea_flat, nbr_flat, size):
+        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size)
