@@ -1,0 +1,47 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "usermeta": {
+    "notes": [
+      "Table displaying run-to-vastai instance ID",
+      "Data Source:",
+      "(runSets: ..., filters: State=running)",
+      "   id",
+      "   name",
+      "   createdAt",
+      "   config: (keys: [vastai_instance_id])"
+    ]
+  },
+  "title": "VastAI instance",
+  "data": { "name": "wandb" },
+  "width": { "step": 90 },
+  "height": { "step": 22 },
+  "config": {
+    "view": { "stroke": "#cccccc" },
+    "axis": {
+      "grid": false,
+      "domain": false,
+      "ticks": false,
+      "labelFontSize": 12,
+      "title": null
+    }
+  },
+  "mark": { "type": "rect", "stroke": "#d0d0d0" },
+  "encoding": {
+    "x": {
+      "field": "vastai_instance_id",
+      "type": "nominal",
+      "axis": { "labelFont": "monospace", "orient": "top", "labelAngle": 0 }
+    },
+    "y": {
+      "field": "id",
+      "type": "nominal",
+      "sort": {"field": "createdAt", "order": "descending"},
+      "axis": {"labelFont": "monospace"}
+    },
+    "fill": { "value": "#888" },
+    "tooltip": [
+      { "field": "id", "type": "nominal", "title": "id" },
+      { "field": "vastai_instance_id", "type": "nominal", "title": "vastai_instance_id" }
+    ]
+  }
+}

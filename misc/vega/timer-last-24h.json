@@ -1,0 +1,84 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "usermeta": {
+    "notes": [
+      "Bar chart with mean value of timer_abs/all metric for the last 24 hours",
+      "Window is relative to each run's latest _timestamp (not now())",
+      "Data Source:",
+      "(runSets: ..., filters: State=running)",
+      "   id",
+      "   name",
+      "   createdAt",
+      "   history: (keys: [_timestamp, timer_abs/all, timer_abs/eval])"
+    ]
+  },
+  "title": "timer_abs/all (24h avg)",
+  "data": { "name": "wandb" },
+  "config": {
+    "legend": { "disable": true },
+    "axis": {
+      "grid": false,
+      "domain": false,
+      "ticks": false,
+      "labelFontSize": 12,
+      "labelFont": "monospace",
+      "title": null
+    }
+  },
+  "transform": [
+    { "filter": "isValid(datum._timestamp) && isValid(datum['timer_abs/all']) && isValid(datum['timer_abs/eval'])" },
+    { "calculate": "datum['timer_abs/all'] - datum['timer_abs/eval']", "as": "timer_sub" },
+
+    { "calculate": "datum._timestamp * 1000", "as": "ts_ms" },
+
+    {
+      "joinaggregate": [
+        { "op": "max", "field": "ts_ms", "as": "last_ts_ms" }
+      ],
+      "groupby": ["id"]
+    },
+
+    { "calculate": "datum.last_ts_ms - 24 * 3600000", "as": "cutoff_ms" },
+    { "filter": "datum.ts_ms >= datum.cutoff_ms" },
+
+    { "calculate": "time(toDate(datum.createdAt))", "as": "createdAt_ms" },
+
+    {
+      "aggregate": [
+        { "op": "mean", "field": "timer_sub", "as": "avg24h" },
+        { "op": "count", "as": "n_points" },
+        { "op": "max", "field": "last_ts_ms", "as": "last_ts_ms" },
+        { "op": "max", "field": "createdAt_ms", "as": "createdAt_ms" }
+      ],
+      "groupby": ["id"]
+    }
+  ],
+  "mark": "bar",
+  "encoding": {
+    "y": {
+      "field": "id",
+      "type": "nominal",
+      "sort": { "field": "createdAt_ms", "order": "descending" }
+    },
+    "color": {
+      "field": "avg24h",
+      "type": "quantitative",
+      "scale": {
+        "domain": [25, 35, 45],
+        "range": ["#2166AC", "#FFD400", "#B2182B"],
+        "clamp": true,
+        "interpolate": "lab"
+      }
+    },
+    "x": {
+      "field": "avg24h",
+      "type": "quantitative",
+      "scale": { "domain": [20, 50], "clamp": true },
+      "axis": { "tickMinStep": 10, "format": "d", "labelExpr": "datum.value + 's'" }
+    },
+    "tooltip": [
+      { "field": "id", "type": "nominal", "title": "Run" },
+      { "field": "avg24h", "type": "quantitative", "title": "Avg [s]", "format": ".1f" }
+    ]
+  }
+}

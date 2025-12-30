@@ -1,0 +1,76 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "usermeta": {
+    "notes": [
+      "Bar chart with number of resumes in the last 24 hours",
+      "Data Source:",
+      "(runSets: ..., filters: State=running)",
+      "   id",
+      "   name",
+      "   createdAt",
+      "   history: (keys: [_timestamp, global/resumes])"
+    ]
+  },
+  "title": "# of resumes (last 24h)",
+  "data": { "name": "wandb" },
+  "config": {
+    "legend": { "disable": true },
+    "axis": {
+      "grid": false,
+      "domain": false,
+      "ticks": false,
+      "labelFontSize": 12,
+      "labelFont": "monospace",
+      "title": null
+    }
+  },
+  "transform": [
+    { "filter": "isValid(datum['global/resumes'])" },
+    { "calculate": "datum._timestamp * 1000", "as": "cur_ts" },
+    { "calculate": "now() - 24*3600*1000", "as": "ref_ts" },
+    { "calculate": "datum.cur_ts <= datum.ref_ts ? datum['global/resumes'] : 0", "as": "resumes_before_24h" },
+    {
+      "joinaggregate": [
+        { "op": "max", "field": "global/resumes", "as": "resumes_now" },
+        { "op": "max", "field": "resumes_before_24h", "as": "resumes_ref" }
+      ],
+      "groupby": ["id"]
+    },
+    { "calculate": "datum.resumes_now - datum.resumes_ref", "as": "resumes_diff" },
+    {
+      "window": [{ "op": "row_number", "as": "rn" }],
+      "sort": [{ "field": "_timestamp", "order": "descending" }],
+      "groupby": ["id"]
+    },
+    { "filter": "datum.rn == 1" },
+    { "filter": "isValid(datum.resumes_ref) && isValid(datum.resumes_diff)" }
+  ],
+  "mark": "bar",
+  "encoding": {
+    "y": {
+      "field": "id",
+      "type": "nominal",
+      "sort": {"field": "createdAt", "order": "descending"}
+    },
+    "color": {
+      "field": "resumes_diff",
+      "type": "quantitative",
+      "scale": {
+        "domain": [1, 3, 5],
+        "range": ["#2166AC", "#FFD400", "#B2182B"],
+        "clamp": true,
+        "interpolate": "lab"
+      }
+    },
+    "x": {
+      "field": "resumes_diff",
+      "type": "quantitative",
+      "scale": { "domain": [0, 5], "clamp": true },
+      "axis": { "tickMinStep": 1, "format": "d" }
+    },
+    "tooltip": [
+      { "field": "id", "type": "nominal", "title": "Run" },
+      { "field": "resumes_diff", "type": "quantitative", "title": "Resumes (24h)" }
+    ]
+  }
+}

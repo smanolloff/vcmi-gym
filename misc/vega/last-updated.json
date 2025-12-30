@@ -1,0 +1,75 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "usermeta": {
+    "notes": [
+      "Bar chart with time since last pushed metric (latest _timestamp) per run",
+      "Data Source:",
+      "(runSets: ..., filters: State=running)",
+      "   id",
+      "   name",
+      "   createdAt",
+      "   history: (keys: [_timestamp, _step])"
+    ]
+  },
+  "title": "Hours since last update",
+  "data": {"name": "wandb"},
+  "config": {
+    "legend": { "disable": true },
+    "axis": {
+      "grid": false,
+      "domain": false,
+      "ticks": false,
+      "labelFontSize": 12,
+      "labelFont": "monospace",
+      "title": null
+    }
+  },
+  "transform": [
+    { "filter": "isValid(datum._step) && isValid(datum._timestamp)" },
+    {
+      "window": [{"op": "row_number", "as": "rn"}],
+      "sort": [{"field": "_timestamp", "order": "descending"}],
+      "groupby": ["name"]
+    },
+    { "filter": "datum.rn == 1" },
+    { "calculate": "(now() - (datum._timestamp * 1000)) / 3600000", "as": "age_hours" },
+    { "calculate": "datum.age_hours > 1", "as": "stale" },
+    { "calculate": "floor((now() - (datum._timestamp * 1000)) / 60000)", "as": "age_min" },
+    { "calculate": "floor(datum.age_min / 60)", "as": "age_h" },
+    { "calculate": "datum.age_min % 60", "as": "age_m" },
+    {
+      "calculate": "datum.age_h > 0 ? datum.age_h + 'h ' + datum.age_m + 'min' : datum.age_m + 'min'",
+      "as": "age_human"
+    },
+    { "calculate": "toDate(datum._timestamp * 1000)", "as": "last_time" }
+  ],
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "field": "age_hours",
+      "type": "quantitative",
+      "scale": { "domain": [0, 3], "clamp": true },
+      "axis": { "tickMinStep": 1, "format": "d", "labelExpr": "datum.value + 'h'" }
+    },
+    "y": {
+      "field": "id",
+      "type": "nominal",
+      "sort": {"field": "createdAt", "order": "descending"}
+    },
+    "color": {
+      "field": "age_hours",
+      "type": "quantitative",
+      "scale": {
+        "domain": [0.5, 1, 2],
+        "range": ["#2166AC", "#FFD400", "#B2182B"],
+        "clamp": true,
+        "interpolate": "lab"
+      }
+    },
+    "tooltip": [
+      { "field": "id", "type": "nominal", "title": "Run" },
+      { "field": "age_human", "type": "nominal", "title": "Stale" },
+      { "field": "last_time", "type": "temporal", "title": "Last update", "format": "%Y-%m-%d %H:%M" }
+    ]
+  }
+}
