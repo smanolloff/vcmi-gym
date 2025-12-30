@@ -456,10 +456,10 @@ mkdir -p data/config
 cp ML/configs/*.json data/config
 ln -s ../../../maps/gym data/Maps/
 
+ONNXRUNTIME_ROOT=/opt/onnxruntime
 if ! [ -d /opt/onnxruntime/lib/libonnxruntime.so ]; then
     # Copied from vcmi/CI/before_install/linux_common.sh
     ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
-    ONNXRUNTIME_ROOT=/opt/onnxruntime
     mkdir -p "$ONNXRUNTIME_ROOT"
     curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
 fi
@@ -483,7 +483,7 @@ cmake -S . -B rel -Wno-dev \
     -D ENABLE_LAUNCHER=0 \
     -D ENABLE_ML=1 \
     -D ENABLE_MMAI=1 \
-    -D MMAI_EXECUTORCH_PATH=""
+    -D ONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
 cmake --build rel/ -- -j$CPU_COUNT
 
 cd ../vcmi_gym/connectors

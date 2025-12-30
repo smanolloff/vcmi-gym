@@ -1200,7 +1200,12 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
     # assert config["checkpoint"]["interval_s"] > config["eval"]["interval_s"]
     assert config["checkpoint"]["permanent_interval_s"] > config["eval"]["interval_s"]
-    assert config["train"]["env"]["kwargs"]["user_timeout"] >= 2 * config["eval"]["interval_s"]
+
+    # A blind guess for the time it takes to complete an eval cycle
+    # i.e. the slowest env to finish eval_model().
+    # Real value depends on num_steps, num_envs, opponent & hardware
+    eval_duration_s_guess = 600
+    assert config["train"]["env"]["kwargs"]["user_timeout"] >= eval_duration_s_guess
 
     checkpoint_config = dig(config, "checkpoint")
     train_config = dig(config, "train")
@@ -1249,6 +1254,10 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
     eval_venv_variants = {}
     for name, envcfg in eval_config["env_variants"].items():
+        # Blind guess for the time ot tales tp complete 1 training cycle
+        # i.e. one cycle of collect_samples() + train_model()
+        # Real value depends on num_steps, num_envs, opponent & hardware
+        assert envcfg["kwargs"]["user_timeout"] >= config["eval"]["interval_s"] + 300
         eval_loader_info = init_model_loader(envcfg, checkpoint_config, logger, dry_run, device)
         if eval_loader_info:
             loader_infos.append(eval_loader_info)

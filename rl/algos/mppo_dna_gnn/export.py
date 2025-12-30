@@ -578,7 +578,7 @@ def main():
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
 
-            export_basename = "%s-%s-dynamic" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
+            export_basename = "%s-%s" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
 
             #
             # Tests (for debugging):
