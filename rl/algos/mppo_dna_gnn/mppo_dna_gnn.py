@@ -592,7 +592,7 @@ class Model(nn.Module):
 
         # HEX1
         assert len(MainAction) == 4
-        act0_emb = self.emb_act0(torch.arange(4))                               # (4, d)
+        act0_emb = self.emb_act0(torch.arange(4, device=obs.device))            # (4, d)
         d = act0_emb.size(-1)
 
         q_hex1 = self.Wq_hex1(
