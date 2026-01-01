@@ -17,9 +17,12 @@ train_env_kwargs = dict(
     mana_min=0,
     mana_max=0,
     reward_step_fixed=-0.5,
-    reward_step_round_mult=0,
-    reward_round_fixed=0,
-    reward_round_round_mult=0,
+
+    # v14 only
+    # reward_step_round_mult=0,
+    # reward_round_fixed=0,
+    # reward_round_round_mult=0,
+
     reward_dmg_mult=0.01,
     reward_term_mult=0.01,
     reward_relval_mult=0.01,

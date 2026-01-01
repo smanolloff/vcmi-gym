@@ -41,9 +41,9 @@ from rl.world.util.wandb import setup_wandb
 from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, safe_mean, timer_stats
 
-from vcmi_gym.envs.v13.vcmi_env import VcmiEnv
+from vcmi_gym.envs.v14.vcmi_env import VcmiEnv
 
-from vcmi_gym.envs.v13.pyconnector import (
+from vcmi_gym.envs.v14.pyconnector import (
     STATE_SIZE,
     STATE_SIZE_ONE_HEX,
     STATE_SIZE_HEXES,
@@ -176,13 +176,16 @@ class SampleStats:
     ep_len_mean: float = 0.0
     ep_value_mean: float = 0.0
     ep_is_success_mean: float = 0.0
-    ep_rew_step_fixed_mean: float = 0.0
-    ep_rew_step_round_mult_mean: float = 0.0
-    ep_rew_round_fixed_mean: float = 0.0
-    ep_rew_round_round_mult_mean: float = 0.0
-    ep_rew_dmg_mult_mean: float = 0.0
-    ep_rew_term_mult_mean: float = 0.0
-    ep_rew_relval_mult_mean: float = 0.0
+
+    if VcmiEnv.ENV_VERSION > 13:
+        ep_rew_step_fixed_mean: float = 0.0
+        ep_rew_dmg_mult_mean: float = 0.0
+        ep_rew_term_mult_mean: float = 0.0
+        ep_rew_relval_mult_mean: float = 0.0
+        ep_rew_step_round_mult_mean: float = 0.0
+        ep_rew_round_fixed_mean: float = 0.0
+        ep_rew_round_round_mult_mean: float = 0.0
+
     num_episodes: int = 0
 
 
@@ -204,13 +207,15 @@ class MultiStats(SampleStats):
         self.ep_len_mean = safe_mean([v.ep_len_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_value_mean = safe_mean([v.ep_value_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_is_success_mean = safe_mean([v.ep_is_success_mean for v in self.variants.values() if v.num_episodes > 0])
-        self.ep_rew_step_fixed_mean = safe_mean([v.ep_rew_step_fixed_mean for v in self.variants.values() if v.num_episodes > 0])
-        self.ep_rew_step_round_mult_mean = safe_mean([v.ep_rew_step_round_mult_mean for v in self.variants.values() if v.num_episodes > 0])
-        self.ep_rew_round_fixed_mean = safe_mean([v.ep_rew_round_fixed_mean for v in self.variants.values() if v.num_episodes > 0])
-        self.ep_rew_round_round_mult_mean = safe_mean([v.ep_rew_round_round_mult_mean for v in self.variants.values() if v.num_episodes > 0])
-        self.ep_rew_dmg_mult_mean = safe_mean([v.ep_rew_dmg_mult_mean for v in self.variants.values() if v.num_episodes > 0])
-        self.ep_rew_term_mult_mean = safe_mean([v.ep_rew_term_mult_mean for v in self.variants.values() if v.num_episodes > 0])
-        self.ep_rew_relval_mult_mean = safe_mean([v.ep_rew_relval_mult_mean for v in self.variants.values() if v.num_episodes > 0])
+
+        if VcmiEnv.ENV_VERSION > 13:
+            self.ep_rew_step_fixed_mean = safe_mean([v.ep_rew_step_fixed_mean for v in self.variants.values() if v.num_episodes > 0])
+            self.ep_rew_dmg_mult_mean = safe_mean([v.ep_rew_dmg_mult_mean for v in self.variants.values() if v.num_episodes > 0])
+            self.ep_rew_term_mult_mean = safe_mean([v.ep_rew_term_mult_mean for v in self.variants.values() if v.num_episodes > 0])
+            self.ep_rew_relval_mult_mean = safe_mean([v.ep_rew_relval_mult_mean for v in self.variants.values() if v.num_episodes > 0])
+            self.ep_rew_step_round_mult_mean = safe_mean([v.ep_rew_step_round_mult_mean for v in self.variants.values() if v.num_episodes > 0])
+            self.ep_rew_round_fixed_mean = safe_mean([v.ep_rew_round_fixed_mean for v in self.variants.values() if v.num_episodes > 0])
+            self.ep_rew_round_round_mult_mean = safe_mean([v.ep_rew_round_round_mult_mean for v in self.variants.values() if v.num_episodes > 0])
 
 
 class MainAction(enum.IntEnum):
@@ -305,7 +310,7 @@ class ActionLogits(NamedTuple):
         if action is None:
             act0, hex1, hex2 = None, None, None
         else:
-            act0, hex1, hex2 = self.inverse_table[action]
+            act0, hex1, hex2 = self.inverse_table[action].unbind(1)
 
         b_inds = torch.arange(self.act0_logits.shape[0], device=self.act0_logits.device)
         act0_dist = CategoricalMasked(logits=self.act0_logits, mask=self.act0_mask)
@@ -685,6 +690,9 @@ class Model(nn.Module):
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 4, 165)
 
         # HEX2
+        # XXX: technically, HEX2 logits should be (B, 4, 165, 165), i.e conditioned on act0 AND hex1
+        # However, HEX2 is only relevant for a single act0 case (3=AMOVE)
+        # => simply omit it and go with (B, 165, 165)
         q_hex2 = self.Wq_hex2(
             torch.cat([
                 z_global.unsqueeze(1).expand(B, 165, d),                        # (B, 165, d)
@@ -827,14 +835,15 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             stats.ep_len_mean += sum(v_final_info["episode"]["l"][v_done_id])
             stats.ep_value_mean += sum(v_final_info["net_value"][v_done_id])
             stats.ep_is_success_mean += sum(v_final_info["is_success"][v_done_id])
-            stats.ep_rew_step_fixed_mean += sum(v_final_info["reward_step_fixed"][v_done_id])
-            stats.ep_rew_step_round_mult_mean += sum(v_final_info["reward_step_round_mult"][v_done_id])
-            stats.ep_rew_round_fixed_mean += sum(v_final_info["reward_round_fixed"][v_done_id])
-            stats.ep_rew_round_round_mult_mean += sum(v_final_info["reward_round_round_mult"][v_done_id])
-            stats.ep_rew_dmg_mult_mean += sum(v_final_info["reward_dmg_mult"][v_done_id])
-            stats.ep_rew_term_mult_mean += sum(v_final_info["reward_term_mult"][v_done_id])
-            stats.ep_rew_relval_mult_mean += sum(v_final_info["reward_relval_mult"][v_done_id])
             stats.num_episodes += len(v_done_id)
+            if VcmiEnv.ENV_VERSION > 13:
+                stats.ep_rew_step_fixed_mean += sum(v_final_info["reward_step_fixed"][v_done_id])
+                stats.ep_rew_step_round_mult_mean += sum(v_final_info["reward_step_round_mult"][v_done_id])
+                stats.ep_rew_round_fixed_mean += sum(v_final_info["reward_round_fixed"][v_done_id])
+                stats.ep_rew_round_round_mult_mean += sum(v_final_info["reward_round_round_mult"][v_done_id])
+                stats.ep_rew_dmg_mult_mean += sum(v_final_info["reward_dmg_mult"][v_done_id])
+                stats.ep_rew_term_mult_mean += sum(v_final_info["reward_term_mult"][v_done_id])
+                stats.ep_rew_relval_mult_mean += sum(v_final_info["reward_relval_mult"][v_done_id])
 
     assert len(storage.rollout_buffer) == num_vsteps * venv.num_envs
 
@@ -843,13 +852,14 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         stats.ep_len_mean /= stats.num_episodes
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
-        stats.ep_rew_step_fixed_mean /= stats.num_episodes
-        stats.ep_rew_step_round_mult_mean /= stats.num_episodes
-        stats.ep_rew_round_fixed_mean /= stats.num_episodes
-        stats.ep_rew_round_round_mult_mean /= stats.num_episodes
-        stats.ep_rew_dmg_mult_mean /= stats.num_episodes
-        stats.ep_rew_term_mult_mean /= stats.num_episodes
-        stats.ep_rew_relval_mult_mean /= stats.num_episodes
+        if VcmiEnv.ENV_VERSION > 13:
+            stats.ep_rew_step_fixed_mean /= stats.num_episodes
+            stats.ep_rew_step_round_mult_mean /= stats.num_episodes
+            stats.ep_rew_round_fixed_mean /= stats.num_episodes
+            stats.ep_rew_round_round_mult_mean /= stats.num_episodes
+            stats.ep_rew_dmg_mult_mean /= stats.num_episodes
+            stats.ep_rew_term_mult_mean /= stats.num_episodes
+            stats.ep_rew_relval_mult_mean /= stats.num_episodes
 
     # bootstrap value if not done
     v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list).to(model.device)
@@ -885,13 +895,15 @@ def eval_model(logger, model, venv, num_vsteps):
             stats.ep_len_mean += sum(v_final_info["episode"]["l"][v_done_id])
             stats.ep_value_mean += sum(v_final_info["net_value"][v_done_id])
             stats.ep_is_success_mean += sum(v_final_info["is_success"][v_done_id])
-            stats.ep_rew_step_fixed_mean += sum(v_final_info["reward_step_fixed"][v_done_id])
-            stats.ep_rew_step_round_mult_mean += sum(v_final_info["reward_step_round_mult"][v_done_id])
-            stats.ep_rew_round_fixed_mean += sum(v_final_info["reward_round_fixed"][v_done_id])
-            stats.ep_rew_round_round_mult_mean += sum(v_final_info["reward_round_round_mult"][v_done_id])
-            stats.ep_rew_dmg_mult_mean += sum(v_final_info["reward_dmg_mult"][v_done_id])
-            stats.ep_rew_term_mult_mean += sum(v_final_info["reward_term_mult"][v_done_id])
-            stats.ep_rew_relval_mult_mean += sum(v_final_info["reward_relval_mult"][v_done_id])
+            if VcmiEnv.ENV_VERSION > 13:
+                stats.ep_rew_step_fixed_mean += sum(v_final_info["reward_step_fixed"][v_done_id])
+                stats.ep_rew_dmg_mult_mean += sum(v_final_info["reward_dmg_mult"][v_done_id])
+                stats.ep_rew_term_mult_mean += sum(v_final_info["reward_term_mult"][v_done_id])
+                stats.ep_rew_relval_mult_mean += sum(v_final_info["reward_relval_mult"][v_done_id])
+                stats.ep_rew_step_round_mult_mean += sum(v_final_info["reward_step_round_mult"][v_done_id])
+                stats.ep_rew_round_fixed_mean += sum(v_final_info["reward_round_fixed"][v_done_id])
+                stats.ep_rew_round_round_mult_mean += sum(v_final_info["reward_round_round_mult"][v_done_id])
+
             stats.num_episodes += len(v_done_id)
 
     if stats.num_episodes > 0:
@@ -899,13 +911,14 @@ def eval_model(logger, model, venv, num_vsteps):
         stats.ep_len_mean /= stats.num_episodes
         stats.ep_value_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
-        stats.ep_rew_step_fixed_mean /= stats.num_episodes
-        stats.ep_rew_step_round_mult_mean /= stats.num_episodes
-        stats.ep_rew_round_fixed_mean /= stats.num_episodes
-        stats.ep_rew_round_round_mult_mean /= stats.num_episodes
-        stats.ep_rew_dmg_mult_mean /= stats.num_episodes
-        stats.ep_rew_term_mult_mean /= stats.num_episodes
-        stats.ep_rew_relval_mult_mean /= stats.num_episodes
+        if VcmiEnv.ENV_VERSION > 13:
+            stats.ep_rew_step_fixed_mean /= stats.num_episodes
+            stats.ep_rew_dmg_mult_mean /= stats.num_episodes
+            stats.ep_rew_term_mult_mean /= stats.num_episodes
+            stats.ep_rew_relval_mult_mean /= stats.num_episodes
+            stats.ep_rew_step_round_mult_mean /= stats.num_episodes
+            stats.ep_rew_round_fixed_mean /= stats.num_episodes
+            stats.ep_rew_round_round_mult_mean /= stats.num_episodes
 
     return stats
 
@@ -1092,7 +1105,6 @@ def train_model(
             # Compute policy and value targets
             with torch.no_grad():
                 old_actlogits = old_model_policy.get_action_logits(mb)
-                print(old_actlogits)
                 value_target = model.model_value.get_value(mb)
 
             new_z_hexes, new_z_global = model.model_policy.encode(mb)
@@ -1101,19 +1113,17 @@ def train_model(
 
             old_act0_dist = CategoricalMasked(old_actlogits.act0_logits, old_actlogits.act0_mask)
             old_hex1_dist = CategoricalMasked(old_actlogits.hex1_logits, old_actlogits.hex1_mask)
-            old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask)
+            old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask[torch.arange(mb.batch_size), MainAction.AMOVE])
             new_act0_dist = CategoricalMasked(new_actlogits.act0_logits, new_actlogits.act0_mask)
             new_hex1_dist = CategoricalMasked(new_actlogits.hex1_logits, new_actlogits.hex1_mask)
-            new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask)
-
-            import ipdb; ipdb.set_trace()  # noqa
+            new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask[torch.arange(mb.batch_size), MainAction.AMOVE])
 
             # Distillation loss
             distill_actloss = (
-                CategoricalMasked.kld(old_act0_dist, new_act0_dist)
-                + CategoricalMasked.kld(old_hex1_dist, new_hex1_dist)
-                + CategoricalMasked.kld(old_hex2_dist, new_hex2_dist)
-            ).mean()
+                CategoricalMasked.kld(old_act0_dist, new_act0_dist).mean()
+                + CategoricalMasked.kld(old_hex1_dist, new_hex1_dist).mean()
+                + CategoricalMasked.kld(old_hex2_dist, new_hex2_dist).mean()
+            )
 
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
             distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
@@ -1165,14 +1175,18 @@ def prepare_wandb_log(
             "eval/ep_len_mean": eval_multistats.ep_len_mean,
             "eval/ep_success_rate": eval_multistats.ep_is_success_mean,
             "eval/ep_count": eval_multistats.num_episodes,
-            "eval/reward/step_fixed": eval_multistats.ep_rew_step_fixed_mean,
-            "eval/reward/step_round_mult": eval_multistats.ep_rew_step_round_mult_mean,
-            "eval/reward/round_fixed": eval_multistats.ep_rew_round_fixed_mean,
-            "eval/reward/round_round_mult": eval_multistats.ep_rew_round_round_mult_mean,
-            "eval/reward/dmg_mult": eval_multistats.ep_rew_dmg_mult_mean,
-            "eval/reward/term_mult": eval_multistats.ep_rew_term_mult_mean,
-            "eval/reward/relval_mult": eval_multistats.ep_rew_relval_mult_mean,
         })
+
+        if VcmiEnv.ENV_VERSION > 13:
+            wlog.update({
+                "eval/reward/step_fixed": eval_multistats.ep_rew_step_fixed_mean,
+                "eval/reward/dmg_mult": eval_multistats.ep_rew_dmg_mult_mean,
+                "eval/reward/term_mult": eval_multistats.ep_rew_term_mult_mean,
+                "eval/reward/relval_mult": eval_multistats.ep_rew_relval_mult_mean,
+                "eval/reward/step_round_mult": eval_multistats.ep_rew_step_round_mult_mean,
+                "eval/reward/round_fixed": eval_multistats.ep_rew_round_fixed_mean,
+                "eval/reward/round_round_mult": eval_multistats.ep_rew_round_round_mult_mean,
+            })
 
     for name, eval_sample_stats in eval_multistats.variants.items():
         wlog.update({
@@ -1181,14 +1195,18 @@ def prepare_wandb_log(
             f"eval/{name}/ep_len_mean": eval_sample_stats.ep_len_mean,
             f"eval/{name}/ep_success_rate": eval_sample_stats.ep_is_success_mean,
             f"eval/{name}/ep_count": eval_sample_stats.num_episodes,
-            f"eval/{name}/reward/step_fixed_mean": eval_sample_stats.ep_rew_step_fixed_mean,
-            f"eval/{name}/reward/step_round_mult_mean": eval_sample_stats.ep_rew_step_round_mult_mean,
-            f"eval/{name}/reward/round_fixed_mean": eval_sample_stats.ep_rew_round_fixed_mean,
-            f"eval/{name}/reward/round_round_mult_mean": eval_sample_stats.ep_rew_round_round_mult_mean,
-            f"eval/{name}/reward/dmg_mult_mean": eval_sample_stats.ep_rew_dmg_mult_mean,
-            f"eval/{name}/reward/term_mult_mean": eval_sample_stats.ep_rew_term_mult_mean,
-            f"eval/{name}/reward/relval_mult_mean": eval_sample_stats.ep_rew_relval_mult_mean,
         })
+
+        if VcmiEnv.ENV_VERSION > 13:
+            wlog.update({
+                f"eval/{name}/reward/step_fixed_mean": eval_sample_stats.ep_rew_step_fixed_mean,
+                f"eval/{name}/reward/dmg_mult_mean": eval_sample_stats.ep_rew_dmg_mult_mean,
+                f"eval/{name}/reward/term_mult_mean": eval_sample_stats.ep_rew_term_mult_mean,
+                f"eval/{name}/reward/relval_mult_mean": eval_sample_stats.ep_rew_relval_mult_mean,
+                f"eval/{name}/reward/step_round_mult_mean": eval_sample_stats.ep_rew_step_round_mult_mean,
+                f"eval/{name}/reward/round_fixed_mean": eval_sample_stats.ep_rew_round_fixed_mean,
+                f"eval/{name}/reward/round_round_mult_mean": eval_sample_stats.ep_rew_round_round_mult_mean,
+            })
 
     if train_sample_stats.num_episodes > 0:
         state.rollout_rew_queue_100.append(train_sample_stats.ep_rew_mean)
