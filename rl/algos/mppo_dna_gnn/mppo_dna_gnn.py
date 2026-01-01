@@ -1027,10 +1027,10 @@ def train_model(
 
             old_act0_dist = CategoricalMasked(old_actlogits.act0_logits, old_actlogits.act0_mask)
             old_hex1_dist = CategoricalMasked(old_actlogits.hex1_logits, old_actlogits.hex1_mask)
-            old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask[torch.arange(mb.batch_size), MainAction.AMOVE])
+            old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask)
             new_act0_dist = CategoricalMasked(new_actlogits.act0_logits, new_actlogits.act0_mask)
             new_hex1_dist = CategoricalMasked(new_actlogits.hex1_logits, new_actlogits.hex1_mask)
-            new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask[torch.arange(mb.batch_size), MainAction.AMOVE])
+            new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask)
 
             # Distillation loss
             distill_actloss = (
