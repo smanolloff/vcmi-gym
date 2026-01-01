@@ -885,7 +885,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
 
         # v_actlogits = model.model_policy.get_action_logits(v_hdata_batch)
         # v_actsample = v_actlogits.sample().cpu()
-        v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch)
+        v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch).cpu()
         v_value = model.model_value.get_value(v_hdata_batch).flatten().cpu()
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.numpy())
         v_rew = torch.as_tensor(v_rew)
