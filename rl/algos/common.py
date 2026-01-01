@@ -117,7 +117,7 @@ class CategoricalMasked(Categorical):
 
     def __init__(self, logits: torch.Tensor, mask: torch.Tensor, fallback_idx: int = 0):
         assert mask is not None
-        assert logits.ndim == 2 and mask.ndim == 2
+        # assert logits.ndim == 2 and mask.ndim == 2
 
         self.mask = mask
         self.fallback_idx = fallback_idx
@@ -132,7 +132,9 @@ class CategoricalMasked(Categorical):
         #
         # This eliminates the need for explicit guards in several places.
         # NOTE: mask is not used outside the dist and can remain all-false.
-        masked_logits[self.invalid_batches, 0] = fallback_idx
+        # 2D version: masked_logits[self.invalid_batches, 0] = fallback_idx
+        # ND version:
+        masked_logits[..., 0].masked_fill_(self.invalid_batches, fallback_idx)
 
         super().__init__(logits=masked_logits)
 

@@ -4,6 +4,7 @@ import torch
 import torch_geometric
 from time import perf_counter_ns
 from torch_geometric.data import Batch
+import numpy as np
 
 import onnx
 import onnxruntime as ort
@@ -130,7 +131,9 @@ def test_block():
 
 def test_model(cfg, weights_file):
     """ Tests DNA Model vs ExecuTorchModel. """
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
+    # venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
+    # venv = DualVecEnv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs_stupidai=1)
+    venv = DualVecEnv(dict(mapname="gym/archangels.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
@@ -149,12 +152,191 @@ def test_model(cfg, weights_file):
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
-    done = torch.tensor([False])
-    links = [venv.call("obs")[0]["links"]]
-    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
+    # obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
+    # done = torch.tensor(venv.call("terminated"))
+    # links = [venv.call("obs")[0]["links"]]
+    # hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
-    actdata = model.get_actdata_eval(hdata, deterministic=True)
+    v_obs, v_info = venv.reset()
+    v_done = np.zeros([venv.num_envs], dtype=bool)
+
+    torch.set_printoptions(sci_mode=False, precision=6)
+
+    for i in range(100):
+        hdata_list = to_hdata_list(torch.as_tensor(v_obs), torch.as_tensor(v_done), venv.call("links"))
+        v_hdata_batch = Batch.from_data_list(hdata_list)
+        t = perf_counter_ns()
+        di0, actdata0 = model.get_actdata_eval(v_hdata_batch, deterministic=True)
+        ms0 = (perf_counter_ns() - t) / 1e6  # ns -> ms
+        t = perf_counter_ns()
+        di, actprobs = model.get_actdata_eval_probs(v_hdata_batch, deterministic=True)
+        ms = (perf_counter_ns() - t) / 1e6  # ns -> ms
+        actdata = actprobs.sample(model.action_table, deterministic=True)
+
+        print(venv.render()[0])
+        B = actdata0.act0.shape[0]
+        b_inds = torch.arange(B)
+        d0 = di.act0_emb_out.size(-1)  # 'd' is reserved in ipdb
+
+        #
+        # DEBUG ACT0
+        #
+        torch.equal(actdata0.act0, actdata.act0)  # True
+        act0 = actdata0.act0
+        torch.equal(actdata0.act0_logits, actdata.act0_logits)  # True
+        # => act0 is OK
+
+        #
+        # DEBUG HEX1
+        #
+        torch.equal(actdata0.hex1, actdata.hex1)  # True
+        hex1 = actdata0.hex1
+        torch.equal(di0.hex1_logits_in[0], di.hex1_logits_in[0][b_inds, act0])  # True  # this is k_hex1
+        torch.equal(di0.hex1_logits_in[1], di.hex1_logits_in[1][b_inds, act0])  # False # this is q_hex1.unsqueeze(-1)
+
+        torch.equal(di0.k_hex1_in, di.k_hex1_in)                    # True
+        torch.equal(di0.k_hex1_out, di.k_hex1_out[b_inds, act0])    # True
+
+        # !!! Problem begins with q_hex1:
+        torch.equal(di0.q_hex1_in, di.q_hex1_in[b_inds, act0])      # True
+        torch.equal(di0.q_hex1_out, di.q_hex1_out[b_inds, act0])    # False
+
+        # So Wq_hex1() forward produces small difference:
+        torch.max(di0.q_hex1_out - di.q_hex1_out[b_inds, act0])
+        # tensor(    0.000003)
+
+        # => matmul produces bigger difference (but has no issue with batching - see below)
+        (di0.hex1_logits_out - di.hex1_logits_out[b_inds, act0]).max()
+        # tensor(    0.000015)
+
+        # TEST: replace q_hex1_out for act0 with result from nonbatched and check if matmul also has error
+        q_hex1_out = di.q_hex1_out.clone()
+        q_hex1_out[b_inds, act0, :] = di0.q_hex1_out
+        torch.equal(di0.q_hex1_out, q_hex1_out[b_inds, act0])                   # local var is identical now (but with dim [1, 4, 128])
+        hex1_logits = (di0.k_hex1_out @ q_hex1_out.unsqueeze(-1)).squeeze(-1) / (d0 ** 0.5)
+        torch.equal(di.hex1_logits_out, hex1_logits)                            # False (expected - q_hex1 was modified)
+        torch.equal(di0.hex1_logits_out, hex1_logits[b_inds, act0])             # True => there is NO error with batched mamtul !!!
+
+        # HEX1 Conclusion:
+        # Problem is only with batched Wq_hex1() forward, slightly multiplied by the matmul (which behaves identically)
+
+        #
+        # DEBUG HEX2
+        #
+        torch.equal(actdata0.hex2, actdata.hex2)  # False
+        hex20 = actdata0.hex2
+        hex2 = actdata.hex2
+
+        torch.equal(di0.k_hex2_in, di.k_hex2_in)      # True
+        torch.equal(di0.k_hex2_out, di.k_hex2_out)      # True
+
+        # !!! Problem begins with q_hex2:
+        torch.equal(di0.q_hex2_in, di.q_hex2_in[b_inds, hex1])      # True
+        torch.equal(di0.q_hex2_out, di.q_hex2_out[b_inds, hex1])    # False
+
+        # Similarly to hex1, Wq_hex2() forward gives small error:
+        (di0.q_hex2_out - di.q_hex2_out[b_inds, hex1]).max()
+        # tensor(    0.000003)
+
+        # XXX: problem with k_hex2 shape?
+        #   q_hex1 is (B, 4, d)
+        #   k_hex1 is (B, 4, 165, d)        # k_hex1 = self.Wk_hex1(z_hexes).unsqueeze(1).expand(B, 4, 165, d)
+        #
+        #   hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 4, 165)
+        #
+        # ...BUT:
+        #   q_hex2 is (B, 165, d)
+        #   k_hex2 is (B, 165, d)           # k_hex2 = self.Wk_hex2(z_hexes)
+        #
+        #   hex2_logits = (k_hex2 @ q_hex2.swapaxes(1, 2)) / (d ** 0.5)             # (B, 165, 165)
+        #
+        # TEST:
+        # Try with similar shapes in hex2
+        #   q_hex2 is (B, 165, d)
+        #   k_hex2 is (B, 165, 165, d)
+        #
+        #   hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165, 165)
+
+        k_hex2 = model.Wk_hex2(di.z_hexes).unsqueeze(1).expand(B, 165, 165, d0)
+        hex2_logits = (k_hex2 @ di.q_hex2_out.unsqueeze(-1)).squeeze(-1) / (d0 ** 0.5)
+
+        (di0.hex2_logits_out - hex2_logits[b_inds, act0]).max()
+        # tensor(9.656811)
+
+        # ipdb> torch.equal(actdata0.hex2, actdata.hex2)
+        # False
+        # !!!
+
+        # ipdb> torch.equal(di0.act0_emb_out, di.act0_emb_out[act0])
+        # True
+        # import ipdb; ipdb.set_trace()  # noqa
+
+        print("(step=%d) TEST ACTION: %s <> %s (%dms <> %dms)" % (i, actdata0.action, actdata.action, ms0, ms))
+
+        err_act0_logits = (actdata0.act0_logits - actdata.act0_logits) / actdata0.act0_logits
+        print("Relative error: act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
+
+        h1mask0 = actdata0.hex1_dist.mask
+        h1mask = actdata.hex1_dist.mask
+        if not torch.equal(h1mask0, h1mask):
+            import ipdb; ipdb.set_trace()  # noqa
+
+        if h1mask.any():
+            err_hex1_logits = (actdata0.hex1_logits - actdata.hex1_logits) / actdata0.hex1_logits
+            print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
+
+        h2mask0 = actdata0.hex2_dist.mask
+        h2mask = actdata.hex2_dist.mask
+        if not torch.equal(h2mask0, h2mask):
+            import ipdb; ipdb.set_trace()  # noqa
+
+        if h2mask0.any():
+            err_hex2_logits = (actdata0.hex2_logits - actdata.hex2_logits) / actdata0.hex2_logits
+            print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
+
+        # ipdb> actdata.hex2_dist.probs[m2]
+        # tensor([0.5133, 0.4867])
+        # ipdb> actdata0.hex2_dist.probs[m2]
+        # tensor([0.6625, 0.3375])
+
+        assert torch.equal(actdata0.action, actdata.action)
+
+        assert torch.equal(actdata0.act0, actdata.act0)
+        assert torch.equal(actdata0.hex1, actdata.hex1)
+        assert torch.equal(actdata0.hex2, actdata.hex2)
+
+        assert torch.equal(actdata0.act0_dist.mask, actdata.act0_dist.mask)
+        assert torch.equal(actdata0.hex1_dist.mask, actdata.hex1_dist.mask)
+        assert torch.equal(actdata0.hex2_dist.mask, actdata.hex2_dist.mask)
+
+        # XXX:
+        # Weird thing: logits may be different, but probs are ultimately the same!
+        # err_act0_logits = (actdata.act0_logits - actdata0.act0_logits) / actdata.act0_logits
+        # err_hex1_logits = (actdata.hex1_logits - actdata0.hex1_logits) / actdata.hex1_logits
+        # err_hex2_logits = (actdata.hex2_logits - actdata0.hex2_logits) / actdata.hex2_logits
+        # print("Relative error (logits): act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
+        # print("Relative error (logits): hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
+        # print("Relative error (logits): hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
+
+        err_act0_probs = (actdata.act0_dist.probs - actdata0.act0_dist.probs) / actdata.act0_dist.probs.clamp_min(1e-8)
+        err_hex1_probs = (actdata.hex1_dist.probs - actdata0.hex1_dist.probs) / actdata.hex1_dist.probs.clamp_min(1e-8)
+        err_hex2_probs = (actdata.hex2_dist.probs - actdata0.hex2_dist.probs) / actdata.hex2_dist.probs.clamp_min(1e-8)
+
+        print("Relative error (probs): act0: mean=%.6f, max=%.6f" % (err_act0_probs.mean(), err_act0_probs.max()))
+        print("Relative error (probs): hex1: mean=%.6f, max=%.6f" % (err_hex1_probs.mean(), err_hex1_probs.max()))
+        print("Relative error (probs): hex2: mean=%.6f, max=%.6f" % (err_hex2_probs.mean(), err_hex2_probs.max()))
+
+        # 1e-5 = 0.001%
+        assert torch.allclose(actdata.act0_dist.probs, actdata0.act0_dist.probs, rtol=1e-5, atol=1e-5)
+        assert torch.allclose(actdata.hex1_dist.probs, actdata0.hex1_dist.probs, rtol=1e-5, atol=1e-5)
+        assert torch.allclose(actdata.hex2_dist.probs, actdata0.hex2_dist.probs, rtol=1e-5, atol=1e-5)
+
+        v_obs, _, v_term, v_trunc, _ = venv.step(actdata0.action.numpy())
+        v_done = np.logical_or(v_term, v_trunc)
+
+
+    import ipdb; ipdb.set_trace()  # noqa
+    assert 0
 
     # XXX: limit to first 2 sizes only (XNN export is very slow)
     # all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
@@ -555,7 +737,7 @@ def main():
     MODEL_PREFIXES = [
         # "nkjrmrsq-202509231549",
         # "nkjrmrsq-202509252116",
-        "nkjrmrsq-202509291846",
+        # "nkjrmrsq-202509291846",
         # "tukbajrv-202509171940",
         # "tukbajrv-202509211112",
         # "tukbajrv-202509222128",
@@ -567,6 +749,7 @@ def main():
         # "rqqartou-1761771948",
         # "sjigvvma-202511011415"
         # "gophftwt-1766488041"
+        "gophftwt-1766837365"
     ]
 
     with torch.inference_mode():
@@ -586,8 +769,8 @@ def main():
 
             # test_gnn(exptype)
             # test_block(exptype)
-            # test_model(cfg, model_weights_path)
-            # assert 0
+            test_model(cfg, model_weights_path)
+            assert 0
             # # test_quantized(cfg, model_weights_path)
             # test_load(cfg, model_weights_path, exptype)
 

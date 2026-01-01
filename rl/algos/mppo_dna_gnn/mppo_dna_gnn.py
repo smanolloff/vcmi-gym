@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 import sys
@@ -14,6 +16,7 @@ import copy
 import importlib
 import math
 import traceback
+from typing import NamedTuple
 
 from dataclasses import dataclass, field, asdict
 from collections import deque
@@ -217,6 +220,26 @@ class MainAction(enum.IntEnum):
     SHOOT = enum.auto()
 
 
+class DebugInfo():
+    z_global: torch.Tensor = None
+    z_hexes: torch.Tensor = None
+    act0_logits: torch.Tensor = None
+    act0_emb_in: torch.Tensor = None
+    act0_emb_out: torch.Tensor = None
+    q_hex1_in: torch.Tensor = None
+    q_hex1_out: torch.Tensor = None
+    k_hex1_in: torch.Tensor = None
+    k_hex1_out: torch.Tensor = None
+    hex1_logits_in: tuple = None
+    hex1_logits_out: torch.Tensor = None
+    q_hex2_in: torch.Tensor = None
+    q_hex2_out: torch.Tensor = None
+    k_hex2_in: torch.Tensor = None
+    k_hex2_out: torch.Tensor = None
+    hex2_logits_in: tuple = None
+    hex2_logits_out: torch.Tensor = None
+
+
 class ActionData:
     def __init__(
         self,
@@ -240,6 +263,7 @@ class ActionData:
         self.hex1 = hex1
         self.hex1_dist = hex1_dist
         self.hex1_logits = hex1_logits
+
         self.hex1_logprob = hex1_dist.log_prob(hex1)
         self.hex1_entropy = hex1_dist.entropy()
 
@@ -265,6 +289,43 @@ class ActionData:
         self.logprob = self.logprob.cpu()
         self.entropy = self.entropy.cpu()
         return self
+
+
+class ActionProbs(NamedTuple):
+    act0_logits: torch.Tensor   # (B, 4)
+    act0_mask: torch.Tensor     # (B, 4)
+    hex1_logits: torch.Tensor   # (B, 4, 165)
+    hex1_mask: torch.Tensor     # (B, 4, 165)
+    hex2_logits: torch.Tensor   # (B, 165, 165)     # !!!
+    hex2_mask: torch.Tensor     # (B, 4, 165, 165)  # !!!
+
+    def sample(self, action_table, deterministic=False):
+        b_inds = torch.arange(self.act0_logits.shape[0], device=self.act0_logits.device)
+        act0_dist = CategoricalMasked(logits=self.act0_logits, mask=self.act0_mask)
+        act0 = act0_dist.probs.argmax(dim=1) if deterministic else act0_dist.sample()
+
+        # hex1 depends on act0
+        hex1_logits_scoped = self.hex1_logits[b_inds, act0]
+        hex1_mask_scoped = self.hex1_mask[b_inds, act0]
+        hex1_dist = CategoricalMasked(logits=hex1_logits_scoped, mask=hex1_mask_scoped)
+        hex1 = hex1_dist.probs.argmax(dim=-1) if deterministic else hex1_dist.sample()
+
+        # hex1 depends on (act0, hex1)
+        # HERE IS THE BUG:
+        # hex2_dist does not depend on act0
+        hex2_logits_scoped = self.hex2_logits[b_inds, hex1]
+        hex2_mask_scoped = self.hex2_mask[b_inds, act0, hex1]
+        hex2_dist = CategoricalMasked(logits=hex2_logits_scoped, mask=hex2_mask_scoped)
+        hex2 = hex2_dist.probs.argmax(dim=-1) if deterministic else hex2_dist.sample()
+
+        action = action_table[act0, hex1, hex2]
+
+        return ActionData(
+            act0, self.act0_logits, act0_dist,
+            hex1, self.hex1_logits[b_inds, act0], hex1_dist,
+            hex2, self.hex2_logits[b_inds, hex1], hex2_dist,
+            action
+        )
 
 
 class NonGNNLayer(nn.Module):
@@ -532,7 +593,7 @@ class Model(nn.Module):
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
         z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
-        k_hex2 = self.Wk_hex2(z_hexes)                                         # (B, 165, d)
+        k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
 
@@ -595,6 +656,11 @@ class Model(nn.Module):
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
 
+        debuginfo = DebugInfo()
+        debuginfo.z_global = z_global.clone()
+        debuginfo.z_hexes = z_hexes.clone()
+        debuginfo.act0_logits = act0_logits.clone()
+
         # Next, we sample:
         #
         # 1. Sample MAIN ACTION
@@ -602,29 +668,235 @@ class Model(nn.Module):
         act0 = dist_act0.probs.argmax(dim=1) if deterministic else dist_act0.sample()  # for testing vs. executorch
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
+        debuginfo.act0_emb_in = act0.clone()
         act0_emb = self.emb_act0(act0)
+        debuginfo.act0_emb_out = act0_emb.clone()
+
         d = act0_emb.size(-1)
+
+        debuginfo.q_hex1_in = torch.cat([z_global, act0_emb], -1).clone()
         q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
+        debuginfo.q_hex1_out = q_hex1.clone()
+
+        debuginfo.k_hex1_in = z_hexes.clone()
         k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
+        debuginfo.k_hex1_out = k_hex1.clone()
+
+        debuginfo.hex1_logits_in = (k_hex1.clone(), q_hex1.unsqueeze(-1).clone())
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        debuginfo.hex1_logits_out = hex1_logits.clone()
+
         dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
         hex1 = dist_hex1.probs.argmax(dim=1) if deterministic else dist_hex1.sample()
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
         z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
+        debuginfo.q_hex2_in = torch.cat([z_global, z_hex1], -1).clone()
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
+        debuginfo.q_hex2_out = q_hex2.clone()
+
+        debuginfo.k_hex2_in = z_hexes.clone()
         k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
+        debuginfo.k_hex2_out = k_hex2.clone()
+
+        debuginfo.hex2_logits_in = (k_hex2.clone(), q_hex2.unsqueeze(-1).clone())
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        debuginfo.hex2_logits_out = hex2_logits.clone()
+
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
         hex2 = dist_hex2.probs.argmax(dim=1) if deterministic else dist_hex2.sample()  # for testing vs. executorch
 
         action = self.action_table[act0, hex1, hex2]
-
-        return ActionData(
+        return debuginfo, ActionData(
             act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
             hex1=hex1, hex1_logits=hex1_logits, hex1_dist=dist_hex1,
             hex2=hex2, hex2_logits=hex2_logits, hex2_dist=dist_hex2,
             action=action,
+        )
+
+    def _get_actdata_eval_probs(self, z_hexes, z_global, obs, deterministic=False):
+        B = obs.shape[0]
+        # b_inds = torch.arange(B, device=obs.device)
+
+        act0_logits = self.act0_head(z_global)
+
+        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
+        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
+        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
+
+        # 1.1 for 0=WAIT: nothing to do (all zeros)
+        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
+        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        mask_hex1[:, 1, :] = movemask
+
+        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
+        amovemask = hexobs[:, :, torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
+
+        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
+        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        mask_hex1[:, 3, :] = shootmask
+
+        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
+        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
+
+        # 2.1 for 0=WAIT: nothing to do (all zeros)
+        # 2.2 for 1=MOVE: nothing to do (all zeros)
+        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
+        dest = self.amove_hexes.expand(B, -1, -1)
+        valid = amovemask & self.amove_hexes_valid.expand_as(dest)
+        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
+        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
+
+        # Select only valid triples and write
+        b_sel = b_idx[valid]
+        s_sel = s_idx[valid]
+        t_sel = dest[valid]
+
+        mask_hex2[b_sel, 2, s_sel, t_sel] = True
+
+        # 2.4 for 3=SHOOT: nothing to do (all zeros)
+
+        # 3. MASK_ACTION - ie. allowed main action mask
+        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
+
+        # 0=WAIT
+        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+
+        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
+        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
+
+        debuginfo = DebugInfo()
+        debuginfo.z_global = z_global.clone()
+        debuginfo.z_hexes = z_hexes.clone()
+        debuginfo.act0_logits = act0_logits.clone()
+
+        # # MAIN ACTION
+        # act0_dist = CategoricalMasked(logits=act0_logits, mask=mask_action)
+
+        # HEX1
+        assert len(MainAction) == 4
+        debuginfo.act0_emb_in = torch.arange(4)
+        act0_emb = self.emb_act0(torch.arange(4))                               # (4, d)
+        debuginfo.act0_emb_out = act0_emb.clone()
+
+        d = act0_emb.size(-1)
+
+        debuginfo.q_hex1_in = torch.cat([
+            z_global.unsqueeze(1).expand(B, 4, d),                          # (B, 4, d)
+            act0_emb.unsqueeze(0).expand(B, 4, d)                           # (B, 4, d)
+        ], dim=-1).clone()
+        q_hex1 = self.Wq_hex1(
+            torch.cat([
+                z_global.unsqueeze(1).expand(B, 4, d),                          # (B, 4, d)
+                act0_emb.unsqueeze(0).expand(B, 4, d)                           # (B, 4, d)
+            ], dim=-1)                                                          # (B, 4, 2d)
+        )                                                                       # (B, 4, d)
+        debuginfo.q_hex1_out = q_hex1.clone()
+
+        debuginfo.k_hex1_in = z_hexes.clone()
+        k_hex1 = self.Wk_hex1(z_hexes).unsqueeze(1).expand(B, 4, 165, d)        # (B, 4, 165, d)
+        debuginfo.k_hex1_out = k_hex1.clone()
+
+        debuginfo.hex1_logits_in = (k_hex1.clone(), q_hex1.unsqueeze(-1).clone())
+        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 4, 165)
+        debuginfo.hex1_logits_out = hex1_logits.clone()
+        # hex1_dist = CategoricalMasked(logits=hex1_logits, mask=mask_hex1)       # (B, 4, 165)
+
+        # HEX2
+        debuginfo.q_hex2_in = torch.cat([
+            z_global.unsqueeze(1).expand(B, 165, d),                        # (B, 165, d)
+            z_hexes                                                         # (B, 165, d)
+        ], dim=-1).clone()
+        q_hex2 = self.Wq_hex2(
+            torch.cat([
+                z_global.unsqueeze(1).expand(B, 165, d),                        # (B, 165, d)
+                z_hexes                                                         # (B, 165, d)
+            ], dim=-1)                                                          # (B, 165, 2d)
+        )                                                                       # (B, 165, d)
+        debuginfo.q_hex2_out = q_hex2.clone()
+
+        debuginfo.k_hex2_in = z_hexes.clone()
+        # k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
+        k_hex2 = self.Wk_hex2(z_hexes).unsqueeze(1).expand(B, 165, 165, d)      # (B, 165, 165, d)
+        debuginfo.k_hex2_out = k_hex2.clone()
+
+        # debuginfo.hex2_logits_in = (k_hex2.clone(), q_hex2.swapaxes(1, 2).clone())
+        # hex2_logits = (k_hex2 @ q_hex2.swapaxes(1, 2)) / (d ** 0.5)             # (B, 165, 165)
+        debuginfo.hex2_logits_in = (k_hex2.clone(), q_hex2.unsqueeze(-1).clone())
+        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165, 165)
+        debuginfo.hex2_logits_out = hex2_logits.clone()
+
+        # # HERE IS THE BUG:
+        # # hex2_dist does not depend on act0 (but it should)
+        # # Its mask does depend on act0 tho
+        # act0 = act0_dist.probs.argmax(dim=1) if deterministic else act0_dist.sample()
+        # hex2_dist = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0].squeeze(1))
+
+        # # SAMPLING (for troubleshooting only; should be in client)
+        # # act0 = act0_dist.probs.argmax(dim=1) if deterministic else act0_dist.sample()
+        # hex1 = hex1_dist.probs[b_inds, act0].argmax(dim=-1) if deterministic else hex1_dist.sample()[b_inds, act0]
+        # hex2 = hex2_dist.probs[b_inds, hex1].argmax(dim=-1) if deterministic else hex2_dist.sample()[b_inds, hex1]
+        # import ipdb; ipdb.set_trace()  # noqa
+        # action = self.action_table[act0, hex1, hex2].flatten()
+
+        # #
+        # # debug
+        # #
+
+        # # Embedding results are equal (batched - nonbatched)
+        # act0_emb = self.emb_act0(torch.arange(4))
+        # _act0_emb = self.emb_act0(act0)
+        # torch.equal(act0_emb[act0], _act0_emb)
+        # # True
+
+        # # Wq_hex1 results are NOT equal
+        # q_hex1_in = torch.cat([z_global.unsqueeze(1).expand(B, 4, d), act0_emb.unsqueeze(0).expand(B, 4, d)], dim=-1)
+        # _q_hex1_in = torch.cat([z_global, act0_emb[act0]], -1)
+        # (self.Wq_hex1(_q_hex1_in) - self.Wq_hex1(q_hex1_in)[0, act0]).max()
+        # # tensor(6.6757e-06)
+        # # Imitate a batch (confirms batched kernel indeed produces different result):
+        # _q_hex1_in2 = torch.cat([_q_hex1_in, _q_hex1_in], 0)
+        # (self.Wq_hex1(_q_hex1_in2)[0] - self.Wq_hex1(q_hex1_in)[0, act0]).max()
+        # # tensor(0.)
+
+        # # Same for Wq_hex2
+        # _z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
+        # _q_hex2 = self.Wq_hex2(torch.cat([z_global, _z_hex1], -1))                # (B, d)
+        # (q_hex2[0, hex1] - _q_hex2).max()
+        # # tensor(2.5835e-06)
+
+        # # => hex2_logits are different (matmul amplifies this)
+        # _k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
+        # _hex2_logits = (_k_hex2 @ _q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        # (hex2_logits[0, hex1] - _hex2_logits).max()
+        # # tensor(6.4268)
+
+        # # However, the difference between the logits within each result is similar
+        # # (e.g. hex2_logits are [-15, -16] and _hex2_logits are [-7, -8])
+        # # => diff for normalized logits (in categorical dist) is smaller:
+        # _hex2_dist = CategoricalMasked(logits=_hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
+        # (hex2_dist.logits[0, hex1] - _hex2_dist.logits).max()
+        # # tensor(0.3586)
+
+        # # => in the end, probs are similar
+        # # (the two attack hexes are 86 and 87 - same wide creature)
+        # _hex2_dist.probs[b_inds][mask_hex2[b_inds, act0, hex1]]
+        # # tensor([0.6612, 0.3388])
+        # hex2_dist.probs[b_inds, hex1][mask_hex2[b_inds, act0, hex1]]
+        # # tensor([0.5133, 0.4867])
+
+        # res = self._get_actdata_eval(z_hexes, z_global, obs, True)
+        # res.hex2_dist.probs[b_inds][mask_hex2[b_inds, act0, hex1]]
+        # # tensor([0.6612, 0.3388])
+
+        return debuginfo, ActionProbs(
+            act0_logits=act0_logits,
+            act0_mask=mask_action,
+            hex1_logits=hex1_logits,
+            hex1_mask=mask_hex1,
+            hex2_logits=hex2_logits,
+            hex2_mask=mask_hex2,
         )
 
     def get_actdata_train(self, hdata):
@@ -634,6 +906,10 @@ class Model(nn.Module):
     def get_actdata_eval(self, hdata, deterministic=False):
         z_hexes, z_global = self.encode(hdata)
         return self._get_actdata_eval(z_hexes, z_global, hdata.obs, deterministic)
+
+    def get_actdata_eval_probs(self, hdata, deterministic=False):
+        z_hexes, z_global = self.encode(hdata)
+        return self._get_actdata_eval_probs(z_hexes, z_global, hdata.obs, deterministic)
 
     def get_value(self, hdata):
         _, z_global = self.encode(hdata)

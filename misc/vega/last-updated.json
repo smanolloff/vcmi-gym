@@ -48,7 +48,7 @@
     "x": {
       "field": "age_hours",
       "type": "quantitative",
-      "scale": { "domain": [0, 3], "clamp": true },
+      "scale": { "domain": [0, 5], "clamp": true },
       "axis": { "tickMinStep": 1, "format": "d", "labelExpr": "datum.value + 'h'" }
     },
     "y": {
