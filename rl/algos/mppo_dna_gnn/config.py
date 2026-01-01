@@ -18,7 +18,7 @@ train_env_kwargs = dict(
     mana_max=0,
     reward_step_fixed=-0.5,
 
-    # v14 only
+    # These require BATTLE_ROUND in obs
     # reward_step_round_mult=0,
     # reward_round_fixed=0,
     # reward_round_round_mult=0,
