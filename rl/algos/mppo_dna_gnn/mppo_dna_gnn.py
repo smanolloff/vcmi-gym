@@ -263,7 +263,6 @@ class ActionSample:
         self.hex1 = hex1
         self.hex1_dist = hex1_dist
         self.hex1_logits = hex1_logits
-
         self.hex1_logprob = hex1_dist.log_prob(hex1)
         self.hex1_entropy = hex1_dist.entropy()
 
@@ -326,6 +325,7 @@ class ActionLogits(NamedTuple):
         # hex2_dist does not depend on act0
         hex2_logits_scoped = self.hex2_logits[b_inds, hex1]
         hex2_mask_scoped = self.hex2_mask[b_inds, hex1]
+        hex2_mask_scoped[act0 != MainAction.AMOVE] = False
         hex2_dist = CategoricalMasked(logits=hex2_logits_scoped, mask=hex2_mask_scoped)
 
         if hex2 is None:
@@ -336,8 +336,8 @@ class ActionLogits(NamedTuple):
 
         return ActionSample(
             act0, self.act0_logits, act0_dist,
-            hex1, self.hex1_logits[b_inds, act0], hex1_dist,
-            hex2, self.hex2_logits[b_inds, hex1], hex2_dist,
+            hex1, hex1_logits_scoped, hex1_dist,
+            hex2, hex2_logits_scoped, hex2_dist,
             action
         )
 
