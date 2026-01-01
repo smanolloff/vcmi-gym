@@ -4,7 +4,6 @@ import torch
 import torch_geometric
 from time import perf_counter_ns
 from torch_geometric.data import Batch
-import numpy as np
 
 import onnx
 import onnxruntime as ort
@@ -17,10 +16,11 @@ from .export_common import (
     ExportableGNNBlock,
     ExportableDNAModel,
     transform_key,
-    build_edge_inputs,
+    # build_edge_inputs,
+    build_dynamic_input
 )
 
-from .mppo_dna_gnn import DNAModel, GNNBlock, CategoricalMasked
+from .mppo_dna_gnn import DNAModel, GNNBlock
 from .dual_vec_env import to_hdata_list, DualVecEnv
 
 
@@ -131,9 +131,7 @@ def test_block():
 
 def test_model(cfg, weights_file):
     """ Tests DNA Model vs ExecuTorchModel. """
-    # venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
-    # venv = DualVecEnv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs_stupidai=1)
-    venv = DualVecEnv(dict(mapname="gym/archangels.vmap", role="defender"), num_envs_stupidai=1)
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
@@ -152,86 +150,43 @@ def test_model(cfg, weights_file):
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    # obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
-    # done = torch.tensor(venv.call("terminated"))
-    # links = [venv.call("obs")[0]["links"]]
-    # hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
+    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
+    done = torch.tensor([False])
+    links = [venv.call("obs")[0]["links"]]
+    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
-    v_obs, v_info = venv.reset()
-    v_done = np.zeros([venv.num_envs], dtype=bool)
+    actdata = model.get_actdata_eval(hdata, deterministic=True)
 
-    torch.set_printoptions(sci_mode=False, precision=6)
+    dyn_input = build_dynamic_input(hdata)
+    (
+        action,
+        act0_logits,
+        hex1_logits,
+        hex2_logits,
+        mask_act0,
+        mask_hex1,
+        mask_hex2,
+        act0,
+        hex1,
+        hex2
+    ) = emodel.predict_with_logits(obs[0], *dyn_input)
 
-    hdata_list = to_hdata_list(torch.as_tensor(v_obs), torch.as_tensor(v_done), venv.call("links"))
-    hdata = Batch.from_data_list(hdata_list)
+    assert torch.equal(actdata.action, action)
+    assert torch.equal(actdata.act0, act0)
+    assert torch.equal(actdata.hex1, hex1)
+    assert torch.equal(actdata.hex2, hex2)
 
-    actsample = model.get_action_logits(hdata).sample(deterministic=True)
+    err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
+    err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
+    err_hex2_logits = (actdata.hex2_logits - hex2_logits) / actdata.hex2_logits
 
-    # XXX: limit to first 2 sizes only (XNN export is very slow)
-    # all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
-    all_edge_inputs = [
-        build_edge_inputs(hdata, ALL_MODEL_SIZES[0]),
-        build_edge_inputs(hdata, ALL_MODEL_SIZES[1]),
-    ]
+    print("Relative error: act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
+    print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
+    print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
 
-    for i, edge_inputs in enumerate(all_edge_inputs):
-        print("Testing size %d..." % i)
-        einputs = (hdata.obs[0], *edge_inputs, ALL_MODEL_SIZES[i])
-        for i1, arg in enumerate(einputs):
-            print(f"Arg {i1}: ", end="")
-            if isinstance(arg, torch.Tensor):
-                print(f"tensor: {arg.shape}")
-            else:
-                print(f"{arg.__class__.__name__}: {arg}")
-
-        (
-            action,
-            act0_logits,
-            hex1_logits,
-            hex2_logits,
-            mask_act0,
-            mask_hex1,
-            mask_hex2,
-            act0,
-            hex1,
-            hex2
-        ) = emodel.predict_with_logits(*einputs)
-
-        assert torch.equal(actsample.action, action)
-        assert torch.equal(actsample.act0, act0)
-        assert torch.equal(actsample.hex1, hex1)
-        assert torch.equal(actsample.hex2, hex2)
-
-        # Weird thing: logits may be different, but probs are ultimately the same!
-        # err_act0_logits = (actsample.act0_logits - act0_logits) / actsample.act0_logits
-        # err_hex1_logits = (actsample.hex1_logits - hex1_logits) / actsample.hex1_logits
-        # err_hex2_logits = (actsample.hex2_logits - hex2_logits) / actsample.hex2_logits
-        # print("Relative error: act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
-        # print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
-        # print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
-
-        m0 = mask_act0.bool()
-        m1 = mask_hex1.bool()
-        m2 = mask_hex2.bool()
-
-        act0_dist = CategoricalMasked(logits=act0_logits, mask=m0)
-        hex1_dist = CategoricalMasked(logits=hex1_logits[0, act0], mask=m1[0, act0])
-        hex2_dist = CategoricalMasked(logits=hex2_logits[0, hex1], mask=m2[0, hex1])
-
-        err_act0_probs = (actsample.act0_dist.probs - act0_dist.probs) / actsample.act0_dist.probs.clamp_min(1e-8)
-        err_hex1_probs = (actsample.hex1_dist.probs - hex1_dist.probs) / actsample.hex1_dist.probs.clamp_min(1e-8)
-        err_hex2_probs = (actsample.hex2_dist.probs - hex2_dist.probs) / actsample.hex2_dist.probs.clamp_min(1e-8)
-
-        print("Relative error (probs): act0: mean=%.6f, max=%.6f" % (err_act0_probs.mean(), err_act0_probs.max()))
-        print("Relative error (probs): hex1: mean=%.6f, max=%.6f" % (err_hex1_probs.mean(), err_hex1_probs.max()))
-        print("Relative error (probs): hex2: mean=%.6f, max=%.6f" % (err_hex2_probs.mean(), err_hex2_probs.max()))
-
-        # 1e-5 = 0.001%
-        assert torch.allclose(actsample.act0_dist.probs, act0_dist.probs, rtol=1e-5, atol=1e-5)
-        assert torch.allclose(actsample.hex1_dist.probs, hex1_dist.probs, rtol=1e-5, atol=1e-5)
-        assert torch.allclose(actsample.hex2_dist.probs, hex2_dist.probs, rtol=1e-5, atol=1e-5)
-
-        print("(size=%d) test_model: OK" % i)
+    assert err_act0_logits.max() < 1e-4
+    assert err_hex1_logits.max() < 1e-4
+    assert err_hex2_logits.max() < 1e-4
 
     print("=== JIT transform ===")
     sw = ModelSizelessWrapper(emodel)
@@ -243,9 +198,9 @@ def test_model(cfg, weights_file):
 
     torch.onnx.export(
         ssw,
-        (hdata.obs[0], *all_edge_inputs[0], ALL_MODEL_SIZES[0]),
+        (obs[0], *dyn_input),
         buffer,
-        input_names=["obs", "ei_flat", "ea_flat", "nbr_flat", "size"],
+        input_names=["obs", "ei_flat", "ea_flat", "size"],
         output_names=[
             "action",
             "act0_logits",
@@ -258,12 +213,11 @@ def test_model(cfg, weights_file):
             "hex1",
             "hex2",
         ],
-        opset_version=16,  # onnxruntime 1.11+
+        opset_version=20,  # onnxruntime 1.17+
         do_constant_folding=True,
         dynamic_axes={
             "ei_flat": {1: "ei_dim"},       # S=[2, 1646], M=[2, 2478], ...
             "ea_flat": {0: "ea_dim"},       # S=[1646, 1], M=[2478, 1], ...
-            "nbr_flat": {1: "nbr_dim"},     # S=[165, 32], M=[165, 52], ...
         },
         # XXX: dynamo is the *new* torch ONNX exporter and will become the
         #       default in torch-2.9.0, however as of torch 2.8.0 there are
@@ -277,66 +231,53 @@ def test_model(cfg, weights_file):
     predict_time_total = 0
     predict_count_total = 0
 
-    for i, edge_inputs in enumerate(all_edge_inputs):
-        print("Testing size %d..." % i)
-        einputs = (hdata.obs[0], *edge_inputs, ALL_MODEL_SIZES[i])
+    einputs = (obs[0], *dyn_input)
 
-        for i1, arg in enumerate(einputs):
-            print(f"Arg {i1}: ", end="")
-            if isinstance(arg, torch.Tensor):
-                print(f"tensor: {arg.shape}")
-            else:
-                print(f"{arg.__class__.__name__}: {arg}")
+    for i1, arg in enumerate(einputs):
+        print(f"Arg {i1}: ", end="")
+        if isinstance(arg, torch.Tensor):
+            print(f"tensor: {arg.shape}")
+        else:
+            print(f"{arg.__class__.__name__}: {arg}")
 
-        t0 = perf_counter_ns()
-        named_einputs = {n: einputs[i].numpy() for i, n in enumerate(["obs", "ei_flat", "ea_flat", "nbr_flat", "size"])}
-        call = lambda: [torch.as_tensor(x) for x in edge.run(None, named_einputs)]
+    t0 = perf_counter_ns()
+    named_einputs = {n: einputs[i].numpy() for i, n in enumerate(["obs", "ei_flat", "ea_flat", "size"])}
+    call = lambda: [torch.as_tensor(x) for x in edge.run(None, named_einputs)]
 
-        (
-            action,
-            act0_logits,
-            hex1_logits,
-            hex2_logits,
-            mask_act0,
-            mask_hex1,
-            mask_hex2,
-            act0,
-            hex1,
-            hex2
-        ) = call()
+    (
+        action,
+        act0_logits,
+        hex1_logits,
+        hex2_logits,
+        mask_act0,
+        mask_hex1,
+        mask_hex2,
+        act0,
+        hex1,
+        hex2
+    ) = call()
 
-        ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
-        print("Predict time: %d ms" % ms)
-        predict_time_total += ms
-        predict_count_total += 1
+    ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
+    print("Predict time: %d ms" % ms)
+    predict_time_total += ms
+    predict_count_total += 1
 
-        assert torch.equal(actsample.action, action)
-        assert torch.equal(actsample.act0, act0)
-        assert torch.equal(actsample.hex1, hex1)
-        assert torch.equal(actsample.hex2, hex2)
+    assert torch.equal(actdata.action, action)
+    assert torch.equal(actdata.act0, act0)
+    assert torch.equal(actdata.hex1, hex1)
+    assert torch.equal(actdata.hex2, hex2)
 
-        m0 = mask_act0.bool()
-        m1 = mask_hex1.bool()
-        m2 = mask_hex2.bool()
+    err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
+    err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
+    err_hex2_logits = (actdata.hex2_logits - hex2_logits) / actdata.hex2_logits
 
-        act0_dist = CategoricalMasked(logits=act0_logits, mask=m0)
-        hex1_dist = CategoricalMasked(logits=hex1_logits[0, act0], mask=m1[0, act0])
-        hex2_dist = CategoricalMasked(logits=hex2_logits[0, hex1], mask=m2[0, hex1])
+    print("Relative error: act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
+    print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
+    print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
 
-        err_act0_probs = (actsample.act0_dist.probs - act0_dist.probs) / actsample.act0_dist.probs.clamp_min(1e-8)
-        err_hex1_probs = (actsample.hex1_dist.probs - hex1_dist.probs) / actsample.hex1_dist.probs.clamp_min(1e-8)
-        err_hex2_probs = (actsample.hex2_dist.probs - hex2_dist.probs) / actsample.hex2_dist.probs.clamp_min(1e-8)
-
-        print("Relative error (probs): act0: mean=%.6f, max=%.6f" % (err_act0_probs.mean(), err_act0_probs.max()))
-        print("Relative error (probs): hex1: mean=%.6f, max=%.6f" % (err_hex1_probs.mean(), err_hex1_probs.max()))
-        print("Relative error (probs): hex2: mean=%.6f, max=%.6f" % (err_hex2_probs.mean(), err_hex2_probs.max()))
-
-        # 1e-5 = 0.001%
-        assert torch.allclose(actsample.act0_dist.probs, act0_dist.probs, rtol=1e-5, atol=1e-5)
-        assert torch.allclose(actsample.hex1_dist.probs, hex1_dist.probs, rtol=1e-5, atol=1e-5)
-        assert torch.allclose(actsample.hex2_dist.probs, hex2_dist.probs, rtol=1e-5, atol=1e-5)
-
-        print("(size=%d) test_model: OK" % i)
+    assert err_act0_logits.max() < 0.01
+    assert err_hex1_logits.max() < 0.01
+    assert err_hex2_logits.max() < 0.01
 
     print("predict_time_total=%d" % predict_time_total)
     print("predict_count_total=%d" % predict_count_total)
@@ -463,7 +404,6 @@ def export_model(cfg, weights_file):
         "version": str(emodel.get_version().item()),
         "side": str(emodel.get_side().item()),
         "action_table": json.dumps(emodel.action_table.tolist()),
-        "is_dynamic": "1",
     }
 
     for k, v in metadata.items():
@@ -515,7 +455,7 @@ def verify_export(cfg, weights_file, loaded_model, num_steps=10):
         links = [venv.call("obs")[0]["links"]]
         hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
 
-        actsample = model.model_policy.get_action_logits(hdata).sample(deterministic=True)
+        actdata = model.model_policy.get_actdata_eval(hdata, deterministic=True)
 
         all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
 
@@ -541,39 +481,31 @@ def verify_export(cfg, weights_file, loaded_model, num_steps=10):
                 hex2
             ) = loaded_res
 
-            print("(step=%d, size=%d) TEST ACTION: %d <> %d (%s ms)" % (n, i, actsample.action, action.item(), ms))
+            print("(step=%d, size=%d) TEST ACTION: %d <> %d (%s ms)" % (n, i, actdata.action, action.item(), ms))
 
-            m0 = mask_act0.bool()
-            m1 = mask_hex1.bool()
-            m2 = mask_hex2.bool()
-            act0_dist = CategoricalMasked(logits=act0_logits, mask=m0)
-            hex1_dist = CategoricalMasked(logits=hex1_logits[0, act0], mask=m1[0, act0])
-            hex2_dist = CategoricalMasked(logits=hex2_logits[0, hex1], mask=m2[0, hex1])
+            err_act0_logits = (actdata.act0_logits - act0_logits) / actdata.act0_logits
+            err_hex1_logits = (actdata.hex1_logits - hex1_logits) / actdata.hex1_logits
+            err_hex2_logits = (actdata.hex2_logits - hex2_logits) / actdata.hex2_logits
 
-            err_act0_probs = (actsample.act0_dist.probs - act0_dist.probs) / actsample.act0_dist.probs.clamp_min(1e-8)
-            err_hex1_probs = (actsample.hex1_dist.probs - hex1_dist.probs) / actsample.hex1_dist.probs.clamp_min(1e-8)
-            err_hex2_probs = (actsample.hex2_dist.probs - hex2_dist.probs) / actsample.hex2_dist.probs.clamp_min(1e-8)
+            print("Relative error: act0: mean=%.6f, max=%.6f" % (err_act0_logits.mean(), err_act0_logits.max()))
+            print("Relative error: hex1: mean=%.6f, max=%.6f" % (err_hex1_logits.mean(), err_hex1_logits.max()))
+            print("Relative error: hex2: mean=%.6f, max=%.6f" % (err_hex2_logits.mean(), err_hex2_logits.max()))
 
-            print("Relative error (probs): act0: mean=%.6f, max=%.6f" % (err_act0_probs.mean(), err_act0_probs.max()))
-            print("Relative error (probs): hex1: mean=%.6f, max=%.6f" % (err_hex1_probs.mean(), err_hex1_probs.max()))
-            print("Relative error (probs): hex2: mean=%.6f, max=%.6f" % (err_hex2_probs.mean(), err_hex2_probs.max()))
+            assert actdata.action.item() == action.item()
+            assert actdata.act0.item() == act0.item()
+            assert actdata.hex1.item() == hex1.item()
+            assert actdata.hex2.item() == hex2.item()
 
-            # 1e-5 = 0.001%
-            assert torch.allclose(actsample.act0_dist.probs, act0_dist.probs, rtol=1e-5, atol=1e-5)
-            assert torch.allclose(actsample.hex1_dist.probs, hex1_dist.probs, rtol=1e-5, atol=1e-5)
-            assert torch.allclose(actsample.hex2_dist.probs, hex2_dist.probs, rtol=1e-5, atol=1e-5)
-
-            assert actsample.action.item() == action.item()
-            assert actsample.act0.item() == act0.item()
-            assert actsample.hex1.item() == hex1.item()
-            assert actsample.hex2.item() == hex2.item()
+            assert err_act0_logits.max() < 0.01
+            assert err_hex1_logits.max() < 0.01
+            assert err_hex2_logits.max() < 0.01
 
             # Not testing value (value model excluded)
             # value = model.get_value(hdata)[0]
             # myvalue = loaded_get_value.execute(einputs)
             # print("(%d) TEST VALUE: %.3f <> %.3f" % (n, value.item(), myvalue.item()))
 
-        venv.step([actsample.action])
+        venv.step([actdata.action])
 
     print("Total execution time:")
 
@@ -611,8 +543,7 @@ def main():
         # "rqqartou-1761858383",   # overfitted
         # "rqqartou-1761771948",
         # "sjigvvma-202511011415"
-        # "gophftwt-1766488041"
-        "gophftwt-1766837365"
+        "gophftwt-1766488041"
     ]
 
     with torch.inference_mode():
@@ -624,7 +555,7 @@ def main():
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
 
-            export_basename = "%s-%s" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
+            export_basename = "%s-%s-dynamic" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
 
             #
             # Tests (for debugging):
@@ -633,7 +564,7 @@ def main():
             # test_gnn(exptype)
             # test_block(exptype)
             test_model(cfg, model_weights_path)
-            # assert 0
+            assert 0
             # # test_quantized(cfg, model_weights_path)
             # test_load(cfg, model_weights_path, exptype)
 
@@ -647,7 +578,7 @@ def main():
             # import ipdb; ipdb.set_trace()  # noqa
             verify_export(cfg, model_weights_path, loaded_model)
 
-            # save_exported_model(exported_model, export_dir, export_basename)
+            save_exported_model(exported_model, export_dir, export_basename)
 
 
 if __name__ == "__main__":

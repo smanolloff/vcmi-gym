@@ -41,9 +41,9 @@ from rl.world.util.wandb import setup_wandb
 from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, safe_mean, timer_stats
 
-from vcmi_gym.envs.v14.vcmi_env import VcmiEnv
+from vcmi_gym.envs.v13.vcmi_env import VcmiEnv
 
-from vcmi_gym.envs.v14.pyconnector import (
+from vcmi_gym.envs.v13.pyconnector import (
     STATE_SIZE,
     STATE_SIZE_ONE_HEX,
     STATE_SIZE_HEXES,
@@ -330,7 +330,7 @@ class ActionLogits(NamedTuple):
         # HERE IS THE BUG:
         # hex2_dist does not depend on act0
         hex2_logits_scoped = self.hex2_logits[b_inds, hex1]
-        hex2_mask_scoped = self.hex2_mask[b_inds, act0, hex1]
+        hex2_mask_scoped = self.hex2_mask[b_inds, hex1]
         hex2_dist = CategoricalMasked(logits=hex2_logits_scoped, mask=hex2_mask_scoped)
 
         if hex2 is None:
@@ -542,87 +542,6 @@ class Model(nn.Module):
     def _get_value(self, z_global):
         return self.critic(z_global)
 
-    # def _get_actdata_train(self, z_hexes, z_global, obs, action):
-    #     B = obs.shape[0]
-    #     b_inds = torch.arange(B, device=obs.device)
-
-    #     act0, hex1, hex2 = self.inverse_table[action].unbind(1)
-
-    #     act0_logits = self.act0_head(z_global)
-
-    #     # 1. MASK_HEX1 - ie. allowed hex#1 for each action
-    #     mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
-    #     hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
-
-    #     # 1.1 for 0=WAIT: nothing to do (all zeros)
-    #     # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-    #     movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
-    #     mask_hex1[:, 1, :] = movemask
-
-    #     # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-    #     amovemask = hexobs[:, :, torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
-    #     mask_hex1[:, 2, :] = amovemask.any(dim=-1)
-
-    #     # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
-    #     shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
-    #     mask_hex1[:, 3, :] = shootmask
-
-    #     # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-    #     mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
-
-    #     # 2.1 for 0=WAIT: nothing to do (all zeros)
-    #     # 2.2 for 1=MOVE: nothing to do (all zeros)
-    #     # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
-    #     dest = self.amove_hexes.expand(B, -1, -1)
-    #     valid = amovemask & self.amove_hexes_valid.expand_as(dest)
-    #     b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
-    #     s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
-
-    #     # Select only valid triples and write
-    #     b_sel = b_idx[valid]
-    #     s_sel = s_idx[valid]
-    #     t_sel = dest[valid]
-
-    #     mask_hex2[b_sel, 2, s_sel, t_sel] = True
-
-    #     # 2.4 for 3=SHOOT: nothing to do (all zeros)
-
-    #     # 3. MASK_ACTION - ie. allowed main action mask
-    #     mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
-
-    #     # 0=WAIT
-    #     mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
-
-    #     # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
-    #     mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
-
-    #     # Next, we sample:
-    #     #
-    #     # 1. Sample MAIN ACTION
-    #     dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
-
-    #     # 2. Sample HEX1 (with mask corresponding to the main action)
-    #     act0_emb = self.emb_act0(act0)
-    #     d = act0_emb.size(-1)
-    #     q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
-    #     k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
-    #     hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-    #     dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
-
-    #     # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
-    #     z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
-    #     q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
-    #     k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
-    #     hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-    #     dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
-
-    #     return ActionData(
-    #         act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
-    #         hex1=hex1, hex1_logits=hex1_logits, hex1_dist=dist_hex1,
-    #         hex2=hex2, hex2_logits=hex2_logits, hex2_dist=dist_hex2,
-    #         action=action,
-    #     )
-
     def _get_action_logits(self, z_hexes, z_global, obs) -> ActionLogits:
         B = obs.shape[0]
         # b_inds = torch.arange(B, device=obs.device)
@@ -647,7 +566,8 @@ class Model(nn.Module):
         mask_hex1[:, 3, :] = shootmask
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
+        # (it's only for AMOVE action, => shape is (B, 165, 165) instead of (B, 4, 165, 165))
+        mask_hex2 = torch.zeros([B, 165, 165], dtype=torch.bool, device=obs.device)
 
         # 2.1 for 0=WAIT: nothing to do (all zeros)
         # 2.2 for 1=MOVE: nothing to do (all zeros)
@@ -662,7 +582,7 @@ class Model(nn.Module):
         s_sel = s_idx[valid]
         t_sel = dest[valid]
 
-        mask_hex2[b_sel, 2, s_sel, t_sel] = True
+        mask_hex2[b_sel, s_sel, t_sel] = True
 
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
@@ -701,12 +621,6 @@ class Model(nn.Module):
         )                                                                       # (B, 165, d)
         k_hex2 = self.Wk_hex2(z_hexes).unsqueeze(1).expand(B, 165, 165, d)      # (B, 165, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165, 165)
-
-        # # HERE IS THE BUG:
-        # # hex2_dist does not depend on act0 (but it should)
-        # # Its mask does depend on act0 though
-        # act0 = act0_dist.probs.argmax(dim=1) if deterministic else act0_dist.sample()
-        # hex2_dist = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0].squeeze(1))
 
         return ActionLogits(
             action_table=self.action_table,

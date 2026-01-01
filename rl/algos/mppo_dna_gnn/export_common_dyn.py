@@ -51,6 +51,14 @@ def transform_key(key, node_type, link_types):
 #        RETAL_DMG_REL   0.2   10    9     8     6     5     3
 #       RANGED_DMG_REL   0.1   8     6     3     2     2     1
 
+# XXX: these stats are based on vanilla H3 battles
+# In mods, there can be battles with creatures that summon other creatures on battle start
+# e.g. 14 such stacks + 14 summoned + 2 commanders + 6 warmachines = 36 stacks
+# This means that unconditional stack<->stack edges must be increased ~2x
+# - MELEE_DMG_REL
+# - RETAL_DMG_REL
+# - ACTS_BEFORE
+# 
 
 # Sizes are (E, K) tuples
 ALL_MODEL_SIZES = torch.tensor([
@@ -102,89 +110,18 @@ ALL_MODEL_SIZES = torch.tensor([
 ])
 
 
-# Inputs:
-#   hdata: HeteroData
-#   model_sizes: tensor with shape (NUM_LT, 2), e.g. an entry from ALL_MODEL_SIZES
-#
-# Returns:
-#   [ei_flat, ea_flat, nbr_flat]
-#
-# Shapes:
-# ei_flat:  (2, sum_E)
-# ea_flat:  (sum_E, edge_dim)
-# nbr_flat: (num_nodes, sum_K)
-#
-# The exported model will contain a method for these model_sizes which knows
-# exactly how to decompose the flattened tensors.
-#
-def build_edge_inputs(hdata, model_sizes):
-    assert len(hdata.node_types) == 1, hdata.node_types
-    assert model_sizes.ndim == 2
-    assert model_sizes.shape[0] == len(hdata.edge_types)
-    assert all(n == 1 for n in hdata.num_edge_features.values()), hdata.num_edge_features.values()
-
-    sum_e = model_sizes[:, 0].sum()
-    sum_k = model_sizes[:, 1].sum()
-
-    ei_flat = torch.zeros((2, sum_e), dtype=torch.int32)
-    ea_flat = torch.zeros((sum_e, 1), dtype=torch.float32)
-    nbr_flat = torch.zeros((hdata.num_nodes, sum_k), dtype=torch.int32)
-
-    e0 = 0
-    k0 = 0
+def build_dynamic_input(hdata):
+    ei_flat = torch.zeros([2, 0], dtype=torch.int64)
+    ea_flat = torch.zeros([0, 1], dtype=torch.float32)
+    size = torch.zeros([7], dtype=torch.int64)
 
     for i, edge_type in enumerate(hdata.edge_types):
-        e = model_sizes[i, 0]
-        k = model_sizes[i, 1]
-        e1 = e0 + e
-        k1 = k0 + k
+        hd = hdata[edge_type]
+        ei_flat = torch.cat((ei_flat, hd.edge_index), dim=1)
+        ea_flat = torch.cat((ea_flat, hd.edge_attr), dim=0)
+        size[i] = hd.edge_attr.shape[0]
 
-        reldata = hdata[edge_type]
-        ei, ea = pad_edges(reldata.edge_index, reldata.edge_attr, 1, e)
-        nbr = build_nbr(reldata.edge_index[1], hdata.num_nodes, k)
-
-        ei_flat[:, e0:e1] = ei
-        ea_flat[e0:e1, :] = ea
-        nbr_flat[:, k0:k1] = nbr
-
-        e0 = e1
-        k0 = k1
-
-    assert e0 == sum_e
-    assert k0 == sum_k
-
-    return ei_flat, ea_flat, nbr_flat
-
-
-# Usage: build_nbr(edge_index[1], x.size(0), K_MAX)
-def build_nbr(dst, num_nodes, k_max):
-    """
-    Build nbr[v, k] = edge id of k-th incoming edge to node v; -1 if unused.
-    Use this OUTSIDE the exported graph (host-side) for the current edge_index.
-    """
-    nbr = torch.full((num_nodes, k_max), -1, dtype=torch.int32)
-    fill = torch.zeros(num_nodes, dtype=torch.int32)
-    for e, v in enumerate(dst.tolist()):
-        p = int(fill[v])
-        if p >= k_max:
-            raise ValueError(f"node {v} exceeds k_max={k_max}")
-        nbr[v, p] = e
-        fill[v] = p + 1
-    return nbr
-
-
-# NOTE: OK to use 0 for padding (padded positions are not present in NBR)
-def pad_edges(edge_index, edge_attr, edge_dim, e_max):
-    # edge_index: (2, E), long; edge_attr: (E, edge_dim), float
-    E = edge_index.size(1)
-    if E > e_max:
-        raise ValueError(f"E={E} exceeds e_max={e_max}")
-    pad = e_max - E
-    if pad:
-        edge_index = torch.cat([edge_index, edge_index.new_zeros(2, pad)], dim=1)
-        edge_attr = torch.cat([edge_attr, edge_attr.new_zeros(pad, edge_dim)], dim=0)
-
-    return edge_index, edge_attr
+    return ei_flat, ea_flat, size
 
 
 class ExportableModel(nn.Module):
@@ -266,10 +203,10 @@ class ExportableModel(nn.Module):
     # edge_triplets is [edge_ind1, edge_attr1, edge_nbr1, edge_ind2, edge_attr2, edge_nbr2, ...]
     # (one triplet for each link type)
     @torch.jit.export
-    def encode(self, obs, ei_flat, ea_flat, nbr_flat, size):
+    def encode(self, obs, ei_flat, ea_flat, size):
         hexes = obs[0, self.dim_other:].view(165, self.state_size_one_hex)
         other = obs[0, :self.dim_other]
-        z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, nbr_flat, size).unsqueeze(0)
+        z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, size).unsqueeze(0)
         z_other = self.encoder_other(other).unsqueeze(0)
         # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
         # z_global = z_other + z_hexes.mean(1)
@@ -277,25 +214,24 @@ class ExportableModel(nn.Module):
         return z_hexes, z_global
 
     @torch.jit.export
-    def get_value(self, obs, ei_flat, ea_flat, nbr_flat, size):
+    def get_value(self, obs, ei_flat, ea_flat, size):
         obs = obs.unsqueeze(dim=0)
-        _, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size)
+        _, z_global = self.encode(obs, ei_flat, ea_flat, size)
         return self.critic(z_global)[0]
 
     @torch.jit.export
-    def predict(self, obs, ei_flat, ea_flat, nbr_flat, size):
-        return self.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size)[0]
+    def predict(self, obs, ei_flat, ea_flat, size):
+        return self.predict_with_logits(obs, ei_flat, ea_flat, size)[0]
 
     @torch.jit.export
-    def predict_with_logits(self, obs, ei_flat, ea_flat, nbr_flat, size):
-        B = 1
+    def predict_with_logits(self, obs, ei_flat, ea_flat, size):
         obs = obs.unsqueeze(dim=0)
-        z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size)
+        z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, size)
 
         act0_logits = self.act0_head(z_global)
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
-        mask_hex1 = torch.zeros((B, 4, 165), dtype=torch.int32)
+        mask_hex1 = torch.zeros((1, 4, 165), dtype=torch.int32)
         hexobs = obs[:, -self.state_size_hexes:].view([-1, 165, self.state_size_one_hex])
 
         # XXX: EXPLICIT casting to torch.bool is required to prevent a
@@ -315,25 +251,57 @@ class ExportableModel(nn.Module):
         mask_hex1[:, 3, :] = shootmask.to(torch.int32)
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        # (it's only for AMOVE action, => shape is (B, 165, 165) instead of (B, 4, 165, 165))
+        mask_hex2 = torch.zeros((1, 4, 165, 165), dtype=torch.int32)
 
         # 2.1 for 0=WAIT: nothing to do (all zeros)
         # 2.2 for 1=MOVE: nothing to do (all zeros)
         # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
         valid = amovemask & self.amove_hexes_valid
 
-        # Ensure invalid entries are excluded from updates
+        # # Select only valid triples and write
+        # b_sel = self.b_idx[valid]
+        # s_sel = self.s_idx[valid]
+        # t_sel = self.amove_hexes[valid]
+        # mask_hex2[b_sel, 2, s_sel, t_sel] = True
+
+        # "How do I build mask_hex2[b, 2, s, t] = True when self.amove_hexes
+        # contains -1 entries, without boolean indexing and with static shapes?"
+        # Shapes:
+        # self.mask_hex2: [B, 4, S, T] (bool)  e.g., [B,4,165,165]
+        # self.amove_hexes: [B, S, K] (long)    target t-indices, may contain -1
+        # valid: [B, S, K] (bool)               which triplets are active
+
+        # 1) Plane we will write: channel 2 of the mask
+        plane = torch.zeros_like(self.mask_hex2.select(1, 2))  # [B, S, T], bool
+
+        # 2) Ensure invalid entries are excluded from updates
         idx = self.amove_hexes.int()                                      # [B, S, K], long
         valid = valid & (idx >= 0)                                  # drop t == -1
 
-        # Replace -1 by 0 (any in-range index works) but make src zero there,
-        # so those updates are no-ops on a zero-initialized buffer.
+        # 3) Replace -1 by 0 (any in-range index works) but make src zero there,
+        #    so those updates are no-ops on a zero-initialized buffer.
         safe_idx = torch.where(valid, idx, idx.new_zeros(idx.shape))            # [B,S,K]
 
-        # Accumulate along T, then binarize
-        accum = torch.zeros((B, 165, 165))  # [B,S,T]
-        accum = accum.scatter_add(-1, safe_idx.long(), valid.float())                         # [B,S,T]
-        mask_hex2 = accum.ne(0).to(torch.int32)
+        # 4) Accumulate along T, then binarize
+
+        # XXX: 4) Option A: use scatter_add
+        # accum = torch.zeros((idx.size(0), idx.size(1), plane.size(-1)))  # [B,S,T]
+        # accum = accum.scatter_add(-1, safe_idx.long(), valid.float())                         # [B,S,T]
+
+        # XXX: 4) Option B: avoid scatter_add
+        classes = torch.arange(165, dtype=torch.int32).view(1, 1, 1, 165)  # [1,1,1,T]
+        onehot = (safe_idx.unsqueeze(-1) == classes)                      # [B,S,K,T], bool
+        src = valid.to(torch.int32).unsqueeze(-1)                       # [B,S,K,1]
+
+        # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
+        # accum = (onehot.to(torch.int32) * src).sum(dim=-2)                  # [B,S,T]
+        accum = (onehot.to(torch.int32) * src).sum(dim=-2, keepdim=True).squeeze(-2)
+
+        plane = accum.ne(0).to(torch.int32)
+
+        # 5) Write back into the full mask tensor
+        mask_hex2 = torch.zeros_like(mask_hex2)                             # [B,4,S,T]
+        mask_hex2[:, 2] = plane
 
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
@@ -346,47 +314,33 @@ class ExportableModel(nn.Module):
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_act0[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1).to(torch.int32)
 
-        # MAIN ACTION
+        # Next, we sample:
+        #
+        # 1. Sample MAIN ACTION
         probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_act0.to(torch.bool))
-
-        B = z_hexes.size(0)
-
-        # HEX1
-        act0_emb = self.emb_act0(torch.arange(4))                               # (4, d)
-        d = act0_emb.size(-1)
-        q_hex1 = self.Wq_hex1(
-            torch.cat([
-                z_global.unsqueeze(1).expand(B, 4, d),                          # (B, 4, d)
-                act0_emb.unsqueeze(0).expand(B, 4, d)                           # (B, 4, d)
-            ], dim=-1)                                                          # (B, 4, 2d)
-        )                                                                       # (B, 4, d)
-        k_hex1 = self.Wk_hex1(z_hexes).unsqueeze(1).expand(B, 4, 165, d)        # (B, 4, 165, d)
-        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 4, 165)
-        hex1_probs = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1.to(torch.bool))
-
-        # HEX2
-        q_hex2 = self.Wq_hex2(
-            torch.cat([
-                z_global.unsqueeze(1).expand(B, 165, d),                        # (B, 165, d)
-                z_hexes                                                         # (B, 165, d)
-            ], dim=-1)                                                          # (B, 165, 2d)
-        )                                                                       # (B, 165, d)
-        k_hex2 = self.Wk_hex2(z_hexes).unsqueeze(1).expand(B, 165, 165, d)      # (B, 165, 165, d)
-        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165, 165)
-        hex2_probs = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2.to(torch.bool))
-
-        #
-        # Greedy sampling (TODO: remove: client should sample stochastically)
-        #
         act0 = torch.argmax(probs_act0, dim=1)
 
-        hex1_index = act0[:, None, None].expand(B, 1, 165)                       # (B, 1, 165)
-        hex1_act0_probs = hex1_probs.gather(dim=1, index=hex1_index).squeeze(1)  # (B, 165)
-        hex1 = hex1_act0_probs.argmax(-1)                                        # (B)
+        # 2. Sample HEX1 (with mask corresponding to the main action)
+        act0_emb = self.emb_act0(act0)
+        d = act0_emb.size(-1)
+        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
+        k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
+        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        # Use per-batch gather of the proper action channel; avoid boolean writes
+        # mask_hex1_sel: [B,S]
+        mask_hex1_sel = mask_hex1.gather(1, act0.view(-1, 1, 1).expand(-1, 1, 165)).squeeze(1).to(torch.bool)
+        probs_hex1 = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1_sel)
+        hex1 = torch.argmax(probs_hex1, dim=1)
 
-        hex2_index = hex1[:, None, None].expand(B, 1, 165)                       # (B, 1, 165)
-        hex2_hex1_probs = hex2_probs.gather(dim=1, index=hex2_index).squeeze(1)  # (B, 165)
-        hex2 = hex2_hex1_probs.argmax(-1)                                        # (B)
+        # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
+        z_hex1 = z_hexes[0, hex1, :]                                       # (B, d)
+        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
+        k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
+        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        mask_hex2_amove = mask_hex2[:, 2]  # [B,S,T]
+        mask_hex2_sel = mask_hex2_amove.gather(1, hex1.view(-1, 1, 1).expand(-1, 1, 165)).squeeze(1).to(torch.bool)
+        probs_hex2 = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2_sel)
+        hex2 = torch.argmax(probs_hex2, dim=1)
 
         action = self.action_table[act0, hex1, hex2]
 
@@ -439,54 +393,96 @@ def _neg_inf_like(x: torch.Tensor) -> torch.Tensor:
     return x.new_full((1,), v, dtype=x.dtype)
 
 
-@torch.jit.export
-def scatter_sum_via_nbr(src, nbr):
-    N, K = nbr.shape
-    H = src.size(1)
-    # idx = nbr.clamp_min(0).reshape(-1)                 # (N*K,)
-    idx64 = nbr.clamp_min(0).to(torch.int64).reshape(-1)       # only here
-    gathered = src.index_select(0, idx64).reshape(N, K, H)
-    valid = (nbr >= 0).unsqueeze(-1)
-    zeros = src.new_zeros((1, 1, H))
-    gathered = torch.where(valid, gathered, zeros)
+# @torch.jit.export
+# def scatter_sum_via_nbr(src, nbr):
+#     N, K = nbr.shape
+#     H = src.size(1)
+#     # idx = nbr.clamp_min(0).reshape(-1)                 # (N*K,)
+#     idx64 = nbr.clamp_min(0).to(torch.int64).reshape(-1)       # only here
+#     gathered = src.index_select(0, idx64).reshape(N, K, H)
+#     valid = (nbr >= 0).unsqueeze(-1)
+#     zeros = src.new_zeros((1, 1, H))
+#     gathered = torch.where(valid, gathered, zeros)
 
-    # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
-    # return gathered.sum(dim=1)                  # (N, H)
-    return gathered.sum(dim=1, keepdim=True).squeeze(1)                  # (N, H)
-
-
-@torch.jit.export
-def scatter_max_via_nbr(src, nbr):
-    N, K = nbr.shape
-    H = src.size(1)
-    # idx = nbr.clamp_min(0).reshape(-1)
-    idx64 = nbr.clamp_min(0).to(torch.int64).reshape(-1)
-    gathered = src.index_select(0, idx64).reshape(N, K, H)
-    valid = (nbr >= 0).unsqueeze(-1)
-    # XXX: torchscript does not allow to use torch.finfo(...)
-    # neg_inf = -((2 - 2**-23) * 2**127)
-    neg_inf = _neg_inf_like(src)[0]
-    gathered = torch.where(valid, gathered, neg_inf)
-    return gathered.max(dim=1).values
+#     # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
+#     # return gathered.sum(dim=1)                  # (N, H)
+#     return gathered.sum(dim=1, keepdim=True).squeeze(1)                  # (N, H)
 
 
-@torch.jit.export
-def softmax_via_nbr(src, index, nbr):
-    src_max = scatter_max_via_nbr(src, nbr)                    # (N, H)
-    # out = (src - src_max.index_select(0, index)).exp()             # (E_max, H)
-    out = (src - src_max.index_select(0, index.to(torch.int64))).exp()
-    out_sum = scatter_sum_via_nbr(out, nbr) + 1e-16            # (N, H)
-    # denom = out_sum.index_select(0, index)                         # (E_max, H)
-    denom = out_sum.index_select(0, index.to(torch.int64))
-    return out / denom
+# @torch.jit.export
+# def scatter_max_via_nbr(src, nbr):
+#     N, K = nbr.shape
+#     H = src.size(1)
+#     # idx = nbr.clamp_min(0).reshape(-1)
+#     idx64 = nbr.clamp_min(0).to(torch.int64).reshape(-1)
+#     gathered = src.index_select(0, idx64).reshape(N, K, H)
+#     valid = (nbr >= 0).unsqueeze(-1)
+#     # XXX: torchscript does not allow to use torch.finfo(...)
+#     # neg_inf = -((2 - 2**-23) * 2**127)
+#     neg_inf = _neg_inf_like(src)[0]
+#     gathered = torch.where(valid, gathered, neg_inf)
+#     return gathered.max(dim=1).values
+
+
+# @torch.jit.export
+# def softmax_via_nbr(src, index, nbr):
+#     src_max = scatter_max_via_nbr(src, nbr)                    # (N, H)
+#     # out = (src - src_max.index_select(0, index)).exp()             # (E_max, H)
+#     out = (src - src_max.index_select(0, index.to(torch.int64))).exp()
+#     out_sum = scatter_sum_via_nbr(out, nbr) + 1e-16            # (N, H)
+#     # denom = out_sum.index_select(0, index)                         # (E_max, H)
+#     denom = out_sum.index_select(0, index.to(torch.int64))
+#     return out / denom
+
+
+def edge_softmax_per_dst(scores: torch.Tensor, dst: torch.Tensor, num_nodes: int, eps: float = 1e-16):
+    """
+    scores: (E, H)
+    dst:    (E,) int64 destination node index per edge
+    returns alpha: (E, H), softmax over edges grouped by dst (per feature dim)
+    """
+    E, H = scores.shape
+    dst = dst.to(torch.int64)
+
+    # Per-node max: (N, H)
+    # IMPORTANT for export: include_self=True is commonly required/assumed by PyTorch ONNX exporter for scatter_reduce.
+    # (Many people hit an export error when include_self=False.)
+    neg_inf = torch.tensor(float("-inf"), device=scores.device, dtype=scores.dtype)
+    max_per_node = neg_inf.expand(num_nodes, H).clone()
+    max_per_node.scatter_reduce_(
+        0,
+        dst[:, None].expand(E, H),
+        scores,
+        reduce="amax",
+        include_self=True,
+    )
+
+    exp_scores = (scores - max_per_node.index_select(0, dst)).exp()
+
+    # Per-node sum: (N, H)
+    sum_per_node = torch.zeros((num_nodes, H), device=scores.device, dtype=scores.dtype)
+    sum_per_node.scatter_add_(0, dst[:, None].expand(E, H), exp_scores)
+
+    return exp_scores / (sum_per_node.index_select(0, dst) + eps)
+
+
+def scatter_sum_per_dst(values: torch.Tensor, dst: torch.Tensor, num_nodes: int):
+    """
+    values: (E, H)
+    dst:    (E,) int64 destination node index per edge
+    returns: (N, H)
+    """
+    E, H = values.shape
+    dst = dst.to(torch.int64)
+
+    out = torch.zeros((num_nodes, H), device=values.device, dtype=values.dtype)
+    out.scatter_add_(0, dst[:, None].expand(E, H), values)
+    return out
 
 
 class ExportableGENConv(nn.Module):
     def __init__(self, in_channels, out_channels, edge_dim):
         super().__init__()
-
-        self.in_channels = in_channels
-        self.out_channels = out_channels
         self.eps = 1e-7
 
         if in_channels != out_channels:
@@ -499,36 +495,40 @@ class ExportableGENConv(nn.Module):
         self.lin_edge = nn.Linear(edge_dim, out_channels, bias=False)
 
         self.mlp = nn.Sequential(
-            nn.Linear(out_channels, out_channels*2, bias=False),
-            nn.BatchNorm1d(out_channels*2, affine=True),
+            nn.Linear(out_channels, out_channels * 2, bias=False),
+            nn.BatchNorm1d(out_channels * 2, affine=True),
             nn.ReLU(),
-            nn.Dropout(0.),
-            nn.Linear(out_channels*2, out_channels, bias=False),
+            nn.Dropout(0.0),
+            nn.Linear(out_channels * 2, out_channels, bias=False),
         )
 
-    # NOTE: all inputs have a fixed length
-    # (edge_index and edge_attr are PADDED with zeros up to E_MAX)
-    @torch.jit.export
-    def forward(self, x, edge_index, edge_attr, nbr):
-        src = self.lin_src(x)
-        dst = self.lin_dst(x)
-        x_j = src.index_select(0, edge_index[0])
-        out = self.message(x_j, edge_attr)
-        out = self.aggregate(out, edge_index[1], nbr)
-        out = out + dst
-        return self.mlp(out)
-
-    @torch.jit.export
     def message(self, x_j, edge_attr):
         edge_attr = self.lin_edge(edge_attr)
         msg = x_j + edge_attr
         return msg.relu() + self.eps
 
-    @torch.jit.export
-    def aggregate(self, x, index, nbr):
-        alpha = softmax_via_nbr(x, index, nbr)
-        res = scatter_sum_via_nbr(x * alpha, nbr)
-        return res
+    def forward(self, x, edge_index, edge_attr):
+        """
+        x:         (N, Fin)
+        edge_index:(2, E)  (src, dst)
+        edge_attr: (E, edge_dim)
+        """
+        N = x.size(0)
+
+        src_feat = self.lin_src(x)   # (N, Fout)
+        dst_feat = self.lin_dst(x)   # (N, Fout)
+
+        src = edge_index[0].to(torch.int64)  # (E,)
+        dst = edge_index[1].to(torch.int64)  # (E,)
+
+        x_j = src_feat.index_select(0, src)      # (E, Fout)
+        msg = self.message(x_j, edge_attr)       # (E, Fout)
+
+        alpha = edge_softmax_per_dst(msg, dst, num_nodes=N)         # (E, Fout)
+        agg = scatter_sum_per_dst(msg * alpha, dst, num_nodes=N)    # (N, Fout)
+
+        out = agg + dst_feat
+        return self.mlp(out)
 
 
 class ExportableGNNBlock(nn.Module):
@@ -619,8 +619,7 @@ class ExportableGNNBlock(nn.Module):
         x_hex: torch.Tensor,
         ei_flat: torch.Tensor,   # (2, sum_E)
         ea_flat: torch.Tensor,   # (sum_E, edge_dim)
-        nbr_flat: torch.Tensor,  # (N, sum_K)
-        size: torch.Tensor       # (L, 2) where last dim is {E, K}
+        size: torch.Tensor       # (L)
     ) -> torch.Tensor:
         x = x_hex
         num_layers = len(self.layers)
@@ -630,19 +629,15 @@ class ExportableGNNBlock(nn.Module):
             y = torch.empty(0, device=x.device)
 
             cur_e = 0
-            cur_k = 0
 
             for l, conv in enumerate(convs):
-                e0, e1 = cur_e, cur_e + size[l][0]
-                k0, k1 = cur_k, cur_k + size[l][1]
+                e0, e1 = cur_e, cur_e + size[l]
                 cur_e = e1
-                cur_k = k1
 
                 edge_inds = ei_flat[:, e0:e1]
                 edge_attrs = ea_flat[e0:e1, :]
-                nbrs = nbr_flat[:, k0:k1]
 
-                out = conv(x, edge_inds, edge_attrs, nbrs)
+                out = conv(x, edge_inds, edge_attrs)
                 if not y_init:
                     y = out
                     y_init = True
@@ -659,5 +654,5 @@ class ModelSizelessWrapper(torch.nn.Module):
         super().__init__()
         self.m = m
 
-    def forward(self, obs, ei_flat, ea_flat, nbr_flat, size):
-        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size)
+    def forward(self, obs, ei_flat, ea_flat, size):
+        return self.m.predict_with_logits(obs, ei_flat, ea_flat, size)
