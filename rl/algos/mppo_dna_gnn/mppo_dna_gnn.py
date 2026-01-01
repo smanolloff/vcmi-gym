@@ -491,7 +491,7 @@ class Model(nn.Module):
             links = 2 * [VcmiEnv.OBSERVATION_SPACE["links"].sample()]
             hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
             z_hexes, z_global = self.encode(hdata)
-            self._get_action_logits(z_hexes, z_global, obs)
+            self._get_actdata_eval(z_hexes, z_global, obs)
             self._get_value(z_global)
 
         def kaiming_init(linlayer):
@@ -536,6 +536,175 @@ class Model(nn.Module):
 
     def _get_value(self, z_global):
         return self.critic(z_global)
+
+    def _get_actdata_train(self, z_hexes, z_global, obs, action):
+        B = obs.shape[0]
+        b_inds = torch.arange(B, device=obs.device)
+
+        act0, hex1, hex2 = self.inverse_table[action].unbind(1)
+
+        act0_logits = self.act0_head(z_global)
+
+        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
+        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
+        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
+
+        # 1.1 for 0=WAIT: nothing to do (all zeros)
+        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
+        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        mask_hex1[:, 1, :] = movemask
+
+        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
+        amovemask = hexobs[:, :, torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
+
+        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
+        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        mask_hex1[:, 3, :] = shootmask
+
+        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
+        # (it's only for AMOVE action, => shape is (B, 165, 165) instead of (B, 4, 165, 165))
+        mask_hex2 = torch.zeros([B, 165, 165], dtype=torch.bool, device=obs.device)
+
+        # 2.1 for 0=WAIT: nothing to do (all zeros)
+        # 2.2 for 1=MOVE: nothing to do (all zeros)
+        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
+        dest = self.amove_hexes.expand(B, -1, -1)
+        valid = amovemask & self.amove_hexes_valid.expand_as(dest)
+        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
+        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
+
+        # Select only valid triples and write
+        b_sel = b_idx[valid]
+        s_sel = s_idx[valid]
+        t_sel = dest[valid]
+
+        mask_hex2[b_sel, s_sel, t_sel] = True
+
+        # 2.4 for 3=SHOOT: nothing to do (all zeros)
+
+        # 3. MASK_ACTION - ie. allowed main action mask
+        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
+
+        # 0=WAIT
+        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+
+        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
+        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
+
+        # Next, we sample:
+        #
+        # 1. Sample MAIN ACTION
+        dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
+        mask_hex2[act0 != MainAction.AMOVE] = False
+
+        # 2. Sample HEX1 (with mask corresponding to the main action)
+        act0_emb = self.emb_act0(act0)
+        d = act0_emb.size(-1)
+        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
+        k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
+        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
+
+        # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
+        z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
+        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
+        k_hex2 = self.Wk_hex2(z_hexes)                                         # (B, 165, d)
+        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, hex1])
+
+        return ActionSample(
+            act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
+            hex1=hex1, hex1_logits=hex1_logits, hex1_dist=dist_hex1,
+            hex2=hex2, hex2_logits=hex2_logits, hex2_dist=dist_hex2,
+            action=action,
+        )
+
+    def _get_actdata_eval(self, z_hexes, z_global, obs, deterministic=False):
+        B = obs.shape[0]
+        b_inds = torch.arange(B, device=obs.device)
+
+        act0_logits = self.act0_head(z_global)
+
+        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
+        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
+        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
+
+        # 1.1 for 0=WAIT: nothing to do (all zeros)
+        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
+        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        mask_hex1[:, 1, :] = movemask
+
+        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
+        amovemask = hexobs[:, :, torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
+
+        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
+        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        mask_hex1[:, 3, :] = shootmask
+
+        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
+        # (it's only for AMOVE action, => shape is (B, 165, 165) instead of (B, 4, 165, 165))
+        mask_hex2 = torch.zeros([B, 165, 165], dtype=torch.bool, device=obs.device)
+
+        # 2.1 for 0=WAIT: nothing to do (all zeros)
+        # 2.2 for 1=MOVE: nothing to do (all zeros)
+        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
+        dest = self.amove_hexes.expand(B, -1, -1)
+        valid = amovemask & self.amove_hexes_valid.expand_as(dest)
+        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
+        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
+
+        # Select only valid triples and write
+        b_sel = b_idx[valid]
+        s_sel = s_idx[valid]
+        t_sel = dest[valid]
+
+        mask_hex2[b_sel, s_sel, t_sel] = True
+
+        # 2.4 for 3=SHOOT: nothing to do (all zeros)
+
+        # 3. MASK_ACTION - ie. allowed main action mask
+        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
+
+        # 0=WAIT
+        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+
+        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
+        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
+
+        # Next, we sample:
+        #
+        # 1. Sample MAIN ACTION
+        dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
+        act0 = dist_act0.probs.argmax(dim=1) if deterministic else dist_act0.sample()  # for testing vs. executorch
+        mask_hex2[act0 != MainAction.AMOVE] = False
+
+        # 2. Sample HEX1 (with mask corresponding to the main action)
+        act0_emb = self.emb_act0(act0)
+        d = act0_emb.size(-1)
+        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
+        k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
+        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
+        hex1 = dist_hex1.probs.argmax(dim=1) if deterministic else dist_hex1.sample()
+
+        # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
+        z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
+        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
+        k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
+        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, hex1])
+        hex2 = dist_hex2.probs.argmax(dim=1) if deterministic else dist_hex2.sample()  # for testing vs. executorch
+
+        action = self.action_table[act0, hex1, hex2]
+
+        return ActionSample(
+            act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
+            hex1=hex1, hex1_logits=hex1_logits, hex1_dist=dist_hex1,
+            hex2=hex2, hex2_logits=hex2_logits, hex2_dist=dist_hex2,
+            action=action,
+        )
 
     def _get_action_logits(self, z_hexes, z_global, obs) -> ActionLogits:
         B = obs.shape[0]
@@ -628,14 +797,17 @@ class Model(nn.Module):
             hex2_mask=mask_hex2,
         )
 
-    # def get_actdata_train(self, hdata):
-    #     z_hexes, z_global = self.encode(hdata)
-    #     return self._get_actdata_train(z_hexes, z_global, hdata.obs, hdata.action)
+    def get_actdata_train(self, hdata):
+        z_hexes, z_global = self.encode(hdata)
+        return self._get_actdata_train(z_hexes, z_global, hdata.obs, hdata.action)
 
-    # def get_actdata_eval(self, hdata, deterministic=False):
-    #     z_hexes, z_global = self.encode(hdata)
-    #     return self._get_actdata_eval(z_hexes, z_global, hdata.obs, deterministic)
+    def get_actdata_eval(self, hdata, deterministic=False):
+        z_hexes, z_global = self.encode(hdata)
+        return self._get_actdata_eval(z_hexes, z_global, hdata.obs, deterministic)
 
+    # For producing full action logits
+    # Not used in training (too much memory consumption)
+    # Keeping here since will be needed in exported models
     def get_action_logits(self, hdata) -> ActionLogits:
         z_hexes, z_global = self.encode(hdata)
         obs = hdata.obs
@@ -711,8 +883,9 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         v_hdata_list = storage.v_next_hdata_list
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
 
-        v_actlogits = model.model_policy.get_action_logits(v_hdata_batch)
-        v_actsample = v_actlogits.sample().cpu()
+        # v_actlogits = model.model_policy.get_action_logits(v_hdata_batch)
+        # v_actsample = v_actlogits.sample().cpu()
+        v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch)
         v_value = model.model_value.get_value(v_hdata_batch).flatten().cpu()
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.numpy())
         v_rew = torch.as_tensor(v_rew)
@@ -790,8 +963,9 @@ def eval_model(logger, model, venv, num_vsteps):
 
         v_hdata_list = to_hdata_list(torch.as_tensor(v_obs), v_done, venv.call("links"))
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
-        v_actlogits = model.model_policy.get_action_logits(v_hdata_batch)
-        v_actsample = v_actlogits.sample()
+        # v_actlogits = model.model_policy.get_action_logits(v_hdata_batch)
+        # v_actsample = v_actlogits.sample()
+        v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch)
         # print("Steppin: %s" % v_actsample.action.cpu().numpy())
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.cpu().numpy())
         # print("Stepped!")
@@ -887,17 +1061,14 @@ def train_model(
     value_losses = torch.zeros(train_config["num_minibatches"])
     distill_losses = torch.zeros(train_config["num_minibatches"])
 
-    # TODO:
-    # Gemini says using differently shuffled indices for policy, value and distill
-    # is destructive for the learning?
-
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.policy) epoch: %d" % epoch)
         for i, mb in enumerate(dataloader):
             logger.debug("(train.policy) minibatch: %d" % i)
             mb = mb.to(model.device, non_blocking=True)
 
-            newactsample = model.model_policy.get_action_logits(mb).sample(mb.action)
+            # newactsample = model.model_policy.get_action_logits(mb).sample(mb.action)
+            newactsample = model.model_policy.get_actdata_train(mb)
 
             logratio = newactsample.logprob - mb.logprob
             ratio = logratio.exp()
@@ -992,46 +1163,56 @@ def train_model(
             logger.debug("(train.distill) minibatch: %d" % i)
             mb = mb.to(model.device, non_blocking=True)
 
-            # # Compute policy and value targets
-            # with torch.no_grad():
-            #     old_actdata = old_model_policy.get_actdata_eval(mb)
-            #     value_target = model.model_value.get_value(mb)
-
-            # # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
-            # #     (if actions differ, masks will differ and KLD will become NaN)
-            # new_z_hexes, new_z_global = model.model_policy.encode(mb)
-            # new_actdata = model.model_policy._get_actdata_train(new_z_hexes, new_z_global, mb.obs, old_actdata.action)
-            # new_value = model.model_policy._get_value(new_z_global)
-
-            # # Distillation loss
-            # distill_actloss = (
-            #     CategoricalMasked.kld(old_actdata.act0_dist, new_actdata.act0_dist)
-            #     + CategoricalMasked.kld(old_actdata.hex1_dist, new_actdata.hex1_dist)
-            #     + CategoricalMasked.kld(old_actdata.hex2_dist, new_actdata.hex2_dist)
-            # ).mean()
+            #
+            # DISTILL LOSS - built-in sampling case
+            # (memory efficient, but limits kld of hex1 and hex2)
+            #
 
             # Compute policy and value targets
             with torch.no_grad():
-                old_actlogits = old_model_policy.get_action_logits(mb)
+                old_actdata = old_model_policy.get_actdata_eval(mb)
                 value_target = model.model_value.get_value(mb)
 
+            # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
+            #     (if actions differ, masks will differ and KLD will become NaN)
             new_z_hexes, new_z_global = model.model_policy.encode(mb)
-            new_actlogits = model.model_policy._get_action_logits(new_z_hexes, new_z_global, mb.obs)
+            new_actdata = model.model_policy._get_actdata_train(new_z_hexes, new_z_global, mb.obs, old_actdata.action)
             new_value = model.model_policy._get_value(new_z_global)
-
-            old_act0_dist = CategoricalMasked(old_actlogits.act0_logits, old_actlogits.act0_mask)
-            old_hex1_dist = CategoricalMasked(old_actlogits.hex1_logits, old_actlogits.hex1_mask)
-            old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask)
-            new_act0_dist = CategoricalMasked(new_actlogits.act0_logits, new_actlogits.act0_mask)
-            new_hex1_dist = CategoricalMasked(new_actlogits.hex1_logits, new_actlogits.hex1_mask)
-            new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask)
 
             # Distillation loss
             distill_actloss = (
-                CategoricalMasked.kld(old_act0_dist, new_act0_dist).mean()
-                + CategoricalMasked.kld(old_hex1_dist, new_hex1_dist).mean()
-                + CategoricalMasked.kld(old_hex2_dist, new_hex2_dist).mean()
-            )
+                CategoricalMasked.kld(old_actdata.act0_dist, new_actdata.act0_dist)
+                + CategoricalMasked.kld(old_actdata.hex1_dist, new_actdata.hex1_dist)
+                + CategoricalMasked.kld(old_actdata.hex2_dist, new_actdata.hex2_dist)
+            ).mean()
+
+            #
+            # DISTILL LOSS - external sampling case
+            # (memory inefficient, but allows "full" kld for hex1 and hex2)
+            #
+
+            # # Compute policy and value targets
+            # with torch.no_grad():
+            #     old_actlogits = old_model_policy.get_action_logits(mb)
+            #     value_target = model.model_value.get_value(mb)
+
+            # new_z_hexes, new_z_global = model.model_policy.encode(mb)
+            # new_actlogits = model.model_policy._get_action_logits(new_z_hexes, new_z_global, mb.obs)
+            # new_value = model.model_policy._get_value(new_z_global)
+
+            # old_act0_dist = CategoricalMasked(old_actlogits.act0_logits, old_actlogits.act0_mask)
+            # old_hex1_dist = CategoricalMasked(old_actlogits.hex1_logits, old_actlogits.hex1_mask)
+            # old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask)
+            # new_act0_dist = CategoricalMasked(new_actlogits.act0_logits, new_actlogits.act0_mask)
+            # new_hex1_dist = CategoricalMasked(new_actlogits.hex1_logits, new_actlogits.hex1_mask)
+            # new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask)
+
+            # # Distillation loss
+            # distill_actloss = (
+            #     CategoricalMasked.kld(old_act0_dist, new_act0_dist).mean()
+            #     + CategoricalMasked.kld(old_hex1_dist, new_hex1_dist).mean()
+            #     + CategoricalMasked.kld(old_hex2_dist, new_hex2_dist).mean()
+            # )
 
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
             distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
