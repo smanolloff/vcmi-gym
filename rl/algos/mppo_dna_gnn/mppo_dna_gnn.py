@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+USE_MODEL_SAMPLING = False
+
 import os
 import re
 import sys
@@ -491,7 +493,10 @@ class Model(nn.Module):
             links = 2 * [VcmiEnv.OBSERVATION_SPACE["links"].sample()]
             hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
             z_hexes, z_global = self.encode(hdata)
-            self._get_actdata_eval(z_hexes, z_global, obs)
+            if USE_MODEL_SAMPLING:
+                self._get_actdata_eval(z_hexes, z_global, obs)
+            else:
+                self._get_action_logits(z_hexes, z_global, obs)
             self._get_value(z_global)
 
         def kaiming_init(linlayer):
@@ -879,9 +884,10 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         v_hdata_list = storage.v_next_hdata_list
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
 
-        # v_actlogits = model.model_policy.get_action_logits(v_hdata_batch)
-        # v_actsample = v_actlogits.sample().cpu()
-        v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch).cpu()
+        if USE_MODEL_SAMPLING:
+            v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch).cpu()
+        else:
+            v_actsample = model.model_policy.get_action_logits(v_hdata_batch).sample().cpu()
         v_value = model.model_value.get_value(v_hdata_batch).flatten().cpu()
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.numpy())
         v_rew = torch.as_tensor(v_rew)
@@ -959,13 +965,11 @@ def eval_model(logger, model, venv, num_vsteps):
 
         v_hdata_list = to_hdata_list(torch.as_tensor(v_obs), v_done, venv.call("links"))
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
-        # v_actlogits = model.model_policy.get_action_logits(v_hdata_batch)
-        # v_actsample = v_actlogits.sample()
-        v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch)
-        # print("Steppin: %s" % v_actsample.action.cpu().numpy())
+        if USE_MODEL_SAMPLING:
+            v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch)
+        else:
+            v_actsample = model.model_policy.get_action_logits(v_hdata_batch).sample()
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.cpu().numpy())
-        # print("Stepped!")
-        # print(venv.render()[0])
 
         # See notes/gym_vector.txt
         if "_final_info" in v_info:
@@ -1063,8 +1067,10 @@ def train_model(
             logger.debug("(train.policy) minibatch: %d" % i)
             mb = mb.to(model.device, non_blocking=True)
 
-            # newactsample = model.model_policy.get_action_logits(mb).sample(mb.action)
-            newactsample = model.model_policy.get_actdata_train(mb)
+            if USE_MODEL_SAMPLING:
+                newactsample = model.model_policy.get_actdata_train(mb)
+            else:
+                newactsample = model.model_policy.get_action_logits(mb).sample(mb.action)
 
             logratio = newactsample.logprob - mb.logprob
             ratio = logratio.exp()
@@ -1159,56 +1165,47 @@ def train_model(
             logger.debug("(train.distill) minibatch: %d" % i)
             mb = mb.to(model.device, non_blocking=True)
 
-            #
-            # DISTILL LOSS - built-in sampling case
-            # (memory efficient, but limits kld of hex1 and hex2)
-            #
+            if USE_MODEL_SAMPLING:
+                # Compute policy and value targets
+                with torch.no_grad():
+                    old_actdata = old_model_policy.get_actdata_eval(mb)
+                    value_target = model.model_value.get_value(mb)
 
-            # Compute policy and value targets
-            with torch.no_grad():
-                old_actdata = old_model_policy.get_actdata_eval(mb)
-                value_target = model.model_value.get_value(mb)
+                # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
+                #     (if actions differ, masks will differ and KLD will become NaN)
+                new_z_hexes, new_z_global = model.model_policy.encode(mb)
+                new_actdata = model.model_policy._get_actdata_train(new_z_hexes, new_z_global, mb.obs, old_actdata.action)
+                new_value = model.model_policy._get_value(new_z_global)
 
-            # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
-            #     (if actions differ, masks will differ and KLD will become NaN)
-            new_z_hexes, new_z_global = model.model_policy.encode(mb)
-            new_actdata = model.model_policy._get_actdata_train(new_z_hexes, new_z_global, mb.obs, old_actdata.action)
-            new_value = model.model_policy._get_value(new_z_global)
+                # Distillation loss
+                distill_actloss = (
+                    CategoricalMasked.kld(old_actdata.act0_dist, new_actdata.act0_dist)
+                    + CategoricalMasked.kld(old_actdata.hex1_dist, new_actdata.hex1_dist)
+                    + CategoricalMasked.kld(old_actdata.hex2_dist, new_actdata.hex2_dist)
+                ).mean()
+            else:
+                # Compute policy and value targets
+                with torch.no_grad():
+                    old_actlogits = old_model_policy.get_action_logits(mb)
+                    value_target = model.model_value.get_value(mb)
 
-            # Distillation loss
-            distill_actloss = (
-                CategoricalMasked.kld(old_actdata.act0_dist, new_actdata.act0_dist)
-                + CategoricalMasked.kld(old_actdata.hex1_dist, new_actdata.hex1_dist)
-                + CategoricalMasked.kld(old_actdata.hex2_dist, new_actdata.hex2_dist)
-            ).mean()
+                new_z_hexes, new_z_global = model.model_policy.encode(mb)
+                new_actlogits = model.model_policy._get_action_logits(new_z_hexes, new_z_global, mb.obs)
+                new_value = model.model_policy._get_value(new_z_global)
 
-            #
-            # DISTILL LOSS - external sampling case
-            # (memory inefficient, but allows "full" kld for hex1 and hex2)
-            #
+                old_act0_dist = CategoricalMasked(old_actlogits.act0_logits, old_actlogits.act0_mask)
+                old_hex1_dist = CategoricalMasked(old_actlogits.hex1_logits, old_actlogits.hex1_mask)
+                old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask)
+                new_act0_dist = CategoricalMasked(new_actlogits.act0_logits, new_actlogits.act0_mask)
+                new_hex1_dist = CategoricalMasked(new_actlogits.hex1_logits, new_actlogits.hex1_mask)
+                new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask)
 
-            # # Compute policy and value targets
-            # with torch.no_grad():
-            #     old_actlogits = old_model_policy.get_action_logits(mb)
-            #     value_target = model.model_value.get_value(mb)
-
-            # new_z_hexes, new_z_global = model.model_policy.encode(mb)
-            # new_actlogits = model.model_policy._get_action_logits(new_z_hexes, new_z_global, mb.obs)
-            # new_value = model.model_policy._get_value(new_z_global)
-
-            # old_act0_dist = CategoricalMasked(old_actlogits.act0_logits, old_actlogits.act0_mask)
-            # old_hex1_dist = CategoricalMasked(old_actlogits.hex1_logits, old_actlogits.hex1_mask)
-            # old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask)
-            # new_act0_dist = CategoricalMasked(new_actlogits.act0_logits, new_actlogits.act0_mask)
-            # new_hex1_dist = CategoricalMasked(new_actlogits.hex1_logits, new_actlogits.hex1_mask)
-            # new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask)
-
-            # # Distillation loss
-            # distill_actloss = (
-            #     CategoricalMasked.kld(old_act0_dist, new_act0_dist).mean()
-            #     + CategoricalMasked.kld(old_hex1_dist, new_hex1_dist).mean()
-            #     + CategoricalMasked.kld(old_hex2_dist, new_hex2_dist).mean()
-            # )
+                # Distillation loss
+                distill_actloss = (
+                    CategoricalMasked.kld(old_act0_dist, new_act0_dist).mean()
+                    + CategoricalMasked.kld(old_hex1_dist, new_hex1_dist).mean()
+                    + CategoricalMasked.kld(old_hex2_dist, new_hex2_dist).mean()
+                )
 
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
             distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
