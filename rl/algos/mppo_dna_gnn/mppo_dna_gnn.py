@@ -1080,7 +1080,7 @@ def train_model(
                 approx_kl = ((ratio - 1) - logratio).mean()
                 clipfracs += [((ratio - 1.0).abs() > train_config["clip_coef"]).float().mean().item()]
 
-            mb_advantages = mb.advantage.dtype
+            mb_advantages = mb.advantage
             if train_config["norm_adv"]:
                 # The 1e-8 is not numerically safe under autocast
                 # mb_advantages = (mb.advantage - mb.advantage.mean()) / (mb.advantage.std() + 1e-8)
