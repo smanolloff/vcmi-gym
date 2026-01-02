@@ -563,8 +563,7 @@ class Model(nn.Module):
         mask_hex1[:, 3, :] = shootmask
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        # (it's only for AMOVE action, => shape is (B, 165, 165) instead of (B, 4, 165, 165))
-        mask_hex2 = torch.zeros([B, 165, 165], dtype=torch.bool, device=obs.device)
+        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
 
         # 2.1 for 0=WAIT: nothing to do (all zeros)
         # 2.2 for 1=MOVE: nothing to do (all zeros)
@@ -579,7 +578,7 @@ class Model(nn.Module):
         s_sel = s_idx[valid]
         t_sel = dest[valid]
 
-        mask_hex2[b_sel, s_sel, t_sel] = True
+        mask_hex2[b_sel, 2, s_sel, t_sel] = True
 
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
@@ -596,7 +595,6 @@ class Model(nn.Module):
         #
         # 1. Sample MAIN ACTION
         dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
-        mask_hex2[act0 != MainAction.AMOVE] = False
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
         act0_emb = self.emb_act0(act0)
@@ -611,7 +609,7 @@ class Model(nn.Module):
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
         k_hex2 = self.Wk_hex2(z_hexes)                                         # (B, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, hex1])
+        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
 
         return ActionSample(
             act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
@@ -644,8 +642,7 @@ class Model(nn.Module):
         mask_hex1[:, 3, :] = shootmask
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        # (it's only for AMOVE action, => shape is (B, 165, 165) instead of (B, 4, 165, 165))
-        mask_hex2 = torch.zeros([B, 165, 165], dtype=torch.bool, device=obs.device)
+        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
 
         # 2.1 for 0=WAIT: nothing to do (all zeros)
         # 2.2 for 1=MOVE: nothing to do (all zeros)
@@ -660,7 +657,7 @@ class Model(nn.Module):
         s_sel = s_idx[valid]
         t_sel = dest[valid]
 
-        mask_hex2[b_sel, s_sel, t_sel] = True
+        mask_hex2[b_sel, 2, s_sel, t_sel] = True
 
         # 2.4 for 3=SHOOT: nothing to do (all zeros)
 
@@ -678,7 +675,6 @@ class Model(nn.Module):
         # 1. Sample MAIN ACTION
         dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
         act0 = dist_act0.probs.argmax(dim=1) if deterministic else dist_act0.sample()  # for testing vs. executorch
-        mask_hex2[act0 != MainAction.AMOVE] = False
 
         # 2. Sample HEX1 (with mask corresponding to the main action)
         act0_emb = self.emb_act0(act0)
@@ -694,7 +690,7 @@ class Model(nn.Module):
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
         k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, hex1])
+        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
         hex2 = dist_hex2.probs.argmax(dim=1) if deterministic else dist_hex2.sample()  # for testing vs. executorch
 
         action = self.action_table[act0, hex1, hex2]
