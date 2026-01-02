@@ -187,6 +187,53 @@ def pad_edges(edge_index, edge_attr, edge_dim, e_max):
     return edge_index, edge_attr
 
 
+def build_action_probs(
+    act0_probs: torch.Tensor,      # (B, 4)
+    hex1_probs: torch.Tensor,      # (B, 4, 165)   = P(hex1 | act0)
+    hex2_probs: torch.Tensor,      # (B, 165, 165) = P(hex2 | hex1)
+    mask: torch.Tensor,            # (B, num_actions) boolean/0-1
+    action_table: torch.Tensor,    # (4, 165, 165) int64 action ids
+) -> torch.Tensor:
+    B = act0_probs.size(0)
+    H = hex1_probs.size(-1)
+    device = act0_probs.device
+    dtype = act0_probs.dtype
+
+    out = torch.zeros_like(mask, dtype=torch.float32)
+
+    # 0) WAIT: all triplets map to 0 when act0=0
+    out[:, 0] += act0_probs[:, 0]
+
+    # 1) MOVE: act0=1, depends on hex1 only (hex2 irrelevant)
+    move_ids = action_table[1, :, 0].to(device)                 # (H,)
+    move_p = act0_probs[:, 1, None] * hex1_probs[:, 1, :]       # (B, H)
+    out.scatter_add_(1, move_ids[None, :].expand(B, H), move_p)
+
+    # 2) AMOVE: act0=2, depends on (hex1, hex2); invalid pairs map to 0
+    amove_ids = action_table[2].reshape(-1).to(device)          # (H*H,)
+    amove_p = (
+        act0_probs[:, 2, None, None]
+        * hex1_probs[:, 2, :, None]
+        * hex2_probs
+    )                                                           # (B, H, H)
+    out.scatter_add_(1, amove_ids[None, :].expand(B, H*H), amove_p.reshape(B, H*H))
+
+    # 3) SHOOT: act0=3, depends on hex1 only (hex2 irrelevant)
+    shoot_ids = action_table[3, :, 0].to(device)                # (H,)
+    shoot_p = act0_probs[:, 3, None] * hex1_probs[:, 3, :]      # (B, H)
+    out.scatter_add_(1, shoot_ids[None, :].expand(B, H), shoot_p)
+
+    # Optional: apply mask over final action ids and renormalize
+    out = out * mask.to(dtype)
+    z = out.sum(dim=-1, keepdim=True)
+    # fallback to action 0 if everything masked out
+    out = torch.where(z > 0, out / z, torch.nn.functional.one_hot(
+        torch.zeros(B, device=device, dtype=torch.long), out.shape[1]
+    ).to(dtype))
+
+    return out
+
+
 class ExportableModel(nn.Module):
     def __init__(self, config, side, all_sizes):
         super().__init__()
@@ -283,11 +330,7 @@ class ExportableModel(nn.Module):
         return self.critic(z_global)[0]
 
     @torch.jit.export
-    def predict(self, obs, ei_flat, ea_flat, nbr_flat, size):
-        return self.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size)[0]
-
-    @torch.jit.export
-    def predict_with_logits(self, obs, ei_flat, ea_flat, nbr_flat, size):
+    def forward(self, obs, ei_flat, ea_flat, nbr_flat, size):
         B = 1
         obs = obs.unsqueeze(dim=0)
         z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size)
@@ -347,7 +390,7 @@ class ExportableModel(nn.Module):
         mask_act0[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1).to(torch.int32)
 
         # MAIN ACTION
-        probs_act0 = self._categorical_masked(logits0=act0_logits, mask=mask_act0.to(torch.bool))
+        act0_probs = categorical_masked(logits0=act0_logits, mask=mask_act0.to(torch.bool))
 
         B = z_hexes.size(0)
 
@@ -362,7 +405,7 @@ class ExportableModel(nn.Module):
         )                                                                       # (B, 4, d)
         k_hex1 = self.Wk_hex1(z_hexes).unsqueeze(1).expand(B, 4, 165, d)        # (B, 4, 165, d)
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 4, 165)
-        hex1_probs = self._categorical_masked(logits0=hex1_logits, mask=mask_hex1.to(torch.bool))
+        hex1_probs = categorical_masked(logits0=hex1_logits, mask=mask_hex1.to(torch.bool))
 
         # HEX2
         q_hex2 = self.Wq_hex2(
@@ -373,43 +416,22 @@ class ExportableModel(nn.Module):
         )                                                                       # (B, 165, d)
         k_hex2 = self.Wk_hex2(z_hexes).unsqueeze(1).expand(B, 165, 165, d)      # (B, 165, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165, 165)
-        hex2_probs = self._categorical_masked(logits0=hex2_logits, mask=mask_hex2.to(torch.bool))
+        hex2_probs = categorical_masked(logits0=hex2_logits, mask=mask_hex2.to(torch.bool))
 
-        #
-        # Greedy sampling (TODO: remove: client should sample stochastically)
-        #
-        act0 = torch.argmax(probs_act0, dim=1)
+        mask_hexes = torch.cat([
+            amovemask,
+            movemask.unsqueeze(-1),
+            shootmask.unsqueeze(-1)
+        ], -1).flatten(1)                                                       # (B, 2310)
 
-        hex1_index = act0[:, None, None].expand(B, 1, 165)                       # (B, 1, 165)
-        hex1_act0_probs = hex1_probs.gather(dim=1, index=hex1_index).squeeze(1)  # (B, 165)
-        hex1 = hex1_act0_probs.argmax(-1)                                        # (B)
+        mask = torch.cat([
+            torch.zeros(B, 1, dtype=torch.bool),                                # RETREAT (never allowed)
+            obs[:, self.global_wait_offset].unsqueeze(-1).to(torch.bool),       # WAIT
+            mask_hexes
+        ], -1)                                                                  # (B, 2312)
 
-        hex2_index = hex1[:, None, None].expand(B, 1, 165)                       # (B, 1, 165)
-        hex2_hex1_probs = hex2_probs.gather(dim=1, index=hex2_index).squeeze(1)  # (B, 165)
-        hex2 = hex2_hex1_probs.argmax(-1)                                        # (B)
-
-        action = self.action_table[act0, hex1, hex2]
-
-        return (
-            action.int().clone(),
-            act0_logits.float(),
-            hex1_logits.float(),
-            hex2_logits.float(),
-            mask_act0.int(),
-            mask_hex1.int(),
-            mask_hex2.int(),
-            act0.int(),
-            hex1.int(),
-            hex2.int()
-        )
-
-    @torch.jit.export
-    def _categorical_masked(self, logits0, mask):
-        neg_inf = _neg_inf_like(logits0)
-        logits1 = torch.where(mask, logits0, neg_inf)
-        logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
-        probs = logits.softmax(dim=-1)
-        return probs
+        # Final probs (B, N_ACTIONS)
+        return build_action_probs(act0_probs, hex1_probs, hex2_probs, mask, self.action_table)
 
 
 # Used in exports only because loading weights from the checkpoint file
@@ -427,7 +449,7 @@ MIN_BFLOAT16 = torch.finfo(torch.bfloat16).min
 
 
 @torch.jit.export
-def _neg_inf_like(x: torch.Tensor) -> torch.Tensor:
+def neg_inf_like(x: torch.Tensor) -> torch.Tensor:
     if x.dtype == torch.float16:
         v = -65504.0
     elif x.dtype == torch.float32:
@@ -437,6 +459,15 @@ def _neg_inf_like(x: torch.Tensor) -> torch.Tensor:
         v = -((2 - 2**-23) * 2**127)
         return x.new_full((1,), v, dtype=torch.float32).to(x.dtype)
     return x.new_full((1,), v, dtype=x.dtype)
+
+
+@torch.jit.export
+def categorical_masked(logits0, mask):
+    neg_inf = neg_inf_like(logits0)
+    logits1 = torch.where(mask, logits0, neg_inf)
+    logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
+    probs = logits.softmax(dim=-1)
+    return probs
 
 
 @torch.jit.export
@@ -465,7 +496,7 @@ def scatter_max_via_nbr(src, nbr):
     valid = (nbr >= 0).unsqueeze(-1)
     # XXX: torchscript does not allow to use torch.finfo(...)
     # neg_inf = -((2 - 2**-23) * 2**127)
-    neg_inf = _neg_inf_like(src)[0]
+    neg_inf = neg_inf_like(src)[0]
     gathered = torch.where(valid, gathered, neg_inf)
     return gathered.max(dim=1).values
 
@@ -660,4 +691,4 @@ class ModelSizelessWrapper(torch.nn.Module):
         self.m = m
 
     def forward(self, obs, ei_flat, ea_flat, nbr_flat, size):
-        return self.m.predict_with_logits(obs, ei_flat, ea_flat, nbr_flat, size)
+        return self.m(obs, ei_flat, ea_flat, nbr_flat, size)
