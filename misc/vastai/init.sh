@@ -145,10 +145,10 @@ function pymod() {
 # Link a tagged checkpoint
 #
 function link_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: link_checkpoint TIMESTAMP [DIR]"; return 1; }
+    [ -n "\${1:-}" ] || { echo "Usage: link_checkpoint RUN_ID-TIMESTAMP [DIR]"; return 1; }
     [ -n "\$2" ] && link_dir="\${2%/}" || link_dir=.
 
-    [ \$1 = best ] || [[ \$1 =~ ^[0-9]+\$ ]] || { echo "Invalid tag: \$1"; return 1; }
+    [[ \$1 =~ ^[a-z]{8}-best$ ] || [[ \$1 =~ ^[a-z]{8}-[0-9]+\$ ]] || { echo "Invalid tag: \$1"; return 1; }
 
     confirmed=no
 
@@ -321,7 +321,7 @@ USAGE
 
     if \$new_run; then
         echo "This is a new run -- will start ONCE with --run-id to create it"
-        bash -x ~/runcmd.sh \$newcmd
+        bash -x ~/runcmd.sh \$newcmd --skip-eval
 
         if [ \$? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
