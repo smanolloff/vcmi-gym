@@ -604,6 +604,6 @@ class VcmiEnv(gym.Env):
             # round_fixed=is_new_round * cfg.round_fixed,
             # round_round_mult=is_new_round * cfg.round_round_mult * battle_round,
             dmg_mult=net_dmg * cfg.dmg_mult,
-            term_mult=is_ended * net_value_acc,
+            term_mult=is_ended * net_value_acc * cfg.term_mult,
             relval_mult=net_value * cfg.relval_mult,
         )
