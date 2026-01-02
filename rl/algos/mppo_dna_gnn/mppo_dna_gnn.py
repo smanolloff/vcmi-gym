@@ -1395,7 +1395,7 @@ def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
     )
 
 
-def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_on_exit=True):
+def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), is_new=False, save_on_exit=True):
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
 
@@ -1618,7 +1618,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
     wandb_log_commit_timer._started_at = 0  # force first trigger
     eval_timer = Timer()
     eval_timer.start()
-    if config["eval"]["at_script_start"]: # and not dry_run:
+    if config["eval"]["at_script_start"] and not is_new: # and not dry_run:
         eval_timer._started_at = 0  # force first trigger
 
     lr_schedule_timer = Timer()
@@ -1853,6 +1853,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), save_o
 
 # This is in a separate function to prevent vars from being global
 def init_config(args):
+    is_new = False
     if args.dry_run:
         args.no_wandb = True
 
@@ -1869,6 +1870,7 @@ def init_config(args):
             run_id = args.run_id
         else:
             run_id = ''.join(random.choices(string.ascii_lowercase, k=8))
+            is_new = True
 
         from .config import config
 
@@ -1883,7 +1885,7 @@ def init_config(args):
             resumed_config=None,
         )
 
-    return config
+    return config, is_new
 
 
 if __name__ == "__main__":
@@ -1894,14 +1896,16 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true", help="do not save anything to disk (implies --no-wandb)")
     parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
     parser.add_argument("--loglevel", metavar="LOGLEVEL", default="INFO", help="DEBUG | INFO | WARN | ERROR")
+    parser.add_argument("--skip-eval", action="store_true", help="do not eval at script start")
     args = parser.parse_args()
 
-    config = init_config(args)
+    config, is_new = init_config(args)
 
     main(
         config=config,
         loglevel=args.loglevel,
         dry_run=args.dry_run,
         no_wandb=args.no_wandb,
+        is_new=is_new
         # seconds_total=10
     )
