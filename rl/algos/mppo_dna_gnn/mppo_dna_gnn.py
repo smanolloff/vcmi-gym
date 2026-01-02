@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-USE_MODEL_SAMPLING = False
+USE_MODEL_SAMPLING = True  # False uses ~2x GPU memory
 
 import os
 import re
