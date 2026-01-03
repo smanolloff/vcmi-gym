@@ -492,7 +492,7 @@ class Model(nn.Module):
             hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
             z_hexes, z_global = self.encode(hdata)
             if USE_MODEL_SAMPLING:
-                self._get_actdata_eval(z_hexes, z_global, obs)
+                self._get_actsample_eval(z_hexes, z_global, obs)
             else:
                 self._get_action_logits(z_hexes, z_global, obs)
             self._get_value(z_global)
@@ -540,7 +540,7 @@ class Model(nn.Module):
     def _get_value(self, z_global):
         return self.critic(z_global)
 
-    def _get_actdata_train(self, z_hexes, z_global, obs, action):
+    def _get_actsample_train(self, z_hexes, z_global, obs, action):
         B = obs.shape[0]
         b_inds = torch.arange(B, device=obs.device)
 
@@ -621,7 +621,7 @@ class Model(nn.Module):
             action=action,
         )
 
-    def _get_actdata_eval(self, z_hexes, z_global, obs, deterministic=False):
+    def _get_actsample_eval(self, z_hexes, z_global, obs, deterministic=False):
         B = obs.shape[0]
         b_inds = torch.arange(B, device=obs.device)
 
@@ -796,13 +796,13 @@ class Model(nn.Module):
             hex2_mask=mask_hex2,
         )
 
-    def get_actdata_train(self, hdata):
+    def get_actsample_train(self, hdata):
         z_hexes, z_global = self.encode(hdata)
-        return self._get_actdata_train(z_hexes, z_global, hdata.obs, hdata.action)
+        return self._get_actsample_train(z_hexes, z_global, hdata.obs, hdata.action)
 
-    def get_actdata_eval(self, hdata, deterministic=False):
+    def get_actsample_eval(self, hdata, deterministic=False):
         z_hexes, z_global = self.encode(hdata)
-        return self._get_actdata_eval(z_hexes, z_global, hdata.obs, deterministic)
+        return self._get_actsample_eval(z_hexes, z_global, hdata.obs, deterministic)
 
     # For producing full action logits
     # Not used in training (too much memory consumption)
@@ -883,7 +883,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
 
         if USE_MODEL_SAMPLING:
-            v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch).cpu()
+            v_actsample = model.model_policy.get_actsample_eval(v_hdata_batch).cpu()
         else:
             v_actsample = model.model_policy.get_action_logits(v_hdata_batch).sample().cpu()
         v_value = model.model_value.get_value(v_hdata_batch).flatten().cpu()
@@ -964,7 +964,7 @@ def eval_model(logger, model, venv, num_vsteps):
         v_hdata_list = to_hdata_list(torch.as_tensor(v_obs), v_done, venv.call("links"))
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
         if USE_MODEL_SAMPLING:
-            v_actsample = model.model_policy.get_actdata_eval(v_hdata_batch)
+            v_actsample = model.model_policy.get_actsample_eval(v_hdata_batch)
         else:
             v_actsample = model.model_policy.get_action_logits(v_hdata_batch).sample()
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.cpu().numpy())
@@ -1066,7 +1066,7 @@ def train_model(
             mb = mb.to(model.device, non_blocking=True)
 
             if USE_MODEL_SAMPLING:
-                newactsample = model.model_policy.get_actdata_train(mb)
+                newactsample = model.model_policy.get_actsample_train(mb)
             else:
                 newactsample = model.model_policy.get_action_logits(mb).sample(mb.action)
 
@@ -1166,20 +1166,20 @@ def train_model(
             if USE_MODEL_SAMPLING:
                 # Compute policy and value targets
                 with torch.no_grad():
-                    old_actdata = old_model_policy.get_actdata_eval(mb)
+                    old_actsample = old_model_policy.get_actsample_eval(mb)
                     value_target = model.model_value.get_value(mb)
 
                 # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
                 #     (if actions differ, masks will differ and KLD will become NaN)
                 new_z_hexes, new_z_global = model.model_policy.encode(mb)
-                new_actdata = model.model_policy._get_actdata_train(new_z_hexes, new_z_global, mb.obs, old_actdata.action)
+                new_actsample = model.model_policy._get_actsample_train(new_z_hexes, new_z_global, mb.obs, old_actsample.action)
                 new_value = model.model_policy._get_value(new_z_global)
 
                 # Distillation loss
                 distill_actloss = (
-                    CategoricalMasked.kld(old_actdata.act0_dist, new_actdata.act0_dist)
-                    + CategoricalMasked.kld(old_actdata.hex1_dist, new_actdata.hex1_dist)
-                    + CategoricalMasked.kld(old_actdata.hex2_dist, new_actdata.hex2_dist)
+                    CategoricalMasked.kld(old_actsample.act0_dist, new_actsample.act0_dist)
+                    + CategoricalMasked.kld(old_actsample.hex1_dist, new_actsample.hex1_dist)
+                    + CategoricalMasked.kld(old_actsample.hex2_dist, new_actsample.hex2_dist)
                 ).mean()
             else:
                 # Compute policy and value targets

@@ -3,25 +3,71 @@ import io
 import torch
 import torch_geometric
 from time import perf_counter_ns
-from torch_geometric.data import Batch
 import numpy as np
 
 import onnx
 import onnxruntime as ort
 
 from .export_common import (
-    ALL_MODEL_SIZES,
     LINK_TYPES,
-    ModelSizelessWrapper,
     ExportableGENConv,
     ExportableGNNBlock,
     ExportableDNAModel,
     transform_key,
-    build_edge_inputs,
+    flatten_edges,
+    build_inputs,
+    build_hdata,
 )
 
-from .mppo_dna_gnn import DNAModel, GNNBlock, CategoricalMasked
+from .mppo_dna_gnn import DNAModel, GNNBlock
 from .dual_vec_env import to_hdata_list, DualVecEnv
+
+# https://chatgpt.com/s/t_69582f5c098c8191ab8afa78678b6016
+# opset 18 is the first ONNX opset that can represent per-destination amax
+# via scatter reduction, because ONNX adds max/min as valid reduction modes
+# for ScatterElements (and ScatterND) in opset 18.
+#
+# Register custom symbolics for:
+# aten::scatter_add → ONNX ScatterElements with reduction="add"
+# aten::scatter_reduce with reduce="amax" → ONNX ScatterElements with reduction="max"
+#   (and similarly amin → min if needed)
+
+import torch.onnx.symbolic_helper as sym_help
+
+
+def _get_axis_i(dim):
+    axis = sym_help._maybe_get_scalar(dim)
+    if axis is None:
+        raise RuntimeError("scatter: dim must be constant for ONNX export")
+    return int(axis)
+
+
+def scatter_add_to_scatterelements(g, self, dim, index, src):
+    axis_i = _get_axis_i(dim)
+    return g.op("ScatterElements", self, index, src, axis_i=axis_i, reduction_s="add")
+
+
+def scatter_reduce_to_scatterelements(g, self, dim, index, src, reduce, include_self):
+    axis_i = _get_axis_i(dim)
+    red = sym_help._maybe_get_const(reduce, "s")  # e.g. "amax"
+    if red == "amax":
+        reduction = "max"
+    elif red == "amin":
+        reduction = "min"
+    elif red == "sum":
+        reduction = "add"
+    elif red == "prod":
+        reduction = "mul"
+    else:
+        raise RuntimeError(f"Unsupported scatter_reduce reduce={red}")
+
+    # Your code uses include_self=True and initializes `self` appropriately (e.g. -inf for max),
+    # so include_self does not need special handling here.
+    return g.op("ScatterElements", self, index, src, axis_i=axis_i, reduction_s=reduction)
+
+
+torch.onnx.register_custom_op_symbolic("aten::scatter_add", scatter_add_to_scatterelements, 18)
+torch.onnx.register_custom_op_symbolic("aten::scatter_reduce", scatter_reduce_to_scatterelements, 18)
 
 
 def test_gnn():
@@ -43,16 +89,48 @@ def test_gnn():
     # hd['hex', 'lt2', 'hex'].edge_index = edge_index_lt2
     # hd['hex', 'lt2', 'hex'].edge_attr = edge_attr_lt2
 
-    # Emax, Kmax for lt1
-    model_sizes = torch.tensor([[5, 7]], dtype=ALL_MODEL_SIZES.dtype)
+    inputs = {
+        "x": hd["hex"].x,
+        "edge_index": hd["hex", "lt1", "hex"].edge_index,
+        "edge_attr": hd["hex", "lt1", "hex"].edge_attr
+    }
 
-    inputs = (hd["hex"].x, hd["hex", "lt1", "hex"].edge_index, hd["hex", "lt1", "hex"].edge_attr)
-    myinputs = (hd["hex"].x, *build_edge_inputs(hd, model_sizes))
+    res = gen(*inputs.values())
+    myres = mygen(*inputs.values())
+    assert torch.allclose(res, myres, rtol=1e-5, atol=1e-5)
 
-    res = gen(*inputs)
-    myres = mygen(*myinputs)
+    myres = mygen(*inputs.values())
+    sgen = torch.jit.script(mygen)
+    sres = sgen(*inputs.values())
+    assert torch.allclose(res, sres, rtol=1e-6, atol=1e-6)
 
-    raise NotImplementedError()
+    buffer = io.BytesIO()
+
+    torch.onnx.export(
+        sgen,
+        tuple(inputs.values()),
+        buffer,
+        input_names=["x", "edge_index", "edge_attr"],
+        output_names=["out"],
+        opset_version=18,  # onnxruntime 1.14+
+        do_constant_folding=True,
+        # dynamic_axes={
+        #     "ei_flat": {1: "ei_dim"},       # S=[2, 1646], M=[2, 2478], ...
+        #     "ea_flat": {0: "ea_dim"},       # S=[1646, 1], M=[2478, 1], ...
+        #     "nbr_flat": {1: "nbr_dim"},     # S=[165, 32], M=[165, 52], ...
+        # },
+        # XXX: dynamo is the *new* torch ONNX exporter and will become the
+        #       default in torch-2.9.0, however as of torch 2.8.0 there are
+        #       missing operator implementations, and 2.9.0 is not viable
+        #       as torch_geometric segfaults (it is still on 2.8.0)
+        # dynamo=True
+    )
+    edge = ort.InferenceSession(buffer.getvalue())
+    eres = edge.run(None, {k: v.numpy() for k, v in inputs.items()})[0]
+
+    assert torch.allclose(res, torch.as_tensor(eres), rtol=1e-6, atol=1e-6)
+
+    print("test_gnn: OK")
 
 
 def test_block():
@@ -63,8 +141,10 @@ def test_block():
     hd['baba'].x = torch.randn(N, 5)
     edge_index_lt1 = torch.tensor([[0, 1], [1, 2]], dtype=torch.long)
     edge_attr_lt1 = torch.tensor([[1.0], [1.0]], dtype=torch.float)
-    edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
-    edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
+    # edge_index_lt2 = torch.tensor([[0, 2], [2, 1]], dtype=torch.long)
+    # edge_attr_lt2 = torch.tensor([[0.5], [0.2]], dtype=torch.float)
+    edge_index_lt2 = torch.tensor([[0, 2, 0], [2, 1, 1]], dtype=torch.long)
+    edge_attr_lt2 = torch.tensor([[0.5], [0.2], [0.1]], dtype=torch.float)
     hd['baba', 'lt1', 'baba'].edge_index = edge_index_lt1
     hd['baba', 'lt1', 'baba'].edge_attr = edge_attr_lt1
     hd['baba', 'lt2', 'baba'].edge_index = edge_index_lt2
@@ -80,22 +160,12 @@ def test_block():
     node_type = hd.node_types[0]
     link_types = [lt for (_, lt, _) in hd.edge_types]
 
-    all_model_sizes = torch.tensor([
-        [
-            [10, 5],        # lt1
-            [5, 4],         # lt2
-        ],
-        [
-            [20, 10],       # lt1
-            [8, 9],         # lt2
-        ],
-    ])
-
     block = GNNBlock(
         num_layers=num_layers,
         in_channels=in_channels,
         hidden_channels=hidden_channels,
         out_channels=out_channels,
+        gnn_kwargs=dict(add_self_loops=True),
         link_types=link_types,
         node_type=node_type,
     ).eval()
@@ -105,7 +175,6 @@ def test_block():
         in_channels=in_channels,
         hidden_channels=hidden_channels,
         out_channels=out_channels,
-        all_sizes=all_model_sizes,
         link_types=link_types,
     ).eval()
 
@@ -113,27 +182,63 @@ def test_block():
     myblock.load_state_dict(mydict, strict=True)
 
     # Test with two different "sizes"
-    myinputs0 = (hd["baba"].x, *build_edge_inputs(hd, all_model_sizes[0]), 0)
-    myinputs1 = (hd["baba"].x, *build_edge_inputs(hd, all_model_sizes[1]), 1)
+    ei_flat, ea_flat, lengths = flatten_edges(hd)
 
-    # import ipdb; ipdb.set_trace()  # noqa
+    inputs = {
+        "x_hex": hd["baba"].x,
+        "ei_flat": ei_flat,
+        "ea_flat": ea_flat,
+        "lengths": lengths
+    }
 
     res = block(hd)["baba"]
-    myres0 = myblock(*myinputs0)
-    myres1 = myblock(*myinputs1)
+    myres0 = myblock(*inputs.values())
 
     assert torch.equal(res, myres0)
-    assert torch.equal(res, myres1)
-    print("test_block: OK")
 
-    raise NotImplementedError()
+    sblock = torch.jit.script(myblock)
+    sres = sblock(*inputs.values())
+    assert torch.allclose(res, sres, rtol=1e-6, atol=1e-6)
+
+    buffer = io.BytesIO()
+
+    torch.onnx.export(
+        sblock,
+        tuple(inputs.values()),
+        buffer,
+        input_names=["x_hex", "ei_flat", "ea_flat", "lengths"],
+        output_names=["z_hex"],
+        opset_version=18,  # onnxruntime 1.14+
+        do_constant_folding=True,
+        # dynamic_axes={
+        #     "ei_flat": {1: "ei_dim"},       # S=[2, 1646], M=[2, 2478], ...
+        #     "ea_flat": {0: "ea_dim"},       # S=[1646, 1], M=[2478, 1], ...
+        #     "nbr_flat": {1: "nbr_dim"},     # S=[165, 32], M=[165, 52], ...
+        # },
+        # XXX: dynamo is the *new* torch ONNX exporter and will become the
+        #       default in torch-2.9.0, however as of torch 2.8.0 there are
+        #       missing operator implementations, and 2.9.0 is not viable
+        #       as torch_geometric segfaults (it is still on 2.8.0)
+        # dynamo=True
+    )
+    edge = ort.InferenceSession(buffer.getvalue())
+    eres = edge.run(None, {k: v.numpy() for k, v in inputs.items()})[0]
+
+    assert torch.allclose(res, torch.as_tensor(eres), rtol=1e-6, atol=1e-6)
+
+    print("test_block: OK")
 
 
 def test_model(cfg, weights_file):
     """ Tests DNA Model vs ExecuTorchModel. """
-    # venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
+
+    venv = DualVecEnv(dict(mapname="gym/A3.vmap", role="defender"), num_envs_stupidai=1)
     # venv = DualVecEnv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs_stupidai=1)
-    venv = DualVecEnv(dict(mapname="gym/archangels.vmap", role="defender", random_heroes=1), num_envs_stupidai=1)
+    # venv = DualVecEnv(dict(mapname="gym/archangels.vmap", role="defender", random_heroes=1), num_envs_stupidai=1)
+    # venv = DualVecEnv(dict(
+    #     mapname="gym/generated/4096/4x1024.vmap",
+    #     role=cfg["train"]["env"]["kwargs"]["role"]
+    # ), num_envs_stupidai=1)
     venv.reset()
 
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
@@ -143,7 +248,7 @@ def test_model(cfg, weights_file):
     model = model.model_policy
 
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExportableDNAModel(cfg["model"], eside, ALL_MODEL_SIZES).eval()
+    emodel = ExportableDNAModel(cfg["model"], eside).eval()
 
     eweights = {
         transform_key(k, "hex", list(LINK_TYPES)): v
@@ -152,116 +257,27 @@ def test_model(cfg, weights_file):
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    # obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
-    # done = torch.tensor(venv.call("terminated"))
-    # links = [venv.call("obs")[0]["links"]]
-    # hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
-
     torch.set_printoptions(sci_mode=False, precision=6)
 
-    from sampletest.sampletest import build_action_probs, categorical_masked
-    for i in range(10):
-        v_obs = venv.call("obs")[0]
-
-        hdata_list = to_hdata_list(
-            torch.as_tensor(v_obs["observation"]).unsqueeze(0),
-            torch.as_tensor(venv.call("terminated")),
-            venv.call("links")
-        )
-        hdata = Batch.from_data_list(hdata_list)
-        actlogits = model.get_action_logits(hdata)
-        actsample = actlogits.sample(deterministic=True)
-
-        action_mask = torch.as_tensor(v_obs["action_mask"]).unsqueeze(0)
-        act0_probs = categorical_masked(actlogits.act0_logits, actlogits.act0_mask)
-        hex1_probs = categorical_masked(actlogits.hex1_logits, actlogits.hex1_mask)
-        hex2_probs = categorical_masked(actlogits.hex2_logits, actlogits.hex2_mask)
-        probs = build_action_probs(
-            act0_probs,
-            hex1_probs,
-            hex2_probs,
-            model.action_table,
-            action_mask
-        )
-
-        assert action_mask.nonzero().numel() >= probs.nonzero().numel()
-
-        topk = probs.topk(5)
-        print("---")
-        for k in range(5):
-            action = topk.indices[0, k]
-            a0, h1, h2 = model.inverse_table[action]
-            p0 = actsample.act0_dist.probs[0, a0] * actsample.hex1_dist.probs[0, h1] * actsample.hex2_dist.probs[0, h2]
-            p1 = topk.values[0, k]
-            print("[k=%d] Action: %d | p0 = %.3f | p1 = %.3f" % (k, action, p0, p1))
-
-        venv.step(actsample.action.numpy())
-
-    # XXX: limit to first 2 sizes only (XNN export is very slow)
-    # all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
-    all_edge_inputs = [
-        build_edge_inputs(hdata, ALL_MODEL_SIZES[0]),
-        build_edge_inputs(hdata, ALL_MODEL_SIZES[1]),
-    ]
-
-    # for i, edge_inputs in enumerate(all_edge_inputs):
-    #     print("Testing size %d..." % i)
-    #     einputs = (hdata.obs[0], *edge_inputs, ALL_MODEL_SIZES[i])
-    #     for i1, arg in enumerate(einputs):
-    #         print(f"Arg {i1}: ", end="")
-    #         if isinstance(arg, torch.Tensor):
-    #             print(f"tensor: {arg.shape}")
-    #         else:
-    #             print(f"{arg.__class__.__name__}: {arg}")
-
-    #     probs = emodel.forward(*einputs)
-    #     action = probs.argmax(1)
-
-    #     assert torch.equal(actsample.action, action)
-
-    #     print("Action: %d | %d" % (actsample.action, action))
-
-    #     topk = probs.topk(5)
-    #     for k in range(5):
-    #         action = topk.indices[0, k]
-    #         a0, h1, h2 = model.inverse_table[action]
-    #         p0 = actsample.act0_dist.probs[0, a0] * actsample.hex1_dist.probs[0, h1] * actsample.hex2_dist.probs[0, h2]
-    #         p1 = topk.values[0, k]
-    #         print("\t[k=%d] p0 = %.3f | p1 = %.3f" % (k, p0, p1))
-    #         if not torch.allclose(p0, p1, atol=0.01):
-    #             import ipdb; ipdb.set_trace()  # noqa
-    #             pass
-
-    #     print("(size=%d) test_model: OK" % i)
-
+    # JIT transform is only useful for identifying export-ralted issues quicker
     print("=== JIT transform ===")
-    sw = ModelSizelessWrapper(emodel)
-
-    # for i, edge_inputs in enumerate(all_edge_inputs):
-    #     einputs = (hdata.obs[0], *edge_inputs, ALL_MODEL_SIZES[i])
-    #     named_einputs = {n: einputs[i] for i, n in enumerate(["obs", "ei_flat", "ea_flat", "nbr_flat", "size"])}
-    #     x = emodel(**named_einputs)
-    #     import ipdb; ipdb.set_trace()  # noqa
-    #     pass
-
-    ssw = torch.jit.script(sw)
-    ssw.eval()
+    smodel = torch.jit.script(emodel)
+    smodel.eval()
 
     print("=== ONNX transform ===")
     buffer = io.BytesIO()
 
     torch.onnx.export(
-        ssw,
-        (hdata.obs[0], *all_edge_inputs[0], ALL_MODEL_SIZES[0]),
+        emodel,
+        tuple(build_inputs(build_hdata(venv)).values()),
         buffer,
-        input_names=["obs", "ei_flat", "ea_flat", "nbr_flat", "size"],
+        input_names=["obs", "ei_flat", "ea_flat", "lengths"],
         output_names=["probs"],
-        opset_version=16,  # onnxruntime 1.11+
+        opset_version=18,  # onnxruntime 1.14+
         do_constant_folding=True,
         dynamic_axes={
-            "ei_flat": {1: "ei_dim"},       # S=[2, 1646], M=[2, 2478], ...
-            "ea_flat": {0: "ea_dim"},       # S=[1646, 1], M=[2478, 1], ...
-            "nbr_flat": {1: "nbr_dim"},     # S=[165, 32], M=[165, 52], ...
+            "ei_flat": {1: "ei_N"},       # [2, 1646], [2, 2478], ...
+            "ea_flat": {0: "ea_N"},       # [1646, 1], [2478, 1], ...
         },
         # XXX: dynamo is the *new* torch ONNX exporter and will become the
         #       default in torch-2.9.0, however as of torch 2.8.0 there are
@@ -272,31 +288,41 @@ def test_model(cfg, weights_file):
 
     edge = ort.InferenceSession(buffer.getvalue())
 
-    predict_time_total = 0
-    predict_count_total = 0
+    num_steps = 10
+    for n in range(num_steps):
+        print(venv.render()[0])
+        hdata = build_hdata(venv)
+        inputs = build_inputs(hdata)
 
-    for i, edge_inputs in enumerate(all_edge_inputs):
-        print("Testing size %d..." % i)
-        einputs = (hdata.obs[0], *edge_inputs, ALL_MODEL_SIZES[i])
+        # 0. DNAModel baseline
 
-        for i1, arg in enumerate(einputs):
-            print(f"Arg {i1}: ", end="")
-            if isinstance(arg, torch.Tensor):
-                print(f"tensor: {arg.shape}")
-            else:
-                print(f"{arg.__class__.__name__}: {arg}")
+        actsample = model.get_actsample_eval(hdata, deterministic=True)
+        action = actsample.action
+
+        # 1. Test ExportableModel
+
+        probs = emodel.forward(*inputs.values())
+        myaction = probs.argmax(1)
+        assert torch.equal(action, myaction)
+
+        # 2. Test torchscript of ExportableModel
+
+        sprobs = smodel(*inputs.values())
+        saction = sprobs.argmax(1)
+        assert torch.equal(action, saction)
+
+        # 3. Test ONNX export of ExportableModel
+
+        for k, v in inputs.items():
+            print(f"Arg {k}: {v.shape}")
 
         t0 = perf_counter_ns()
-        named_einputs = {n: einputs[i].numpy() for i, n in enumerate(["obs", "ei_flat", "ea_flat", "nbr_flat", "size"])}
-        probs = torch.as_tensor(edge.run(None, named_einputs)[0])
+        eprobs = torch.as_tensor(edge.run(None, {k: v.numpy() for k, v in inputs.items()})[0])
         ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
         print("Predict time: %d ms" % ms)
-        predict_time_total += ms
-        predict_count_total += 1
 
-        action = probs.argmax(1)
-        print("Action: %d | %d" % (actsample.action, action))
-        assert torch.equal(actsample.action, action)
+        eaction = eprobs.argmax(1)
+        assert torch.equal(action, eaction)
 
         topk = probs.topk(5)
         for k in range(5):
@@ -311,11 +337,9 @@ def test_model(cfg, weights_file):
             #     import ipdb; ipdb.set_trace()  # noqa
             #     pass
 
-        print("(size=%d) test_model: OK" % i)
+        venv.step([action])
 
-    print("predict_time_total=%d" % predict_time_total)
-    print("predict_count_total=%d" % predict_count_total)
-    print("ms_per_perdiction=%d" % (predict_time_total / predict_count_total))
+    print("test_model: OK")
 
 
 def test_load(cfg, weights_file):
@@ -331,7 +355,7 @@ def test_load(cfg, weights_file):
     model = model.model_policy
 
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExportableDNAModel(cfg["model"], eside, ALL_MODEL_SIZES).eval()
+    emodel = ExportableDNAModel(cfg["model"], eside).eval()
 
     eweights = {
         transform_key(k, "hex", list(LINK_TYPES)): v
@@ -340,39 +364,24 @@ def test_load(cfg, weights_file):
     emodel.load_state_dict(eweights, strict=True)
     emodel = emodel.model_policy
 
-    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
-    done = torch.tensor([False])
-    links = [venv.call("obs")[0]["links"]]
-    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
+    hdata = build_hdata(venv)
+    inputs = build_inputs(hdata)
 
-    # XXX: test only with size "S" (faster)
-    einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]))
+    for k, v in inputs.items():
+        print(f"Arg {k}: {v.shape}")
 
-    for i1, arg in enumerate(einputs):
-        print(f"Arg {i1}: ", end="")
-        if isinstance(arg, torch.Tensor):
-            print(f"tensor: {arg.shape}")
-        else:
-            print(f"{arg.__class__.__name__}: {arg}")
-
-    actdata = model.get_actdata_eval(hdata, deterministic=True)
-
-    # XXX: test only with size "S" (quantizing is very slow)
-    einputs = (obs[0], *build_edge_inputs(hdata, ALL_MODEL_SIZES[0]))
-
+    actsample = model.get_actsample_eval(hdata, deterministic=True)
     raise NotImplementedError()
 
 
 def export_model(cfg, weights_file):
-    """ Tests DNAModel vs the loaded XNN-lowered ExportableDNAModel. """
-
     venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
     venv.reset()
 
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
 
     eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel0 = ExportableDNAModel(cfg["model"], eside, ALL_MODEL_SIZES).eval()
+    emodel0 = ExportableDNAModel(cfg["model"], eside).eval()
 
     eweights = {
         transform_key(k, "hex", list(LINK_TYPES)): v
@@ -381,37 +390,20 @@ def export_model(cfg, weights_file):
     emodel0.load_state_dict(eweights, strict=True)
     emodel = emodel0.model_policy.eval()
 
-    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
-    done = torch.tensor([False])
-    links = [venv.call("obs")[0]["links"]]
-    hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
-
-    all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
-
-    # XXX: it should work OK if args_tail == einputs' model size
-    #       it returns incorrect result if args_tail < einputs' model size
-    #       it fails with RuntimeError: index_select(): ... otherwise
-
-    # sw = ModelSizelessWrapper(emodel)
-    sw = emodel
-    ssw = torch.jit.script(sw)
-    ssw.eval()
-
     print("=== ONNX transform ===")
     buffer = io.BytesIO()
 
     torch.onnx.export(
-        ssw,
-        (obs[0], *all_edge_inputs[0], ALL_MODEL_SIZES[0]),
+        emodel,
+        tuple(build_inputs(build_hdata(venv)).values()),
         buffer,
-        input_names=["obs", "ei_flat", "ea_flat", "nbr_flat", "size"],
+        input_names=["obs", "ei_flat", "ea_flat", "lengths"],
         output_names=["probs"],
-        opset_version=20,  # onnxruntime 1.17+
+        opset_version=18,  # onnxruntime 1.14+
         do_constant_folding=True,
         dynamic_axes={
-            "ei_flat": {1: "ei_dim"},       # S=[2, 1646], M=[2, 2478], ...
-            "ea_flat": {0: "ea_dim"},       # S=[1646, 1], M=[2478, 1], ...
-            "nbr_flat": {1: "nbr_dim"},     # S=[165, 32], M=[165, 52], ...
+            "ei_flat": {1: "ei_N"},       # [2, 1646], [2, 2478], ...
+            "ea_flat": {0: "ea_N"},       # [1646, 1], [2478, 1], ...
         },
         # XXX: dynamo is the *new* torch ONNX exporter and will become the
         #       default in torch-2.9.0, however as of torch 2.8.0 there are
@@ -424,11 +416,8 @@ def export_model(cfg, weights_file):
     loaded_model = onnx.load_from_string(buffer.getvalue())
 
     metadata = {
-        "all_sizes": json.dumps(emodel.get_all_sizes().tolist()),
         "version": str(emodel.get_version().item()),
-        "side": str(emodel.get_side().item()),
-        "action_table": json.dumps(emodel.action_table.tolist()),
-        "is_dynamic": "1",
+        "side": str(emodel.get_side().item())
     }
 
     for k, v in metadata.items():
@@ -458,65 +447,50 @@ def verify_export(cfg, weights_file, loaded_model, num_steps=10):
     md = loaded_model.get_modelmeta().custom_metadata_map
     assert md["version"] == "13"
     assert md["side"] == str(eside)
-    assert json.loads(md["all_sizes"]) == ALL_MODEL_SIZES.tolist()
-    assert json.loads(md["action_table"]) == model.model_policy.action_table.tolist()
 
     print("Testing data methods for %d steps..." % (num_steps))
 
-    # XXX: 4x1024.vmap will cause errors in build_edge_inputs for smaller sizes
-    #       (which is OK, but it's better to test all sizes)
-    # venv = DualVecEnv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs_stupidai=1)
+    venv = DualVecEnv(dict(
+        mapname="gym/generated/4096/4x1024.vmap",
+        role=cfg["train"]["env"]["kwargs"]["role"]
+    ), num_envs_stupidai=1)
 
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role=cfg["train"]["env"]["kwargs"]["role"]), num_envs_stupidai=1)
-    venv.reset()
-
-    benchmarks = torch.zeros(len(ALL_MODEL_SIZES))
+    ms_total = 0
 
     for n in range(num_steps):
         print(venv.render()[0])
 
-        obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
-        done = torch.tensor([False])
-        links = [venv.call("obs")[0]["links"]]
-        hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
+        hdata = build_hdata(venv)
 
         actsample = model.model_policy.get_action_logits(hdata).sample(deterministic=True)
+        inputs = build_inputs(hdata)
 
-        all_edge_inputs = [build_edge_inputs(hdata, model_size) for model_size in ALL_MODEL_SIZES]
+        t0 = perf_counter_ns()
+        probs = torch.as_tensor(loaded_model.run(None, {k: v.numpy() for k, v in inputs.items()})[0])
+        ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
+        print("Predict time: %d ms" % ms)
+        ms_total += ms
 
-        for i, edge_inputs in enumerate(all_edge_inputs):
-            einputs = (obs[0], *edge_inputs, ALL_MODEL_SIZES[i])
-            t0 = perf_counter_ns()
-            named_einputs = {n: einputs[i].numpy() for i, n in enumerate(["obs", "ei_flat", "ea_flat", "nbr_flat", "size"])}
-            loaded_res = torch.as_tensor(loaded_model.run(None, named_einputs)[0])
-            ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
-            benchmarks[i] += ms
+        eaction = probs.argmax(1)
+        print("Action: %d | %d" % (actsample.action, eaction))
+        assert torch.equal(actsample.action, eaction)
 
-            probs = loaded_res
-            action = probs.argmax(1)
-            print("Action: %d | %d" % (actsample.action, action))
-            assert torch.equal(actsample.action, action)
+        topk = probs.topk(5)
+        for k in range(5):
+            action = topk.indices[0, k]
+            a0, h1, h2 = model.model_policy.inverse_table[action]
+            p0 = actsample.act0_dist.probs[0, a0] * actsample.hex1_dist.probs[0, h1] * actsample.hex2_dist.probs[0, h2]
+            p1 = topk.values[0, k]
+            print("\t[k=%d] p0 = %.3f | p1 = %.3f" % (k, p0, p1))
 
-            topk = probs.topk(5)
-            for k in range(5):
-                action = topk.indices[0, k]
-                a0, h1, h2 = model.model_policy.inverse_table[action]
-                p0 = actsample.act0_dist.probs[0, a0] * actsample.hex1_dist.probs[0, h1] * actsample.hex2_dist.probs[0, h2]
-                p1 = topk.values[0, k]
-                print("\t[k=%d] p0 = %.3f | p1 = %.3f" % (k, p0, p1))
-
-                # These are not always that close (sometimes diff is almost 0.1)
-                # if not torch.allclose(p0, p1, atol=0.01):
-                #     import ipdb; ipdb.set_trace()  # noqa
-                #     pass
+            # These are not always that close (sometimes diff is almost 0.1)
+            # if not torch.allclose(p0, p1, atol=0.01):
+            #     import ipdb; ipdb.set_trace()  # noqa
+            #     pass
 
         venv.step([action])
 
-    print("Total execution time:")
-
-    for i, ms in enumerate(benchmarks):
-        print("  %d: %d ms" % (i, ms.item()))
-
+    print("Total execution time: %dms" % ms_total)
     print("Model role: %s" % cfg["train"]["env"]["kwargs"]["role"])
     print("verify_export: OK")
 
@@ -567,10 +541,10 @@ def main():
             # Tests (for debugging):
             #
 
-            # test_gnn(exptype)
-            # test_block(exptype)
+            # test_gnn()
+            # test_block()
             test_model(cfg, model_weights_path)
-            # assert 0
+            assert 0
             # # test_quantized(cfg, model_weights_path)
             # test_load(cfg, model_weights_path, exptype)
 
@@ -578,8 +552,8 @@ def main():
             # Actual export
             #
 
-            exported_model = export_model(cfg, model_weights_path)
-            loaded_model = load_exported_model(exported_model)
+            # exported_model = export_model(cfg, model_weights_path)
+            # loaded_model = load_exported_model(exported_model)
             # loaded_model = load_exported_model(exptype, "/Users/simo/Projects/vcmi-play/Mods/MMAI/models/defender-sjigvvma-202511011415.onnx")
             # import ipdb; ipdb.set_trace()  # noqa
             verify_export(cfg, model_weights_path, loaded_model)

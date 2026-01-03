@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 
+from torch_geometric.data import Batch
+from .dual_vec_env import to_hdata_list
+
 from .mppo_dna_gnn import (
     STATE_SIZE,
     STATE_SIZE_ONE_HEX,
@@ -28,163 +31,42 @@ def transform_key(key, node_type, link_types):
     return "%s.%d.%d.%s" % (pre, int(module_id) / 2, link_types.index(link_type), rest)
 
 
-#
-# Stats (10k steps) - obtained via statscounter.py:
-#
-#        Num edges (E)   avg   max   p99   p90   p75   p50   p25
-# -----------------------------------------------------------------
-#             ADJACENT   888   888   888   888   888   888   888
-#                REACH   355   988   820   614   478   329   209
-#           RANGED_MOD   408   2403  1285  646   483   322   162
-#          ACTS_BEFORE   51    268   203   118   75    35    15
-#        MELEE_DMG_REL   43    198   160   103   60    31    14
-#        RETAL_DMG_REL   27    165   113   67    38    18    8
-#       RANGED_DMG_REL   12    133   60    29    18    9     4
-#
-#    Inbound edges (K)   avg   max   p99   p90   p75   p50   p25
-# -----------------------------------------------------------------
-#             ADJACENT   5.4   6     6     6     6     6     6
-#                REACH   2.2   13    10    8     6     4     3
-#           RANGED_MOD   2.5   15    8     4     3     2     1
-#          ACTS_BEFORE   0.3   23    19    15    12    8     5
-#        MELEE_DMG_REL   0.3   10    9     8     7     5     3
-#        RETAL_DMG_REL   0.2   10    9     8     6     5     3
-#       RANGED_DMG_REL   0.1   8     6     3     2     2     1
+def build_hdata(venv):
+    obs = torch.as_tensor(venv.call("obs")[0]["observation"]).unsqueeze(0)
+    done = torch.tensor(venv.call("terminated"))
+    links = [venv.call("obs")[0]["links"]]
+    return Batch.from_data_list(to_hdata_list(obs, done, links))
 
 
-# Sizes are (E, K) tuples
-ALL_MODEL_SIZES = torch.tensor([
-    [  # 0 (S): p50
-        [888, 6],       # ADJACENT
-        [330, 4],       # REACH
-        [330, 2],       # RANGED_MOD
-        [36, 8],        # ACTS_BEFORE
-        [32, 5],        # MELEE_DMG_REL
-        [20, 5],        # RETAL_DMG_REL
-        [10, 2],        # RANGED_DMG_REL
-    ],
-    [  # 1 (M): p90
-        [888, 6],       # ADJACENT
-        [620, 8],       # REACH
-        [650, 4],       # RANGED_MOD
-        [120, 15],      # ACTS_BEFORE
-        [100, 8],       # MELEE_DMG_REL
-        [70, 8],        # RETAL_DMG_REL
-        [30, 3],        # RANGED_DMG_REL
-    ],
-    [  # 2 (L): p99
-        [888, 6],       # ADJACENT
-        [820, 10],      # REACH
-        [1300, 8],      # RANGED_MOD
-        [200, 19],      # ACTS_BEFORE
-        [160, 9],       # MELEE_DMG_REL
-        [110, 9],       # RETAL_DMG_REL
-        [60, 6],        # RANGED_DMG_REL
-    ],
-    [  # 3 (XL): max+
-        [888, 6],       # ADJACENT
-        [1000, 14],     # REACH
-        [2500, 16],     # RANGED_MOD
-        [300, 24],      # ACTS_BEFORE
-        [250, 11],      # MELEE_DMG_REL
-        [200, 11],      # RETAL_DMG_REL
-        [150, 9],       # RANGED_DMG_REL
-    ],
-    [  # 4 (XXL): fallback (bug?)
-        [888, 6],       # ADJACENT        # fixed
-        [3000, 30],     # REACH           # 20 arch devils, no obstacles: 20*146 = 2920
-        [4000, 30],     # RANGED_MOD      # 24 shooters: 24*165 = 3960
-        [1000, 50],     # ACTS_BEFORE     # 30 stacks: 30*29 = 870
-        [500, 20],      # MELEE_DMG_REL   # 15 wide stacks per side: 15*30 = 450
-        [500, 20],      # RETAL_DMG_REL   # same as MELEE_DMG_REL
-        [250, 15],      # RANGED_DMG_REL  # 15 shooters per side: 15*15 = 225
-    ]
-])
+def build_inputs(hdata):
+    ei_flat, ea_flat, lengths = flatten_edges(hdata)
+    return {
+        "obs": hdata.obs[0],
+        "ei_flat": ei_flat,
+        "ea_flat": ea_flat,
+        "lengths": lengths
+    }
 
 
-# Inputs:
-#   hdata: HeteroData
-#   model_sizes: tensor with shape (NUM_LT, 2), e.g. an entry from ALL_MODEL_SIZES
-#
-# Returns:
-#   [ei_flat, ea_flat, nbr_flat]
-#
-# Shapes:
-# ei_flat:  (2, sum_E)
-# ea_flat:  (sum_E, edge_dim)
-# nbr_flat: (num_nodes, sum_K)
-#
-# The exported model will contain a method for these model_sizes which knows
-# exactly how to decompose the flattened tensors.
-#
-def build_edge_inputs(hdata, model_sizes):
+def flatten_edges(hdata):
     assert len(hdata.node_types) == 1, hdata.node_types
-    assert model_sizes.ndim == 2
-    assert model_sizes.shape[0] == len(hdata.edge_types)
     assert all(n == 1 for n in hdata.num_edge_features.values()), hdata.num_edge_features.values()
 
-    sum_e = model_sizes[:, 0].sum()
-    sum_k = model_sizes[:, 1].sum()
-
-    ei_flat = torch.zeros((2, sum_e), dtype=torch.int32)
-    ea_flat = torch.zeros((sum_e, 1), dtype=torch.float32)
-    nbr_flat = torch.zeros((hdata.num_nodes, sum_k), dtype=torch.int32)
-
-    e0 = 0
-    k0 = 0
+    ei_flat = torch.zeros((2, 0), dtype=torch.int32)
+    ea_flat = torch.zeros((0, 1), dtype=torch.float32)
+    lengths = []
 
     for i, edge_type in enumerate(hdata.edge_types):
-        e = model_sizes[i, 0]
-        k = model_sizes[i, 1]
-        e1 = e0 + e
-        k1 = k0 + k
-
         reldata = hdata[edge_type]
-        ei, ea = pad_edges(reldata.edge_index, reldata.edge_attr, 1, e)
-        nbr = build_nbr(reldata.edge_index[1], hdata.num_nodes, k)
+        lengths.append(reldata.edge_index.shape[1])
+        ei_flat = torch.cat([ei_flat, reldata.edge_index], dim=1)
+        ea_flat = torch.cat([ea_flat, reldata.edge_attr], dim=0)
 
-        ei_flat[:, e0:e1] = ei
-        ea_flat[e0:e1, :] = ea
-        nbr_flat[:, k0:k1] = nbr
+    sum_e = sum(hdata[et].edge_index.shape[1] for et in hdata.edge_types)
+    assert ei_flat.shape[1] == sum_e
+    assert ea_flat.shape[0] == sum_e
 
-        e0 = e1
-        k0 = k1
-
-    assert e0 == sum_e
-    assert k0 == sum_k
-
-    return ei_flat, ea_flat, nbr_flat
-
-
-# Usage: build_nbr(edge_index[1], x.size(0), K_MAX)
-def build_nbr(dst, num_nodes, k_max):
-    """
-    Build nbr[v, k] = edge id of k-th incoming edge to node v; -1 if unused.
-    Use this OUTSIDE the exported graph (host-side) for the current edge_index.
-    """
-    nbr = torch.full((num_nodes, k_max), -1, dtype=torch.int32)
-    fill = torch.zeros(num_nodes, dtype=torch.int32)
-    for e, v in enumerate(dst.tolist()):
-        p = int(fill[v])
-        if p >= k_max:
-            raise ValueError(f"node {v} exceeds k_max={k_max}")
-        nbr[v, p] = e
-        fill[v] = p + 1
-    return nbr
-
-
-# NOTE: OK to use 0 for padding (padded positions are not present in NBR)
-def pad_edges(edge_index, edge_attr, edge_dim, e_max):
-    # edge_index: (2, E), long; edge_attr: (E, edge_dim), float
-    E = edge_index.size(1)
-    if E > e_max:
-        raise ValueError(f"E={E} exceeds e_max={e_max}")
-    pad = e_max - E
-    if pad:
-        edge_index = torch.cat([edge_index, edge_index.new_zeros(2, pad)], dim=1)
-        edge_attr = torch.cat([edge_attr, edge_attr.new_zeros(pad, edge_dim)], dim=0)
-
-    return edge_index, edge_attr
+    return ei_flat, ea_flat, torch.tensor(lengths)
 
 
 def build_action_probs(
@@ -235,7 +117,7 @@ def build_action_probs(
 
 
 class ExportableModel(nn.Module):
-    def __init__(self, config, side, all_sizes):
+    def __init__(self, config, side):
         super().__init__()
         self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
         self.dim_hexes = STATE_SIZE_HEXES
@@ -264,7 +146,6 @@ class ExportableModel(nn.Module):
             in_channels=STATE_SIZE_ONE_HEX,
             hidden_channels=config["gnn_hidden_channels"],
             out_channels=config["gnn_out_channels"],
-            all_sizes=all_sizes,
             link_types=list(LINK_TYPES),
         ).eval()
 
@@ -297,7 +178,6 @@ class ExportableModel(nn.Module):
         # self.register_buffer("mask_value", torch.tensor(torch.finfo(torch.float32).min), persistent=False)
         self.register_buffer("mask_value", torch.tensor(-((2 - 2**-23) * 2**127), dtype=torch.float32), persistent=False)
         self.register_buffer("hexactmask_inds", torch.as_tensor(torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]).int(), persistent=False)
-        self.register_buffer("sizemarks", all_sizes.sum(dim=1)[:, 1].int(), persistent=False)
 
     def get_version(self):
         return self.version.clone()
@@ -307,16 +187,11 @@ class ExportableModel(nn.Module):
     def get_side(self):
         return self.side.clone()
 
-    def get_all_sizes(self):
-        return self.encoder_hexes.all_sizes.clone()
-
-    # edge_triplets is [edge_ind1, edge_attr1, edge_nbr1, edge_ind2, edge_attr2, edge_nbr2, ...]
-    # (one triplet for each link type)
     @torch.jit.export
-    def encode(self, obs, ei_flat, ea_flat, nbr_flat, size):
+    def encode(self, obs, ei_flat, ea_flat, lengths):
         hexes = obs[0, self.dim_other:].view(165, self.state_size_one_hex)
         other = obs[0, :self.dim_other]
-        z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, nbr_flat, size).unsqueeze(0)
+        z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, lengths).unsqueeze(0)
         z_other = self.encoder_other(other).unsqueeze(0)
         # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
         # z_global = z_other + z_hexes.mean(1)
@@ -324,16 +199,16 @@ class ExportableModel(nn.Module):
         return z_hexes, z_global
 
     @torch.jit.export
-    def get_value(self, obs, ei_flat, ea_flat, nbr_flat, size):
+    def get_value(self, obs, ei_flat, ea_flat, lengths):
         obs = obs.unsqueeze(dim=0)
-        _, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size)
+        _, z_global = self.encode(obs, ei_flat, ea_flat, lengths)
         return self.critic(z_global)[0]
 
     @torch.jit.export
-    def forward(self, obs, ei_flat, ea_flat, nbr_flat, size):
+    def forward(self, obs, ei_flat, ea_flat, lengths):
         B = 1
         obs = obs.unsqueeze(dim=0)
-        z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, nbr_flat, size)
+        z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, lengths)
 
         act0_logits = self.act0_head(z_global)
 
@@ -431,16 +306,21 @@ class ExportableModel(nn.Module):
         ], -1)                                                                  # (B, 2312)
 
         # Final probs (B, N_ACTIONS)
-        return build_action_probs(act0_probs, hex1_probs, hex2_probs, mask, self.action_table)
+        return (
+            act0_probs, mask_act0,
+            hex1_probs, mask_hex1,
+            hex2_probs, mask_hex2,
+            build_action_probs(act0_probs, hex1_probs, hex2_probs, mask, self.action_table)
+        )
 
 
 # Used in exports only because loading weights from the checkpoint file
 # is easier as it expects this model structure (DNA -> policy, value models)
 class ExportableDNAModel(nn.Module):
-    def __init__(self, config, side, all_sizes):
+    def __init__(self, config, side):
         super().__init__()
-        self.model_policy = ExportableModel(config, side, all_sizes)
-        self.model_value = ExportableModel(config, side, all_sizes)
+        self.model_policy = ExportableModel(config, side)
+        self.model_value = ExportableModel(config, side)
 
 
 MIN_FLOAT32 = torch.finfo(torch.float32).min
@@ -470,54 +350,54 @@ def categorical_masked(logits0, mask):
     return probs
 
 
-@torch.jit.export
-def scatter_sum_via_nbr(src, nbr):
-    N, K = nbr.shape
-    H = src.size(1)
-    # idx = nbr.clamp_min(0).reshape(-1)                 # (N*K,)
-    idx64 = nbr.clamp_min(0).to(torch.int64).reshape(-1)       # only here
-    gathered = src.index_select(0, idx64).reshape(N, K, H)
-    valid = (nbr >= 0).unsqueeze(-1)
-    zeros = src.new_zeros((1, 1, H))
-    gathered = torch.where(valid, gathered, zeros)
+def edge_softmax_per_dst(scores: torch.Tensor, dst: torch.Tensor, num_nodes: int, eps: float = 1e-16):
+    """
+    scores: (E, H)
+    dst:    (E,) int64 destination node index per edge
+    returns alpha: (E, H), softmax over edges grouped by dst (per feature dim)
+    """
+    E, H = scores.shape
+    dst = dst.to(torch.int64)
 
-    # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
-    # return gathered.sum(dim=1)                  # (N, H)
-    return gathered.sum(dim=1, keepdim=True).squeeze(1)                  # (N, H)
+    # Per-node max: (N, H)
+    # IMPORTANT for export: include_self=True is commonly required/assumed by PyTorch ONNX exporter for scatter_reduce.
+    # (Many people hit an export error when include_self=False.)
+    neg_inf = torch.tensor(float("-inf"), device=scores.device, dtype=scores.dtype)
+    max_per_node = neg_inf.expand(num_nodes, H).clone()
+    max_per_node.scatter_reduce_(
+        0,
+        dst[:, None].expand(E, H),
+        scores,
+        reduce="amax",
+        include_self=True,
+    )
+
+    exp_scores = (scores - max_per_node.index_select(0, dst)).exp()
+
+    # Per-node sum: (N, H)
+    sum_per_node = torch.zeros((num_nodes, H), device=scores.device, dtype=scores.dtype)
+    sum_per_node.scatter_add_(0, dst[:, None].expand(E, H), exp_scores)
+
+    return exp_scores / (sum_per_node.index_select(0, dst) + eps)
 
 
-@torch.jit.export
-def scatter_max_via_nbr(src, nbr):
-    N, K = nbr.shape
-    H = src.size(1)
-    # idx = nbr.clamp_min(0).reshape(-1)
-    idx64 = nbr.clamp_min(0).to(torch.int64).reshape(-1)
-    gathered = src.index_select(0, idx64).reshape(N, K, H)
-    valid = (nbr >= 0).unsqueeze(-1)
-    # XXX: torchscript does not allow to use torch.finfo(...)
-    # neg_inf = -((2 - 2**-23) * 2**127)
-    neg_inf = neg_inf_like(src)[0]
-    gathered = torch.where(valid, gathered, neg_inf)
-    return gathered.max(dim=1).values
+def scatter_sum_per_dst(values: torch.Tensor, dst: torch.Tensor, num_nodes: int):
+    """
+    values: (E, H)
+    dst:    (E,) int64 destination node index per edge
+    returns: (N, H)
+    """
+    E, H = values.shape
+    dst = dst.to(torch.int64)
 
-
-@torch.jit.export
-def softmax_via_nbr(src, index, nbr):
-    src_max = scatter_max_via_nbr(src, nbr)                    # (N, H)
-    # out = (src - src_max.index_select(0, index)).exp()             # (E_max, H)
-    out = (src - src_max.index_select(0, index.to(torch.int64))).exp()
-    out_sum = scatter_sum_via_nbr(out, nbr) + 1e-16            # (N, H)
-    # denom = out_sum.index_select(0, index)                         # (E_max, H)
-    denom = out_sum.index_select(0, index.to(torch.int64))
-    return out / denom
+    out = torch.zeros((num_nodes, H), device=values.device, dtype=values.dtype)
+    out.scatter_add_(0, dst[:, None].expand(E, H), values)
+    return out
 
 
 class ExportableGENConv(nn.Module):
     def __init__(self, in_channels, out_channels, edge_dim):
         super().__init__()
-
-        self.in_channels = in_channels
-        self.out_channels = out_channels
         self.eps = 1e-7
 
         if in_channels != out_channels:
@@ -530,36 +410,40 @@ class ExportableGENConv(nn.Module):
         self.lin_edge = nn.Linear(edge_dim, out_channels, bias=False)
 
         self.mlp = nn.Sequential(
-            nn.Linear(out_channels, out_channels*2, bias=False),
-            nn.BatchNorm1d(out_channels*2, affine=True),
+            nn.Linear(out_channels, out_channels * 2, bias=False),
+            nn.BatchNorm1d(out_channels * 2, affine=True),
             nn.ReLU(),
-            nn.Dropout(0.),
-            nn.Linear(out_channels*2, out_channels, bias=False),
+            nn.Dropout(0.0),
+            nn.Linear(out_channels * 2, out_channels, bias=False),
         )
 
-    # NOTE: all inputs have a fixed length
-    # (edge_index and edge_attr are PADDED with zeros up to E_MAX)
-    @torch.jit.export
-    def forward(self, x, edge_index, edge_attr, nbr):
-        src = self.lin_src(x)
-        dst = self.lin_dst(x)
-        x_j = src.index_select(0, edge_index[0])
-        out = self.message(x_j, edge_attr)
-        out = self.aggregate(out, edge_index[1], nbr)
-        out = out + dst
-        return self.mlp(out)
-
-    @torch.jit.export
     def message(self, x_j, edge_attr):
         edge_attr = self.lin_edge(edge_attr)
         msg = x_j + edge_attr
         return msg.relu() + self.eps
 
-    @torch.jit.export
-    def aggregate(self, x, index, nbr):
-        alpha = softmax_via_nbr(x, index, nbr)
-        res = scatter_sum_via_nbr(x * alpha, nbr)
-        return res
+    def forward(self, x, edge_index, edge_attr):
+        """
+        x:         (N, Fin)
+        edge_index:(2, E)  (src, dst)
+        edge_attr: (E, edge_dim)
+        """
+        N = x.size(0)
+
+        src_feat = self.lin_src(x)   # (N, Fout)
+        dst_feat = self.lin_dst(x)   # (N, Fout)
+
+        src = edge_index[0].to(torch.int64)  # (E,)
+        dst = edge_index[1].to(torch.int64)  # (E,)
+
+        x_j = src_feat.index_select(0, src)      # (E, Fout)
+        msg = self.message(x_j, edge_attr)       # (E, Fout)
+
+        alpha = edge_softmax_per_dst(msg, dst, num_nodes=N)         # (E, Fout)
+        agg = scatter_sum_per_dst(msg * alpha, dst, num_nodes=N)    # (N, Fout)
+
+        out = agg + dst_feat
+        return self.mlp(out)
 
 
 class ExportableGNNBlock(nn.Module):
@@ -569,7 +453,6 @@ class ExportableGNNBlock(nn.Module):
         in_channels,
         hidden_channels,
         out_channels,
-        all_sizes,     # Tensor[S, L, 2] with ints; constant at model build time
         link_types,
         edge_dim: int = 1,
     ):
@@ -585,73 +468,12 @@ class ExportableGNNBlock(nn.Module):
         self.layers = nn.ModuleList([nn.ModuleList(convs) for convs in layers])
         self.act = nn.LeakyReLU()
 
-        # Keep original sizes as a buffer (useful for verification/debug)
-        self.register_buffer("all_sizes", all_sizes.int().clone(), persistent=False)
-
-        # ---- precompute constant offsets on CPU as Python lists (Dynamo-friendly) ----
-        # e_offsets[s][l] gives the starting column for link l; last entry is total sum_E[s]
-        # k_offsets[s][l] gives the starting column for link l; last entry is total sum_K[s]
-        sizes_list = all_sizes.detach().to("cpu").tolist()  # S x L x 2
-        S = len(sizes_list)
-        self.e_offsets = []
-        self.k_offsets = []
-        for s in range(S):
-            e_off = [0]
-            k_off = [0]
-            for l in range(len(sizes_list[s])):
-                e_off.append(e_off[-1] + int(sizes_list[s][l][0]))
-                k_off.append(k_off[-1] + int(sizes_list[s][l][1]))
-            self.e_offsets.append(e_off)
-            self.k_offsets.append(k_off)
-
-        # Adding these for ONNX which does not support plain lists.
-        # Not sure why I needed plain lists in the first place, maybe executorch stuff?
-        self.register_buffer("e_offsets_tensor", torch.tensor(self.e_offsets, dtype=torch.int64), persistent=False)
-        self.register_buffer("k_offsets_tensor", torch.tensor(self.k_offsets, dtype=torch.int64), persistent=False)
-
-    # def forward(
-    #     self,
-    #     x_hex: torch.Tensor,
-    #     ei_flat: torch.Tensor,   # (2, sum_E[size])
-    #     ea_flat: torch.Tensor,   # (sum_E[size], edge_dim)
-    #     nbr_flat: torch.Tensor,  # (N, sum_K[size])
-    #     size_idx: int
-    # ) -> torch.Tensor:
-    #     x = x_hex
-    #     num_layers = len(self.layers)
-    #     e_off = self.e_offsets_tensor[size_idx]
-    #     k_off = self.k_offsets_tensor[size_idx]
-
-    #     for i, convs in enumerate(self.layers):
-    #         y_init = False
-    #         y = torch.empty(0, device=x.device)
-
-    #         for l, conv in enumerate(convs):
-    #             e0, e1 = e_off[l], e_off[l + 1]
-    #             k0, k1 = k_off[l], k_off[l + 1]
-
-    #             edge_inds = ei_flat[:, e0:e1]
-    #             edge_attrs = ea_flat[e0:e1, :]
-    #             nbrs = nbr_flat[:, k0:k1]
-
-    #             out = conv(x, edge_inds, edge_attrs, nbrs)
-    #             if not y_init:
-    #                 y = out
-    #                 y_init = True
-    #             else:
-    #                 y = y + out
-
-    #         x = self.act(y) if i < num_layers - 1 else y
-
-    #     return x
-
     def forward(
         self,
         x_hex: torch.Tensor,
         ei_flat: torch.Tensor,   # (2, sum_E)
         ea_flat: torch.Tensor,   # (sum_E, edge_dim)
-        nbr_flat: torch.Tensor,  # (N, sum_K)
-        size: torch.Tensor       # (L, 2) where last dim is {E, K}
+        lengths: torch.Tensor    # (L) where L = len(self.layers)
     ) -> torch.Tensor:
         x = x_hex
         num_layers = len(self.layers)
@@ -661,19 +483,17 @@ class ExportableGNNBlock(nn.Module):
             y = torch.empty(0, device=x.device)
 
             cur_e = 0
-            cur_k = 0
 
             for l, conv in enumerate(convs):
-                e0, e1 = cur_e, cur_e + size[l][0]
-                k0, k1 = cur_k, cur_k + size[l][1]
+                length = lengths[l]
+                e0, e1 = cur_e, cur_e + length
                 cur_e = e1
-                cur_k = k1
 
                 edge_inds = ei_flat[:, e0:e1]
                 edge_attrs = ea_flat[e0:e1, :]
-                nbrs = nbr_flat[:, k0:k1]
 
-                out = conv(x, edge_inds, edge_attrs, nbrs)
+                out = conv(x, edge_inds, edge_attrs)
+
                 if not y_init:
                     y = out
                     y_init = True
@@ -683,12 +503,3 @@ class ExportableGNNBlock(nn.Module):
             x = self.act(y) if i < num_layers - 1 else y
 
         return x
-
-
-class ModelSizelessWrapper(torch.nn.Module):
-    def __init__(self, m):
-        super().__init__()
-        self.m = m
-
-    def forward(self, obs, ei_flat, ea_flat, nbr_flat, size):
-        return self.m(obs, ei_flat, ea_flat, nbr_flat, size)
