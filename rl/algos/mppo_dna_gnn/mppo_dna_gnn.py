@@ -1249,6 +1249,16 @@ def prepare_wandb_log(
     wlog = {}
 
     if eval_multistats.num_episodes > 0:
+        reward_abs_tot = (
+            abs(eval_multistats.ep_rew_step_fixed_mean)
+            + abs(eval_multistats.ep_rew_dmg_mult_mean)
+            + abs(eval_multistats.ep_rew_term_mult_mean)
+            + abs(eval_multistats.ep_rew_relval_mult_mean)
+            # + abs(eval_multistats.ep_rew_step_round_mult_mean)
+            # + abs(eval_multistats.ep_rew_round_fixed_mean)
+            # + abs(eval_multistats.ep_rew_round_round_mult_mean)
+        )
+
         wlog.update({
             "eval/ep_rew_mean": eval_multistats.ep_rew_mean,
             "eval/ep_value_mean": eval_multistats.ep_value_mean,
@@ -1262,9 +1272,26 @@ def prepare_wandb_log(
             # "eval/reward/step_round_mult": eval_multistats.ep_rew_step_round_mult_mean,
             # "eval/reward/round_fixed": eval_multistats.ep_rew_round_fixed_mean,
             # "eval/reward/round_round_mult": eval_multistats.ep_rew_round_round_mult_mean,
+            "eval/reward_rel/step_fixed": abs(eval_multistats.ep_rew_step_fixed_mean) / reward_abs_tot,
+            "eval/reward_rel/dmg_mult": abs(eval_multistats.ep_rew_dmg_mult_mean) / reward_abs_tot,
+            "eval/reward_rel/term_mult": abs(eval_multistats.ep_rew_term_mult_mean) / reward_abs_tot,
+            "eval/reward_rel/relval_mult": abs(eval_multistats.ep_rew_relval_mult_mean) / reward_abs_tot,
+            # "eval/reward_rel/step_round_mult": abs(eval_multistats.ep_rew_step_round_mult_mean) / reward_abs_tot,
+            # "eval/reward_rel/round_fixed": abs(eval_multistats.ep_rew_round_fixed_mean) / reward_abs_tot,
+            # "eval/reward_rel/round_round_mult": abs(eval_multistats.ep_rew_round_round_mult_mean) / reward_abs_tot,
         })
 
     for name, eval_sample_stats in eval_multistats.variants.items():
+        reward_abs_tot = (
+            abs(eval_sample_stats.ep_rew_step_fixed_mean)
+            + abs(eval_sample_stats.ep_rew_dmg_mult_mean)
+            + abs(eval_sample_stats.ep_rew_term_mult_mean)
+            + abs(eval_sample_stats.ep_rew_relval_mult_mean)
+            # + abs(eval_sample_stats.ep_rew_step_round_mult_mean)
+            # + abs(eval_sample_stats.ep_rew_round_fixed_mean)
+            # + abs(eval_sample_stats.ep_rew_round_round_mult_mean)
+        )
+
         wlog.update({
             f"eval/{name}/ep_rew_mean": eval_sample_stats.ep_rew_mean,
             f"eval/{name}/ep_value_mean": eval_sample_stats.ep_value_mean,
@@ -1278,6 +1305,13 @@ def prepare_wandb_log(
             # f"eval/{name}/reward/step_round_mult_mean": eval_sample_stats.ep_rew_step_round_mult_mean,
             # f"eval/{name}/reward/round_fixed_mean": eval_sample_stats.ep_rew_round_fixed_mean,
             # f"eval/{name}/reward/round_round_mult_mean": eval_sample_stats.ep_rew_round_round_mult_mean,
+            f"eval/{name}/reward_rel/step_fixed": abs(eval_sample_stats.ep_rew_step_fixed_mean) / reward_abs_tot,
+            f"eval/{name}/reward_rel/dmg_mult": abs(eval_sample_stats.ep_rew_dmg_mult_mean) / reward_abs_tot,
+            f"eval/{name}/reward_rel/term_mult": abs(eval_sample_stats.ep_rew_term_mult_mean) / reward_abs_tot,
+            f"eval/{name}/reward_rel/relval_mult": abs(eval_sample_stats.ep_rew_relval_mult_mean) / reward_abs_tot,
+            # f"eval/{name}/reward_rel/step_round_mult": abs(eval_sample_stats.ep_rew_step_round_mult_mean) / reward_abs_tot,
+            # f"eval/{name}/reward_rel/round_fixed": abs(eval_sample_stats.ep_rew_round_fixed_mean) / reward_abs_tot,
+            # f"eval/{name}/reward_rel/round_round_mult": abs(eval_sample_stats.ep_rew_round_round_mult_mean) / reward_abs_tot,
         })
 
     if train_sample_stats.num_episodes > 0:
@@ -1797,7 +1831,8 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                         logger.info("Still uploading previous 'best' checkpoint -- will not overwrite it")
                     else:
                         eval_net_value_best = eval_net_value
-                        thread = threading.Thread(target=save_fn, kwargs=dict(s3_config=None, tag="best"))
+                        # Add resumes to filename to prevent overwriting pre-crash best results
+                        thread = threading.Thread(target=save_fn, kwargs=dict(s3_config=None, tag=f"{state.resumes}-best"))
                         thread.start()
 
             if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:

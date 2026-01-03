@@ -145,7 +145,7 @@ function pymod() {
 # Link a tagged checkpoint
 #
 function link_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: link_checkpoint RUN_ID-TIMESTAMP [DIR]"; return 1; }
+    [ -n "\${1:-}" ] || { echo "Usage: link_checkpoint RUN_ID-TAG [DIR]"; return 1; }
     [ -n "\$2" ] && link_dir="\${2%/}" || link_dir=.
 
     [[ \$1 =~ ^[a-z]{8}-best$ ] || [[ \$1 =~ ^[a-z]{8}-[0-9]+\$ ]] || { echo "Invalid tag: \$1"; return 1; }
@@ -223,28 +223,34 @@ function download_checkpoint() {
 }
 
 #
-# Make a timestamped checkpoint
+# Copy a checkpoint
+# E.g. fdqwrsd-best-... fdqwrsd-202601011251-...
 #
-function backup_best_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: backup_best_checkpoint ID [TIMESTAMP]"; return 1; }
-    [ -n "\${2:-}" ] && ts=\$2 || ts="\$(date +%s)"
+function backup_checkpoint() {
+    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: backup_checkpoint RUN_ID-OLDTAG NEWTAG"; return 1; }
 
-    id=\$1
+    rid=\${1%-*}
+    otag=\${1#*-}
+    ntag=\$2
 
-    [[ \$ts =~ ^[0-9]+\$ ]] || { echo "Invalid timestamp: \$ts"; return 1; }
-    [[ \$id =~ ^[a-z]{8}\$ ]] || { echo "Bad id: \$id"; return 1; }
+    if ! [ -e \$rid-\$otag-model-dna.pt ]; then
+        echo "Source model not found: \$rid-\$otag-model-dna.pt"
+        return 1
+    fi
 
-    if [ -e \$id-\$ts-model-dna.pt ]; then
-        echo "File already exists: \$id-\$ts-model-dna.pt"
+    [[ \$ntag =~ ^[0-9a-z]+$ ]] || { echo "Bad NEWTAG: \$ntag"; return 1; }
+
+    if [ -e \$rid-\$ntag-model-dna.pt ]; then
+        echo "Destination already exists: \$rid-\$ntag-model-dna.pt"
         return 1
     fi
 
     for f in config state-default; do
-      cp \$id-{best-,\$ts-}\$f.json
+      cp \$rid-{\$otag-,\$ntag-}\$f.json
     done
 
     for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
-      cp \$id-{best-,\$ts-}\$f.pt
+      cp \$rid-{\$otag-,\$ntag-}\$f.pt
     done
 }
 
