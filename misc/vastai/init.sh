@@ -146,33 +146,39 @@ function pymod() {
 #
 function link_checkpoint() {
     [ -n "\${1:-}" ] || { echo "Usage: link_checkpoint RUN_ID-TAG [DIR]"; return 1; }
-    [ -n "\$2" ] && link_dir="\${2%/}" || link_dir=.
+    [ -n "\$2" ] && workdir="\${2%/}" || workdir=.
 
-    [[ \$1 =~ ^[a-z]{8}-best$ ] || [[ \$1 =~ ^[a-z]{8}-[0-9]+\$ ]] || { echo "Invalid tag: \$1"; return 1; }
+    rid=\${1%-*}
+    tag=\${1#*-}
 
+    [[ \$rid =~ ^[a-z]{8}$ ]] || { echo "Invalid RUN_ID: \$rid"; return 1; }
+    [[ \$tag =~ ^[a-z0-9]+\$ ]] || { echo "Invalid TAG: \$tag"; return 1; }
     confirmed=no
 
-    for f in \$link_dir/*-\$1-*; do
-        fbase=\${f##*/}
-        flink=\$link_dir/\${fbase:0:8}-\${fbase:20}
-        if [ -e \$flink -a \$confirmed != yes ]; then
-            echo -n "File exists, type 'yes' to continue: "
-            read -r confirmed
-            [ "\$confirmed" = "yes" ] || return 0
-        fi
+    (
+        set -e
+        cd \$workdir
 
-        abstarget="\$link_dir/\$fbase"
-        [ -e "\$abstarget" ] || { echo "Error: target not found: \$abstarget"; return 1; }
+        for f in \$rid-\$tag-*; do
+            tail=\${f#\$rid-\$tag-}
+            flink=\$rid-\$tail
+            if [ -e \$flink -a \$confirmed != yes ]; then
+                echo -n "File exists, type 'yes' to continue: "
+                read -r confirmed
+                [ "\$confirmed" = "yes" ] || return 0
+            fi
 
-        ln -fs \$fbase \$link_dir/\${fbase:0:8}-\${fbase:20}
-    done
+            ln -fs \$f \$flink
+        done
+    )
 }
 
 #
 # Upload a timestamped checkpoint (from current dir)
 #
 function upload_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG"; return 1; }
+    [ -n "\${1:-}" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG [DIR]"; return 1; }
+    [ -n "\$2" ] && workdir="\${2%/}" || workdir=.
 
     rid=\${1%-*}
     tag=\${1#*-}
@@ -180,16 +186,21 @@ function upload_checkpoint() {
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG"; return 1; }
 
-    files=()
-    for suffix in config.json state-default.json model-dna.pt optimizer-distill.pt optimizer-policy.pt optimizer-value.pt scaler-default.pt; do
-        f=\$rid-\$tag-\$suffix
-        [ -r \$f ] || { echo "Not found: \$f"; return 1; }
-        files+=(\$f)
-    done
+    (
+        set -e
+        cd \$workdir
 
-    for f in \${files[@]}; do
-        aws s3 cp \$f s3://vcmi-gym/\$s3_dir/
-    done
+        files=()
+        for suffix in config.json state-default.json model-dna.pt optimizer-distill.pt optimizer-policy.pt optimizer-value.pt scaler-default.pt; do
+            f=\$rid-\$tag-\$suffix
+            [ -r \$f ] || { echo "Not found: \$f"; return 1; }
+            files+=(\$f)
+        done
+
+        for f in \${files[@]}; do
+            aws s3 cp \$f s3://vcmi-gym/\$s3_dir/
+        done
+    )
 }
 
 #
@@ -227,31 +238,37 @@ function download_checkpoint() {
 # E.g. fdqwrsd-best-... fdqwrsd-202601011251-...
 #
 function backup_checkpoint() {
-    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: backup_checkpoint RUN_ID-OLDTAG NEWTAG"; return 1; }
+    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: backup_checkpoint RUN_ID-OLDTAG NEWTAG [DIR]"; return 1; }
+    [ -n "\$3" ] && workdir="\${3%/}" || workdir=.
 
     rid=\${1%-*}
     otag=\${1#*-}
     ntag=\$2
 
-    if ! [ -e \$rid-\$otag-model-dna.pt ]; then
-        echo "Source model not found: \$rid-\$otag-model-dna.pt"
-        return 1
-    fi
+    (
+        set -e
+        cd \$workdir
 
-    [[ \$ntag =~ ^[0-9a-z]+$ ]] || { echo "Bad NEWTAG: \$ntag"; return 1; }
+        if ! [ -e \$rid-\$otag-model-dna.pt ]; then
+            echo "Source model not found: \$rid-\$otag-model-dna.pt"
+            return 1
+        fi
 
-    if [ -e \$rid-\$ntag-model-dna.pt ]; then
-        echo "Destination already exists: \$rid-\$ntag-model-dna.pt"
-        return 1
-    fi
+        [[ \$ntag =~ ^[0-9a-z]+$ ]] || { echo "Bad NEWTAG: \$ntag"; return 1; }
 
-    for f in config state-default; do
-      cp \$rid-{\$otag-,\$ntag-}\$f.json
-    done
+        if [ -e \$rid-\$ntag-model-dna.pt ]; then
+            echo "Destination already exists: \$rid-\$ntag-model-dna.pt"
+            return 1
+        fi
 
-    for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
-      cp \$rid-{\$otag-,\$ntag-}\$f.pt
-    done
+        for f in config state-default; do
+          cp \$rid-{\$otag-,\$ntag-}\$f.json
+        done
+
+        for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
+          cp \$rid-{\$otag-,\$ntag-}\$f.pt
+        done
+    )
 }
 
 function setboot() {
@@ -264,22 +281,27 @@ set -x
 # For tracking reboots
 date +'BOOTED_AT=%FT%T%z' >> ~/.bashrc
 
-tmux new-session -d "source ~/.simorc; cd \$PWD; \$*; exec \$SHELL"
+tmux new-session -d "source ~/.simorc; tmux rename-window REBOOTED; /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID REBOOTED; cd \$PWD; \$*; exec \$SHELL"
 EOL
 }
 
 function retry_until_sigint() {
+    local run_id=\$1
+    shift
     local i=0
     while true; do
+        tmux rename-window \$run_id || :
         bash -x ~/runcmd.sh \$*
         if [ \$? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
             /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID IDLE
+            tmux rename-window IDLE || :
             break
         else
             echo "Interrupt NOT detected, will retry in 10s..."
             let ++i
             /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID CRASHED_\$i
+            tmux rename-window CRASHED_\$i || :
             # FIXME: if there are other runs on the same instance, this will kill them as well
             killall python
             sleep 10
@@ -318,19 +340,21 @@ USAGE
     if \$dry_run; then
         resumecmd+=" --dry-run"
 
-        # don't resume on boot (let it transition to IDLE)
+        # don't resume on boot (let it transition to REBOOTED)
         setboot :
     else
         # must not start a new run on boot => use resumecmd
-        setboot retry_until_sigint \$resumecmd
+        setboot retry_until_sigint \$run_id \$resumecmd
     fi
 
     if \$new_run; then
         echo "This is a new run -- will start ONCE with --run-id to create it"
+        tmux rename-window \$run_id || :
         bash -x ~/runcmd.sh \$newcmd --skip-eval
 
         if [ \$? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
+            tmux rename-window IDLE || :
             /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID IDLE
             # run was interrupted, no need to resume on boot
             setboot :
@@ -339,12 +363,13 @@ USAGE
 
         # The config file should now be created, can enter the regular retry loop
         echo "Interrupt NOT detected, will enter retry loop"
+        tmux rename-window CRASHED || :
         /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID CRASHED
         killall python
         sleep 10
     fi
 
-    retry_until_sigint \$resumecmd
+    retry_until_sigint \$run_id \$resumecmd
     setboot :
 }
 
@@ -510,4 +535,5 @@ echo "Done in $((finished_at - started_at)) seconds."
 
 # Mark as completed
 touch /workspace/.initialized
+tmux rename-window ready || :
 /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID ready
