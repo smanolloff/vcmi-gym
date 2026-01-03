@@ -69,6 +69,13 @@ def flatten_edges(hdata):
     return ei_flat, ea_flat, torch.tensor(lengths)
 
 
+def onnx_fwd(edge, inputs):
+    return [
+        torch.as_tensor(x)
+        for x in edge.run(None, {k: v.numpy() for k, v in inputs.items()})
+    ]
+
+
 def build_action_probs(
     act0_probs: torch.Tensor,      # (B, 4)
     hex1_probs: torch.Tensor,      # (B, 4, 165)   = P(hex1 | act0)
@@ -84,7 +91,7 @@ def build_action_probs(
     out = torch.zeros_like(mask, dtype=torch.float32)
 
     # 0) WAIT: all triplets map to 0 when act0=0
-    out[:, 0] += act0_probs[:, 0]
+    out[:, 1] += act0_probs[:, 0]
 
     # 1) MOVE: act0=1, depends on hex1 only (hex2 irrelevant)
     move_ids = action_table[1, :, 0].to(device)                 # (H,)
@@ -306,12 +313,9 @@ class ExportableModel(nn.Module):
         ], -1)                                                                  # (B, 2312)
 
         # Final probs (B, N_ACTIONS)
-        return (
-            act0_probs, mask_act0,
-            hex1_probs, mask_hex1,
-            hex2_probs, mask_hex2,
-            build_action_probs(act0_probs, hex1_probs, hex2_probs, mask, self.action_table)
-        )
+        probs = build_action_probs(act0_probs, hex1_probs, hex2_probs, mask, self.action_table)
+
+        return probs, mask
 
 
 # Used in exports only because loading weights from the checkpoint file
