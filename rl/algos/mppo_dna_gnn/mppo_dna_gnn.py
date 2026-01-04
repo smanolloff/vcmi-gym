@@ -1832,7 +1832,8 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                     else:
                         eval_net_value_best = eval_net_value
                         # Add resumes to filename to prevent overwriting pre-crash best results
-                        thread = threading.Thread(target=save_fn, kwargs=dict(s3_config=None, tag=f"{state.resumes}-best"))
+                        # (functions in init.sh expect  alphanumeric tags => no separator)
+                        thread = threading.Thread(target=save_fn, kwargs=dict(s3_config=None, tag=f"best{state.resumes}"))
                         thread.start()
 
             if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:

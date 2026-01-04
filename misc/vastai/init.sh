@@ -143,25 +143,29 @@ function pymod() {
 
 #
 # Link a tagged checkpoint
+# e.g. link_checkpoint joymfkqj-1767449899 joymfkqj
 #
 function link_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: link_checkpoint RUN_ID-TAG [DIR]"; return 1; }
-    [ -n "\$2" ] && workdir="\${2%/}" || workdir=.
+    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: link_checkpoint PREFIX LINK_PREFIX [DIR]"; return 1; }
+    [ -n "\$3" ] && workdir="\${3%/}" || workdir=.
 
-    rid=\${1%-*}
-    tag=\${1#*-}
-
-    [[ \$rid =~ ^[a-z]{8}$ ]] || { echo "Invalid RUN_ID: \$rid"; return 1; }
-    [[ \$tag =~ ^[a-z0-9]+\$ ]] || { echo "Invalid TAG: \$tag"; return 1; }
-    confirmed=no
+    prefix=\$1
+    lprefix=\$2
 
     (
         set -e
         cd \$workdir
 
-        for f in \$rid-\$tag-*; do
-            tail=\${f#\$rid-\$tag-}
-            flink=\$rid-\$tail
+        if ! [ -e \$prefix-model-dna.pt ]; then
+            echo "Source model not found: \$prefix-model-dna.pt"
+            return 1
+        fi
+
+        confirmed=no
+        for f in \$prefix-*; do
+            tail=\${f#\$prefix-}
+            flink=\$lprefix-\$tail
+
             if [ -e \$flink -a \$confirmed != yes ]; then
                 echo -n "File exists, type 'yes' to continue: "
                 read -r confirmed
@@ -235,38 +239,52 @@ function download_checkpoint() {
 
 #
 # Copy a checkpoint
-# E.g. fdqwrsd-best-... fdqwrsd-202601011251-...
+# E.g. fdqwrsd-best-... gdhsgsi-202601011251-...
 #
-function backup_checkpoint() {
-    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: backup_checkpoint RUN_ID-OLDTAG NEWTAG [DIR]"; return 1; }
+function copy_checkpoint() {
+    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: backup_checkpoint RUN_ID-TAG1 RUN_ID-TAG2 [DIR]"; return 1; }
     [ -n "\$3" ] && workdir="\${3%/}" || workdir=.
 
-    rid=\${1%-*}
-    otag=\${1#*-}
-    ntag=\$2
+    rid1=\${1%-*}
+    tag1=\${1#*-}
+    rid2=\${2%-*}
+    tag2=\${2#*-}
+
+    [[ \$rid1 =~ ^[a-z]+$ ]] || { echo "Bad RUN_ID1: \$rid1"; return 1; }
+    [[ \$rid2 =~ ^[a-z]+$ ]] || { echo "Bad RUN_ID2: \$rid2"; return 1; }
+    [[ \$tag1 =~ ^[0-9a-z]+$ ]] || { echo "Bad TAG1: \$tag1"; return 1; }
+    [[ \$tag2 =~ ^[0-9a-z]+$ ]] || { echo "Bad TAG2: \$tag2"; return 1; }
 
     (
         set -e
         cd \$workdir
 
-        if ! [ -e \$rid-\$otag-model-dna.pt ]; then
-            echo "Source model not found: \$rid-\$otag-model-dna.pt"
+        confirmed=no
+        if [ \$rid1 != \$rid2 ]; then
+            echo -n "RUN_ID is different, type 'yes' to continue: "
+            read -r confirmed
+            [ "\$confirmed" = "yes" ] || return 0
+        fi
+
+        prefix1=\$rid1-\$tag1
+        prefix2=\$rid2-\$tag2
+
+        if ! [ -e \$prefix1-model-dna.pt ]; then
+            echo "Source model not found: \$prefix1-model-dna.pt"
             return 1
         fi
 
-        [[ \$ntag =~ ^[0-9a-z]+$ ]] || { echo "Bad NEWTAG: \$ntag"; return 1; }
-
-        if [ -e \$rid-\$ntag-model-dna.pt ]; then
-            echo "Destination already exists: \$rid-\$ntag-model-dna.pt"
+        if [ -e \$prefix2-model-dna.pt ]; then
+            echo "Destination already exists: \$prefix2-model-dna.pt"
             return 1
         fi
 
         for f in config state-default; do
-          cp \$rid-{\$otag-,\$ntag-}\$f.json
+          cp {\$prefix1-,\$prefix2-}\$f.json
         done
 
         for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
-          cp \$rid-{\$otag-,\$ntag-}\$f.pt
+          cp {\$prefix1-,\$prefix2-}\$f.pt
         done
     )
 }
