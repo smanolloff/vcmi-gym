@@ -1,3 +1,19 @@
+<div align="center">
+<a href=https://smanolloff.github.io/projects/vcmi-gym/>
+  <img src="doc/cover-800.webp" alt="cover" width="200px">
+</a>
+</div>
+
+<div align="center">
+  <h3>
+    Follow the journey:
+    <br>
+    <a href=https://smanolloff.github.io/projects/vcmi-gym/>smanolloff.github.io</a>
+  </h3>
+</div>
+
+---
+
 # VCMI Gym
 
 `vcmi-gym` is a project which aims to create a gym-compatible reinforcement
@@ -8,31 +24,58 @@ needed to produce VCMI combat AI models.
 
 <img src="doc/demo.gif" alt="demo">
 
+### Codename `MMAI`
+
+`MMAI` is the name of VCMI's AI which uses the models trained in vcmi-gym.
+
+It was introduced in
+[VCMI v1.7.0](https://github.com/vcmi/vcmi/blob/68a1a900ae50c4c2dd92234a7e64b3fd162d3217/ChangeLog.md)
+as an experimental ML-powered AI and is now available in the VCMI Settings:
+
+<p>
+<kbd>
+<img src="doc/vcmi-launcher.png" alt="launcher" width="500px">
+</kbd>
+</p>
+
+Feel free to try it out!
+[Install VCMI](https://github.com/vcmi/vcmi?tab=readme-ov-file#installation-guides),
+choose "MMAI" and press Play ;)
+
+
 ## Project state
 
-Models trained by vcmi-gym can be loaded in VCMI through the changes proposed
-in this pull request: https://github.com/vcmi/vcmi/pull/4788. When the VCMI
-team accepts the contribution, vcmi-gym's models will become readily available
-in VCMI through the VCMI mod ecosystem. 
+`vcmi-gym` is in a state of active development. Updates to the
+gym environment, NN architecture and RL algorithms are made frequently.
+Although the first models are already out, training new models is an
+[ongoing effort](https://smanolloff.github.io/projects/vcmi-gym/).
 
-Training new models is an ongoing effort and does not block players from using
-the already trained MMAI models once released, as they enhance gameplay
-experience by adding engaging and unpredictable behaviour of the enemy troops
-during battle.
+Documentation is outdated :( There is too much going on at the moment and I
+really can't keep up. I will eventually update it to smoothen the onboarding
+process for AI enthusiasts and contributors. Until then, you can read my
+[vcmi-gym journal](https://smanolloff.github.io/projects/vcmi-gym/) for an
+up-to-date (albeit less-technical) overview of the current project state.
 
 ## Project architecture
 
 A high-level overview of the `vcmi-gym` project is given in the below diagram:
 
-<img src="doc/components.png" alt="components" height="500px">
+<img src="doc/components.png" alt="components" height="200px">
 
-The W&B external component is optional. VCMI (the game itself) is required --
-it is a fork of VCMI with some modifications for RL training purposes and is
-managed in a [separate repo](https://github.com/smanolloff/vcmi), tracked as a
-[git submodule](https://git-scm.com/book/en/v2/Git-Tools-Submodules) located
-at `./vcmi`.
+The W&B external component is optional. VCMI (the game itself) is required
+(specifically, a VCMI [fork](https://github.com/smanolloff/vcmi/tree/mmai-ml)
+with modifications for RL training purposes which are not part of the official
+game yet).
 
 ## Getting started
+
+> [!WARNING]
+> This documentation is outdated and the installation instructions will
+> not work :(.
+>
+> Updates will follow as soon as I can spare the time. Until then, you can read my
+> [vcmi-gym journal](https://smanolloff.github.io/projects/vcmi-gym/) for a
+> recently updated (albeit less-technical) overview of the current project state.
 
 ### Installation
 
