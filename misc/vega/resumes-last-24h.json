@@ -4,15 +4,38 @@
     "notes": [
       "Bar chart with number of resumes in the last 24 hours",
       "Data Source:",
-      "(runSets: ..., filters: State=running)",
+      "(runSets: ..., filters: [])",
       "   id",
       "   name",
       "   createdAt",
-      "   history: (keys: [_timestamp, global/resumes])"
+      "   history: (keys: [_timestamp, global/resumes, eval/ep_rew_mean])",
+      "   history1: (keys: [_timestamp, eval/ep_rew_mean])"
     ]
   },
-  "title": "# of resumes (last 24h)",
+  "title": {"text": {"expr": "'# of resumes (last ' + hours_window + 'h)'"}},
   "data": { "name": "wandb" },
+  "params": [
+    {
+      "name": "hours_window",
+      "value": "${string:Window (h):24}"
+    },
+    {
+      "name": "run_filter_days",
+      "value": "${string:Run filter (d):3}"
+    },
+    {
+      "name": "fresh_marker_days",
+      "value": "${string:Fresh mark (d):1}"
+    },
+    {
+      "name": "tag_fresh",
+      "value": "${string:Fresh tag:}"
+    },
+    {
+      "name": "tag_stale",
+      "value": "${string:Stale tag:-}"
+    }
+  ],
   "config": {
     "legend": { "disable": true },
     "axis": {
@@ -25,9 +48,30 @@
     }
   },
   "transform": [
+    {
+      "calculate": "isValid(datum['eval/ep_rew_mean']) ? datum._timestamp * 1000 : null",
+      "as": "_eval_ts"
+    },
+    {
+      "joinaggregate": [
+        { "op": "max", "field": "_eval_ts", "as": "_last_eval_ts" }
+      ],
+      "groupby": ["id"]
+    },
+
     { "filter": "isValid(datum['global/resumes'])" },
     { "calculate": "datum._timestamp * 1000", "as": "cur_ts" },
-    { "calculate": "now() - 24*3600*1000", "as": "ref_ts" },
+    { "calculate": "now() - hours_window*3600*1000", "as": "ref_ts" },
+    { "calculate": "now() - fresh_marker_days*24*3600*1000", "as": "ref_fresh_ts" },
+
+    {
+      "joinaggregate": [
+        { "op": "max", "field": "cur_ts", "as": "last_ts" }
+      ],
+      "groupby": ["id"]
+    },
+    { "filter": "datum.last_ts >= now() - run_filter_days*24*3600*1000" },
+
     { "calculate": "datum.cur_ts <= datum.ref_ts ? datum['global/resumes'] : 0", "as": "resumes_before_24h" },
     {
       "joinaggregate": [
@@ -37,18 +81,22 @@
       "groupby": ["id"]
     },
     { "calculate": "datum.resumes_now - datum.resumes_ref", "as": "resumes_diff" },
+
     {
       "window": [{ "op": "row_number", "as": "rn" }],
       "sort": [{ "field": "_timestamp", "order": "descending" }],
       "groupby": ["id"]
     },
     { "filter": "datum.rn == 1" },
-    { "filter": "isValid(datum.resumes_ref) && isValid(datum.resumes_diff)" }
+    { "filter": "isValid(datum.resumes_ref) && isValid(datum.resumes_diff)" },
+
+    { "calculate": "datum._last_eval_ts >= datum.ref_fresh_ts", "as": "fresh" },
+    { "calculate": "(datum.fresh ? tag_fresh : tag_stale) + datum.id", "as": "id_label" }
   ],
   "mark": "bar",
   "encoding": {
     "y": {
-      "field": "id",
+      "field": "id_label",
       "type": "nominal",
       "sort": {"field": "createdAt", "order": "descending"}
     },

@@ -5,15 +5,37 @@
       "Bar chart with mean value of timer_abs/all metric for the last 24 hours",
       "Window is relative to each run's latest _timestamp (not now())",
       "Data Source:",
-      "(runSets: ..., filters: State=running)",
+      "(runSets: ..., filters: [])",
       "   id",
       "   name",
       "   createdAt",
       "   history: (keys: [_timestamp, timer_abs/all, timer_abs/eval])"
     ]
   },
-  "title": "timer_abs/all (24h avg)",
+  "title": {"text": {"expr": "'timer_abs/all (' + hours_window + 'h avg)'"}},
   "data": { "name": "wandb" },
+  "params": [
+    {
+      "name": "hours_window",
+      "value": "${string:Window (h):24}"
+    },
+    {
+      "name": "run_filter_days",
+      "value": "${string:Run filter (d):7}"
+    },
+    {
+      "name": "fresh_marker_days",
+      "value": "${string:Fresh mark (d):1}"
+    },
+    {
+      "name": "tag_fresh",
+      "value": "${string:Fresh tag:}"
+    },
+    {
+      "name": "tag_stale",
+      "value": "${string:Stale tag:-}"
+    }
+  ],
   "config": {
     "legend": { "disable": true },
     "axis": {
@@ -26,7 +48,7 @@
     }
   },
   "transform": [
-    { "filter": "isValid(datum._timestamp) && isValid(datum['timer_abs/all']) && isValid(datum['timer_abs/eval'])" },
+    { "filter": "isValid(datum._timestamp) && isValid(datum['timer_abs/all'])" },
     { "calculate": "datum['timer_abs/all'] - datum['timer_abs/eval']", "as": "timer_sub" },
 
     { "calculate": "datum._timestamp * 1000", "as": "ts_ms" },
@@ -38,10 +60,10 @@
       "groupby": ["id"]
     },
 
-    { "calculate": "datum.last_ts_ms - 24 * 3600000", "as": "cutoff_ms" },
-    { "filter": "datum.ts_ms >= datum.cutoff_ms" },
-
     { "calculate": "time(toDate(datum.createdAt))", "as": "createdAt_ms" },
+
+    { "calculate": "now()/1000 - run_filter_days*24*3600", "as": "ref_run_ts" },
+    { "filter": "datum._timestamp > datum.ref_run_ts" },
 
     {
       "aggregate": [
@@ -51,12 +73,16 @@
         { "op": "max", "field": "createdAt_ms", "as": "createdAt_ms" }
       ],
       "groupby": ["id"]
-    }
+    },
+
+    { "calculate": "now() - fresh_marker_days*24*3600*1000", "as": "ref_fresh_ts" },
+    { "calculate": "datum.last_ts_ms > datum.ref_fresh_ts", "as": "fresh" },
+    { "calculate": "(datum.fresh ? tag_fresh : tag_stale) + datum.id", "as": "id_label" }
   ],
   "mark": "bar",
   "encoding": {
     "y": {
-      "field": "id",
+      "field": "id_label",
       "type": "nominal",
       "sort": { "field": "createdAt_ms", "order": "descending" }
     },

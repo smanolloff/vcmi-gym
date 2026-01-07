@@ -1,5 +1,5 @@
 <div align="center">
-<a href=https://smanolloff.github.io/projects/vcmi-gym/>
+<a href="https://smanolloff.github.io/projects/vcmi-gym/">
   <img src="doc/cover-800.webp" alt="cover" width="200px">
 </a>
 </div>
@@ -8,7 +8,7 @@
   <h3>
     Follow the journey:
     <br>
-    <a href=https://smanolloff.github.io/projects/vcmi-gym/>smanolloff.github.io</a>
+    <a href="https://smanolloff.github.io/projects/vcmi-gym/">smanolloff.github.io</a>
   </h3>
 </div>
 

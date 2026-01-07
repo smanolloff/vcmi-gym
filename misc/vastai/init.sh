@@ -242,7 +242,7 @@ function download_checkpoint() {
 # E.g. fdqwrsd-best-... gdhsgsi-202601011251-...
 #
 function copy_checkpoint() {
-    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: backup_checkpoint RUN_ID-TAG1 RUN_ID-TAG2 [DIR]"; return 1; }
+    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: copy_checkpoint RUN_ID-TAG1 RUN_ID-TAG2 [DIR]"; return 1; }
     [ -n "\$3" ] && workdir="\${3%/}" || workdir=.
 
     rid1=\${1%-*}
@@ -391,6 +391,7 @@ USAGE
     setboot :
 }
 
+set +x
 alias gs='git status'
 alias gl='git log'
 alias gh='git h'
@@ -408,7 +409,6 @@ export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 export VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
 cd /workspace/vcmi-gym
-set +x
 . /workspace/vcmi-gym/.venv/bin/activate
 set -x
 EOF
