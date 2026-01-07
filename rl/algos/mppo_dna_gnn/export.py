@@ -99,12 +99,12 @@ def test_gnn():
 
     res = gen(*inputs.values())
     myres = mygen(*inputs.values())
-    assert torch.allclose(res, myres, rtol=1e-5, atol=1e-5)
+    assert torch.allclose(res, myres, atol=1e-5, rtol=0)
 
     myres = mygen(*inputs.values())
     sgen = torch.jit.script(mygen)
     sres = sgen(*inputs.values())
-    assert torch.allclose(res, sres, rtol=1e-6, atol=1e-6)
+    assert torch.allclose(res, sres, atol=1e-6, rtol=0)
 
     buffer = io.BytesIO()
 
@@ -130,7 +130,7 @@ def test_gnn():
     omodel = ort.InferenceSession(buffer.getvalue())
     ores = omodel.run(None, {k: v.numpy() for k, v in inputs.items()})[0]
 
-    assert torch.allclose(res, torch.as_tensor(omodel), rtol=1e-6, atol=1e-6)
+    assert torch.allclose(res, torch.as_tensor(omodel), atol=1e-6, rtol=0)
 
     print("test_gnn: OK")
 
@@ -200,7 +200,7 @@ def test_block():
 
     sblock = torch.jit.script(myblock)
     sres = sblock(*inputs.values())
-    assert torch.allclose(res, sres, rtol=1e-6, atol=1e-6)
+    assert torch.allclose(res, sres, atol=1e-6, rtol=0)
 
     buffer = io.BytesIO()
 
@@ -226,7 +226,7 @@ def test_block():
     omodel = ort.InferenceSession(buffer.getvalue())
     ores = omodel.run(None, {k: v.numpy() for k, v in inputs.items()})[0]
 
-    assert torch.allclose(res, torch.as_tensor(ores), rtol=1e-6, atol=1e-6)
+    assert torch.allclose(res, torch.as_tensor(ores), atol=1e-6, rtol=0)
 
     print("test_block: OK")
 
@@ -239,6 +239,7 @@ def test_model(cfg, weights_file):
     # venv = DualVecEnv(dict(mapname="gym/archangels.vmap", role="defender", random_heroes=1), num_envs_stupidai=1)
     venv = DualVecEnv(dict(
         mapname="gym/generated/4096/4x1024.vmap",
+        # mapname="gym/A1.vmap",
         role=cfg["train"]["env"]["kwargs"]["role"]
     ), num_envs_stupidai=1)
 
@@ -273,7 +274,7 @@ def test_model(cfg, weights_file):
         tuple(build_inputs(build_hdata(venv)).values()),
         buffer,
         input_names=["obs", "ei_flat", "ea_flat", "lengths"],
-        output_names=["probs", "mask"],
+        output_names=["act0_probs", "hex1_probs", "hex2_probs", "act0_mask", "hex1_mask", "hex2_mask"],
         opset_version=18,  # onnxruntime 1.14+
         do_constant_folding=True,
         dynamic_axes={
@@ -294,31 +295,34 @@ def test_model(cfg, weights_file):
         print(venv.render()[0])
         hdata = build_hdata(venv)
         inputs = build_inputs(hdata)
-        mask = torch.as_tensor(venv.call("obs")[0]["action_mask"])
 
         # 0. DNAModel baseline
         # Test new probs sample vs old in-model (greedy) sample
 
         actlogits = model.get_action_logits(hdata)
-        action = actlogits.sample(deterministic=True).action
-        greedy = model.get_actsample_eval(hdata, deterministic=True).action
+        action = actlogits.sample(deterministic=True).action[0]
+        oldaction = model.get_actsample_eval(hdata, deterministic=True).action[0]
 
-        print("Action: %d | Greedy=%d" % (action, greedy))
-        assert torch.equal(action, greedy)
+        print("Action: %d | Greedy=%d" % (action, oldaction))
+        assert torch.equal(action, oldaction)
+
+        act0_dist = CategoricalMasked(actlogits.act0_logits[0], actlogits.act0_mask[0])
+        hex1_dist = CategoricalMasked(actlogits.hex1_logits[0], actlogits.hex1_mask[0])
+        hex2_dist = CategoricalMasked(actlogits.hex2_logits[0], actlogits.hex2_mask[0])
 
         # 1. Test ExportableModel
 
-        eprobs, emask = emodel.forward(*inputs.values())
-        myaction = eprobs.argmax(1)
-        assert torch.equal(action, myaction)
-        assert torch.equal(mask, emask[0])
+        eact0_probs, ehex1_probs, ehex2_probs, _, _, _ = emodel.forward(*inputs.values())
+        assert torch.allclose(act0_dist.probs, eact0_probs, atol=1e-5, rtol=0)
+        assert torch.allclose(hex1_dist.probs, ehex1_probs, atol=1e-5, rtol=0)
+        assert torch.allclose(hex2_dist.probs, ehex2_probs, atol=1e-5, rtol=0)
 
         # 2. Test torchscript of ExportableModel
 
-        sprobs, smask = smodel(*inputs.values())
-        saction = sprobs.argmax(1)
-        assert torch.equal(action, saction)
-        assert torch.equal(mask, smask[0])
+        sact0_probs, shex1_probs, shex2_probs, _, _, _ = smodel(*inputs.values())
+        assert torch.allclose(act0_dist.probs, sact0_probs, atol=1e-5, rtol=0)
+        assert torch.allclose(hex1_dist.probs, shex1_probs, atol=1e-5, rtol=0)
+        assert torch.allclose(hex2_dist.probs, shex2_probs, atol=1e-5, rtol=0)
 
         # 3. Test ONNX export of ExportableModel
 
@@ -326,78 +330,17 @@ def test_model(cfg, weights_file):
             print(f"Arg {k}: {v.shape}")
 
         t0 = perf_counter_ns()
-        oprobs, omask = onnx_fwd(omodel, inputs)
+        oact0_probs, ohex1_probs, ohex2_probs, _, _, _ = onnx_fwd(omodel, inputs)
         ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
         print("Predict time: %d ms" % ms)
 
-        oaction = oprobs.argmax(1)
-        assert torch.equal(action, oaction)
-        assert torch.equal(mask, omask[0])
-
-        # Test probabilities for each of the top-5 most probable actions
-        # NOTE: Here we can't use model.get_actsample_eval() result because
-        #       the distribution there is conditioned on greedy act0 and hex1
-        #       => use actlogits with full distribution
-        act0_dist = CategoricalMasked(actlogits.act0_logits, actlogits.act0_mask)
-        hex1_dist = CategoricalMasked(actlogits.hex1_logits, actlogits.hex1_mask)
-        hex2_dist = CategoricalMasked(actlogits.hex2_logits, actlogits.hex2_mask)
-        topk = oprobs.topk(5)
-
-        for k in range(5):
-            kaction = topk.indices[0, k]
-            oprob = topk.values[0, k]
-
-            kact0, khex1, khex2 = model.inverse_table[kaction]
-            prob = (
-                act0_dist.probs[0, kact0]
-                * hex1_dist.probs[0, kact0, khex1]
-                * hex2_dist.probs[0, khex1, khex2]
-            )
-
-            if mask[kaction]:
-                print("\t[k=%d] prob=%.6f | oprob=%.6f | action=%d" % (k, prob, oprob, kaction))
-                assert torch.allclose(prob, oprob, atol=1e-5, rtol=1e-5)
-            else:
-                # e.g. non-flyer cornered in bottom right => only 4 valid actions
-                # (WAIT, DEFEND, ATTACK-L, ATTACK-TL)
-                # or even less if surrounding hexes are friendly units or obstacles
-                print("\t[k=%d] action=%d (INVALID)" % (k, kaction))
+        assert torch.allclose(act0_dist.probs, oact0_probs, atol=1e-5, rtol=0)
+        assert torch.allclose(hex1_dist.probs, ohex1_probs, atol=1e-5, rtol=0)
+        assert torch.allclose(hex2_dist.probs, ohex2_probs, atol=1e-5, rtol=0)
 
         venv.step([action])
 
     print("test_model: OK")
-
-
-def test_load(cfg, weights_file):
-    """ Tests DNAModel vs the loaded XNN-lowered ExportableDNAModel. """
-
-    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role="defender"), num_envs_stupidai=1)
-    venv.reset()
-
-    weights = torch.load(weights_file, weights_only=True, map_location="cpu")
-
-    model = DNAModel(cfg["model"], torch.device("cpu")).eval()
-    model.load_state_dict(weights, strict=True)
-    model = model.model_policy
-
-    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
-    emodel = ExportableDNAModel(cfg["model"], eside).eval()
-
-    eweights = {
-        transform_key(k, "hex", list(LINK_TYPES)): v
-        for k, v in weights.items()
-    }
-    emodel.load_state_dict(eweights, strict=True)
-    emodel = emodel.model_policy
-
-    hdata = build_hdata(venv)
-    inputs = build_inputs(hdata)
-
-    for k, v in inputs.items():
-        print(f"Arg {k}: {v.shape}")
-
-    actsample = model.get_actsample_eval(hdata, deterministic=True)
-    raise NotImplementedError()
 
 
 def export_model(cfg, weights_file):
@@ -424,7 +367,7 @@ def export_model(cfg, weights_file):
         tuple(build_inputs(build_hdata(venv)).values()),
         buffer,
         input_names=["obs", "ei_flat", "ea_flat", "lengths"],
-        output_names=["probs", "mask"],
+        output_names=["act0_probs", "hex1_probs", "hex2_probs", "act0_mask", "hex1_mask", "hex2_mask"],
         opset_version=18,  # onnxruntime 1.14+
         do_constant_folding=True,
         dynamic_axes={
@@ -443,7 +386,8 @@ def export_model(cfg, weights_file):
 
     metadata = {
         "version": str(emodel.get_version().item()),
-        "side": str(emodel.get_side().item())
+        "side": str(emodel.get_side().item()),
+        "action_table": json.dumps(emodel.action_table.tolist()),
     }
 
     for k, v in metadata.items():
@@ -473,14 +417,12 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
     md = onnx_model.get_modelmeta().custom_metadata_map
     assert md["version"] == "13"
     assert md["side"] == str(eside)
+    assert json.loads(md["action_table"]) == model.model_policy.action_table.tolist()
+
+    venv = DualVecEnv(dict(mapname="gym/A1.vmap", role=cfg["train"]["env"]["kwargs"]["role"]), num_envs_stupidai=1)
+    venv.reset()
 
     print("Testing data methods for %d steps..." % (num_steps))
-
-    venv = DualVecEnv(dict(
-        mapname="gym/generated/4096/4x1024.vmap",
-        role=cfg["train"]["env"]["kwargs"]["role"]
-    ), num_envs_stupidai=1)
-
     ms_total = 0
 
     for n in range(num_steps):
@@ -489,53 +431,26 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
         hdata = build_hdata(venv)
 
         actlogits = model.model_policy.get_action_logits(hdata)
-        action = actlogits.sample(deterministic=True).action
+        act0_dist = CategoricalMasked(actlogits.act0_logits[0], actlogits.act0_mask[0])
+        hex1_dist = CategoricalMasked(actlogits.hex1_logits[0], actlogits.hex1_mask[0])
+        hex2_dist = CategoricalMasked(actlogits.hex2_logits[0], actlogits.hex2_mask[0])
+
         inputs = build_inputs(hdata)
-        mask = torch.as_tensor(venv.call("obs")[0]["action_mask"])
 
         t0 = perf_counter_ns()
-        oprobs, omask = onnx_fwd(onnx_model, inputs)
+        oact0_probs, ohex1_probs, ohex2_probs, _, _, _ = onnx_fwd(onnx_model, inputs)
         ms = (perf_counter_ns() - t0) / 1e6  # ns -> ms
         print("Predict time: %d ms" % ms)
         ms_total += ms
 
-        oaction = oprobs.argmax(1)
-        print("Action: %d | %d" % (action, oaction))
-        assert torch.equal(action, oaction)
-        assert torch.equal(mask, omask[0])
+        assert torch.allclose(act0_dist.probs, oact0_probs, atol=1e-5, rtol=0)
+        assert torch.allclose(hex1_dist.probs, ohex1_probs, atol=1e-5, rtol=0)
+        assert torch.allclose(hex2_dist.probs, ohex2_probs, atol=1e-5, rtol=0)
+        import ipdb; ipdb.set_trace()  # noqa
 
-        # Test probabilities for each of the top-5 most probable actions
-        # NOTE: Here we can't use model.get_actsample_eval() result because
-        #       the distribution there is conditioned on greedy act0 and hex1
-        #       => use actlogits with full distribution
-        act0_dist = CategoricalMasked(actlogits.act0_logits, actlogits.act0_mask)
-        hex1_dist = CategoricalMasked(actlogits.hex1_logits, actlogits.hex1_mask)
-        hex2_dist = CategoricalMasked(actlogits.hex2_logits, actlogits.hex2_mask)
-        topk = oprobs.topk(5)
+        venv.step([actlogits.sample(deterministic=True).action])
 
-        for k in range(5):
-            kaction = topk.indices[0, k]
-            eprob = topk.values[0, k]
-
-            kact0, khex1, khex2 = model.model_policy.inverse_table[kaction]
-            prob = (
-                act0_dist.probs[0, kact0]
-                * hex1_dist.probs[0, kact0, khex1]
-                * hex2_dist.probs[0, khex1, khex2]
-            )
-
-            if mask[kaction]:
-                print("\t[k=%d] prob = %.6f | eprob = %.6f | action=%d" % (k, prob, eprob, kaction))
-                assert torch.allclose(prob, eprob, atol=1e-5, rtol=1e-5)
-            else:
-                # e.g. non-flyer cornered in bottom right => only 4 valid actions
-                # (WAIT, DEFEND, ATTACK-L, ATTACK-TL)
-                # or even less if surrounding hexes are friendly units or obstacles
-                print("\t[k=%d] action=%d (INVALID)" % (k, kaction))
-
-        venv.step([action])
-
-    print("Total execution time: %dms" % ms_total)
+    print("Total execution time: %dms (mean %.2f)" % (ms_total, ms_total / num_steps))
     print("Model role: %s" % cfg["train"]["env"]["kwargs"]["role"])
     print("verify_export: OK")
 
@@ -554,33 +469,21 @@ def save_exported_model(m, export_dir, basename):
 
 def main():
     MODEL_PREFIXES = [
-        # "nkjrmrsq-202509231549",
-        # "nkjrmrsq-202509252116",
         # "nkjrmrsq-202509291846",
-        # "tukbajrv-202509171940",
-        # "tukbajrv-202509211112",
-        # "tukbajrv-202509222128",
-        # "tukbajrv-202509241418",
-        # "lcfcwxbc-202510020051",
-        # "aspnnqwg-1762370851",
-        # "rqqartou-202511050135"  # overfitted
-        # "rqqartou-1761858383",   # overfitted
-        # "rqqartou-1761771948",
-        # "sjigvvma-202511011415"
-        # "gophftwt-1766488041"
-        "gophftwt-1766837365"
+        "tukbajrv-202509241418",
+        # "qsslwyxa-202601031013"
     ]
 
     with torch.inference_mode():
         for prefix in MODEL_PREFIXES:
-            model_cfg_path = f"{prefix}-config.json"
-            model_weights_path = f"{prefix}-model-dna.pt"
+            model_cfg_path = f"export/{prefix}-config.json"
+            model_weights_path = f"export/{prefix}-model-dna.pt"
             export_dir = "/Users/simo/Library/Application Support/vcmi/Mods/mmai/models"
 
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
 
-            export_basename = "%s-%s" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
+            export_basename = "%s-%s-3step" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
 
             #
             # Tests (for debugging):
@@ -589,8 +492,6 @@ def main():
             # test_gnn()
             # test_block()
             test_model(cfg, model_weights_path)
-            # # test_quantized(cfg, model_weights_path)
-            # test_load(cfg, model_weights_path, exptype)
 
             #
             # Actual export
@@ -598,11 +499,9 @@ def main():
 
             exported_model = export_model(cfg, model_weights_path)
             loaded_model = load_exported_model(exported_model)
-            # loaded_model = load_exported_model(exptype, "/Users/simo/Projects/vcmi-play/Mods/MMAI/models/defender-sjigvvma-202511011415.onnx")
-            # import ipdb; ipdb.set_trace()  # noqa
+            # loaded_model = load_exported_model("/Users/simo/Library/Application Support/vcmi/Mods/mmai/models/defender-tukbajrv-202509241418-probs-debug1.onnx")
             verify_export(cfg, model_weights_path, loaded_model)
-
-            # save_exported_model(exported_model, export_dir, export_basename)
+            save_exported_model(exported_model, export_dir, export_basename)
 
 
 if __name__ == "__main__":

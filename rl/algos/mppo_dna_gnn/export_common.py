@@ -52,7 +52,8 @@ def flatten_edges(hdata):
     assert len(hdata.node_types) == 1, hdata.node_types
     assert all(n == 1 for n in hdata.num_edge_features.values()), hdata.num_edge_features.values()
 
-    ei_flat = torch.zeros((2, 0), dtype=torch.int32)
+    # HeteroData will convert edge indexes to int64 anyway
+    ei_flat = torch.zeros((2, 0), dtype=torch.int64)
     ea_flat = torch.zeros((0, 1), dtype=torch.float32)
     lengths = []
 
@@ -66,7 +67,7 @@ def flatten_edges(hdata):
     assert ei_flat.shape[1] == sum_e
     assert ea_flat.shape[0] == sum_e
 
-    return ei_flat, ea_flat, torch.tensor(lengths)
+    return ei_flat, ea_flat, torch.tensor(lengths, dtype=torch.int32)
 
 
 def onnx_fwd(edge, inputs):
@@ -76,51 +77,67 @@ def onnx_fwd(edge, inputs):
     ]
 
 
-def build_action_probs(
-    act0_probs: torch.Tensor,      # (B, 4)
-    hex1_probs: torch.Tensor,      # (B, 4, 165)   = P(hex1 | act0)
-    hex2_probs: torch.Tensor,      # (B, 165, 165) = P(hex2 | hex1)
-    mask: torch.Tensor,            # (B, num_actions) boolean/0-1
-    action_table: torch.Tensor,    # (4, 165, 165) int64 action ids
-) -> torch.Tensor:
-    B = act0_probs.size(0)
-    H = hex1_probs.size(-1)
-    device = act0_probs.device
-    dtype = act0_probs.dtype
-
-    out = torch.zeros_like(mask, dtype=torch.float32)
-
-    # 0) WAIT: all triplets map to 0 when act0=0
-    out[:, 1] += act0_probs[:, 0]
-
-    # 1) MOVE: act0=1, depends on hex1 only (hex2 irrelevant)
-    move_ids = action_table[1, :, 0].to(device)                 # (H,)
-    move_p = act0_probs[:, 1, None] * hex1_probs[:, 1, :]       # (B, H)
-    out.scatter_add_(1, move_ids[None, :].expand(B, H), move_p)
-
-    # 2) AMOVE: act0=2, depends on (hex1, hex2); invalid pairs map to 0
-    amove_ids = action_table[2].reshape(-1).to(device)          # (H*H,)
-    amove_p = (
-        act0_probs[:, 2, None, None]
-        * hex1_probs[:, 2, :, None]
-        * hex2_probs
-    )                                                           # (B, H, H)
-    out.scatter_add_(1, amove_ids[None, :].expand(B, H*H), amove_p.reshape(B, H*H))
-
-    # 3) SHOOT: act0=3, depends on hex1 only (hex2 irrelevant)
-    shoot_ids = action_table[3, :, 0].to(device)                # (H,)
-    shoot_p = act0_probs[:, 3, None] * hex1_probs[:, 3, :]      # (B, H)
-    out.scatter_add_(1, shoot_ids[None, :].expand(B, H), shoot_p)
-
-    # Optional: apply mask over final action ids and renormalize
-    out = out * mask.to(dtype)
-    z = out.sum(dim=-1, keepdim=True)
-    # fallback to action 0 if everything masked out
-    out = torch.where(z > 0, out / z, torch.nn.functional.one_hot(
-        torch.zeros(B, device=device, dtype=torch.long), out.shape[1]
-    ).to(dtype))
-
-    return out
+# build_action_probs builds a single joint probability distribution
+# of shape (N_ACTIONS,).
+#
+# It looks useful, but is actually not!
+# It does not allow to apply temperature when sampling.
+#
+# Consider the greedy case (temperature=0):
+#
+# If act0_probs=[0.4, 0.6, 0, 0], greedy action is 1 (MOVE).
+# However, consider hex1_probs=[0.5, 0.5, 0, 0, 0, ...]
+# => joint (act0, hex1) probability for each of them is 0.6*0.5 = 0.3.
+#    and the final/flat probabilities will look like this:
+# [0.4, ..., 0.3, 0.3, 0, ...], greedy action becomes 0 (WAIT).
+#
+# Sampling must remain a 3-step process.
+#
+# def build_action_probs(
+#     act0_probs: torch.Tensor,      # (B, 4)
+#     hex1_probs: torch.Tensor,      # (B, 4, 165)   = P(hex1 | act0)
+#     hex2_probs: torch.Tensor,      # (B, 165, 165) = P(hex2 | hex1)
+#     mask: torch.Tensor,            # (B, num_actions) boolean/0-1
+#     action_table: torch.Tensor,    # (4, 165, 165) int64 action ids
+# ) -> torch.Tensor:
+#     B = act0_probs.size(0)
+#     H = hex1_probs.size(-1)
+#     device = act0_probs.device
+#     dtype = act0_probs.dtype
+#
+#     out = torch.zeros_like(mask, dtype=torch.float32)
+#
+#     # 0) WAIT: all triplets map to 0 when act0=0
+#     out[:, 1] += act0_probs[:, 0]
+#
+#     # 1) MOVE: act0=1, depends on hex1 only (hex2 irrelevant)
+#     move_ids = action_table[1, :, 0].to(device)                 # (H,)
+#     move_p = act0_probs[:, 1, None] * hex1_probs[:, 1, :]       # (B, H)
+#     out.scatter_add_(1, move_ids[None, :].expand(B, H), move_p)
+#
+#     # 2) AMOVE: act0=2, depends on (hex1, hex2); invalid pairs map to 0
+#     amove_ids = action_table[2].reshape(-1).to(device)          # (H*H,)
+#     amove_p = (
+#         act0_probs[:, 2, None, None]
+#         * hex1_probs[:, 2, :, None]
+#         * hex2_probs
+#     )                                                           # (B, H, H)
+#     out.scatter_add_(1, amove_ids[None, :].expand(B, H*H), amove_p.reshape(B, H*H))
+#
+#     # 3) SHOOT: act0=3, depends on hex1 only (hex2 irrelevant)
+#     shoot_ids = action_table[3, :, 0].to(device)                # (H,)
+#     shoot_p = act0_probs[:, 3, None] * hex1_probs[:, 3, :]      # (B, H)
+#     out.scatter_add_(1, shoot_ids[None, :].expand(B, H), shoot_p)
+#
+#     # Optional: apply mask over final action ids and renormalize
+#     out = out * mask.to(dtype)
+#     z = out.sum(dim=-1, keepdim=True)
+#     # fallback to action 0 if everything masked out
+#     out = torch.where(z > 0, out / z, torch.nn.functional.one_hot(
+#         torch.zeros(B, device=device, dtype=torch.long), out.shape[1]
+#     ).to(dtype))
+#
+#     return out
 
 
 class ExportableModel(nn.Module):
@@ -213,7 +230,11 @@ class ExportableModel(nn.Module):
 
     @torch.jit.export
     def forward(self, obs, ei_flat, ea_flat, lengths):
+        # Inputs/Outputs of ExportableModel are not batched.
+        # However, methods here are mostly copy-paste from DNAModel
+        # => simulate batched tensors with B=1
         B = 1
+
         obs = obs.unsqueeze(dim=0)
         z_hexes, z_global = self.encode(obs, ei_flat, ea_flat, lengths)
 
@@ -272,8 +293,6 @@ class ExportableModel(nn.Module):
         mask_act0[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1).to(torch.int32)
 
         # MAIN ACTION
-        act0_probs = categorical_masked(logits0=act0_logits, mask=mask_act0.to(torch.bool))
-
         B = z_hexes.size(0)
 
         # HEX1
@@ -287,7 +306,6 @@ class ExportableModel(nn.Module):
         )                                                                       # (B, 4, d)
         k_hex1 = self.Wk_hex1(z_hexes).unsqueeze(1).expand(B, 4, 165, d)        # (B, 4, 165, d)
         hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 4, 165)
-        hex1_probs = categorical_masked(logits0=hex1_logits, mask=mask_hex1.to(torch.bool))
 
         # HEX2
         q_hex2 = self.Wq_hex2(
@@ -298,24 +316,33 @@ class ExportableModel(nn.Module):
         )                                                                       # (B, 165, d)
         k_hex2 = self.Wk_hex2(z_hexes).unsqueeze(1).expand(B, 165, 165, d)      # (B, 165, 165, d)
         hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165, 165)
+
+        act0_probs = categorical_masked(logits0=act0_logits, mask=mask_act0.to(torch.bool))
+        hex1_probs = categorical_masked(logits0=hex1_logits, mask=mask_hex1.to(torch.bool))
         hex2_probs = categorical_masked(logits0=hex2_logits, mask=mask_hex2.to(torch.bool))
 
-        mask_hexes = torch.cat([
-            amovemask,
-            movemask.unsqueeze(-1),
-            shootmask.unsqueeze(-1)
-        ], -1).flatten(1)                                                       # (B, 2310)
-
-        mask = torch.cat([
-            torch.zeros(B, 1, dtype=torch.bool),                                # RETREAT (never allowed)
-            obs[:, self.global_wait_offset].unsqueeze(-1).to(torch.bool),       # WAIT
-            mask_hexes
-        ], -1)                                                                  # (B, 2312)
-
         # Final probs (B, N_ACTIONS)
-        probs = build_action_probs(act0_probs, hex1_probs, hex2_probs, mask, self.action_table)
+        # NOT using those -- see comment in function definition
+        # mask_hexes = torch.cat([
+        #     amovemask,
+        #     movemask.unsqueeze(-1),
+        #     shootmask.unsqueeze(-1)
+        # ], -1).flatten(1)                                                       # (B, 2310)
+        # mask = torch.cat([
+        #     torch.zeros(B, 1, dtype=torch.bool),                                # RETREAT (never allowed)
+        #     obs[:, self.global_wait_offset].unsqueeze(-1).to(torch.bool),       # WAIT
+        #     mask_hexes
+        # ], -1)                                                                  # (B, 2312)
+        # probs = build_action_probs(act0_probs, hex1_probs, hex2_probs, mask, self.action_table)
 
-        return probs, mask
+        return (
+            act0_probs[0],
+            hex1_probs[0],
+            hex2_probs[0],
+            mask_act0[0],
+            mask_hex1[0],
+            mask_hex2[0],
+        )
 
 
 # Used in exports only because loading weights from the checkpoint file
@@ -348,10 +375,20 @@ def neg_inf_like(x: torch.Tensor) -> torch.Tensor:
 @torch.jit.export
 def categorical_masked(logits0, mask):
     neg_inf = neg_inf_like(logits0)
-    logits1 = torch.where(mask, logits0, neg_inf)
-    logits = logits1 - logits1.logsumexp(dim=-1, keepdim=True)
+    masked = torch.where(mask, logits0, neg_inf)
+    logits = masked - masked.logsumexp(dim=-1, keepdim=True)
     probs = logits.softmax(dim=-1)
-    return probs
+
+    # probs will be uniformly distributed for rows that are all-masked out.
+    # This does not match CategoricalMasked which uses a fallback
+    # distribution where index0 is the only valid choice.
+    # => fallback here as well to maintain consistency
+    #    between DNAModel and ExportableDNAModel.
+    has_valid = mask.any(dim=-1, keepdim=True)  # (..., 1)
+    fallback_probs = torch.zeros_like(probs)
+    fallback_probs[..., 0] = 1.0
+
+    return torch.where(has_valid, probs, fallback_probs)
 
 
 def edge_softmax_per_dst(scores: torch.Tensor, dst: torch.Tensor, num_nodes: int, eps: float = 1e-16):
@@ -481,6 +518,7 @@ class ExportableGNNBlock(nn.Module):
     ) -> torch.Tensor:
         x = x_hex
         num_layers = len(self.layers)
+        lengths = lengths.to(torch.int64)
 
         for i, convs in enumerate(self.layers):
             y_init = False
