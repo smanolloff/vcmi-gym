@@ -1719,6 +1719,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
             now = dt.datetime.now().astimezone(dt.timezone.utc)
             for loader_info in loader_infos:
+                loader_info.loaded_at = now
                 next_check_at = loader_info.loaded_at + dt.timedelta(seconds=loader_info.reload_interval_s)
                 if now < next_check_at:
                     continue
