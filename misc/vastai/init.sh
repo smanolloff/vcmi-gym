@@ -332,8 +332,10 @@ function train_gnn() {
     shift
     local rest=\$*
 
+    local new_run=false
     if [ -z "\$run_id" ]; then
         LC_ALL=C run_id=\$(tr -dc 'a-z' </dev/urandom | head -c8)
+        new_run=true
     fi
 
     [[ \$run_id =~ ^[a-z]{8}\$ ]] || {
@@ -347,8 +349,16 @@ USAGE
     echo \$* | grep -- --dry-run && dry_run=true || dry_run=false
 
     local f="data/mppo-dna-heads/\$run_id-config.json"
-    local new_run
-    [ -r "\$f" ] && new_run=false || new_run=true
+
+    if [ -r "\$f" ] && \$new_run; then
+        echo "Config already exists, but this should be a new run"
+        retirn 1
+    fi
+
+    if ! [ -r "\$f" ] && ! \$new_run; then
+        echo "Config not found, but this should be a resumed run"
+        return 1
+    fi
 
     local basecmd="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn"
     local newcmd="\$basecmd --run-id \$run_id \$rest"

@@ -149,7 +149,7 @@ class DualEnvController():
 
                     with self.controller_act_cond:
                         self.logger.debug("model.model_policy.get_actdata_eval(hdata)")
-                        self.env_actions[ids] = self.model_loader.get_model().model_policy.get_actdata_eval(hdata).action.cpu().numpy()
+                        self.env_actions[ids] = self.model_loader.get_model().model_policy.get_action_logits(hdata).sample().action.cpu().numpy()
                         self.logger.debug(f"self.env_states[{ids}] = {EnvState.UNSET}")
                         self.env_states[ids] = EnvState.UNSET
                         self.logger.debug("controller_act_cond.notify_all()")

@@ -1385,24 +1385,24 @@ def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
         latest_ts = None
         reload_interval_s = 1e9
     else:
-        # BEGIN: DEBUG
-        print("*** DEBUG: force local model ***")
-        latest_ts = dt.datetime(2000, 1, 1).astimezone(dt.timezone.utc)
-        config_file = [f for f in os.listdir(".") if "nkjrmrsq" in f and f.endswith(".json")][0]
-        weights_file = [f for f in os.listdir(".") if "nkjrmrsq" in f and f.endswith(".pt")][0]
-        # EOF: DEBUG
+        # # BEGIN: DEBUG
+        # print("*** DEBUG: force local model ***")
+        # latest_ts = dt.datetime(2000, 1, 1).astimezone(dt.timezone.utc)
+        # config_file = [f for f in os.listdir(".") if "nkjrmrsq" in f and f.endswith(".json")][0]
+        # weights_file = [f for f in os.listdir(".") if "nkjrmrsq" in f and f.endswith(".pt")][0]
+        # # EOF: DEBUG
 
-        # # For "dynamic" models, config and weights may change on each download
-        # latest_ts, config_file, weights_file = download_latest_model(
-        #     logger,
-        #     dry_run=dry_run,
-        #     out_dir=config["run"]["out_dir"],
-        #     run_id=modelcfg["run_id"],
-        #     optimize_local_storage=checkpoint_config["optimize_local_storage"],
-        #     s3_config=checkpoint_config["s3"],
-        #     # Force download via a timestamp in the distant past
-        #     timestamp=dt.datetime(2000, 1, 1).astimezone(dt.timezone.utc)
-        # )
+        # For "dynamic" models, config and weights may change on each download
+        latest_ts, config_file, weights_file = download_latest_model(
+            logger,
+            dry_run=dry_run,
+            out_dir=config["run"]["out_dir"],
+            run_id=modelcfg["run_id"],
+            optimize_local_storage=checkpoint_config["optimize_local_storage"],
+            s3_config=checkpoint_config["s3"],
+            # Force download via a timestamp in the distant past
+            timestamp=dt.datetime(2000, 1, 1).astimezone(dt.timezone.utc)
+        )
 
         logger.info(f"Loading dynamic model config from {config_file} / {latest_ts.isoformat()}")
         model_loader.configure(config_file)

@@ -446,7 +446,6 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
         assert torch.allclose(act0_dist.probs, oact0_probs, atol=1e-5, rtol=0)
         assert torch.allclose(hex1_dist.probs, ohex1_probs, atol=1e-5, rtol=0)
         assert torch.allclose(hex2_dist.probs, ohex2_probs, atol=1e-5, rtol=0)
-        import ipdb; ipdb.set_trace()  # noqa
 
         venv.step([actlogits.sample(deterministic=True).action])
 
@@ -470,8 +469,11 @@ def save_exported_model(m, export_dir, basename):
 def main():
     MODEL_PREFIXES = [
         # "nkjrmrsq-202509291846",
-        "tukbajrv-202509241418",
+        # "tukbajrv-202509241418",
         # "qsslwyxa-202601031013"
+        "joymfkqj-202601071930",
+        "oasbctkd-1767770356",
+        "qsslwyxa-1767798249"
     ]
 
     with torch.inference_mode():
@@ -483,7 +485,7 @@ def main():
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
 
-            export_basename = "%s-%s-3step" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
+            export_basename = "%s-%s-stochastic" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
 
             #
             # Tests (for debugging):
