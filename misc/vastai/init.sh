@@ -299,6 +299,8 @@ set -x
 # For tracking reboots
 date +'BOOTED_AT=%FT%T%z' >> ~/.bashrc
 
+service cron start || :
+
 tmux new-session -d "source ~/.simorc; tmux rename-window REBOOTED; /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID REBOOTED; cd \$PWD; \$*; exec \$SHELL"
 EOL
 }
@@ -448,6 +450,54 @@ set -x
 
 echo "PROGRAM EXIT CODE: \$?"
 EOF
+
+cat <<-EOFCLEANUP >/root/cleanup.sh
+#!/bin/bash
+
+set -euxo pipefail
+
+# For logging
+date
+
+# Deletes non-symlinked files older than X hours
+# Usage:
+#   cleanup_data 12 /workspace/vcmi-gym/data/mppo-dna-heads
+
+HOURS="\${1:?Hours required}"
+DIR="\${2:?Directory required}"
+
+cd "\$DIR"
+[[ "\$HOURS" =~ ^[0-9]+\$ ]] || { echo "Invalid hours: \$HOURS"; exit 1; }
+MINUTES=\$(( HOURS * 60 ))
+
+# Associative array filename => 1
+# Contains files which are targets of symlinks
+declare -A LINK_TARGETS=()
+for link in \$(find . -maxdepth 1 -type l -printf '%f\n' | sort); do
+    target=\$(readlink "\$link")
+    LINK_TARGETS["\$target"]=1
+done
+
+DELETED=()
+for file in \$(find . -maxdepth 1 -type f -mmin "+\$MINUTES" -printf '%f\n' | sort); do
+    [ "\${LINK_TARGETS[\$file]-}" = "1" ] && continue || :
+    rm -f "\$file"
+    DELETED+=("\$file")
+done
+
+cat <<EOF
+========================
+Deleted:
+\$(printf '%s\n' "\${DELETED[@]}")
+EOF
+EOFCLEANUP
+
+chmod +x /root/cleanup.sh
+cat <<EOF >>/etc/cron.d/cleanup
+0 0 * * * root /root/cleanup.sh 24 /workspace/vcmi-gym/data/mppo-dna-heads >> /root/cleanup.log
+EOF
+chmod 644 /etc/cron.d/cleanup
+service cron start
 
 # does not work (fails with unbound variable)
 # i.e. better not use this tmux session anything else after init
