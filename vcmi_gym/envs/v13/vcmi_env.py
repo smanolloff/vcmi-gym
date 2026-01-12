@@ -102,7 +102,7 @@ class VcmiEnv(gym.Env):
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
     ROLES = ["attacker", "defender"]
-    OPPONENTS = ["StupidAI", "BattleAI", "MMAI_SCRIPT_SUMMONER", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
+    OPPONENTS = ["StupidAI", "BattleAI", "MMAI_BATTLEAI", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
 
     STATE_SIZE = STATE_SIZE
     STATE_SIZE_HEXES = STATE_SIZE_HEXES
@@ -145,6 +145,7 @@ class VcmiEnv(gym.Env):
         role: str = "attacker",
         opponent: str = "StupidAI",
         opponent_model: Optional[str] = None,
+        opponent_allow_mlbot: bool = True,      # only if opponent is MMAI_MODEL or OTHER_ENV (i.e. MMAI_USER)
         vcmi_stats_mode: str = "disabled",
         vcmi_stats_storage: str = "-",
         vcmi_stats_persist_freq: int = 100,
@@ -159,6 +160,8 @@ class VcmiEnv(gym.Env):
         random_terrain_chance: int = 0,
         random_stack_chance: int = 0,
         tight_formation_chance: int = 0,
+        vip_chance: int = 0,
+        opponent_vip_chance: int = 0,
         battlefield_pattern: str = "",
         mana_min: int = 0,
         mana_max: int = 0,
@@ -252,9 +255,21 @@ class VcmiEnv(gym.Env):
         if role == "attacker":
             attacker = "MMAI_USER"
             defender = opp
+            # When mlbot is allowed for a MMAI_USER or MMAI_MODEL ai, it will
+            # acts automatically if VIP-shooter army is detected.
+            # We never want that for the main VcmiEnv player
+            # => make sure mlbot is NOT allowed for our side
+            attacker_allow_mlbot = False
+            defender_allow_mlbot = opponent_allow_mlbot
+            attacker_vip_chance = vip_chance
+            defender_vip_chance = opponent_vip_chance
         else:
             attacker = opp
             defender = "MMAI_USER"
+            attacker_allow_mlbot = opponent_allow_mlbot
+            defender_allow_mlbot = False
+            attacker_vip_chance = opponent_vip_chance
+            defender_vip_chance = vip_chance
 
         if attacker == "MMAI_MODEL":
             attacker_model = opponent_model
@@ -290,6 +305,8 @@ class VcmiEnv(gym.Env):
             random_stack_chance,
             tight_formation_chance,
             random_terrain_chance,
+            attacker_vip_chance,
+            defender_vip_chance,
             battlefield_pattern,
             mana_min,
             mana_max,
@@ -301,6 +318,8 @@ class VcmiEnv(gym.Env):
             defender,
             attacker_model,
             defender_model,
+            attacker_allow_mlbot,
+            defender_allow_mlbot,
             vcmi_stats_mode,
             vcmi_stats_storage,
             vcmi_stats_persist_freq,

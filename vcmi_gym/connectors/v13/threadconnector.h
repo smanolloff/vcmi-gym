@@ -76,6 +76,8 @@ namespace Connector::V13::Thread {
         const int randomStackChance;
         const int tightFormationChance;
         const int randomTerrainChance;
+        const int leftVipChance;
+        const int rightVipChance;
         const std::string battlefieldPattern;
         const int manaMin;
         const int manaMax;
@@ -87,6 +89,8 @@ namespace Connector::V13::Thread {
         const std::string blue;
         const std::string redModel;
         const std::string blueModel;
+        const bool redAllowMlBot;
+        const bool blueAllowMlBot;
         const std::string statsMode;
         const std::string statsStorage;
         const int statsPersistFreq;
@@ -151,6 +155,8 @@ namespace Connector::V13::Thread {
             const int randomStackChance,
             const int tightFormationChance,
             const int randomTerrainChance,
+            const int leftVipChance,
+            const int rightVipChance,
             const std::string battlefieldPattern,
             const int manaMin,
             const int manaMax,
@@ -162,6 +168,8 @@ namespace Connector::V13::Thread {
             const std::string blue,
             const std::string redModel,
             const std::string blueModel,
+            const bool redAllowMlBot,
+            const bool blueAllowMlBot,
             const std::string statsMode,
             const std::string statsStorage,
             const int statsPersistFreq

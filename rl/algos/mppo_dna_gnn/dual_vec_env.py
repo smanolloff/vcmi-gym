@@ -335,12 +335,13 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         env_kwargs,
         num_envs_stupidai=0,
         num_envs_battleai=0,
+        num_envs_mmai_battleai=0,
         num_envs_model=0,
         model_loader: AbstractModelLoader = None,
         e_max=3300,
         logprefix="",
     ):
-        num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai
+        num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai + num_envs_mmai_battleai
         assert num_envs_total > 0, f"{num_envs_total} > 0"
 
         # AsyncVectorEnv creates a dummy_env() in the main process just to
@@ -391,6 +392,9 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         def env_creator_battleai(i):
             return VcmiEnv(**env_kwargs, opponent="BattleAI", vcmienv_logtag=f"{logprefix}env.battleai.{i}")
 
+        def env_creator_mmai_battleai(i):
+            return VcmiEnv(**env_kwargs, opponent="MMAI_BATTLEAI", vcmienv_logtag=f"{logprefix}env.mmaibattleai.{i}")
+
         def env_creator_wrapper(env_creator):
             if os.getpid() == pid:
                 return dummy_env
@@ -404,6 +408,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         env_creators.extend([partial(env_creator_model, i) for i in range(num_envs_model)])
         env_creators.extend([partial(env_creator_stupidai, i) for i in range(num_envs_stupidai)])
         env_creators.extend([partial(env_creator_battleai, i) for i in range(num_envs_battleai)])
+        env_creators.extend([partial(env_creator_mmai_battleai, i) for i in range(num_envs_mmai_battleai)])
         funcs = [partial(env_creator_wrapper, env_creator) for env_creator in env_creators]
 
         super().__init__(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
@@ -476,6 +481,7 @@ if __name__ == "__main__":
         env_kwargs=dict(mapname="gym/A1.vmap"),
         num_envs_stupidai=0,
         num_envs_battleai=0,
+        num_envs_mmai_battleai=0,
         num_envs_model=1,
         model_loader=model_loader,
         logprefix="test-",

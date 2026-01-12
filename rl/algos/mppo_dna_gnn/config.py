@@ -49,7 +49,7 @@ dynamic_bot = lambda run_id, reload_interval_s: dict(
     reload_interval_s=reload_interval_s
 )
 
-gen_num_envs = lambda StupidAI, BattleAI, model: dict(StupidAI=StupidAI, BattleAI=BattleAI, model=model)
+gen_num_envs = lambda StupidAI, BattleAI, MMAI_BATTLEAI, model: dict(StupidAI=StupidAI, BattleAI=BattleAI, MMAI_BATTLEAI=MMAI_BATTLEAI, model=model)
 
 eval_variant = lambda num_envs_per_opponent, model, **env_kwargs: dict(
     num_envs_per_opponent=num_envs_per_opponent,
@@ -82,18 +82,18 @@ config = dict(
     ),
     eval=dict(
         env_variants={
-            # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0), town_chance=100),
-            "BattleAI.open": eval_variant(
-                num_envs_per_opponent=gen_num_envs(0, 2, 0),
-                model=None,
-                town_chance=0,
-            ),
-            # "MMAI.open": eval_variant(
-            #     num_envs_per_opponent=gen_num_envs(0, 0, 1),
-            #     model=dynamic_bot("nkjrmrsq", 5),
-            #     # model=static_bot("nkjrmrsq-202509291846"),
+            # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0, 0), town_chance=100),
+            # "BattleAI.open": eval_variant(
+            #     num_envs_per_opponent=gen_num_envs(0, 2, 0, 0),
+            #     model=None,
             #     town_chance=0,
             # ),
+            "MMAI.open": eval_variant(
+                num_envs_per_opponent=gen_num_envs(0, 0, 0, 1),
+                model=dynamic_bot("nkjrmrsq", 3600),
+                # model=static_bot("nkjrmrsq-202509291846"),
+                town_chance=0,
+            ),
         },
         num_vsteps=10_000,
         interval_s=1800,
@@ -104,9 +104,9 @@ config = dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
             kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
-            num_envs_per_opponent=dict(StupidAI=0, BattleAI=40, model=0),
+            num_envs_per_opponent=dict(StupidAI=0, BattleAI=40, MMAI_BATTLEAI=0, model=0),
 
-            # num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, model=1),
+            # num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, MMAI_BATTLEAI=0, model=1),
             # model=static_bot("data/mppo-dna-heads/tukbajrv-202509241418"),
             # model=static_bot("nkjrmrsq-202509291846"),
         ),

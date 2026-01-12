@@ -176,6 +176,8 @@ namespace Connector::V13::Thread {
         const int randomStackChance_,
         const int tightFormationChance_,
         const int randomTerrainChance_,
+        const int leftVipChance_,
+        const int rightVipChance_,
         const std::string battlefieldPattern_,
         const int manaMin_,
         const int manaMax_,
@@ -187,6 +189,8 @@ namespace Connector::V13::Thread {
         const std::string blue_,
         const std::string redModel_,
         const std::string blueModel_,
+        const bool redAllowMlBot_,
+        const bool blueAllowMlBot_,
         const std::string statsMode_,
         const std::string statsStorage_,
         const int statsPersistFreq_
@@ -203,6 +207,8 @@ namespace Connector::V13::Thread {
         randomStackChance(randomStackChance_),
         tightFormationChance(tightFormationChance_),
         randomTerrainChance(randomTerrainChance_),
+        leftVipChance(leftVipChance_),
+        rightVipChance(rightVipChance_),
         battlefieldPattern(battlefieldPattern_),
         manaMin(manaMin_),
         manaMax(manaMax_),
@@ -214,6 +220,8 @@ namespace Connector::V13::Thread {
         blue(blue_),
         redModel(redModel_),
         blueModel(blueModel_),
+        redAllowMlBot(redAllowMlBot_),
+        blueAllowMlBot(blueAllowMlBot_),
         statsMode(statsMode_),
         statsStorage(statsStorage_),
         statsPersistFreq(statsPersistFreq_)
@@ -658,6 +666,8 @@ namespace Connector::V13::Thread {
             mapname,            // mapname
             leftModel,          // leftModel
             rightModel,         // rightModel
+            redAllowMlBot,      // leftAllowMlBot
+            blueAllowMlBot,     // rightAllowMlBot
             0,                  // maxBattles
             seed,               // seed
             randomHeroes,       // randomHeroes
@@ -667,6 +677,8 @@ namespace Connector::V13::Thread {
             randomStackChance,  // randomStackChance
             tightFormationChance,  // tightFormationChance
             randomTerrainChance,  // randomTerrainChance
+            leftVipChance,
+            rightVipChance,
             battlefieldPattern,  // battlefieldPattern
             manaMin,            // manaMin
             manaMax,            // manaMax
