@@ -1610,6 +1610,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
     wandb.log({
         "global/resumes": state.resumes,
+        "global/instance_id": os.getenv("VASTAI_INSTANCE_ID", 0),
         "train_config/num_envs": num_envs,
         "train_config/num_vsteps": train_config["num_vsteps"],
         "train_config/num_minibatches": train_config["num_minibatches"],
