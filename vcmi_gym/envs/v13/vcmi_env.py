@@ -20,7 +20,7 @@ import os
 from typing import Optional, NamedTuple
 
 from ..util import log
-from .decoder.decoder import Decoder
+from .decoder.decoder import Decoder, Battlefield
 from .decoder.other import HexAction
 
 from .pyconnector import (
@@ -374,11 +374,11 @@ class VcmiEnv(gym.Env):
 
         bf = Decoder.decode(res.state, only_global=True)
         term = bf.global_stats.BATTLE_WINNER.v is not None
-        rewvals = VcmiEnv.calc_reward(res.errcode, bf, self.bf, self.reward_cfg)
+        trunc = self.steps_this_episode >= self.max_steps
+        rewvals = VcmiEnv.calc_reward(res.errcode, term, trunc, bf, self.bf, self.reward_cfg)
         rew = sum(rewvals)
         res.mask[0] = False  # prevent retreats for now
         obs = self.__class__.build_obs(res)
-        trunc = self.steps_this_episode >= self.max_steps
 
         self._update_vars_after_step(action, obs, res, rew, term, trunc, bf, rewvals)
         self._maybe_render()
@@ -605,17 +605,29 @@ class VcmiEnv(gym.Env):
         )
 
     @staticmethod
-    def calc_reward(errcode, bf, bf_old, cfg: RewardConfig):
+    def calc_reward(errcode, term, trunc, bf: Battlefield, bf_old: Battlefield, cfg: RewardConfig):
         if errcode > 0:
             return cfg.err_exclusive
 
-        # battle_round = bf.global_stats.BATTLE_ROUND.v
-        net_value = bf.enemy_stats.VALUE_LOST_NOW_REL.v - bf.my_stats.VALUE_LOST_NOW_REL.v
-        net_dmg = bf.enemy_stats.DMG_RECEIVED_NOW_REL.v - bf.my_stats.DMG_RECEIVED_NOW_REL.v
-        net_value_acc = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
+        if trunc:
+            # Trunc is bad: means model runs away forever
+            # => punish as if entire army was lost
+            my_dmg_received = bf.my_stats.ARMY_HP_NOW_REL.v
+            my_value_lost = bf.my_stats.ARMY_VALUE_NOW_REL.v
+            my_value_lost_acc = bf.my_stats.ARMY_VALUE_NOW_REL0.v
+        else:
+            my_dmg_received = bf.my_stats.DMG_RECEIVED_NOW_REL.v
+            my_value_lost = bf.my_stats.VALUE_LOST_NOW_REL.v
+            my_value_lost_acc = bf.my_stats.VALUE_LOST_ACC_REL0.v
 
-        is_ended = bf.global_stats.BATTLE_WINNER.v is not None
+        net_dmg = bf.enemy_stats.DMG_RECEIVED_NOW_REL.v - my_dmg_received
+        net_value = bf.enemy_stats.VALUE_LOST_NOW_REL.v - my_value_lost
+        net_value_acc = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - my_value_lost_acc
+
         # is_new_round = battle_round > bf_old.global_stats.BATTLE_ROUND.v
+        # battle_round = bf.global_stats.BATTLE_ROUND.v
+
+        done = term or trunc
 
         return RewardValues(
             step_fixed=cfg.step_fixed,
@@ -623,6 +635,6 @@ class VcmiEnv(gym.Env):
             # round_fixed=is_new_round * cfg.round_fixed,
             # round_round_mult=is_new_round * cfg.round_round_mult * battle_round,
             dmg_mult=net_dmg * cfg.dmg_mult,
-            term_mult=is_ended * net_value_acc * cfg.term_mult,
+            term_mult=done * net_value_acc * cfg.term_mult,
             relval_mult=net_value * cfg.relval_mult,
         )

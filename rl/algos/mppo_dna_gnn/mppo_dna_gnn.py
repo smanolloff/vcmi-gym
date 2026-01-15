@@ -184,6 +184,7 @@ class SampleStats:
     # ep_rew_round_fixed_mean: float = 0.0
     # ep_rew_round_round_mult_mean: float = 0.0
     num_episodes: int = 0
+    num_truncations: int = 0
 
 
 # Aggregated version of SampleStats with a handle
@@ -200,6 +201,7 @@ class MultiStats(SampleStats):
 
         # Don't let "empty" samples influence the mean values EXCEPT for num_episodes
         self.num_episodes = safe_mean([v.num_episodes for v in self.variants.values()])
+        self.num_truncations = safe_mean([v.num_truncations for v in self.variants.values()])
         self.ep_rew_mean = safe_mean([v.ep_rew_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_len_mean = safe_mean([v.ep_len_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_value_mean = safe_mean([v.ep_value_mean for v in self.variants.values() if v.num_episodes > 0])
@@ -916,7 +918,9 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             stats.ep_len_mean += sum(v_final_info["episode"]["l"][v_done_id])
             stats.ep_value_mean += sum(v_final_info["net_value"][v_done_id])
             stats.ep_is_success_mean += sum(v_final_info["is_success"][v_done_id])
+            assert len(v_done_id) == int(np.logical_or(v_term, v_trunc).sum())
             stats.num_episodes += len(v_done_id)
+            stats.num_truncations += int(v_trunc.sum())
             stats.ep_rew_step_fixed_mean += sum(v_final_info["reward_step_fixed"][v_done_id])
             # stats.ep_rew_step_round_mult_mean += sum(v_final_info["reward_step_round_mult"][v_done_id])
             # stats.ep_rew_round_fixed_mean += sum(v_final_info["reward_round_fixed"][v_done_id])
@@ -985,7 +989,9 @@ def eval_model(logger, model, venv, num_vsteps):
             # stats.ep_rew_round_fixed_mean += sum(v_final_info["reward_round_fixed"][v_done_id])
             # stats.ep_rew_round_round_mult_mean += sum(v_final_info["reward_round_round_mult"][v_done_id])
 
+            assert len(v_done_id) == int(np.logical_or(v_term, v_trunc).sum())
             stats.num_episodes += len(v_done_id)
+            stats.num_truncations += int(v_trunc.sum())
 
     if stats.num_episodes > 0:
         stats.ep_rew_mean /= stats.num_episodes
@@ -1265,6 +1271,7 @@ def prepare_wandb_log(
             "eval/ep_len_mean": eval_multistats.ep_len_mean,
             "eval/ep_success_rate": eval_multistats.ep_is_success_mean,
             "eval/ep_count": eval_multistats.num_episodes,
+            "eval/ep_trunc_count": eval_multistats.num_truncations,
             "eval/reward/step_fixed": eval_multistats.ep_rew_step_fixed_mean,
             "eval/reward/dmg_mult": eval_multistats.ep_rew_dmg_mult_mean,
             "eval/reward/term_mult": eval_multistats.ep_rew_term_mult_mean,
@@ -1298,6 +1305,7 @@ def prepare_wandb_log(
             f"eval/{name}/ep_len_mean": eval_sample_stats.ep_len_mean,
             f"eval/{name}/ep_success_rate": eval_sample_stats.ep_is_success_mean,
             f"eval/{name}/ep_count": eval_sample_stats.num_episodes,
+            f"eval/{name}/ep_trunc_count": eval_sample_stats.num_truncations,
             f"eval/{name}/reward/step_fixed_mean": eval_sample_stats.ep_rew_step_fixed_mean,
             f"eval/{name}/reward/dmg_mult_mean": eval_sample_stats.ep_rew_dmg_mult_mean,
             f"eval/{name}/reward/term_mult_mean": eval_sample_stats.ep_rew_term_mult_mean,
@@ -1327,6 +1335,7 @@ def prepare_wandb_log(
             "train/ep_len_mean": train_sample_stats.ep_len_mean,
             "train/ep_success_rate": train_sample_stats.ep_is_success_mean,
             "train/ep_count": train_sample_stats.num_episodes,
+            "train/ep_trunc_count": train_sample_stats.num_truncations,
         })
 
     wlog.update({
