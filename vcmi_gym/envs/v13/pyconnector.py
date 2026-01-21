@@ -33,6 +33,7 @@ EXPORTER = exporter_v13.Exporter()
 N_NONHEX_ACTIONS = EXPORTER.get_n_nonhex_actions()
 N_HEX_ACTIONS = EXPORTER.get_n_hex_actions()
 N_ACTIONS = EXPORTER.get_n_actions()
+MAX_ROUNDS = EXPORTER.get_max_rounds()
 
 STATE_SIZE = EXPORTER.get_state_size()
 STATE_SIZE_GLOBAL = EXPORTER.get_state_size_global()

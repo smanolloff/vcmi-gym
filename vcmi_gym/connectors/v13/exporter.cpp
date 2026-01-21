@@ -18,9 +18,11 @@
 #include <pybind11/stl.h>
 
 #include "exporter.h"
+#include "schema/v13/constants.h"
 
 namespace Connector::V13 {
-    const int Exporter::getVersion() const { return 12; }
+    const int Exporter::getVersion() const { return 13; }
+    const int Exporter::getMaxRounds() const { return static_cast<int>(MAX_ROUNDS); }
     const int Exporter::getNActions() const { return N_ACTIONS; }
     const int Exporter::getNNonhexActions() const { return N_NONHEX_ACTIONS; }
     const int Exporter::getNHexActions() const { return N_HEX_ACTIONS; }
@@ -259,7 +261,7 @@ namespace Connector::V13 {
 
             using GA = GlobalAttribute;
             switch (a) {
-            break; case GA::BATTLE_SIDE:                 attrname = "BATTLE_SIDE";
+            break; case GA::BATTLE_ROUND:                attrname = "BATTLE_ROUND";
             break; case GA::BATTLE_SIDE_ACTIVE_PLAYER:   attrname = "BATTLE_SIDE_ACTIVE_PLAYER";
             break; case GA::BATTLE_WINNER:               attrname = "BATTLE_WINNER";
             break; case GA::BFIELD_VALUE_START_ABS:      attrname = "BFIELD_VALUE_START_ABS";
@@ -405,6 +407,7 @@ namespace Connector::V13 {
             .def("get_n_actions", &Exporter::getNActions)
             .def("get_n_nonhex_actions", &Exporter::getNNonhexActions)
             .def("get_n_hex_actions", &Exporter::getNHexActions)
+            .def("get_max_rounds", &Exporter::getMaxRounds)
             .def("get_state_size", &Exporter::getStateSize)
             .def("get_state_size_hexes", &Exporter::getStateSizeAllHexes)
             .def("get_state_size_one_hex", &Exporter::getStateSizeOneHex)

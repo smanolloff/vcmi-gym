@@ -175,6 +175,7 @@ class SampleStats:
     ep_rew_mean: float = 0.0
     ep_len_mean: float = 0.0
     ep_value_mean: float = 0.0
+    ep_rounds_mean: float = 0.0
     ep_is_success_mean: float = 0.0
     ep_rew_step_fixed_mean: float = 0.0
     ep_rew_dmg_mult_mean: float = 0.0
@@ -205,6 +206,7 @@ class MultiStats(SampleStats):
         self.ep_rew_mean = safe_mean([v.ep_rew_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_len_mean = safe_mean([v.ep_len_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_value_mean = safe_mean([v.ep_value_mean for v in self.variants.values() if v.num_episodes > 0])
+        self.ep_rounds_mean = safe_mean([v.ep_rounds_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_is_success_mean = safe_mean([v.ep_is_success_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_rew_step_fixed_mean = safe_mean([v.ep_rew_step_fixed_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_rew_dmg_mult_mean = safe_mean([v.ep_rew_dmg_mult_mean for v in self.variants.values() if v.num_episodes > 0])
@@ -917,6 +919,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             stats.ep_rew_mean += sum(v_final_info["episode"]["r"][v_done_id])
             stats.ep_len_mean += sum(v_final_info["episode"]["l"][v_done_id])
             stats.ep_value_mean += sum(v_final_info["net_value"][v_done_id])
+            stats.ep_rounds_mean += sum(v_final_info["round"][v_done_id])
             stats.ep_is_success_mean += sum(v_final_info["is_success"][v_done_id])
             assert len(v_done_id) == int(np.logical_or(v_term, v_trunc).sum())
             stats.num_episodes += len(v_done_id)
@@ -935,6 +938,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         stats.ep_rew_mean /= stats.num_episodes
         stats.ep_len_mean /= stats.num_episodes
         stats.ep_value_mean /= stats.num_episodes
+        stats.ep_rounds_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
         stats.ep_rew_step_fixed_mean /= stats.num_episodes
         # stats.ep_rew_step_round_mult_mean /= stats.num_episodes
@@ -980,6 +984,7 @@ def eval_model(logger, model, venv, num_vsteps):
             stats.ep_rew_mean += sum(v_final_info["episode"]["r"][v_done_id])
             stats.ep_len_mean += sum(v_final_info["episode"]["l"][v_done_id])
             stats.ep_value_mean += sum(v_final_info["net_value"][v_done_id])
+            stats.ep_rounds_mean += sum(v_final_info["round"][v_done_id])
             stats.ep_is_success_mean += sum(v_final_info["is_success"][v_done_id])
             stats.ep_rew_step_fixed_mean += sum(v_final_info["reward_step_fixed"][v_done_id])
             stats.ep_rew_dmg_mult_mean += sum(v_final_info["reward_dmg_mult"][v_done_id])
@@ -997,6 +1002,7 @@ def eval_model(logger, model, venv, num_vsteps):
         stats.ep_rew_mean /= stats.num_episodes
         stats.ep_len_mean /= stats.num_episodes
         stats.ep_value_mean /= stats.num_episodes
+        stats.ep_rounds_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
         stats.ep_rew_step_fixed_mean /= stats.num_episodes
         stats.ep_rew_dmg_mult_mean /= stats.num_episodes
@@ -1269,6 +1275,7 @@ def prepare_wandb_log(
             "eval/ep_rew_mean": eval_multistats.ep_rew_mean,
             "eval/ep_value_mean": eval_multistats.ep_value_mean,
             "eval/ep_len_mean": eval_multistats.ep_len_mean,
+            "eval/ep_rounds_mean": eval_multistats.ep_rounds_mean,
             "eval/ep_success_rate": eval_multistats.ep_is_success_mean,
             "eval/ep_count": eval_multistats.num_episodes,
             "eval/ep_trunc_count": eval_multistats.num_truncations,

@@ -31,6 +31,7 @@ from .pyconnector import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     N_ACTIONS,
+    MAX_ROUNDS,
     HEX_ACT_MAP,
     LINK_TYPES
 )
@@ -374,7 +375,7 @@ class VcmiEnv(gym.Env):
 
         bf = Decoder.decode(res.state, only_global=True)
         term = bf.global_stats.BATTLE_WINNER.v is not None
-        trunc = self.steps_this_episode >= self.max_steps
+        trunc = bf.global_stats.BATTLE_ROUND.v == MAX_ROUNDS  # vcmi should have retreated
         rewvals = VcmiEnv.calc_reward(res.errcode, term, trunc, bf, self.bf, self.reward_cfg)
         rew = sum(rewvals)
         res.mask[0] = False  # prevent retreats for now
@@ -400,7 +401,7 @@ class VcmiEnv(gym.Env):
         if self.render_each_step:
             print(self.render())
 
-        info = {"side": bf.global_stats.BATTLE_SIDE.v}
+        info = {"round": bf.global_stats.BATTLE_ROUND.v}
         return obs, info
 
     @tracelog
@@ -586,10 +587,10 @@ class VcmiEnv(gym.Env):
     def build_info(res, term, trunc, bf, steps_this_episode, rewvals_total):
         # Performance optimization
         if not (term or trunc):
-            return dict(side=bf.global_stats.BATTLE_SIDE.v, step=steps_this_episode)
+            return dict(round=bf.global_stats.BATTLE_ROUND.v, step=steps_this_episode)
 
         return dict(
-            side=bf.global_stats.BATTLE_SIDE.v,
+            round=bf.global_stats.BATTLE_ROUND.v,
             step=steps_this_episode,
 
             # round=bf.global_stats.BATTLE_ROUND.v,

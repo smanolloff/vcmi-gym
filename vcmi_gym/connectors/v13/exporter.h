@@ -43,6 +43,7 @@ namespace Connector::V13 {
     class Exporter {
     public:
         virtual const int getVersion() const;
+        virtual const int getMaxRounds() const;
         virtual const int getNActions() const;
         virtual const int getNNonhexActions() const;
         virtual const int getNHexActions() const;
