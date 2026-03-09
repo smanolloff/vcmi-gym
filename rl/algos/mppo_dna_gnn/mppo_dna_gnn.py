@@ -474,6 +474,18 @@ class Model(nn.Module):
             nn.LeakyReLU()
         )
 
+        self.hex1_residual_scorer = nn.Sequential(
+            nn.Linear(2 * d, d),
+            nn.LeakyReLU(),
+            nn.Linear(d, 1)
+        )
+
+        self.hex2_residual_scorer = nn.Sequential(
+            nn.Linear(2 * d, d),
+            nn.LeakyReLU(),
+            nn.Linear(d, 1)
+        )
+
         self.act0_head = nn.Linear(d, len(MainAction))
         self.emb_act0 = nn.Embedding(len(MainAction), d)
         self.Wk_hex1 = nn.Linear(d, d, bias=False)
@@ -608,14 +620,24 @@ class Model(nn.Module):
         d = act0_emb.size(-1)
         q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
         k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
-        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        hex1_base_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        hex1_residual_logits = self.hex1_residual_scorer(torch.cat([
+            q_hex1.unsqueeze(1).expand(-1, z_hexes.size(1), -1),
+            z_hexes
+        ], dim=-1)).squeeze(-1)
+        hex1_logits = hex1_base_logits + hex1_residual_logits
         dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
 
         # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
         z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
         q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
-        k_hex2 = self.Wk_hex2(z_hexes)                                         # (B, 165, d)
-        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
+        hex2_base_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
+        hex2_residual_logits = self.hex2_residual_scorer(torch.cat([
+            q_hex2.unsqueeze(1).expand(-1, z_hexes.size(1), -1),
+            z_hexes,
+        ], dim=-1)).squeeze(-1)
+        hex2_logits = hex2_base_logits + hex2_residual_logits
         dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
 
         return ActionSample(
