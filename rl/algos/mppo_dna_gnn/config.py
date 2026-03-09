@@ -93,6 +93,7 @@ config = dict(
                 model=dynamic_bot("nkjrmrsq", 3600),
                 # model=static_bot("nkjrmrsq-202509291846"),
                 town_chance=0,
+                opponent_vip_chance=0
             ),
         },
         num_vsteps=10_000,
@@ -104,7 +105,7 @@ config = dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
             kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
-            num_envs_per_opponent=dict(StupidAI=0, BattleAI=40, MMAI_BATTLEAI=0, model=0),
+            num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, MMAI_BATTLEAI=40, model=0),
 
             # num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, MMAI_BATTLEAI=0, model=1),
             # model=static_bot("data/mppo-dna-heads/tukbajrv-202509241418"),
