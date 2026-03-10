@@ -398,8 +398,8 @@ class GNNBlock(nn.Module):
 
         self.layers = gnn.Sequential("x_dict, edge_index_dict, edge_attr_dict", layers)
 
-    def forward(self, hdata):
-        return self.layers(hdata.x_dict, hdata.edge_index_dict, hdata.edge_attr_dict)
+    def forward(self, x_dict, ei_dict, ea_dict):
+        return self.layers(x_dict, ei_dict, ea_dict)
 
 
 class Model(nn.Module):
@@ -456,21 +456,28 @@ class Model(nn.Module):
         self.register_buffer("action_table", action_table)
         self.register_buffer("inverse_table", inverse_table)
 
+        d = config["gnn_out_channels"]
+
         # XXX: todo: over-arching global node connected to all hexes
         #           (for non-hex data)
 
+        self.init_hexes = nn.Sequential(
+            nn.Linear(STATE_SIZE_ONE_HEX, d),
+            # nn.LayerNorm(d),
+            nn.LeakyReLU()
+        )
+
         self.encoder_hexes = GNNBlock(
             config["gnn_num_layers"],
-            STATE_SIZE_ONE_HEX,
+            d,
             config["gnn_hidden_channels"],
-            config["gnn_out_channels"],
+            d,
             config.get("gnn_kwargs", {}),
         )
 
-        d = config["gnn_out_channels"]
-
         self.encoder_other = nn.Sequential(
             nn.Linear(self.dim_other, d),
+            # nn.LayerNorm(d),
             nn.LeakyReLU()
         )
 
@@ -482,8 +489,8 @@ class Model(nn.Module):
         self.Wq_hex2 = nn.Linear(2*d, d)
 
         self.critic = nn.Sequential(
-            # nn.LayerNorm(d), helps?
             nn.Linear(d, config["critic_hidden_features"]),
+            # nn.LayerNorm(config["critic_hidden_features"]),
             nn.LeakyReLU(),
             nn.Linear(config["critic_hidden_features"], 1)
         )
@@ -514,6 +521,7 @@ class Model(nn.Module):
                 nn.init.zeros_(linlayer.bias)
 
         # For layers followed by ReLU or LeakyReLU, use Kaiming (He).
+        kaiming_init(self.init_hexes[0])
         kaiming_init(self.encoder_other[0])
 
         # For other layers, use Xavier.
@@ -526,7 +534,8 @@ class Model(nn.Module):
         xavier_init(self.critic[2])
 
     def encode(self, hdata):
-        z_hexes_dict = self.encoder_hexes(hdata)
+        x_dict = {"hex": self.init_hexes(hdata["hex"].x)}
+        z_hexes_dict = self.encoder_hexes(x_dict, hdata.edge_index_dict, hdata.edge_attr_dict)
         z_hexes, hmask = to_dense_batch(z_hexes_dict["hex"], hdata["hex"].batch)
 
         # zhex is (B, Nmax, Z)
