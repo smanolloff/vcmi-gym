@@ -463,7 +463,7 @@ class Model(nn.Module):
 
         self.init_hexes = nn.Sequential(
             nn.Linear(STATE_SIZE_ONE_HEX, d),
-            # nn.LayerNorm(d),
+            nn.LayerNorm(d),
             nn.LeakyReLU()
         )
 
@@ -477,7 +477,7 @@ class Model(nn.Module):
 
         self.encoder_other = nn.Sequential(
             nn.Linear(self.dim_other, d),
-            # nn.LayerNorm(d),
+            nn.LayerNorm(d),
             nn.LeakyReLU()
         )
 
@@ -490,7 +490,7 @@ class Model(nn.Module):
 
         self.critic = nn.Sequential(
             nn.Linear(d, config["critic_hidden_features"]),
-            # nn.LayerNorm(config["critic_hidden_features"]),
+            nn.LayerNorm(config["critic_hidden_features"]),
             nn.LeakyReLU(),
             nn.Linear(config["critic_hidden_features"], 1)
         )
@@ -531,7 +531,7 @@ class Model(nn.Module):
         xavier_init(self.Wq_hex1)
         xavier_init(self.Wq_hex2)
         kaiming_init(self.critic[0])
-        xavier_init(self.critic[2])
+        xavier_init(self.critic[3])
 
     def encode(self, hdata):
         x_dict = {"hex": self.init_hexes(hdata["hex"].x)}
