@@ -19,9 +19,10 @@ train_env_kwargs = dict(
     reward_step_fixed=-0.5,
 
     # These require BATTLE_ROUND in obs
-    # reward_step_round_mult=0,
-    # reward_round_fixed=0,
-    # reward_round_round_mult=0,
+    reward_prog_base=0.1,
+    reward_prog_trigger=9,
+    reward_prog_exponent=2,
+    reward_prog_limit=15,
 
     reward_dmg_mult=0.01,
     reward_term_mult=0.01,
@@ -89,8 +90,9 @@ config = dict(
             #     town_chance=0,
             # ),
             "MMAI.open": eval_variant(
-                num_envs_per_opponent=gen_num_envs(0, 0, 0, 1),
-                model=dynamic_bot("nkjrmrsq", 3600),
+                num_envs_per_opponent=gen_num_envs(0, 1, 0, 0),
+                model=None,
+                # model=dynamic_bot("nkjrmrsq", 3600),
                 # model=static_bot("nkjrmrsq-202509291846"),
                 town_chance=0,
                 opponent_vip_chance=0
@@ -155,7 +157,7 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 2
     config["train"]["env"]["num_envs_per_opponent"] = {k: min(v, 2) for k, v in config["train"]["env"]["num_envs_per_opponent"].items()}
-    config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
+    # config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     # config["train"]["env"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     config["eval"]["num_vsteps"] = 100
@@ -163,7 +165,7 @@ if os.getenv("VASTAI", None) != "1":
     for name, envcfg in config["eval"]["env_variants"].items():
         envcfg["num_envs_per_opponent"] = {k: min(v, 1) for k, v in envcfg["num_envs_per_opponent"].items()}
         envcfg["kwargs"]["warmachine_chance"] = 0
-        envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
+        # envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
         # envcfg["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     # DEBUG dual vec env:

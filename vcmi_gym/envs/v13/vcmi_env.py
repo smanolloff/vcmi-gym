@@ -66,34 +66,46 @@ class RewardConfig(NamedTuple):
     term_mult: float
     relval_mult: float
 
-    # Progressive rewards is a per-step quadratic penalty which increases each round.
+    # Progressive rewards is a per-step penalty which increases each round
+    # until it reaches a specific value (cap), after which it stops growing.
     #
     # Use https://www.desmos.com/calculator to visualize:
     #
     #       Equation:
-    #           a+b\left(c\cdot\left(\max\left(d,\operatorname{floor}\left(x\right)\right)-d\right)\right)^{3}
+    #           \min\left(a\left(\max\left(\operatorname{floor}\left(x\right),b\right)-b\right)^{c},d\right)
     #
-    #       Then add sliders for a, b, c, d
+    #       Then add sliders for a, b & c
     #       Also set y-axis to log scale
     #
-    #       NOTE: Actual rewards use the negative of this result
+    #       NOTE: Actual rewards use the negative value of this result
     #
-    # For example, with {a=1 b=20 c=0.3 d=11}, reward is:
+    # For example, with {a=0.1 b=9 c=2 d=15}, reward is:
     #
-    # round <=11: -1
-    # round 12: -1.5
-    # round 13: -5.3
-    # round 14: -15.6
-    # round 15: -35.6
-    # round 16: -68.5
+    # round <=9: 0
+    # round 10: -0.1
+    # round 11: -0.4
+    # round 12: -0.9
+    # round 13: -1.6
+    # round 14: -2.5
+    # round 15: -3.6
+    # round 16: -4.9
+    # round 17: -6.4
+    # round 18: -8.1
+    # round 19: -10.0
+    # round 20: -12.1
+    # round 21: -14.4
+    # round 22: -15
+    # round 23: -15
     # ...
-    # round 20: -395
-    # ...
     #
-    prog_base: float    # a
-    prog_width: float   # b
-    prog_gain: float    # c
-    prog_round: int     # d
+    # Cap=15 above is suitable in conjunction with reward_term_mult=0.01
+    # (i.e. even if net_value_lost=500‰, net_dmg_received=500‰ + some acc value)
+    #   totals to 1500‰ * reward_term_mult = 15
+    # => cap our prog to 15 as well
+    prog_base: float        # a
+    prog_trigger: int       # b
+    prog_exponent: float    # c
+    prog_limit: int         # d
 
 
 class RewardValues(NamedTuple):
@@ -199,10 +211,10 @@ class VcmiEnv(gym.Env):
 
         # These require BATTLE_ROUND in obs (to add in future env version)
         # See RewardConfig for more info
-        reward_prog_base: float = 1,        # "a", pre-transition, fixed reward
-        reward_prog_gain: float = 20,       # "b", post-transition grow factor
-        reward_prog_width: float = 0.3,     # "c", transition duration
-        reward_prog_round: int = 11,        # "d", transition center (target round)
+        reward_prog_base: float = 0.1,
+        reward_prog_trigger: int = 9,
+        reward_prog_exponent: float = 2,
+        reward_prog_limit: float = 15,
 
         reward_dmg_mult: float = 1,
         reward_term_mult: float = 1,
@@ -263,9 +275,9 @@ class VcmiEnv(gym.Env):
             err_exclusive=float(reward_err_exclusive),
             step_fixed=float(reward_step_fixed),
             prog_base=float(reward_prog_base),
-            prog_gain=float(reward_prog_gain),
-            prog_width=float(reward_prog_width),
-            prog_round=float(reward_prog_round),
+            prog_trigger=float(reward_prog_trigger),
+            prog_exponent=float(reward_prog_exponent),
+            prog_limit=float(reward_prog_limit),
             dmg_mult=float(reward_dmg_mult),
             term_mult=float(reward_term_mult),
             relval_mult=float(reward_relval_mult),
@@ -651,11 +663,11 @@ class VcmiEnv(gym.Env):
 
         # See note in RewardConfig
         a = cfg.prog_base
-        b = cfg.prog_gain
-        c = cfg.prog_width
-        d = cfg.prog_round
+        b = cfg.prog_trigger
+        c = cfg.prog_exponent
+        d = cfg.prog_limit
         x = bf.global_stats.BATTLE_ROUND.v
-        prog = -(a + b*(c*(max(d, int(x)) - d))**3)
+        prog = -min(a*(max(b, int(x)) - b)**c, d)
 
         done = term or trunc
 
