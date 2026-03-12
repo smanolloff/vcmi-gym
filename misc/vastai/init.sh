@@ -32,15 +32,13 @@ EFFECTIVE_NUM_CPUS=${1:-12}
 #
 
 touch ~/.no_auto_tmux
-cat <<-EOF >~/.tmux.conf
-set-option -g history-limit 100000
-set-window-option -g mode-keys vi
-EOF
 
 # This takes some time => make it a separate step
 if ! [ -e ~/.tmux/plugins/tpm ]; then
     git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
-    cat <<-EOF >>~/.tmux.conf
+    cat <<-EOF >~/.tmux.conf
+set-option -g history-limit 100000
+set-window-option -g mode-keys vi
 set -g @logging-path ".tmux"
 
 # Plugins

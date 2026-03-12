@@ -181,9 +181,7 @@ class SampleStats:
     ep_rew_dmg_mult_mean: float = 0.0
     ep_rew_term_mult_mean: float = 0.0
     ep_rew_relval_mult_mean: float = 0.0
-    # ep_rew_step_round_mult_mean: float = 0.0
-    # ep_rew_round_fixed_mean: float = 0.0
-    # ep_rew_round_round_mult_mean: float = 0.0
+    ep_rew_prog_mean: float = 0.0
     num_episodes: int = 0
     num_truncations: int = 0
 
@@ -212,9 +210,7 @@ class MultiStats(SampleStats):
         self.ep_rew_dmg_mult_mean = safe_mean([v.ep_rew_dmg_mult_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_rew_term_mult_mean = safe_mean([v.ep_rew_term_mult_mean for v in self.variants.values() if v.num_episodes > 0])
         self.ep_rew_relval_mult_mean = safe_mean([v.ep_rew_relval_mult_mean for v in self.variants.values() if v.num_episodes > 0])
-        # self.ep_rew_step_round_mult_mean = safe_mean([v.ep_rew_step_round_mult_mean for v in self.variants.values() if v.num_episodes > 0])
-        # self.ep_rew_round_fixed_mean = safe_mean([v.ep_rew_round_fixed_mean for v in self.variants.values() if v.num_episodes > 0])
-        # self.ep_rew_round_round_mult_mean = safe_mean([v.ep_rew_round_round_mult_mean for v in self.variants.values() if v.num_episodes > 0])
+        self.ep_rew_prog_mean = safe_mean([v.ep_rew_prog_mean for v in self.variants.values() if v.num_episodes > 0])
 
 
 class MainAction(enum.IntEnum):
@@ -925,9 +921,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             stats.num_episodes += len(v_done_id)
             stats.num_truncations += int(v_trunc.sum())
             stats.ep_rew_step_fixed_mean += sum(v_final_info["reward_step_fixed"][v_done_id])
-            # stats.ep_rew_step_round_mult_mean += sum(v_final_info["reward_step_round_mult"][v_done_id])
-            # stats.ep_rew_round_fixed_mean += sum(v_final_info["reward_round_fixed"][v_done_id])
-            # stats.ep_rew_round_round_mult_mean += sum(v_final_info["reward_round_round_mult"][v_done_id])
+            stats.ep_rew_prog_mean += sum(v_final_info["reward_prog"][v_done_id])
             stats.ep_rew_dmg_mult_mean += sum(v_final_info["reward_dmg_mult"][v_done_id])
             stats.ep_rew_term_mult_mean += sum(v_final_info["reward_term_mult"][v_done_id])
             stats.ep_rew_relval_mult_mean += sum(v_final_info["reward_relval_mult"][v_done_id])
@@ -941,9 +935,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         stats.ep_rounds_mean /= stats.num_episodes
         stats.ep_is_success_mean /= stats.num_episodes
         stats.ep_rew_step_fixed_mean /= stats.num_episodes
-        # stats.ep_rew_step_round_mult_mean /= stats.num_episodes
-        # stats.ep_rew_round_fixed_mean /= stats.num_episodes
-        # stats.ep_rew_round_round_mult_mean /= stats.num_episodes
+        stats.ep_rew_prog_mean /= stats.num_episodes
         stats.ep_rew_dmg_mult_mean /= stats.num_episodes
         stats.ep_rew_term_mult_mean /= stats.num_episodes
         stats.ep_rew_relval_mult_mean /= stats.num_episodes
@@ -990,9 +982,7 @@ def eval_model(logger, model, venv, num_vsteps):
             stats.ep_rew_dmg_mult_mean += sum(v_final_info["reward_dmg_mult"][v_done_id])
             stats.ep_rew_term_mult_mean += sum(v_final_info["reward_term_mult"][v_done_id])
             stats.ep_rew_relval_mult_mean += sum(v_final_info["reward_relval_mult"][v_done_id])
-            # stats.ep_rew_step_round_mult_mean += sum(v_final_info["reward_step_round_mult"][v_done_id])
-            # stats.ep_rew_round_fixed_mean += sum(v_final_info["reward_round_fixed"][v_done_id])
-            # stats.ep_rew_round_round_mult_mean += sum(v_final_info["reward_round_round_mult"][v_done_id])
+            stats.ep_rew_prog_mean += sum(v_final_info["reward_prog"][v_done_id])
 
             assert len(v_done_id) == int(np.logical_or(v_term, v_trunc).sum())
             stats.num_episodes += len(v_done_id)
@@ -1008,9 +998,7 @@ def eval_model(logger, model, venv, num_vsteps):
         stats.ep_rew_dmg_mult_mean /= stats.num_episodes
         stats.ep_rew_term_mult_mean /= stats.num_episodes
         stats.ep_rew_relval_mult_mean /= stats.num_episodes
-        # stats.ep_rew_step_round_mult_mean /= stats.num_episodes
-        # stats.ep_rew_round_fixed_mean /= stats.num_episodes
-        # stats.ep_rew_round_round_mult_mean /= stats.num_episodes
+        stats.ep_rew_prog_mean /= stats.num_episodes
 
     return stats
 
@@ -1266,9 +1254,7 @@ def prepare_wandb_log(
             + abs(eval_multistats.ep_rew_dmg_mult_mean)
             + abs(eval_multistats.ep_rew_term_mult_mean)
             + abs(eval_multistats.ep_rew_relval_mult_mean)
-            # + abs(eval_multistats.ep_rew_step_round_mult_mean)
-            # + abs(eval_multistats.ep_rew_round_fixed_mean)
-            # + abs(eval_multistats.ep_rew_round_round_mult_mean)
+            + abs(eval_multistats.ep_rew_prog_mean)
         )
 
         wlog.update({
@@ -1283,16 +1269,12 @@ def prepare_wandb_log(
             "eval/reward/dmg_mult": eval_multistats.ep_rew_dmg_mult_mean,
             "eval/reward/term_mult": eval_multistats.ep_rew_term_mult_mean,
             "eval/reward/relval_mult": eval_multistats.ep_rew_relval_mult_mean,
-            # "eval/reward/step_round_mult": eval_multistats.ep_rew_step_round_mult_mean,
-            # "eval/reward/round_fixed": eval_multistats.ep_rew_round_fixed_mean,
-            # "eval/reward/round_round_mult": eval_multistats.ep_rew_round_round_mult_mean,
+            "eval/reward/prog": eval_multistats.ep_rew_prog_mean,
             "eval/reward_rel/step_fixed": abs(eval_multistats.ep_rew_step_fixed_mean) / reward_abs_tot,
             "eval/reward_rel/dmg_mult": abs(eval_multistats.ep_rew_dmg_mult_mean) / reward_abs_tot,
             "eval/reward_rel/term_mult": abs(eval_multistats.ep_rew_term_mult_mean) / reward_abs_tot,
             "eval/reward_rel/relval_mult": abs(eval_multistats.ep_rew_relval_mult_mean) / reward_abs_tot,
-            # "eval/reward_rel/step_round_mult": abs(eval_multistats.ep_rew_step_round_mult_mean) / reward_abs_tot,
-            # "eval/reward_rel/round_fixed": abs(eval_multistats.ep_rew_round_fixed_mean) / reward_abs_tot,
-            # "eval/reward_rel/round_round_mult": abs(eval_multistats.ep_rew_round_round_mult_mean) / reward_abs_tot,
+            "eval/reward_rel/prog": abs(eval_multistats.ep_rew_prog_mean) / reward_abs_tot,
         })
 
     for name, eval_sample_stats in eval_multistats.variants.items():
@@ -1301,9 +1283,7 @@ def prepare_wandb_log(
             + abs(eval_sample_stats.ep_rew_dmg_mult_mean)
             + abs(eval_sample_stats.ep_rew_term_mult_mean)
             + abs(eval_sample_stats.ep_rew_relval_mult_mean)
-            # + abs(eval_sample_stats.ep_rew_step_round_mult_mean)
-            # + abs(eval_sample_stats.ep_rew_round_fixed_mean)
-            # + abs(eval_sample_stats.ep_rew_round_round_mult_mean)
+            + abs(eval_sample_stats.ep_rew_prog_mean)
         )
 
         wlog.update({
@@ -1317,16 +1297,12 @@ def prepare_wandb_log(
             f"eval/{name}/reward/dmg_mult_mean": eval_sample_stats.ep_rew_dmg_mult_mean,
             f"eval/{name}/reward/term_mult_mean": eval_sample_stats.ep_rew_term_mult_mean,
             f"eval/{name}/reward/relval_mult_mean": eval_sample_stats.ep_rew_relval_mult_mean,
-            # f"eval/{name}/reward/step_round_mult_mean": eval_sample_stats.ep_rew_step_round_mult_mean,
-            # f"eval/{name}/reward/round_fixed_mean": eval_sample_stats.ep_rew_round_fixed_mean,
-            # f"eval/{name}/reward/round_round_mult_mean": eval_sample_stats.ep_rew_round_round_mult_mean,
+            f"eval/{name}/reward/prog_mean": eval_sample_stats.ep_rew_prog_mean,
             f"eval/{name}/reward_rel/step_fixed": abs(eval_sample_stats.ep_rew_step_fixed_mean) / reward_abs_tot,
             f"eval/{name}/reward_rel/dmg_mult": abs(eval_sample_stats.ep_rew_dmg_mult_mean) / reward_abs_tot,
             f"eval/{name}/reward_rel/term_mult": abs(eval_sample_stats.ep_rew_term_mult_mean) / reward_abs_tot,
             f"eval/{name}/reward_rel/relval_mult": abs(eval_sample_stats.ep_rew_relval_mult_mean) / reward_abs_tot,
-            # f"eval/{name}/reward_rel/step_round_mult": abs(eval_sample_stats.ep_rew_step_round_mult_mean) / reward_abs_tot,
-            # f"eval/{name}/reward_rel/round_fixed": abs(eval_sample_stats.ep_rew_round_fixed_mean) / reward_abs_tot,
-            # f"eval/{name}/reward_rel/round_round_mult": abs(eval_sample_stats.ep_rew_round_round_mult_mean) / reward_abs_tot,
+            f"eval/{name}/reward_rel/prog": abs(eval_sample_stats.ep_rew_prog_mean) / reward_abs_tot,
         })
 
     if train_sample_stats.num_episodes > 0:

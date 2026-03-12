@@ -58,22 +58,47 @@ def tracelog(func, maxlen=80):
 # (-60, 60)
 # * -/+ 60 if dmg_mult=1
 # * -/+ 50 if term_mult=1
+#
 class RewardConfig(NamedTuple):
     err_exclusive: float
     step_fixed: float
-    # step_round_mult: float
-    # round_fixed: float
-    # round_round_mult: float
     dmg_mult: float
     term_mult: float
     relval_mult: float
 
+    # Progressive rewards is a per-step quadratic penalty which increases each round.
+    #
+    # Use https://www.desmos.com/calculator to visualize:
+    #
+    #       Equation:
+    #           a+b\left(c\cdot\left(\max\left(d,\operatorname{floor}\left(x\right)\right)-d\right)\right)^{3}
+    #
+    #       Then add sliders for a, b, c, d
+    #       Also set y-axis to log scale
+    #
+    #       NOTE: Actual rewards use the negative of this result
+    #
+    # For example, with {a=1 b=20 c=0.3 d=11}, reward is:
+    #
+    # round <=11: -1
+    # round 12: -1.5
+    # round 13: -5.3
+    # round 14: -15.6
+    # round 15: -35.6
+    # round 16: -68.5
+    # ...
+    # round 20: -395
+    # ...
+    #
+    prog_base: float    # a
+    prog_width: float   # b
+    prog_gain: float    # c
+    prog_round: int     # d
+
 
 class RewardValues(NamedTuple):
     step_fixed: float = 0.0
-    # step_round_mult: float = 0.0
-    # round_fixed: float = 0.0
-    # round_round_mult: float = 0.0
+    prog: float = 0.0
     dmg_mult: float = 0.0
     term_mult: float = 0.0
     relval_mult: float = 0.0
@@ -173,10 +198,11 @@ class VcmiEnv(gym.Env):
         reward_step_fixed: float = -1,          # reward = value
 
         # These require BATTLE_ROUND in obs (to add in future env version)
-        # reward_step_round_mult: float = -1,     # reward = value * current_round
-        # # Applied on first step of every round:
-        # reward_round_fixed: float = -1,         # reward = value
-        # reward_round_round_mult: float = -1,    # reward = value * current_round
+        # See RewardConfig for more info
+        reward_prog_base: float = 1,        # "a", pre-transition, fixed reward
+        reward_prog_gain: float = 20,       # "b", post-transition grow factor
+        reward_prog_width: float = 0.3,     # "c", transition duration
+        reward_prog_round: int = 11,        # "d", transition center (target round)
 
         reward_dmg_mult: float = 1,
         reward_term_mult: float = 1,
@@ -236,9 +262,10 @@ class VcmiEnv(gym.Env):
         self.reward_cfg = RewardConfig(
             err_exclusive=float(reward_err_exclusive),
             step_fixed=float(reward_step_fixed),
-            # step_round_mult=float(reward_step_round_mult),
-            # round_fixed=float(reward_round_fixed),
-            # round_round_mult=float(reward_round_round_mult),
+            prog_base=float(reward_prog_base),
+            prog_gain=float(reward_prog_gain),
+            prog_width=float(reward_prog_width),
+            prog_round=float(reward_prog_round),
             dmg_mult=float(reward_dmg_mult),
             term_mult=float(reward_term_mult),
             relval_mult=float(reward_relval_mult),
@@ -593,13 +620,10 @@ class VcmiEnv(gym.Env):
             round=bf.global_stats.BATTLE_ROUND.v,
             step=steps_this_episode,
 
-            # round=bf.global_stats.BATTLE_ROUND.v,
             net_value=bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v,
             is_success=bf.is_battle_won or False,  # can be None if truncated
             reward_step_fixed=rewvals_total.step_fixed,
-            # reward_step_round_mult=rewvals_total.step_round_mult,
-            # reward_round_fixed=rewvals_total.round_fixed,
-            # reward_round_round_mult=rewvals_total.round_round_mult,
+            reward_prog=rewvals_total.prog,
             reward_dmg_mult=rewvals_total.dmg_mult,
             reward_term_mult=rewvals_total.term_mult,
             reward_relval_mult=rewvals_total.relval_mult,
@@ -625,16 +649,19 @@ class VcmiEnv(gym.Env):
         net_value = bf.enemy_stats.VALUE_LOST_NOW_REL.v - my_value_lost
         net_value_acc = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - my_value_lost_acc
 
-        # is_new_round = battle_round > bf_old.global_stats.BATTLE_ROUND.v
-        # battle_round = bf.global_stats.BATTLE_ROUND.v
+        # See note in RewardConfig
+        a = cfg.prog_base
+        b = cfg.prog_gain
+        c = cfg.prog_width
+        d = cfg.prog_round
+        x = bf.global_stats.BATTLE_ROUND.v
+        prog = -(a + b*(c*(max(d, int(x)) - d))**3)
 
         done = term or trunc
 
         return RewardValues(
             step_fixed=cfg.step_fixed,
-            # step_round_mult=cfg.step_round_mult * battle_round,
-            # round_fixed=is_new_round * cfg.round_fixed,
-            # round_round_mult=is_new_round * cfg.round_round_mult * battle_round,
+            prog=prog,
             dmg_mult=net_dmg * cfg.dmg_mult,
             term_mult=done * net_value_acc * cfg.term_mult,
             relval_mult=net_value * cfg.relval_mult,
