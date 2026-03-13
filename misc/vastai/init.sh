@@ -299,7 +299,7 @@ date +'BOOTED_AT=%FT%T%z' >> ~/.bashrc
 
 service cron start || :
 
-tmux new-session -d "source ~/.simorc; tmux rename-window REBOOTED; /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID REBOOTED; cd \$PWD; \$*; exec \$SHELL"
+tmux new-session -d "source ~/.simorc; tmux rename-window \$VASTAI_INSTANCE_ID:REBOOTED; /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID REBOOTED; cd \$PWD; \$*; exec \$SHELL"
 EOL
 }
 
@@ -308,18 +308,18 @@ function retry_until_sigint() {
     shift
     local i=0
     while true; do
-        tmux rename-window \$run_id || :
+        tmux rename-window \$VASTAI_INSTANCE_ID:\$run_id || :
         bash -x ~/runcmd.sh \$*
         if [ \$? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
             /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID IDLE
-            tmux rename-window IDLE || :
+            tmux rename-window \$VASTAI_INSTANCE_ID:IDLE || :
             break
         else
             echo "Interrupt NOT detected, will retry in 10s..."
             let ++i
             /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID CRASHED_\$i
-            tmux rename-window CRASHED_\$i || :
+            tmux rename-window \$VASTAI_INSTANCE_ID:CRASHED_\$i || :
             # FIXME: if there are other runs on the same instance, this will kill them as well
             killall python
             sleep 10
@@ -377,12 +377,12 @@ USAGE
 
     if \$new_run; then
         echo "This is a new run -- will start ONCE with --run-id to create it"
-        tmux rename-window \$run_id || :
+        tmux rename-window \$VASTAI_INSTANCE_ID:\$run_id || :
         bash -x ~/runcmd.sh \$newcmd --skip-eval
 
         if [ \$? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
-            tmux rename-window IDLE || :
+            tmux rename-window \$VASTAI_INSTANCE_ID:IDLE || :
             /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID IDLE
             # run was interrupted, no need to resume on boot
             setboot :
@@ -391,7 +391,7 @@ USAGE
 
         # The config file should now be created, can enter the regular retry loop
         echo "Interrupt NOT detected, will enter retry loop"
-        tmux rename-window CRASHED || :
+        tmux rename-window \$VASTAI_INSTANCE_ID:CRASHED || :
         /opt/instance-tools/bin/vastai label instance \$VASTAI_INSTANCE_ID CRASHED
         killall python
         sleep 10
@@ -611,5 +611,5 @@ echo "Done in $((finished_at - started_at)) seconds."
 
 # Mark as completed
 touch /workspace/.initialized
-tmux rename-window ready || :
+tmux rename-window \$VASTAI_INSTANCE_ID:ready || :
 /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID ready
