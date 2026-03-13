@@ -82,5 +82,5 @@ def setup_wandb(config, model, src_file, wandb_kwargs={}):
 
     # XXX: no "Model" will be shown in the W&B UI when .forward()
     #       returns a non-tensor value (e.g. a tuple)
-    wandb.watch(model, log="all", log_graph=True, log_freq=1000)
+    wandb.watch(model, log="all", log_graph=False, log_freq=1000)
     return wandb
