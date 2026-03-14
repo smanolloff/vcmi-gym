@@ -101,7 +101,7 @@ def main(model, venv, num_vsteps, player, opponent, dual_venv_kwargs):
     print("* Average steps/s: %.0f (%.0f vsteps/s)" % (num_vsteps / sum(times), venv.num_envs * num_vsteps / sum(times)))
     print("* Average winrate: %.0f%%" % (100 * sum(winrates) / len(winrates)))
 
-    with open("mmai-arena.out", "a") as f:
+    with open("arena.out", "a") as f:
         f.write("-- %s: %.0f%% | %s <> %s | episodes=%d %s\n" % (
             datetime.strftime(datetime.now(), "%F %T"),
             (100 * sum(winrates) / len(winrates)),

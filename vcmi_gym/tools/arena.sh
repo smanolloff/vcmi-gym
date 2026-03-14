@@ -38,7 +38,7 @@ for player in "${players[@]}"; do
             cat <<-EOF
 =========================== $player vs. $opponent (town_chance=$town_chance)
 EOF
-            python -m vcmi_gym.tools.benchmark_venv2 \
+            python -m vcmi_gym.tools.arena \
                 --num-envs=${1-30} \
                 --num-vsteps=${2-1000} \
                 --player $player_file \
