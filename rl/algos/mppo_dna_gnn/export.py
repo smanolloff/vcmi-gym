@@ -467,20 +467,10 @@ def save_exported_model(m, export_dir, basename):
 
 
 def main():
-    MODEL_PREFIXES = [
-        # "nkjrmrsq-202509291846",
-        # "tukbajrv-202509241418",
-        # "qsslwyxa-202601031013"
-        "joymfkqj-202601071930",
-        "oasbctkd-1767770356",
-        "qsslwyxa-1767798249"
-    ]
-
     with torch.inference_mode():
         for prefix in MODEL_PREFIXES:
-            model_cfg_path = f"export/{prefix}-config.json"
-            model_weights_path = f"export/{prefix}-model-dna.pt"
-            export_dir = "/Users/simo/Library/Application Support/vcmi/Mods/mmai/models"
+            model_cfg_path = f"{EXPORT_SRC_DIR}/{prefix}-config.json"
+            model_weights_path = f"{EXPORT_SRC_DIR}/{prefix}-model-dna.pt"
 
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
@@ -503,8 +493,15 @@ def main():
             loaded_model = load_exported_model(exported_model)
             # loaded_model = load_exported_model("/Users/simo/Library/Application Support/vcmi/Mods/mmai/models/defender-tukbajrv-202509241418-probs-debug1.onnx")
             verify_export(cfg, model_weights_path, loaded_model)
-            save_exported_model(exported_model, export_dir, export_basename)
+            save_exported_model(exported_model, EXPORT_DST_DIR, export_basename)
 
 
 if __name__ == "__main__":
+    MODEL_PREFIXES = [
+        "tukbavip-1773266382"
+    ]
+
+    EXPORT_SRC_DIR = "./export"
+    EXPORT_DST_DIR = "/Users/simo/Library/Application Support/vcmi/Mods/mmai/models"
+
     main()

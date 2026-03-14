@@ -488,8 +488,8 @@ if __name__ == "__main__":
         e_max=3300,
     )
 
-    model_loader.configure("tukbajrv-1758611103-config.json")
-    model_loader.load("tukbajrv-1758611103-model-dna.pt")
+    model_loader.configure("export/tukbajrv-202509241418-config.json")
+    model_loader.load("export/tukbajrv-202509241418-model-dna.pt")
 
     import ipdb; ipdb.set_trace()  # noqa
     pass

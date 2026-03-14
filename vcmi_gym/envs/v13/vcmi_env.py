@@ -422,7 +422,7 @@ class VcmiEnv(gym.Env):
         self._update_vars_after_step(action, obs, res, rew, term, trunc, bf, rewvals)
         self._maybe_render()
 
-        info = self.__class__.build_info(res, term, trunc, bf, self.steps_this_episode, self.rewvals_total)
+        info = self.__class__.build_info(self.side, res, term, trunc, bf, self.steps_this_episode, self.rewvals_total)
 
         return obs, rew, term, trunc, info
 
@@ -439,7 +439,7 @@ class VcmiEnv(gym.Env):
         if self.render_each_step:
             print(self.render())
 
-        info = {"round": bf.global_stats.BATTLE_ROUND.v}
+        info = {"side": self.side, "round": bf.global_stats.BATTLE_ROUND.v}
         return obs, info
 
     @tracelog
@@ -598,6 +598,10 @@ class VcmiEnv(gym.Env):
         self.bf = bf
 
     def _reset_vars(self, res, obs, bf):
+        # Workaround for the legacy BATTLE_SIDE (now replaced by BATTLE_ROUND)
+        # Since active player may change at battle end => store it at start
+        self.side = bf.global_stats.BATTLE_SIDE_ACTIVE_PLAYER
+
         self.last_action = None
         self.steps_this_episode = 0
         self.obs = obs
@@ -622,12 +626,17 @@ class VcmiEnv(gym.Env):
     # One-time values will be lost, put only only cumulatives/totals/etc.
     #
     @staticmethod
-    def build_info(res, term, trunc, bf, steps_this_episode, rewvals_total):
+    def build_info(side, res, term, trunc, bf, steps_this_episode, rewvals_total):
         # Performance optimization
         if not (term or trunc):
-            return dict(round=bf.global_stats.BATTLE_ROUND.v, step=steps_this_episode)
+            return dict(
+                side=side,
+                round=bf.global_stats.BATTLE_ROUND.v,
+                step=steps_this_episode
+            )
 
         return dict(
+            side=side,
             round=bf.global_stats.BATTLE_ROUND.v,
             step=steps_this_episode,
 

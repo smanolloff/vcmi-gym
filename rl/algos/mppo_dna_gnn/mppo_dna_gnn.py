@@ -465,10 +465,22 @@ class Model(nn.Module):
 
         d = config["gnn_out_channels"]
 
-        self.encoder_other = nn.Sequential(
-            nn.Linear(self.dim_other, d),
-            nn.LeakyReLU()
-        )
+        # TODO: temporary backward-compat
+        # XXX: new encoder is not yet ported to Exporter
+        self.legacy_global_encoder = config.get("legacy_global_encoder", True)
+
+        if self.legacy_global_encoder:
+            self.encoder_other = nn.Sequential(
+                nn.Linear(self.dim_other, d),
+                nn.LeakyReLU()
+            )
+        else:
+            self.encoder_global = nn.Sequential(
+                nn.Linear(self.dim_other + 2*d, 3*d),
+                nn.LeakyReLU(),
+                nn.Linear(3*d, d),
+                nn.LeakyReLU(),
+            )
 
         self.act0_head = nn.Linear(d, len(MainAction))
         self.emb_act0 = nn.Embedding(len(MainAction), d)
@@ -510,7 +522,11 @@ class Model(nn.Module):
                 nn.init.zeros_(linlayer.bias)
 
         # For layers followed by ReLU or LeakyReLU, use Kaiming (He).
-        kaiming_init(self.encoder_other[0])
+        if self.legacy_global_encoder:
+            kaiming_init(self.encoder_other[0])
+        else:
+            kaiming_init(self.encoder_global[0])
+            kaiming_init(self.encoder_global[2])
 
         # For other layers, use Xavier.
         xavier_init(self.act0_head)
@@ -532,8 +548,15 @@ class Model(nn.Module):
         # Note that this would not be the case if e.g. units were also nodes.
         assert torch.all(hmask)
 
-        z_other = self.encoder_other(hdata.obs[:, :self.dim_other])
-        z_global = z_other + z_hexes.mean(1)
+        if self.legacy_global_encoder:
+            z_other = self.encoder_other(hdata.obs[:, :self.dim_other])
+            z_global = z_other + z_hexes.mean(1)
+        else:
+            z_global = self.encoder_global(torch.cat([
+                hdata.obs[:, :self.dim_other],  # [B, dim_other]
+                z_hexes.mean(1),                # [B, D]
+                z_hexes.max(1).values,          # [B, D]
+            ], dim=-1))
 
         return z_hexes, z_global
 
