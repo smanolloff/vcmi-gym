@@ -19,6 +19,7 @@ import argparse
 import time
 import torch
 import json
+from datetime import datetime
 
 from rl.algos.mppo_dna_gnn.mppo_dna_gnn import (
     DNAModel,
@@ -99,6 +100,16 @@ def main(model, venv, num_vsteps, player, opponent, dual_venv_kwargs):
     print("* Total resets: %d (%.2f resets/s)" % (sum(resets), sum(resets) / sum(times)))
     print("* Average steps/s: %.0f (%.0f vsteps/s)" % (num_vsteps / sum(times), venv.num_envs * num_vsteps / sum(times)))
     print("* Average winrate: %.0f%%" % (100 * sum(winrates) / len(winrates)))
+
+    with open("mmai-arena.out", "a") as f:
+        f.write("-- %s: %.0f%% | %s <> %s | episodes=%d %s\n" % (
+            datetime.strftime(datetime.now(), "%F %T"),
+            (100 * sum(winrates) / len(winrates)),
+            os.path.basename(player or ""),
+            os.path.basename(opponent or ""),
+            sum(resets),
+            " ".join(f"{k}={v}" for k, v in dual_venv_kwargs["env_kwargs"].items())
+        ))
 
 
 def parse_kv(text):
