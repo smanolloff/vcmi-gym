@@ -1,3 +1,12 @@
+#!/bin/bash
+
+set -euxo pipefail
+
+# Usage:
+#
+# $0 [venvs] [vsteps]
+#
+
 players=(
     tukbajrv-202509241418
     tukbajrv-1770544743
@@ -21,7 +30,8 @@ for player in "${players[@]}"; do
 =========================== $player vs. $opponent (town_chance=$town_chance)
 EOF
             python -m vcmi_gym.tools.benchmark_venv2 \
-                --num-envs=30 \
+                --num-envs=${1-30} \
+                --num-vsteps=${2-1000} \
                 --player $player_file \
                 --opponent $opponent_file \
                 --envarg town_chance=$town_chance
