@@ -94,8 +94,7 @@ class RewardConfig(NamedTuple):
     # round 19: -10.0
     # round 20: -12.1
     # round 21: -14.4
-    # round 22: -15
-    # round 23: -15
+    # round >=22: -15
     # ...
     #
     # Cap=15 above is suitable in conjunction with reward_term_mult=0.01
