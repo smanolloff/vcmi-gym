@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source ~/.simorc
+
 set -euxo pipefail
 
 # Usage:
@@ -23,8 +25,15 @@ opponents=(
 
 for player in "${players[@]}"; do
     player_file=data/mppo-dna-heads/$player-model-dna.pt
+    [ -f $player_file ] || download_checkpoint $player
     for opponent in "${opponents[@]}"; do
-        [ $opponent = BattleAI ] && opponent_file=$opponent || opponent_file=data/mppo-dna-heads/$opponent-model-dna.pt
+        if [ $opponent = BattleAI ]; then
+            opponent_file=$opponent
+        else
+            opponent_file=data/mppo-dna-heads/$opponent-model-dna.pt
+            [ -f $opponent_file ] || download_checkpoint $opponent
+        fi
+
         for town_chance in 0 100; do
             cat <<-EOF
 =========================== $player vs. $opponent (town_chance=$town_chance)
