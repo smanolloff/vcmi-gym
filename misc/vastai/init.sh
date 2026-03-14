@@ -141,9 +141,14 @@ function pymod() {
 
 #
 # Link a tagged checkpoint
-# e.g. link_checkpoint joymfkqj-1767449899 joymfkqj
+# e.g. link_checkpoint [-y] joymfkqj-1767449899 joymfkqj
 #
 function link_checkpoint() {
+    if [ "\$1" = "-y" ]; then
+        confirmed=yes
+        shift
+    fi
+
     [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: link_checkpoint PREFIX LINK_PREFIX [DIR]"; return 1; }
     [ -n "\$3" ] && workdir="\${3%/}" || workdir=.
 
@@ -159,12 +164,11 @@ function link_checkpoint() {
             return 1
         fi
 
-        confirmed=no
         for f in \$prefix-*; do
             tail=\${f#\$prefix-}
             flink=\$lprefix-\$tail
 
-            if [ -e \$flink -a \$confirmed != yes ]; then
+            if [ -e \$flink -a \${confirmed:-no} != yes ]; then
                 echo -n "File exists, type 'yes' to continue: "
                 read -r confirmed
                 [ "\$confirmed" = "yes" ] || return 0
@@ -240,7 +244,12 @@ function download_checkpoint() {
 # E.g. fdqwrsd-best-... gdhsgsi-202601011251-...
 #
 function copy_checkpoint() {
-    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: copy_checkpoint RUN_ID-TAG1 RUN_ID-TAG2 [DIR]"; return 1; }
+    if [ "\$1" = "-y" ]; then
+        confirmed=yes
+        shift
+    fi
+
+    [ -n "\${1:-}" -a -n "\${2:-}" ] || { echo "Usage: copy_checkpoint [-y] RUN_ID-TAG1 RUN_ID-TAG2 [DIR]"; return 1; }
     [ -n "\$3" ] && workdir="\${3%/}" || workdir=.
 
     rid1=\${1%-*}
@@ -257,8 +266,7 @@ function copy_checkpoint() {
         set -e
         cd \$workdir
 
-        confirmed=no
-        if [ \$rid1 != \$rid2 ]; then
+        if [ \$rid1 != \$rid2 -a \${confirmed:-no} != yes ]; then
             echo -n "RUN_ID is different, type 'yes' to continue: "
             read -r confirmed
             [ "\$confirmed" = "yes" ] || return 0

@@ -1,0 +1,30 @@
+players=(
+    tukbajrv-202509241418
+    tukbajrv-1770544743
+    idiqvwea-1773428519
+    naesumvw-best2
+    tukbavip-1773500887
+    fqcbvmti-best5
+)
+
+opponents=(
+    BattleAI
+    nkjrmrsq-202509291846
+)
+
+for player in "${players[@]}"; do
+    player_file=data/mppo-dna-heads/$player-model-dna.pt
+    for opponent in "${opponents[@]}"; do
+        [ $opponent = BattleAI ] && opponent_file=$opponent || opponent_file=data/mppo-dna-heads/$opponent-model-dna.pt
+        for town_chance in 0 100; do
+            cat <<-EOF
+=========================== $player vs. $opponent (town_chance=$town_chance)
+EOF
+            python -m vcmi_gym.tools.benchmark_venv2 \
+                --num-envs=30 \
+                --player $player_file \
+                --opponent $opponent_file \
+                --envarg town_chance=$town_chance
+        done
+    done
+done
