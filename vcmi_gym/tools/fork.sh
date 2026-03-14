@@ -57,8 +57,8 @@ cat <<'JQ' >$data/$id-fork.jq
 
 | {
     "type": "static",
-    "config_file": "$data/nkjrmrsq-202509291846-config.json",
-    "weights_file": "$data/nkjrmrsq-202509291846-model-dna.pt"
+    "config_file": "data/mppo-dna-heads/nkjrmrsq-202509291846-config.json",
+    "weights_file": "data/mppo-dna-heads/nkjrmrsq-202509291846-model-dna.pt"
 } as $model
 
 | .eval.env_variants["BattleAI.open"].num_envs_per_opponent.BattleAI = 10
