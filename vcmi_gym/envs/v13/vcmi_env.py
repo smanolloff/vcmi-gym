@@ -366,7 +366,7 @@ class VcmiEnv(gym.Env):
         )
 
         if opponent == "OTHER_ENV":
-            self.logger.warn("Dual-env setup detected -- will NOT connect automatically.")
+            self.logger.info("Dual-env setup detected -- will NOT connect automatically.")
         else:
             self.connector.connect_as(role)
             self.reset()  # needed to init vars

@@ -31,7 +31,7 @@ from rl.algos.mppo_dna_gnn.mppo_dna_gnn import (
 
 class DummyActsample:
     def __init__(self, v_action):
-        self.action = torch.tensor(v_action)
+        self.action = torch.tensor(list(v_action))
         self.logprob = torch.zeros(v_action.size(0))
         self.value = torch.zeros(v_action.size(0))
         self.reward = torch.zeros(v_action.size(0))
@@ -63,7 +63,7 @@ class DummyLogger:
         pass
 
 
-def main(model, venv, num_vsteps, player, opponent):
+def main(model, venv, num_vsteps, player, opponent, dual_venv_kwargs):
     assert num_vsteps % 10 == 0
     report_vsteps = num_vsteps // 10
     winrates = []
@@ -93,12 +93,27 @@ def main(model, venv, num_vsteps, player, opponent):
     print("")
     print("*** Player: %s" % player)
     print("*** Opponent: %s" % opponent)
+    print("*** %s" % dual_venv_kwargs)
     print("")
     print("* Total time: %.2f seconds" % sum(times))
     print("* Total steps: %d" % (num_vsteps * venv.num_envs))
     print("* Total resets: %d (%.2f resets/s)" % (sum(resets), sum(resets) / sum(times)))
     print("* Average steps/s: %.0f (%.0f vsteps/s)" % (num_vsteps / sum(times), venv.num_envs * num_vsteps / sum(times)))
     print("* Average winrate: %.0f%%" % (100 * sum(winrates) / len(winrates)))
+
+
+def parse_kv(text):
+    if "=" not in text:
+        raise argparse.ArgumentTypeError("Expected format key=value")
+    key, value = text.split("=", 1)
+    try:
+        value = int(value)
+    except ValueError:
+        value = float(value)
+    except ValueError:
+        # string
+        pass
+    return key, value
 
 
 if __name__ == "__main__":
@@ -110,6 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-envs", metavar="INT", type=int, default=10)
     parser.add_argument("--num-vsteps", metavar="INT", type=int, default=1000)
     parser.add_argument("--cpu", action="store_true", help="force CPU even if CUDA is available")
+    parser.add_argument("--envarg", action="append", type=parse_kv, metavar="KEY=VALUE", help="Env kwarg in key=value format")
 
     args = parser.parse_args()
 
@@ -139,18 +155,20 @@ if __name__ == "__main__":
 
     print(f"-- Player role: {player_role}")
 
-    dual_venv_kwargs = dict(
-        env_kwargs=dict(
-            mapname=mapname,
-            role=player_role,
-            random_heroes=1,
-            random_obstacles=1,
-            random_stack_chance=0,
-            random_terrain_chance=100,
-            warmachine_chance=0,
-            town_chance=0,
-        ),
+    env_kwargs = dict(
+        mapname=mapname,
+        role=player_role,
+        random_heroes=1,
+        random_obstacles=1,
+        random_stack_chance=0,
+        random_terrain_chance=100,
+        warmachine_chance=0,
+        town_chance=0,
     )
+
+    env_kwargs.update(args.envarg or {})
+
+    dual_venv_kwargs = dict(env_kwargs=env_kwargs)
 
     bot_loader = None
 
@@ -175,11 +193,10 @@ if __name__ == "__main__":
         dual_venv_kwargs["num_envs_model"] = args.num_envs
         dual_venv_kwargs["model_loader"] = bot_loader
 
-    print(f"-- DualVecEnv kwargs: {dual_venv_kwargs}")
     venv = DualVecEnv(**dual_venv_kwargs)
 
     if args.player == "rng":
         player_model.venv = venv
 
     with torch.no_grad():
-        main(player_model, venv, args.num_vsteps, args.player, args.opponent)
+        main(player_model, venv, args.num_vsteps, args.player, args.opponent, dual_venv_kwargs)
