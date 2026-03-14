@@ -15,7 +15,9 @@ set -euxo pipefail
 SRC_ID=${1?SRC_ID required as \$1}
 SUFFIX=${2?SUFFIX required as \$2}
 
-if ! [ -e data/mppo-dna-heads/$SRC_ID-config.json -a -e data/mppo-dna-heads/$SRC_ID-model-dna.pt ]; then
+data=data/mppo-dna-heads
+
+if ! [ -e $data/$SRC_ID-config.json -a -e $data/$SRC_ID-model-dna.pt ]; then
     download_checkpoint $SRC_ID
 fi
 
@@ -24,31 +26,22 @@ LC_ALL=C id=$(tr -dc 'a-z' </dev/urandom | head -c8) || :
 prefix=$(date "+%Y%m%d_%H%M%S")
 name=$prefix-$id-$SUFFIX
 
-python -c "
-import wandb
-wandb.init(
-    project='vcmi-gym',
-    group='mppo-dna-heads',
-    name='$name',
-    id='$id',
-    resume='never',
-    config=dict(_start_infos=[{'source': '$SRC_ID'}]),
-    sync_tensorboard=False,
-    save_code=False,
-)
-"
+copy_checkpoint -y $SRC_ID $id-fork $data/
+link_checkpoint -y $id-fork $id $data/
 
-copy_checkpoint -y $SRC_ID $id-fork data/mppo-dna-heads/
-link_checkpoint -y $id-fork $id data/mppo-dna-heads/
-
-# cat data/mppo-dna-heads/$SRC_ID-config.json \
+# cat $data/$SRC_ID-config.json \
 # | jq --arg name "$name" \
 
-cat <<'JQ' >fork-$id.jq
+cat <<'JQ' >$data/$id-fork.jq
+#
+# Input args:
+#   $id     run id, e.g. "zoacpwry"
+#   $name   run name, e.g. "20260314_211800-zoacpwry-fork-mmai"
+#
 .name_template = "{datetime}-{id}-" + $id
 | .run.id = $id
 | .run.name = $name
-| .run.resumed_config = "data/mppo-dna-heads/" + $id + "-config.json"
+| .run.resumed_config = "$data/" + $id + "-config.json"
 | {
     "user_timeout": 2400,
     "vcmi_timeout": 2400,
@@ -64,8 +57,8 @@ cat <<'JQ' >fork-$id.jq
 
 | {
     "type": "static",
-    "config_file": "data/mppo-dna-heads/nkjrmrsq-202509291846-config.json",
-    "weights_file": "data/mppo-dna-heads/nkjrmrsq-202509291846-model-dna.pt"
+    "config_file": "$data/nkjrmrsq-202509291846-config.json",
+    "weights_file": "$data/nkjrmrsq-202509291846-model-dna.pt"
 } as $model
 
 | .eval.env_variants["BattleAI.open"].num_envs_per_opponent.BattleAI = 10
@@ -88,10 +81,27 @@ cat <<'JQ' >fork-$id.jq
 | .train.env.num_envs_per_opponent.BattleAI = 10
 JQ
 
-cfgsrc=data/mppo-dna-heads/$SRC_ID-config.json
-cfgdst=data/mppo-dna-heads/$id-config.json
+python -c "
+import wandb
+wandb.init(
+    project='vcmi-gym',
+    group='mppo-dna-heads',
+    name='$name',
+    id='$id',
+    resume='never',
+    config=dict(_start_infos=[{
+        'source': '$SRC_ID',
+        'jq': open('$data/$id-fork.jq', 'r').read()
+    }]),
+    sync_tensorboard=False,
+    save_code=False,
+)
+"
 
-jq --arg id "$id" --arg name "$name" -f fork-$id.jq $cfgsrc > $cfgdst
+cfgsrc=$data/$SRC_ID-config.json
+cfgdst=$data/$id-config.json
+
+jq --arg id "$id" --arg name "$name" -f $data/$id-fork.jq $cfgsrc > $cfgdst
 
 cat <<-EOF
 
