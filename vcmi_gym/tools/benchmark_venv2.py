@@ -46,7 +46,7 @@ class DummyActsample:
 class DummyModel:
     def __init__(self):
         self.venv = None  # set manually
-        self.device = torch.device("cpu")
+        self.device = DEVICE
         self.model_policy = self
         self.model_value = self
 
@@ -63,7 +63,7 @@ class DummyLogger:
         pass
 
 
-def main(model, venv, num_vsteps):
+def main(model, venv, num_vsteps, player, opponent):
     assert num_vsteps % 10 == 0
     report_vsteps = num_vsteps // 10
     winrates = []
@@ -73,15 +73,16 @@ def main(model, venv, num_vsteps):
     print("0%...")
     for i in range(10):
         t0 = time.time()
-        stats = collect_samples(DummyLogger(), model, venv, report_vsteps, Storage(venv, report_vsteps, torch.device("cpu")))
+        stats = collect_samples(DummyLogger(), model, venv, report_vsteps, Storage(venv, report_vsteps, DEVICE))
         s = time.time() - t0
         times.append(s)
         resets.append(stats.num_episodes)
         winrates.append(stats.ep_is_success_mean)
 
-        print("%d%%... step=%d episode=%d resets: %d steps/s: %-6.0f resets/s: %-6.2f winrate=(%.0f%%)" % (
+        print("%d%%... vstep=%d step=%d episode=%d resets: %d steps/s: %-6.0f resets/s: %-6.2f winrate=(%.0f%%)" % (
             10 + 10*i,
             report_vsteps + report_vsteps*i,
+            venv.num_envs * (report_vsteps + report_vsteps*i),
             sum(resets),
             stats.num_episodes,
             venv.num_envs * report_vsteps/s,
@@ -90,10 +91,13 @@ def main(model, venv, num_vsteps):
         ))
 
     print("")
+    print("*** Player: %s" % player)
+    print("*** Opponent: %s" % opponent)
+    print("")
     print("* Total time: %.2f seconds" % sum(times))
     print("* Total steps: %d" % (num_vsteps * venv.num_envs))
-    print("* Total resets: %d (%-6.2f)" % (sum(resets), sum(resets) / sum(times)))
-    print("* Average steps/s: %-6.0f (%.0f vsteps/s)" % (num_vsteps / sum(times), venv.num_envs * num_vsteps / sum(times)))
+    print("* Total resets: %d (%.2f resets/s)" % (sum(resets), sum(resets) / sum(times)))
+    print("* Average steps/s: %.0f (%.0f vsteps/s)" % (num_vsteps / sum(times), venv.num_envs * num_vsteps / sum(times)))
     print("* Average winrate: %.0f%%" % (100 * sum(winrates) / len(winrates)))
 
 
@@ -105,8 +109,13 @@ if __name__ == "__main__":
     parser.add_argument("--rng-role", metavar="ROLE", default="defender", help="attacker | defender")
     parser.add_argument("--num-envs", metavar="INT", type=int, default=10)
     parser.add_argument("--num-vsteps", metavar="INT", type=int, default=1000)
+    parser.add_argument("--cpu", action="store_true", help="force CPU even if CUDA is available")
 
     args = parser.parse_args()
+
+    DEVICE = torch.device("cpu")
+    if torch.cuda.is_available() and not args.cpu:
+        DEVICE = torch.device("cuda")
 
     mapname = args.map.removeprefix("maps/")
     print(f"-- mapname: {mapname}")
@@ -123,8 +132,8 @@ if __name__ == "__main__":
 
         with open(player_cfgfile, "r") as f:
             player_cfg = json.load(f)
-        player_weights = torch.load(args.player, weights_only=True, map_location="cpu")
-        player_model = DNAModel(player_cfg["model"], torch.device("cpu")).eval()
+        player_weights = torch.load(args.player, weights_only=True, map_location=DEVICE.type)
+        player_model = DNAModel(player_cfg["model"], DEVICE).eval()
         player_model.load_state_dict(player_weights, strict=True)
         player_role = player_cfg["train"]["env"]["kwargs"]["role"]
 
@@ -136,8 +145,9 @@ if __name__ == "__main__":
             role=player_role,
             random_heroes=1,
             random_obstacles=1,
-            warmachine_chance=40,
+            random_stack_chance=0,
             random_terrain_chance=100,
+            warmachine_chance=0,
             town_chance=0,
         ),
     )
@@ -149,22 +159,27 @@ if __name__ == "__main__":
     else:
         bot_weights = args.opponent
         bot_cfgfile = bot_weights.replace("-model-dna.pt", "-config.json")
+
         assert os.path.isfile(bot_weights), bot_weights
         assert os.path.isfile(bot_cfgfile), bot_cfgfile
 
-        bot_role = "attacker" if player_role == "defender" else "defender"
-        bot_loader = ModelLoader("cpu", role=bot_role)
+        with open(bot_cfgfile, "r") as f:
+            bot_cfg = json.load(f)
+        bot_role = bot_cfg["train"]["env"]["kwargs"]["role"]
+        assert bot_role != player_role
+
+        bot_loader = ModelLoader(DEVICE.type, role=bot_role)
+        bot_loader.configure(bot_cfgfile)
+        bot_loader.load(bot_weights)
+
         dual_venv_kwargs["num_envs_model"] = args.num_envs
         dual_venv_kwargs["model_loader"] = bot_loader
 
+    print(f"-- DualVecEnv kwargs: {dual_venv_kwargs}")
     venv = DualVecEnv(**dual_venv_kwargs)
 
     if args.player == "rng":
         player_model.venv = venv
 
-    if bot_loader:
-        bot_loader.configure(bot_cfgfile)
-        bot_loader.load(bot_weights)
-
     with torch.no_grad():
-        main(player_model, venv, args.num_vsteps)
+        main(player_model, venv, args.num_vsteps, args.player, args.opponent)
