@@ -24,8 +24,7 @@ from rl.algos.mppo_dna_gnn.mppo_dna_gnn import (
     DNAModel,
     DualVecEnv,
     ModelLoader,
-    Storage,
-    collect_samples,
+    eval_model,
 )
 
 
@@ -57,9 +56,9 @@ class DummyModel:
         return torch.zeros(1)
 
 
-# For collect_samples()
+# For eval_model
 class DummyLogger:
-    def debug(self, *args, **kwargs):
+    def debug(self):
         pass
 
 
@@ -73,7 +72,7 @@ def main(model, venv, num_vsteps, player, opponent, dual_venv_kwargs):
     print("0%...")
     for i in range(10):
         t0 = time.time()
-        stats = collect_samples(DummyLogger(), model, venv, report_vsteps, Storage(venv, report_vsteps, DEVICE))
+        stats = eval_model(DummyLogger(), model, venv, report_vsteps)
         s = time.time() - t0
         times.append(s)
         resets.append(stats.num_episodes)
@@ -198,5 +197,5 @@ if __name__ == "__main__":
     if args.player == "rng":
         player_model.venv = venv
 
-    with torch.no_grad():
+    with torch.inference_mode():
         main(player_model, venv, args.num_vsteps, args.player, args.opponent, dual_venv_kwargs)
