@@ -34,6 +34,9 @@ for player in "${players[@]}"; do
             [ -f $opponent_file ] || download_checkpoint $opponent
         fi
 
+        # Prevent cleanup.sh cron from deleting the old checkpoints
+        touch data/mppo-dna-heads/*
+
         for town_chance in 0 100; do
             cat <<-EOF
 =========================== $player vs. $opponent (town_chance=$town_chance)
@@ -41,8 +44,8 @@ EOF
             python -m vcmi_gym.tools.arena \
                 --num-envs=${1-30} \
                 --num-vsteps=${2-1000} \
-                --player $player_file \
-                --opponent $opponent_file \
+                --player=$player_file \
+                --opponent=$opponent_file \
                 --envarg town_chance=$town_chance
         done
     done

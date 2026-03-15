@@ -24,4 +24,4 @@ rl/stats/
 .cache
 misc/vastai/.env
 export/
-mmai-arena.out
+arena.out

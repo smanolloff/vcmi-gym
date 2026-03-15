@@ -98,7 +98,7 @@ def main(model, venv, num_vsteps, player, opponent, dual_venv_kwargs):
     print("* Total time: %.2f seconds" % sum(times))
     print("* Total steps: %d" % (num_vsteps * venv.num_envs))
     print("* Total resets: %d (%.2f resets/s)" % (sum(resets), sum(resets) / sum(times)))
-    print("* Average steps/s: %.0f (%.0f vsteps/s)" % (num_vsteps / sum(times), venv.num_envs * num_vsteps / sum(times)))
+    print("* Average vsteps/s: %.0f (%.0f steps/s)" % (num_vsteps / sum(times), venv.num_envs * num_vsteps / sum(times)))
     print("* Average winrate: %.0f%%" % (100 * sum(winrates) / len(winrates)))
 
     with open("arena.out", "a") as f:
