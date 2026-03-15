@@ -41,7 +41,7 @@ cat <<'JQ' >$data/$id-fork.jq
 .name_template = "{datetime}-{id}-" + $id
 | .run.id = $id
 | .run.name = $name
-| .run.resumed_config = "$data/" + $id + "-config.json"
+| .run.resumed_config = "data/mppo-dna-heads/" + $id + "-config.json"
 | {
     "user_timeout": 2400,
     "vcmi_timeout": 2400,
@@ -49,36 +49,23 @@ cat <<'JQ' >$data/$id-fork.jq
 } as $timeouts
 | .train.env.kwargs += $timeouts
 | .eval.env_variants["BattleAI.open"].kwargs += $timeouts
-| .eval.env_variants["BattleAI.town"].kwargs += $timeouts
 
 #
 # SPECIFIC TO RUN
 #
 
 | {
-    "type": "static",
-    "config_file": "data/mppo-dna-heads/nkjrmrsq-202509291846-config.json",
-    "weights_file": "data/mppo-dna-heads/nkjrmrsq-202509291846-model-dna.pt"
-} as $model
+  "reward_step_fixed": -0.002,
+  "reward_term_mult": 0.03,
+  "reward_prog_base": 0.1,
+  "reward_prog_trigger": 15,
+  "reward_prog_exponent": 2,
+  "reward_prog_limit": 10,
+} as $rewards
 
-| .eval.env_variants["BattleAI.open"].num_envs_per_opponent.BattleAI = 10
-| .eval.env_variants["BattleAI.town"].num_envs_per_opponent.BattleAI = 10
-
-| .eval.env_variants["MMAI.open"] = .eval.env_variants["BattleAI.open"]
-| .eval.env_variants["MMAI.open"].kwargs += $timeouts
-| .eval.env_variants["MMAI.open"].model = $model
-| .eval.env_variants["MMAI.open"].num_envs_per_opponent.model = 10
-| .eval.env_variants["MMAI.open"].num_envs_per_opponent.BattleAI = 0
-
-| .eval.env_variants["MMAI.town"] = .eval.env_variants["BattleAI.town"]
-| .eval.env_variants["MMAI.town"].kwargs += $timeouts
-| .eval.env_variants["MMAI.town"].model = $model
-| .eval.env_variants["MMAI.town"].num_envs_per_opponent.model = 10
-| .eval.env_variants["MMAI.town"].num_envs_per_opponent.BattleAI = 0
-
-| .train.env.model = $model
-| .train.env.num_envs_per_opponent.model = 30
-| .train.env.num_envs_per_opponent.BattleAI = 10
+| .eval.env_variants["BattleAI.open"].kwargs += $rewards
+| .train.env.kwargs += $rewards
+| .train.gamma = 0.98
 JQ
 
 python -c "
