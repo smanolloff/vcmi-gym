@@ -75,8 +75,6 @@ class RewardConfig(NamedTuple):
     #           \min\left(a\left(\max\left(\operatorname{floor}\left(x\right),b\right)-b\right)^{c},d\right)
     #
     #       Then add sliders for a, b & c
-    #       Also set y-axis to log scale
-    #
     #       NOTE: Actual rewards use the negative value of this result
     #
     # For example, with {a=0.1 b=9 c=2 d=15}, reward is:

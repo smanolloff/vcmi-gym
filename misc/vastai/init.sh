@@ -467,7 +467,7 @@ date
 
 # Deletes non-symlinked files older than X hours
 # Usage:
-#   cleanup_data 12 /workspace/vcmi-gym/data/mppo-dna-heads
+#   cleanup 12 /workspace/vcmi-gym/data/mppo-dna-heads
 
 HOURS="\${1:?Hours required}"
 DIR="\${2:?Directory required}"
@@ -500,7 +500,7 @@ EOFCLEANUP
 
 chmod +x /root/cleanup.sh
 cat <<EOF >>/etc/cron.d/cleanup
-0 0 * * * root /root/cleanup.sh 24 /workspace/vcmi-gym/data/mppo-dna-heads >> /root/cleanup.log
+0 0 * * * root /root/cleanup.sh 48 /workspace/vcmi-gym/data/mppo-dna-heads >> /root/cleanup.log
 EOF
 chmod 644 /etc/cron.d/cleanup
 service cron start

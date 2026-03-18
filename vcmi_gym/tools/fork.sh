@@ -66,6 +66,7 @@ cat <<'JQ' >$data/$id-fork.jq
 | .eval.env_variants["BattleAI.open"].kwargs += $rewards
 | .train.env.kwargs += $rewards
 | .train.gamma = 0.98
+| .model.legacy_global_encoder = false
 JQ
 
 python -c "

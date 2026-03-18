@@ -1441,7 +1441,7 @@ def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
     )
 
 
-def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_eval=False, save_on_exit=True):
+def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_eval=False, max_rollouts=float("inf"), save_on_exit=True):
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
 
@@ -1720,7 +1720,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     )
 
     try:
-        while True:
+        while state.current_rollout < max_rollouts:
             state.global_second = global_second_start + int(cumulative_timer_values["all"])
             state.current_second = int(cumulative_timer_values["all"])
 
@@ -1894,13 +1894,14 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         ret_rew = safe_mean(list(state.rollout_rew_queue_1000)[-min(300, state.current_rollout):])
         ret_value = safe_mean(list(state.rollout_net_value_queue_1000)[-min(300, state.current_rollout):])
 
-        return ret_rew, ret_value, save_fn
+        return ret_rew, ret_value, save_fn, cumulative_timer_values["all"]
     finally:
         if save_on_exit:
             save_fn(s3_config=None, tag=f"{time.time():.0f}")
         if os.getenv("VASTAI_INSTANCE_ID") and not dry_run:
             import vastai_sdk
             vastai_sdk.VastAI().label_instance(id=int(os.environ["VASTAI_INSTANCE_ID"]), label="IDLE")
+        logger.warn(dict(event="finish", timers=cumulative_timer_values))
 
 
 # This is in a separate function to prevent vars from being global
@@ -1947,15 +1948,17 @@ if __name__ == "__main__":
     parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
     parser.add_argument("--loglevel", metavar="LOGLEVEL", default="INFO", help="DEBUG | INFO | WARN | ERROR")
     parser.add_argument("--skip-eval", action="store_true", help="do not eval at script start")
+    parser.add_argument("--max-rollouts", metavar="N", type=int, default=0, help="exit after N rollouts, printing iterationsing info")
     args = parser.parse_args()
 
     config = init_config(args)
 
-    main(
+    *_, t = main(
         config=config,
         loglevel=args.loglevel,
         dry_run=args.dry_run,
         no_wandb=args.no_wandb,
-        skip_eval=args.skip_eval
+        skip_eval=args.skip_eval,
+        max_rollouts=args.max_rollouts or float("inf"),
         # seconds_total=10
     )
