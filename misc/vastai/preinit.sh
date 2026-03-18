@@ -8,7 +8,7 @@
 
 set -euxo pipefail
 
-cd /
+cd /workspace
 
 cat <<-EOF >.env
 AWS_ACCESS_KEY='$AWS_ACCESS_KEY'

@@ -7,9 +7,10 @@ BENCHMARK_N_ROLLOUTS=5
 BENCHMARK_SECONDS_MAX=$((BENCHMARK_N_ROLLOUTS * 28))
 
 onstart="set -x"
-onstart+="; cd /"
+onstart+="; mkdir -p /workspace"
+onstart+="; cd /workspace"
 onstart+="; curl -sLO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/preinit.sh"
-onstart+='; tmux new-session -d "bash -xc \"bash /preinit.sh; bash /init.sh; bash /check.sh; bash /resolve.sh -d; exec \\$SHELL\""'
+onstart+='; tmux new-session -d "bash -xc \"cd /workspace; bash preinit.sh; bash init.sh; bash check.sh; bash resolve.sh -d; exec \\$SHELL\""'
 
 RENT_BODY=$(jq -n --arg onstart "$onstart" '{
   "env": {
