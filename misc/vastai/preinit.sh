@@ -1,0 +1,23 @@
+#!/bin/bash
+
+#
+# Prepares a "blank" VastAI VM for init:
+# - creates .env
+# - creates init.sh (does NOT execute it)
+#
+
+set -euxo pipefail
+
+mkdir -p /workspace
+cd /workspace
+
+cat <<-EOF >.env
+AWS_ACCESS_KEY='$AWS_ACCESS_KEY'
+AWS_SECRET_KEY='$AWS_SECRET_KEY'
+VCMI_ARCHIVE_KEY='$VCMI_ARCHIVE_KEY'
+WANDB_API_KEY='$WANDB_API_KEY'
+EOF
+
+for script in init check resolve; do
+    curl -LO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/$script.sh
+done

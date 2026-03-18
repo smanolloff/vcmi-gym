@@ -13,7 +13,7 @@ export PS4='+ [$(date "+%Y-%m-%dT%H:%M:%S%z")] '
 
 set -euxo pipefail
 
-CPU_COUNT=$1
+CPU_COUNT=${1:$(nproc)}
 
 if [ -e /workspace/.initialized ]; then
     echo "Already initialized, nothing to do."
@@ -23,8 +23,6 @@ fi
 set -x
 
 started_at=$(date +%s)
-
-EFFECTIVE_NUM_CPUS=${1:-12}
 
 #
 # TMUX setup
