@@ -4,7 +4,7 @@ set -euxo pipefail
 
 N_ROLLOUTS=5
 ROLLOUT_SECONDS=27
-SECONDS_MAX=$((N_ROLLOUTS * PER_ROLLOUT))
+SECONDS_MAX=$((N_ROLLOUTS * ROLLOUT_SECONDS))
 
 cd /workspace/vcmi-gym
 

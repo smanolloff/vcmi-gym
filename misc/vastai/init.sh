@@ -13,7 +13,7 @@ export PS4='+ [$(date "+%Y-%m-%dT%H:%M:%S%z")] '
 
 set -euxo pipefail
 
-CPU_COUNT=${1:$(nproc)}
+CPU_COUNT=${1:-$(nproc)}
 
 if [ -e /workspace/.initialized ]; then
     echo "Already initialized, nothing to do."

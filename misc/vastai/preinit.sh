@@ -8,8 +8,7 @@
 
 set -euxo pipefail
 
-mkdir -p /workspace
-cd /workspace
+cd /
 
 cat <<-EOF >.env
 AWS_ACCESS_KEY='$AWS_ACCESS_KEY'
@@ -19,5 +18,5 @@ WANDB_API_KEY='$WANDB_API_KEY'
 EOF
 
 for script in init check resolve; do
-    curl -LO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/$script.sh
+    curl -sLO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/$script.sh
 done
