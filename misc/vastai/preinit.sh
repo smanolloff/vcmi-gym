@@ -36,7 +36,6 @@ if [ "$offset" !=  "0m" ]; then
     # Permanently enable faketime (effective globally and immediately)
     echo "FAKETIME='${offset}'" >> /etc/environment
     echo "$faketime_so" > /etc/ld.so.preload
-EOF
 fi
 
 for script in init check; do
