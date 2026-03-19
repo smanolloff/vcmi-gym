@@ -21,7 +21,7 @@ while getopts "tdi:r:n:" opt; do
 done
 
 function http() {
-  curl --fail-with-body -H "Authorization: Bearer $VASTAI_API_KEY" \
+  curl --fail-with-body -H "Authorization: Bearer $VAST_API_KEY" \
     --url "https://console.vast.ai/api/v0/instances/$VASTAI_INSTANCE_ID" \
     -X "$1" --json "$2"
 }

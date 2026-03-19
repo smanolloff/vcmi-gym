@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-VASTAI_API_KEY=
+VAST_API_KEY=
 BENCHMARK_N_ROLLOUTS=5
 BENCHMARK_SECONDS_MAX=$((BENCHMARK_N_ROLLOUTS * 28))
 
@@ -21,7 +21,7 @@ RENT_BODY=$(jq -n --arg onstart "$onstart" '{
     "AWS_SECRET_KEY": $ENV["VASTAI_AWS_SECRET_KEY"],
     "VCMI_ARCHIVE_KEY": $ENV["VASTAI_VCMI_ARCHIVE_KEY"],
     "WANDB_API_KEY": $ENV["VASTAI_WANDB_API_KEY"],
-    "VASTAI_API_KEY": $ENV["VASTAI_BENCHMARK_API_KEY"]
+    "VAST_API_KEY": $ENV["VASTAI_BENCHMARK_API_KEY"]
   },
   "disk": 25.0,
   "onstart": $onstart,
@@ -31,7 +31,7 @@ RENT_BODY=$(jq -n --arg onstart "$onstart" '{
 
 function http() {
   # VastAI API expects traling slash on some endpoints
-  curl --fail-with-body -H "Authorization: Bearer $VASTAI_API_KEY" \
+  curl --fail-with-body -H "Authorization: Bearer $VAST_API_KEY" \
     -X "$1" --url "https://console.vast.ai/api/v0${2#/}/" --json "$3"
 }
 
