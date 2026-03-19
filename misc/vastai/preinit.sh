@@ -49,3 +49,7 @@ fi
 for script in init check; do
     curl -sLO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/$script.sh
 done
+
+set -a
+source .env
+set +a
