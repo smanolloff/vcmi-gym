@@ -2,6 +2,23 @@
 
 set -euxo pipefail
 
+TAG=false   # -t
+DEL=false   # -d
+
+while getopts "td" opt; do
+    case "$opt" in
+    t) TAG=true ;;
+    d) DEL=true ;;
+    *) echo "Usage: $0 [-td]"; exit 1 ;;
+    esac
+done
+
+function http() {
+  curl --fail-with-body -H "Authorization: Bearer $VASTAI_API_KEY" \
+    --url "https://console.vast.ai/api/v0/instances/$VASTAI_INSTANCE_ID" \
+    -X "$1" --json "$2"
+}
+
 N_ROLLOUTS=5
 INIT_SECONDS=90     # cold start (40 envs, load weights, etc.)
 ROLLOUT_SECONDS=27  # "ok" duration of 1 rollout
@@ -11,6 +28,8 @@ SECONDS_TIMEOUT=$((INIT_SECONDS + SECONDS_CHECK * 2))
 
 CHECKPOINT=ytoowqgj-1773645017
 RUN_ID=${CHECKPOINT%-*}
+
+$TAG && http PUT '{"label": "check..."}' || :
 
 . ~/.simorc
 cd /workspace/vcmi-gym
@@ -41,8 +60,11 @@ line=$(printf "%s" "$output" | grep '"event": "finish"') || :
 
 if printf "%s" "$line" | jq -e ".message.timers.all < $SECONDS_CHECK"; then
   echo "CHECK PASSED"
+  $TAG && http PUT '{"label": "passed"}' || :
   echo 1 > /checkresult
 else
   echo "CHECK FAILED"
+  $TAG && http PUT '{"label": "failed"}' || :
+  $DEL && http DELETE '{}' || :
   echo 0 > /checkresult
 fi

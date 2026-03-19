@@ -3,7 +3,7 @@
 #
 # Prepares a "blank" VastAI VM for init:
 # - creates .env
-# - creates init.sh (does NOT execute it)
+# - downloads init.sh, check.sh (does NOT execute them)
 #
 
 set -euxo pipefail
@@ -17,6 +17,6 @@ VCMI_ARCHIVE_KEY='$VCMI_ARCHIVE_KEY'
 WANDB_API_KEY='$WANDB_API_KEY'
 EOF
 
-for script in init check resolve; do
+for script in init check; do
     curl -sLO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/$script.sh
 done
