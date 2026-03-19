@@ -9,7 +9,7 @@ INIT_SECONDS=90     # cold start (40 envs, load weights, etc.)
 ROLLOUT_SECONDS=27  # "ok" duration of 1 rollout
 N_ROLLOUTS=5
 
-while getopts "tdi:r:" opt; do
+while getopts "tdi:r:n:" opt; do
     case "$opt" in
     t) TAG=true ;;
     d) DEL=true ;;
