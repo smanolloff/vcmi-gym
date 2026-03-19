@@ -22,12 +22,15 @@ diffmins=$(((ref_epoch - now_epoch) / 60))
 
 cd /workspace
 
+export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)
+
 cat <<-EOF >.env
 AWS_ACCESS_KEY='$AWS_ACCESS_KEY'
 AWS_SECRET_KEY='$AWS_SECRET_KEY'
 VCMI_ARCHIVE_KEY='$VCMI_ARCHIVE_KEY'
 WANDB_API_KEY='$WANDB_API_KEY'
 VAST_API_KEY='$VAST_API_KEY'
+VASTAI_INSTANCE_ID='$VASTAI_INSTANCE_ID'
 EOF
 
 if [ "$offset" !=  "0m" ]; then

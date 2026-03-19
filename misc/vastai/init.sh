@@ -615,5 +615,5 @@ echo "Done in $((finished_at - started_at)) seconds."
 
 # Mark as completed
 touch /workspace/.initialized
-tmux rename-window \$VASTAI_INSTANCE_ID:ready || :
+tmux rename-window $VASTAI_INSTANCE_ID:ready || :
 /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID ready
