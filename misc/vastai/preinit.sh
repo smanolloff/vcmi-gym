@@ -33,12 +33,12 @@ if [ "$offset" !=  "0m" ]; then
     apt-get -o Acquire::Check-Date=false update
     apt-get -o Acquire::Check-Date=false -y install faketime
     faketime_so=$(dpkg -L libfaketime | grep libfaketime.so)
-    echo "FAKETIME='${offset}'" >> /etc/environment
 
-    export FAKETIME='${offset}'
-    echo "FAKETIME='$offset'" >> /etc/environment
-    export LD_PRELOAD="$faketime_so"
-    echo "LD_PRELOAD='$faketime_so'" >> /etc/environment
+    export FAKETIME=$offset
+    export LD_PRELOAD=$faketime_so
+
+    echo "FAKETIME=$offset" >> /etc/environment
+    echo "LD_PRELOAD=$faketime_so" >> /etc/environment
 
     # Permanently enable faketime (effective globally and immediately)
     # XXX: breaks vastai's key exchange?
