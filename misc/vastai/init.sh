@@ -37,12 +37,10 @@ if ! [ -e ~/.tmux/plugins/tpm ]; then
     cat <<-EOF >~/.tmux.conf
 set-option -g history-limit 100000
 set-window-option -g mode-keys vi
-set -g @logging-path ".tmux"
 
 # Plugins
 set -g @plugin 'tmux-plugins/tpm'
 set -g @plugin 'tmux-plugins/tmux-sensible'
-set -g @plugin 'tmux-plugins/tmux-logging'
 run '~/.tmux/plugins/tpm/tpm'
 EOF
 fi
