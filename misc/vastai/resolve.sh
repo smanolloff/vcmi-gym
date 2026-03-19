@@ -10,14 +10,14 @@ function http() {
     -X "$1" --json "$2"
 }
 
-checkresult=$(cat /checkresult)
+checkresult=$(cat /checkresult || :)
 
 if [ "$checkresult" = "1" ]; then
   http PUT '{"label": "passed"}'
 else
-  http PUT '{"label": "failed"}'
+  http PUT '{"label": "failed"}' || :
 
-  if [ "$1" = "-d" ]; then
+  if [ "${1:-}" = "-d" ]; then
     http DELETE '{}'  # destroy instance
   fi
 fi
