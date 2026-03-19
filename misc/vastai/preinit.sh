@@ -40,9 +40,11 @@ if [ "$offset" !=  "0m" ]; then
 
     export FAKETIME=$offset
     export LD_PRELOAD=$faketime_so
+    export FAKETIME_DISABLE_SHM=1
 
     echo "FAKETIME=$offset" >> /etc/environment
     echo "LD_PRELOAD=$faketime_so" >> /etc/environment
+    echo "FAKETIME_DISABLE_SHM=1" >> /etc/environment
 
     # Permanently enable faketime (effective globally and immediately)
     # XXX: breaks vastai's key exchange?
