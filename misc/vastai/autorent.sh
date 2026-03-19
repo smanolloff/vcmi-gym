@@ -9,7 +9,6 @@ BENCHMARK_SECONDS_MAX=$((BENCHMARK_N_ROLLOUTS * 28))
 
 # TODO: this script is outdated, synchronize with "vrent" first
 
-
 onstart="set -x"
 onstart+="; mkdir -p /workspace"
 onstart+="; cd /workspace"

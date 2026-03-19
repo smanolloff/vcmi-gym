@@ -6,7 +6,7 @@ TAG=false   # -t
 DEL=false   # -d
 
 INIT_SECONDS=90     # cold start (40 envs, load weights, etc.)
-ROLLOUT_SECONDS=27  # "ok" duration of 1 rollout
+ROLLOUT_SECONDS=28  # "ok" duration of 1 rollout
 N_ROLLOUTS=5
 
 while getopts "tdi:r:n:" opt; do
@@ -76,10 +76,10 @@ function check() {
 $TAG && http PUT '{"label": "check..."}' || :
 
 if check; then
-    $TAG && http PUT '{"label": "passed"}' || :
+    $TAG && http PUT '{"label": "PASSED"}' || :
     echo 1 > /checkresult
 else
-    $TAG && http PUT '{"label": "failed"}' || :
+    $TAG && http PUT '{"label": "FAILED"}' || :
     $DEL && http DELETE '{}' || :
     echo 0 > /checkresult
 fi
