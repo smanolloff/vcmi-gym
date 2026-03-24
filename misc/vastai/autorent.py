@@ -369,11 +369,10 @@ def migrate_warn_to_blacklist(conn: sqlite3.Connection) -> None:
 def handle_pending_instances(conn: sqlite3.Connection, running_instances: Dict[int, dict]) -> None:
     running_ids = vastai_list()
 
-    for row in running_instances:
-        instance_id = row["instance_id"]
-        machine_id = row["machine_id"]
-        host_id = row["host_id"]
-        created_at = row["created_at"]
+    for instance_id, instance in running_instances.items():
+        machine_id = instance["machine_id"]
+        host_id = instance["host_id"]
+        created_at = instance["created_at"]
 
         if instance_id not in running_instances:
             db_instance_update(conn, instance_id, "unknown")
