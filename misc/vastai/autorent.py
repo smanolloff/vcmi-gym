@@ -12,7 +12,9 @@ from typing import List
 
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
-INIT_TIMEOUT_MINUTES = 2
+
+# 9950X with 15MB/s dload speed inits in ~10 minutes
+INIT_TIMEOUT_MINUTES = 30
 
 VASTAI_API_KEY = os.environ["VASTAI_API_KEY"]
 VASTAI_ENV = dict(
