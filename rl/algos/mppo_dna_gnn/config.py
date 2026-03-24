@@ -84,19 +84,19 @@ config = dict(
     eval=dict(
         env_variants={
             # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0, 0), town_chance=100),
-            # "BattleAI.open": eval_variant(
-            #     num_envs_per_opponent=gen_num_envs(0, 2, 0, 0),
-            #     model=None,
-            #     town_chance=0,
-            # ),
-            "MMAI.open": eval_variant(
-                num_envs_per_opponent=gen_num_envs(0, 1, 0, 0),
+            "BattleAI.open": eval_variant(
+                num_envs_per_opponent=gen_num_envs(0, 2, 0, 0),
                 model=None,
-                # model=dynamic_bot("nkjrmrsq", 3600),
-                # model=static_bot("nkjrmrsq-202509291846"),
                 town_chance=0,
-                opponent_vip_chance=0
             ),
+            # "MMAI.open": eval_variant(
+            #     num_envs_per_opponent=gen_num_envs(0, 0, 0, 2),
+            #     model=None,
+            #     # model=dynamic_bot("nkjrmrsq", 3600),
+            #     # model=static_bot("nkjrmrsq-202509291846"),
+            #     town_chance=0,
+            #     opponent_vip_chance=0
+            # ),
         },
         num_vsteps=10_000,
         interval_s=1800,

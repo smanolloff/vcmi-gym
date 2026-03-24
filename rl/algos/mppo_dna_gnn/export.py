@@ -3,8 +3,8 @@ import io
 import torch
 import torch_geometric
 from time import perf_counter_ns
-import numpy as np
-
+import os
+import sys
 import onnx
 import onnxruntime as ort
 
@@ -498,7 +498,8 @@ def main():
 
 if __name__ == "__main__":
     MODEL_PREFIXES = [
-        "tukbavip-1773266382"
+        sys.argv[1],
+        # "tukbavip-1773266382"
     ]
 
     EXPORT_SRC_DIR = "./export"
