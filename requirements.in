@@ -12,7 +12,8 @@
 torch<2.9
 torch_geometric
 wandb
-vastai
+#vastai
+vastai_sdk
 gymnasium
 pygit2
 boto3
