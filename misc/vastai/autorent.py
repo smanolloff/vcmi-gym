@@ -10,6 +10,13 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
+# Exit after this amount of gold instances are rented (0=no limit)
+GOLD_TARGET = 0
+goldcounter = 0
+
+# Price threshold of $/hr
+DPH = 0.15
+
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
 
@@ -65,7 +72,7 @@ def vastai_search(blacklist: List[int]):
         "gpu_name": {"eq": "RTX 5090"},
         "cpu_cores": {"gte": "16"},
         "cpu_ram": {"gte": 55000.0},
-        "dph_total": {"lte": "0.15"},       # <--- $/hr
+        "dph_total": {"lte": DPH},
         "rentable": {"eq": True},
     }
 
@@ -270,7 +277,7 @@ def db_warnlist_add(conn: sqlite3.Connection, machine_id: int, host_id: int):
         INSERT INTO warnlist (machine_id, host_id, counter, created_at, updated_at)
         VALUES ({machine_id}, {host_id}, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT(machine_id, host_id)
-        DO UPDATE SET counter = blacklist.counter + 1, updated_at = CURRENT_TIMESTAMP
+        DO UPDATE SET counter = warnlist.counter + 1, updated_at = CURRENT_TIMESTAMP
         """
     logging.debug(f"SQL: {sql}")
     conn.execute(sql)
@@ -367,18 +374,19 @@ def migrate_warn_to_blacklist(conn: sqlite3.Connection) -> None:
 
 
 def handle_pending_instances(conn: sqlite3.Connection, running_instances: Dict[int, dict]) -> None:
-    running_ids = vastai_list()
+    pending_rows = db_instances_get_pending(conn)
 
-    for instance_id, instance in running_instances.items():
-        machine_id = instance["machine_id"]
-        host_id = instance["host_id"]
-        created_at = instance["created_at"]
+    for row in pending_rows:
+        instance_id = row["instance_id"]
+        machine_id = row["machine_id"]
+        host_id = row["host_id"]
+        created_at = row["created_at"]
 
         if instance_id not in running_instances:
             db_instance_update(conn, instance_id, "unknown")
             continue
 
-        label = running_ids[instance_id]["label"]
+        label = running_instances[instance_id]["label"]
 
         if label in ["autorent", "init...", "check..."] and is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
             vastai_destroy(instance_id)
@@ -394,6 +402,12 @@ def handle_pending_instances(conn: sqlite3.Connection, running_instances: Dict[i
             # db_audit_log(conn, f"destroy: instance_id={instance_id} reason=PASSED")
             db_instance_update(conn, instance_id, "PASSED")
             db_goldlist_add(conn, machine_id, host_id)
+            global goldcounter
+            goldcounter += 1
+            logging.info(f"goldcounter={goldcounter} (GOLD_TARGET={GOLD_TARGET})")
+            if GOLD_TARGET and goldcounter >= GOLD_TARGET:
+                logging.warning(f"Gold target of {GOLD_TARGET} reached, will exit now")
+                sys.exit(0)
 
 
 def handle_new_offers(conn: sqlite3.Connection) -> None:
