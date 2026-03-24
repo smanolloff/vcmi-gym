@@ -1,0 +1,27 @@
+#
+# To install pinned dependencies:
+#
+#   pip install -r requirements.txt
+#
+# To bump versions:
+#
+#   pip-compile requirements.in -o requirements.txt
+#
+
+# As of Mar 2026, torch_geometric does not support torch 2.9
+torch<2.9
+torch_geometric
+wandb
+vastai
+gymnasium
+pygit2
+boto3
+ipdb
+requests
+
+#
+# export only
+#
+
+#onnx
+#onnxscript
