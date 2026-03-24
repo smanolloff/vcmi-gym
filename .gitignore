@@ -25,3 +25,4 @@ rl/stats/
 misc/vastai/.env
 export/
 arena.out
+autorent.db
