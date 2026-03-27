@@ -15,7 +15,7 @@ GOLD_TARGET = 0
 goldcounter = 0
 
 # Price threshold of $/hr
-DPH = 0.15
+DPH = 0.17
 
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
@@ -373,8 +373,9 @@ def migrate_warn_to_blacklist(conn: sqlite3.Connection) -> None:
         db_blacklist_add(conn, row["machine_id"], row["host_id"])
 
 
-def handle_pending_instances(conn: sqlite3.Connection, running_instances: Dict[int, dict]) -> None:
+def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
     pending_rows = db_instances_get_pending(conn)
+    running_instances = vastai_list()
 
     for row in pending_rows:
         instance_id = row["instance_id"]
@@ -393,13 +394,15 @@ def handle_pending_instances(conn: sqlite3.Connection, running_instances: Dict[i
             db_audit_log(conn, f"destroy: instance_id={instance_id} reason=timeout")
             db_instance_update(conn, instance_id, "timeout")
             db_blacklist_add(conn, machine_id, host_id)
+            del running_instances[instance_id]
         elif label == "FAILED":
             vastai_destroy(instance_id)
             db_audit_log(conn, f"destroy: instance_id={instance_id} reason=FAILED")
             db_instance_update(conn, instance_id, "FAILED")
             db_blacklist_add(conn, machine_id, host_id)
+            del running_instances[instance_id]
         elif label == "PASSED":
-            # db_audit_log(conn, f"destroy: instance_id={instance_id} reason=PASSED")
+            db_audit_log(conn, f"keep: instance_id={instance_id} reason=PASSED")
             db_instance_update(conn, instance_id, "PASSED")
             db_goldlist_add(conn, machine_id, host_id)
             global goldcounter
@@ -408,6 +411,8 @@ def handle_pending_instances(conn: sqlite3.Connection, running_instances: Dict[i
             if GOLD_TARGET and goldcounter >= GOLD_TARGET:
                 logging.warning(f"Gold target of {GOLD_TARGET} reached, will exit now")
                 sys.exit(0)
+
+    return running_instances
 
 
 def handle_new_offers(conn: sqlite3.Connection) -> None:
@@ -435,17 +440,17 @@ def main_loop() -> None:
 
     while True:
         try:
-            credit = vastai_get_user()["credit"]
-            running_instances = vastai_list()
-            n_instances = len(running_instances)
-            if credit < 10 * n_instances:
-                logging.info(f"Sleeping 600 seconds due to low balance (credit=${credit:.2f} n_instances={n_instances})")
-                time.sleep(600)
-                continue
-
             with db_connection(DB_PATH) as conn:
                 migrate_warn_to_blacklist(conn)
-                handle_pending_instances(conn, running_instances)
+                running_instances = handle_pending_instances(conn)
+
+                credit = vastai_get_user()["credit"]
+                n_instances = len(running_instances)
+                if credit < 10 * n_instances:
+                    logging.info(f"Sleeping 600 seconds due to low balance (credit=${credit:.2f} n_instances={n_instances})")
+                    time.sleep(600)
+                    continue
+
                 handle_new_offers(conn)
         except Exception:
             logging.exception("Loop iteration failed")
