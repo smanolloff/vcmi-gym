@@ -236,6 +236,28 @@ function download_checkpoint() {
 }
 
 #
+# Same as download_checkpoint(), but only for the config & model weights
+#
+function download_model() {
+    [ -n "\${1:-}" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
+
+    rid=\${1%-*}
+    tag=\${1#*-}
+    s3_dir=mppo-dna-heads/models
+
+    [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
+
+    cfg_json="\$(aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$tag-config.json -)"
+    [ -n "\$cfg_json" ] || { echo "Failed to fetch config.json"; return 1; }
+    out_dir=\$(echo "\$cfg_json" | jq -r '.run.out_dir')
+    mkdir -p "\$out_dir"
+
+    # Copy config separately (already downloaded as text)
+    echo "\$cfg_json" > \$out_dir/\$rid-\$tag-config.json
+
+    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$tag-model-dna.pt \$out_dir/  || { echo "ERROR"; return 1; }
+}
+#
 # Copy a checkpoint
 # E.g. fdqwrsd-best-... gdhsgsi-202601011251-...
 #

@@ -25,13 +25,13 @@ opponents=(
 
 for player in "${players[@]}"; do
     player_file=data/mppo-dna-heads/$player-model-dna.pt
-    [ -f $player_file ] || download_checkpoint $player
+    [ -f $player_file ] || download_model $player
     for opponent in "${opponents[@]}"; do
         if [ $opponent = BattleAI ]; then
             opponent_file=$opponent
         else
             opponent_file=data/mppo-dna-heads/$opponent-model-dna.pt
-            [ -f $opponent_file ] || download_checkpoint $opponent
+            [ -f $opponent_file ] || download_model $opponent
         fi
 
         # Prevent cleanup.sh cron from deleting the old checkpoints
