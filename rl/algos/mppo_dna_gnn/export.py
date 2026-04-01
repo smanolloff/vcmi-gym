@@ -458,12 +458,17 @@ def load_exported_model(m):
     return ort.InferenceSession(m)
 
 
-def save_exported_model(m, export_dir, basename):
+def save_exported_model(m, export_dir, link_dir, basename):
     dst = f"{export_dir}/{basename}.onnx"  # extension is based on exptype
+    link = f"{link_dir}/{basename}.onnx"
+
     with open(dst, "wb") as f:
         f.write(m)
 
     print("Wrote %s" % dst)
+
+    os.symlink(os.path.realpath(dst), os.path.realpath(link))
+    print("Linked %s" % link)
 
 
 def main():
@@ -475,7 +480,10 @@ def main():
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
 
-            export_basename = "%s-%s-stochastic" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
+            export_basename = "%s-%s" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
+
+            if MODEL_SUFFIX:
+                export_basename += f"-{MODEL_SUFFIX}"
 
             #
             # Tests (for debugging):
@@ -493,7 +501,7 @@ def main():
             loaded_model = load_exported_model(exported_model)
             # loaded_model = load_exported_model("/Users/simo/Library/Application Support/vcmi/Mods/mmai/models/defender-tukbajrv-202509241418-probs-debug1.onnx")
             verify_export(cfg, model_weights_path, loaded_model)
-            save_exported_model(exported_model, EXPORT_DST_DIR, export_basename)
+            save_exported_model(exported_model, EXPORT_DST_DIR, EXPORT_LINK_DIR, export_basename)
 
 
 if __name__ == "__main__":
@@ -501,8 +509,10 @@ if __name__ == "__main__":
         sys.argv[1],
         # "tukbavip-1773266382"
     ]
+    MODEL_SUFFIX = ""  # e.g. "stochastic"
 
     EXPORT_SRC_DIR = "./export"
-    EXPORT_DST_DIR = "/Users/simo/Library/Application Support/vcmi/Mods/mmai/models"
+    EXPORT_DST_DIR = "./export"
+    EXPORT_LINK_DIR = "/Users/simo/Library/Application Support/vcmi/Mods/mmai/models"
 
     main()
