@@ -135,7 +135,7 @@ def vastai_rent(offer_id: int) -> int:
             'set -x; touch ~/.no_auto_tmux; mkdir -p /workspace; cd /workspace;'
             'curl -sLO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/preinit.sh;'
             'source preinit.sh; set +e; env -u FAKETIME_SHARED; unset FAKETIME_SHARED;'
-            r'tmux new-session -d unset\ FAKETIME_SHARED\;'
+            r'tmux set-option -g history-limit 100000 \; new-session -d unset\ FAKETIME_SHARED\;'
             r'bash\ -xc\ unset\\\ FAKETIME_SHARED\\\;'
             r'cd\\\ /workspace\\\;'
             r'bash\\\ init.sh\\\;'
