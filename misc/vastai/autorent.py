@@ -446,7 +446,7 @@ def main_loop() -> None:
 
                 credit = vastai_get_user()["credit"]
                 n_instances = len(running_instances)
-                if credit < 10 * n_instances:
+                if credit < 10 + 10 * n_instances:
                     logging.info(f"Sleeping 600 seconds due to low balance (credit=${credit:.2f} n_instances={n_instances})")
                     time.sleep(600)
                     continue
