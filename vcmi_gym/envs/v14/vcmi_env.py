@@ -20,7 +20,7 @@ import os
 from typing import Optional, NamedTuple
 
 from ..util import log
-from .decoder.decoder import Decoder
+from .decoder.decoder import Decoder, Battlefield
 from .decoder.other import HexAction
 
 from .pyconnector import (
@@ -31,6 +31,7 @@ from .pyconnector import (
     STATE_SIZE_GLOBAL,
     STATE_SIZE_ONE_PLAYER,
     N_ACTIONS,
+    MAX_ROUNDS,
     HEX_ACT_MAP,
     LINK_TYPES
 )
@@ -57,22 +58,56 @@ def tracelog(func, maxlen=80):
 # (-60, 60)
 # * -/+ 60 if dmg_mult=1
 # * -/+ 50 if term_mult=1
+#
 class RewardConfig(NamedTuple):
     err_exclusive: float
     step_fixed: float
-    step_round_mult: float
-    round_fixed: float
-    round_round_mult: float
     dmg_mult: float
     term_mult: float
     relval_mult: float
 
+    # Progressive rewards is a per-step penalty which increases each round
+    # until it reaches a specific value (cap), after which it stops growing.
+    #
+    # Use https://www.desmos.com/calculator to visualize:
+    #
+    #       Equation:
+    #           \min\left(a\left(\max\left(\operatorname{floor}\left(x\right),b\right)-b\right)^{c},d\right)
+    #
+    #       Then add sliders for a, b & c
+    #       NOTE: Actual rewards use the negative value of this result
+    #
+    # For example, with {a=0.1 b=9 c=2 d=15}, reward is:
+    #
+    # round <=9: 0
+    # round 10: -0.1
+    # round 11: -0.4
+    # round 12: -0.9
+    # round 13: -1.6
+    # round 14: -2.5
+    # round 15: -3.6
+    # round 16: -4.9
+    # round 17: -6.4
+    # round 18: -8.1
+    # round 19: -10.0
+    # round 20: -12.1
+    # round 21: -14.4
+    # round >=22: -15
+    # ...
+    #
+    # Cap=15 above is suitable in conjunction with reward_term_mult=0.01
+    # (i.e. even if net_value_lost=500‰, net_dmg_received=500‰ + some acc value)
+    #   totals to 1500‰ * reward_term_mult = 15
+    # => cap our prog to 15 as well
+    prog_base: float        # a
+    prog_trigger: int       # b
+    prog_exponent: float    # c
+    prog_limit: int         # d
+
 
 class RewardValues(NamedTuple):
     step_fixed: float = 0.0
-    step_round_mult: float = 0.0
-    round_fixed: float = 0.0
-    round_round_mult: float = 0.0
+    prog: float = 0.0
     dmg_mult: float = 0.0
     term_mult: float = 0.0
     relval_mult: float = 0.0
@@ -102,7 +137,7 @@ class VcmiEnv(gym.Env):
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
     ROLES = ["attacker", "defender"]
-    OPPONENTS = ["StupidAI", "BattleAI", "MMAI_SCRIPT_SUMMONER", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
+    OPPONENTS = ["StupidAI", "BattleAI", "MMAI_BATTLEAI", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
 
     STATE_SIZE = STATE_SIZE
     STATE_SIZE_HEXES = STATE_SIZE_HEXES
@@ -145,6 +180,7 @@ class VcmiEnv(gym.Env):
         role: str = "attacker",
         opponent: str = "StupidAI",
         opponent_model: Optional[str] = None,
+        opponent_allow_mlbot: bool = True,      # only if opponent is MMAI_MODEL or OTHER_ENV (i.e. MMAI_USER)
         vcmi_stats_mode: str = "disabled",
         vcmi_stats_storage: str = "-",
         vcmi_stats_persist_freq: int = 100,
@@ -159,6 +195,8 @@ class VcmiEnv(gym.Env):
         random_terrain_chance: int = 0,
         random_stack_chance: int = 0,
         tight_formation_chance: int = 0,
+        vip_chance: int = 0,
+        opponent_vip_chance: int = 0,
         battlefield_pattern: str = "",
         mana_min: int = 0,
         mana_max: int = 0,
@@ -167,10 +205,14 @@ class VcmiEnv(gym.Env):
         reward_err_exclusive: float = -10,
         # Applied on every step:
         reward_step_fixed: float = -1,          # reward = value
-        reward_step_round_mult: float = -1,     # reward = value * current_round
-        # Applied on first step of every round:
-        reward_round_fixed: float = -1,         # reward = value
-        reward_round_round_mult: float = -1,    # reward = value * current_round
+
+        # These require BATTLE_ROUND in obs (to add in future env version)
+        # See RewardConfig for more info
+        reward_prog_base: float = 0.1,
+        reward_prog_trigger: int = 9,
+        reward_prog_exponent: float = 2,
+        reward_prog_limit: float = 15,
+
         reward_dmg_mult: float = 1,
         reward_term_mult: float = 1,
         reward_relval_mult: float = 1,
@@ -229,9 +271,10 @@ class VcmiEnv(gym.Env):
         self.reward_cfg = RewardConfig(
             err_exclusive=float(reward_err_exclusive),
             step_fixed=float(reward_step_fixed),
-            step_round_mult=float(reward_step_round_mult),
-            round_fixed=float(reward_round_fixed),
-            round_round_mult=float(reward_round_round_mult),
+            prog_base=float(reward_prog_base),
+            prog_trigger=float(reward_prog_trigger),
+            prog_exponent=float(reward_prog_exponent),
+            prog_limit=float(reward_prog_limit),
             dmg_mult=float(reward_dmg_mult),
             term_mult=float(reward_term_mult),
             relval_mult=float(reward_relval_mult),
@@ -249,9 +292,21 @@ class VcmiEnv(gym.Env):
         if role == "attacker":
             attacker = "MMAI_USER"
             defender = opp
+            # When mlbot is allowed for a MMAI_USER or MMAI_MODEL ai, it will
+            # acts automatically if VIP-shooter army is detected.
+            # We never want that for the main VcmiEnv player
+            # => make sure mlbot is NOT allowed for our side
+            attacker_allow_mlbot = False
+            defender_allow_mlbot = opponent_allow_mlbot
+            attacker_vip_chance = vip_chance
+            defender_vip_chance = opponent_vip_chance
         else:
             attacker = opp
             defender = "MMAI_USER"
+            attacker_allow_mlbot = opponent_allow_mlbot
+            defender_allow_mlbot = False
+            attacker_vip_chance = opponent_vip_chance
+            defender_vip_chance = vip_chance
 
         if attacker == "MMAI_MODEL":
             attacker_model = opponent_model
@@ -287,6 +342,8 @@ class VcmiEnv(gym.Env):
             random_stack_chance,
             tight_formation_chance,
             random_terrain_chance,
+            attacker_vip_chance,
+            defender_vip_chance,
             battlefield_pattern,
             mana_min,
             mana_max,
@@ -298,6 +355,8 @@ class VcmiEnv(gym.Env):
             defender,
             attacker_model,
             defender_model,
+            attacker_allow_mlbot,
+            defender_allow_mlbot,
             vcmi_stats_mode,
             vcmi_stats_storage,
             vcmi_stats_persist_freq,
@@ -305,7 +364,7 @@ class VcmiEnv(gym.Env):
         )
 
         if opponent == "OTHER_ENV":
-            self.logger.warn("Dual-env setup detected -- will NOT connect automatically.")
+            self.logger.info("Dual-env setup detected -- will NOT connect automatically.")
         else:
             self.connector.connect_as(role)
             self.reset()  # needed to init vars
@@ -352,16 +411,16 @@ class VcmiEnv(gym.Env):
 
         bf = Decoder.decode(res.state, only_global=True)
         term = bf.global_stats.BATTLE_WINNER.v is not None
-        rewvals = VcmiEnv.calc_reward(res.errcode, bf, self.bf, self.reward_cfg)
+        trunc = bf.global_stats.BATTLE_ROUND.v == MAX_ROUNDS  # vcmi should have retreated
+        rewvals = VcmiEnv.calc_reward(res.errcode, term, trunc, bf, self.bf, self.reward_cfg)
         rew = sum(rewvals)
         res.mask[0] = False  # prevent retreats for now
         obs = self.__class__.build_obs(res)
-        trunc = self.steps_this_episode >= self.max_steps
 
         self._update_vars_after_step(action, obs, res, rew, term, trunc, bf, rewvals)
         self._maybe_render()
 
-        info = self.__class__.build_info(res, term, trunc, bf, self.steps_this_episode, self.rewvals_total)
+        info = self.__class__.build_info(self.side, res, term, trunc, bf, self.steps_this_episode, self.rewvals_total)
 
         return obs, rew, term, trunc, info
 
@@ -378,7 +437,7 @@ class VcmiEnv(gym.Env):
         if self.render_each_step:
             print(self.render())
 
-        info = {"side": bf.global_stats.BATTLE_SIDE.v}
+        info = {"side": self.side, "round": bf.global_stats.BATTLE_ROUND.v}
         return obs, info
 
     @tracelog
@@ -537,6 +596,10 @@ class VcmiEnv(gym.Env):
         self.bf = bf
 
     def _reset_vars(self, res, obs, bf):
+        # Workaround for the legacy BATTLE_SIDE (now replaced by BATTLE_ROUND)
+        # Since active player may change at battle end => store it at start
+        self.side = bf.global_stats.BATTLE_SIDE_ACTIVE_PLAYER
+
         self.last_action = None
         self.steps_this_episode = 0
         self.obs = obs
@@ -561,46 +624,63 @@ class VcmiEnv(gym.Env):
     # One-time values will be lost, put only only cumulatives/totals/etc.
     #
     @staticmethod
-    def build_info(res, term, trunc, bf, steps_this_episode, rewvals_total):
+    def build_info(side, res, term, trunc, bf, steps_this_episode, rewvals_total):
         # Performance optimization
         if not (term or trunc):
-            return dict(side=bf.global_stats.BATTLE_SIDE.v, step=steps_this_episode)
+            return dict(
+                side=side,
+                round=bf.global_stats.BATTLE_ROUND.v,
+                step=steps_this_episode
+            )
 
         return dict(
-            side=bf.global_stats.BATTLE_SIDE.v,
+            side=side,
+            round=bf.global_stats.BATTLE_ROUND.v,
             step=steps_this_episode,
 
-            round=bf.global_stats.BATTLE_ROUND.v,
             net_value=bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v,
             is_success=bf.is_battle_won or False,  # can be None if truncated
             reward_step_fixed=rewvals_total.step_fixed,
-            reward_step_round_mult=rewvals_total.step_round_mult,
-            reward_round_fixed=rewvals_total.round_fixed,
-            reward_round_round_mult=rewvals_total.round_round_mult,
+            reward_prog=rewvals_total.prog,
             reward_dmg_mult=rewvals_total.dmg_mult,
             reward_term_mult=rewvals_total.term_mult,
             reward_relval_mult=rewvals_total.relval_mult,
         )
 
     @staticmethod
-    def calc_reward(errcode, bf, bf_old, cfg: RewardConfig):
+    def calc_reward(errcode, term, trunc, bf: Battlefield, bf_old: Battlefield, cfg: RewardConfig):
         if errcode > 0:
             return cfg.err_exclusive
 
-        battle_round = bf.global_stats.BATTLE_ROUND.v
-        net_value = bf.enemy_stats.VALUE_LOST_NOW_REL.v - bf.my_stats.VALUE_LOST_NOW_REL.v
-        net_dmg = bf.enemy_stats.DMG_RECEIVED_NOW_REL.v - bf.my_stats.DMG_RECEIVED_NOW_REL.v
-        net_value_acc = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v
+        if trunc:
+            # Trunc is bad: means model runs away forever
+            # => punish as if entire army was lost
+            my_dmg_received = bf.my_stats.ARMY_HP_NOW_REL.v
+            my_value_lost = bf.my_stats.ARMY_VALUE_NOW_REL.v
+            my_value_lost_acc = bf.my_stats.ARMY_VALUE_NOW_REL0.v
+        else:
+            my_dmg_received = bf.my_stats.DMG_RECEIVED_NOW_REL.v
+            my_value_lost = bf.my_stats.VALUE_LOST_NOW_REL.v
+            my_value_lost_acc = bf.my_stats.VALUE_LOST_ACC_REL0.v
 
-        is_ended = bf.global_stats.BATTLE_WINNER.v is not None
-        is_new_round = battle_round > bf_old.global_stats.BATTLE_ROUND.v
+        net_dmg = bf.enemy_stats.DMG_RECEIVED_NOW_REL.v - my_dmg_received
+        net_value = bf.enemy_stats.VALUE_LOST_NOW_REL.v - my_value_lost
+        net_value_acc = bf.enemy_stats.VALUE_LOST_ACC_REL0.v - my_value_lost_acc
+
+        # See note in RewardConfig
+        a = cfg.prog_base
+        b = cfg.prog_trigger
+        c = cfg.prog_exponent
+        d = cfg.prog_limit
+        x = bf.global_stats.BATTLE_ROUND.v
+        prog = -min(a*(max(b, int(x)) - b)**c, d)
+
+        done = term or trunc
 
         return RewardValues(
             step_fixed=cfg.step_fixed,
-            step_round_mult=cfg.step_round_mult * battle_round,
-            round_fixed=is_new_round * cfg.round_fixed,
-            round_round_mult=is_new_round * cfg.round_round_mult * battle_round,
+            prog=prog,
             dmg_mult=net_dmg * cfg.dmg_mult,
-            term_mult=is_ended * net_value_acc,
+            term_mult=done * net_value_acc * cfg.term_mult,
             relval_mult=net_value * cfg.relval_mult,
         )

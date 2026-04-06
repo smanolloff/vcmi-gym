@@ -48,14 +48,14 @@ class Battlefield():
 
     @property
     def my_stats(self):
-        if self.global_stats.BATTLE_SIDE.v:
+        if self.global_stats.BATTLE_SIDE_ACTIVE_PLAYER.v:
             return self.right_stats
         else:
             return self.left_stats
 
     @property
     def enemy_stats(self):
-        if self.global_stats.BATTLE_SIDE.v:
+        if self.global_stats.BATTLE_SIDE_ACTIVE_PLAYER.v:
             return self.left_stats
         else:
             return self.right_stats
@@ -65,7 +65,7 @@ class Battlefield():
         if self.global_stats.BATTLE_WINNER.v is None:
             return None
 
-        return self.global_stats.BATTLE_WINNER.v == self.global_stats.BATTLE_SIDE.v
+        return self.global_stats.BATTLE_WINNER.v == self.global_stats.BATTLE_SIDE_ACTIVE_PLAYER.v
 
     # def get_lstack(self, i):
     #     return self._get_stack(0, i)
@@ -241,7 +241,7 @@ class Battlefield():
         rpstats = self.right_stats
 
         ended = gstats.BATTLE_WINNER.v is not None
-        side = gstats.BATTLE_SIDE.v
+        side = gstats.BATTLE_SIDE_ACTIVE_PLAYER.v
         mystats = rpstats if side else rpstats
 
         for i, line in enumerate(lines):
@@ -255,6 +255,9 @@ class Battlefield():
                     if aside is not None:
                         value = (bluecol + "BLUE" + nocol) if aside else (redcol + "RED" + nocol)
                 case 2:
+                    name = "Round"
+                    value = str(gstats.BATTLE_ROUND.v)
+                case 3:
                     name = "Action"
                     if last_action:
                         assert N_NONHEX_ACTIONS == 2
@@ -269,31 +272,31 @@ class Battlefield():
                             hex = self.get_hex((last_action - 2) // len(HEX_ACT_MAP))
                             act = list(HEX_ACT_MAP)[(last_action - 2) % len(HEX_ACT_MAP)]
                             value += "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
-                case 3:
+                case 4:
                     name = "DMG dealt"
                     value = "%d (%d since start)" % (mystats.DMG_DEALT_NOW_ABS.v, mystats.DMG_DEALT_ACC_ABS.v)
-                case 4:
+                case 5:
                     name = "DMG received"
                     value = "%d (%d since start)" % (mystats.DMG_RECEIVED_NOW_ABS.v, mystats.DMG_RECEIVED_ACC_ABS.v)
-                case 5:
+                case 6:
                     name = "Value killed"
                     value = "%d (%d since start)" % (mystats.VALUE_KILLED_NOW_ABS.v, mystats.VALUE_KILLED_ACC_ABS.v)
-                case 6:
+                case 7:
                     name = "Value lost"
                     value = "%d (%d since start)" % (mystats.VALUE_LOST_NOW_ABS.v, mystats.VALUE_LOST_ACC_ABS.v)
-                case 7:
+                case 8:
                     # XXX: if there's a draw, this text will be incorrect
                     restext = (bluecol + "BLUE WINS") if gstats.BATTLE_WINNER.v else (redcol + "RED WINS")
                     name = "Battle result"
                     value = (restext + nocol) if ended else ""
 
-                case 8:
+                case 9:
                     name = "Army value (L)"
                     value = "%d (%.0f‰ of current BF value)" % (lpstats.ARMY_VALUE_NOW_ABS.v, lpstats.ARMY_VALUE_NOW_REL.v)
-                case 9:
+                case 10:
                     name = "Army value (R)"
                     value = "%d (%.0f‰ of current BF value)" % (rpstats.ARMY_VALUE_NOW_ABS.v, rpstats.ARMY_VALUE_NOW_REL.v)
-                case 10:
+                case 11:
                     name = "Current BF value"
                     value = "%d (%.0f‰ of starting BF value)" % (gstats.BFIELD_VALUE_NOW_ABS.v, gstats.BFIELD_VALUE_NOW_REL0.v)
                 case _:

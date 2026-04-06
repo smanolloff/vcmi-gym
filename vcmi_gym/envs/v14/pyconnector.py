@@ -33,6 +33,7 @@ EXPORTER = exporter_v14.Exporter()
 N_NONHEX_ACTIONS = EXPORTER.get_n_nonhex_actions()
 N_HEX_ACTIONS = EXPORTER.get_n_hex_actions()
 N_ACTIONS = EXPORTER.get_n_actions()
+MAX_ROUNDS = EXPORTER.get_max_rounds()
 
 STATE_SIZE = EXPORTER.get_state_size()
 STATE_SIZE_GLOBAL = EXPORTER.get_state_size_global()
@@ -76,12 +77,8 @@ def tracelog(func, maxlen=MAXLEN):
 # TODO: this class is redundant, return original result to VcmiEnv instead
 class PyResult():
     def __init__(self, result):
-        # self.intstates = result.get_intermediate_states()
-        # self.intmasks = result.get_intermediate_action_masks()
-        # self.intactions = result.get_intermediate_actions()
-        self.state = result.get_intermediate_states()[0]
-        self.mask = result.get_intermediate_action_masks()[0]
-
+        self.state = result.get_state()
+        self.mask = result.get_action_mask()
         self.links_dict = result.get_links_dict().items()
         self.errcode = result.get_errcode()
 

@@ -2,23 +2,31 @@
 
 set -euxo pipefail
 
-TAG=false   # -t
-DEL=false   # -d
+TAG=false    # -t
+DEL=false    # -d
+FORCE=false  # -f
 
 INIT_SECONDS=90     # cold start (40 envs, load weights, etc.)
 ROLLOUT_SECONDS=28  # "ok" duration of 1 rollout
 N_ROLLOUTS=5
 
-while getopts "tdi:r:n:" opt; do
+while getopts "tdfi:r:n:" opt; do
     case "$opt" in
     t) TAG=true ;;
     d) DEL=true ;;
+    f) FORCE=true ;;
     i) INIT_SECONDS=$OPTARG ;;
     r) ROLLOUT_SECONDS=$OPTARG ;;
     n) N_ROLLOUTS=$OPTARG ;;
     *) echo "Usage: $0 [-td] [-i INT] [-r INT] [-n INT]"; exit 1 ;;
     esac
 done
+
+if [ -e /workspace/.check ] && !$FORCE; then
+    echo "Already checked, nothing to do."
+    exit 0
+fi
+
 
 function http() {
   curl --fail-with-body -H "Authorization: Bearer $VAST_API_KEY" \
@@ -77,9 +85,9 @@ $TAG && http PUT '{"label": "check..."}' || :
 
 if check; then
     $TAG && http PUT '{"label": "PASSED"}' || :
-    echo 1 > /checkresult
+    echo 1 > /workspace/.check
 else
     $TAG && http PUT '{"label": "FAILED"}' || :
     $DEL && http DELETE '{}' || :
-    echo 0 > /checkresult
+    echo 0 > /workspace/.check
 fi
