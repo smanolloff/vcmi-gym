@@ -41,9 +41,9 @@ from rl.world.util.wandb import setup_wandb
 from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, safe_mean, timer_stats
 
-from vcmi_gym.envs.v13.vcmi_env import VcmiEnv
+from vcmi_gym.envs.v14.vcmi_env import VcmiEnv
 
-from vcmi_gym.envs.v13.pyconnector import (
+from vcmi_gym.envs.v14.pyconnector import (
     STATE_SIZE,
     STATE_SIZE_ONE_HEX,
     STATE_SIZE_HEXES,
@@ -60,37 +60,28 @@ from vcmi_gym.envs.v13.pyconnector import (
 from .dual_vec_env import DualVecEnv, AbstractModelLoader, to_hdata_list
 
 
-OFFSETS_0 = [   # even rows offsets  /\    /\    /\    /\    /\
-    (-1, 1),    # AMOVE_0           /  \  /  \  /  \  /  \  /  \
-    (0, 1),     # AMOVE_1          /    \/(11)\/(5) \/(0) \/(6) \
-    (1, 1),     # AMOVE_2         ||    ||-1-1||-1 0||-1+1||-1+2||   =row 5
-    (1, 0),     # AMOVE_3          \    /\    /\    /\    /\    /\
-    (0, -1),    # AMOVE_4           \  /  \  /  \  /  \  /  \  /  \
-    (-1, 0),    # AMOVE_5            \/(10)\/(4) \/    \/(1) \/(7) \
-    (-1, 2),    # AMOVE_6            ||0 -2||0 -1||0  0||0 +1||0 +2||=row 6
-    (0, 2),     # AMOVE_7            /\    /\    /\    /\    /\    /
-    (1, 2),     # AMOVE_8           /  \  /  \  /  \  /  \  /  \  /
-    (1, -1),    # AMOVE_9          /    \/(9) \/(3) \/(2) \/(8) \/
-    (0, -2),    # AMOVE_10        ||    ||+1-1||+1 0||+1+1||+1+2||   =row 7
-    (-1, -1),   # AMOVE_11         \    /\    /\    /\    /\    /\
+# (row,col) offsets (from * POV)
+OFFSETS_0 = [   # even rows offsets
+    (-1, 1),    # AMOVE_0    .| .| .| .| .| .|
+    (0, 1),     # AMOVE_1   . |. |. |5 |0 |. |= row 5
+    (1, 1),     # AMOVE_2    .| .| 4| *| 1| .|= row 6
+    (1, 0),     # AMOVE_3   . |. |. |3 |2 |. |= row 7
+    (0, -1),    # AMOVE_4    .| .| .| .| .| .|
+    (-1, 0),    # AMOVE_5
 ]               # -------------------------------------------------------------
-OFFSETS_1 = [   # odd rows offsets   \/(11)\/(5) \/(0) \/(6) \/    \
-    (-1, 0),    # AMOVE_0            ||-1-2||-1-1||-1 0||-1+1||    ||=row 8
-    (0, 1),     # AMOVE_1            /\    /\    /\    /\    /\    /
-    (1, 0),     # AMOVE_2           /  \  /  \  /  \  /  \  /  \  /
-    (1, -1),    # AMOVE_3          /(10)\/(4) \/    \/(1) \/(7) \/
-    (0, -1),    # AMOVE_4         ||0 -2||0 -1||0  0||0 +1||0 +2||   =row 9
-    (-1, -1),   # AMOVE_5          \    /\    /\    /\    /\    /\
-    (-1, 1),    # AMOVE_6           \  /  \  /  \  /  \  /  \  /  \
-    (0, 2),     # AMOVE_7            \/(9) \/(3) \/(2) \/(8) \/    \
-    (1, 1),     # AMOVE_8            ||+1-2||+1-1||+1 0||+1+1||    ||=row 10
-    (1, -2),    # AMOVE_9            /\    /\    /\    /\    /\    /
-    (0, -2),    # AMOVE_10          /  \  /  \  /  \  /  \  /  \  /
-    (-1, -2),   # AMOVE_11         /    \/    \/    \/    \/    \/
+OFFSETS_1 = [   # odd rows offsets
+    (-1, 0),    # AMOVE_0   . |. |. |. |. |. |
+    (0, 1),     # AMOVE_1    .| .| .| 5| 0| .|= row 6
+    (1, 0),     # AMOVE_2   . |. |. |4 |* |1 |= row 7
+    (1, -1),    # AMOVE_3    .| .| .| 3| 2| .|= row 8
+    (0, -1),    # AMOVE_4   . |. |. |. |. |. |
+    (-1, -1),   # AMOVE_5
 ]
 
 OFFSETS_1D_0 = [y * 15 + x for y, x in OFFSETS_0]
 OFFSETS_1D_1 = [y * 15 + x for y, x in OFFSETS_1]
+
+N_AMOVES = len(OFFSETS_0)
 
 if os.getenv("PYDEBUG", None) == "1":
     def excepthook(exc_type, exc_value, tb):
@@ -292,7 +283,7 @@ class ActionSample:
 
 class ActionLogits(NamedTuple):
     action_table: torch.Tensor      # (4, 165, 165)
-    inverse_table: torch.Tensor     # (2312, 3)
+    inverse_table: torch.Tensor     # (N_ACTIONS, 3)
     act0_logits: torch.Tensor       # (B, 4)
     act0_mask: torch.Tensor         # (B, 4)
     hex1_logits: torch.Tensor       # (B, 4, 165)
@@ -413,7 +404,7 @@ class Model(nn.Module):
         inverse_table = torch.zeros([N_ACTIONS, 3], dtype=torch.long)
         inverse_table[GLOBAL_ACT_MAP["WAIT"]] = torch.tensor([MainAction.WAIT, 0, 0])
 
-        amove_hexes = torch.zeros([165, 12], dtype=torch.long)
+        amove_hexes = torch.zeros([165, N_AMOVES], dtype=torch.long)
         calcind = lambda y, x: y*15 + x if (y in range(0, 11) and x in range(0, 15)) else -1
 
         for y in range(11):
@@ -581,7 +572,7 @@ class Model(nn.Module):
         mask_hex1[:, 1, :] = movemask
 
         # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
         mask_hex1[:, 2, :] = amovemask.any(dim=-1)
 
         # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
@@ -660,7 +651,7 @@ class Model(nn.Module):
         mask_hex1[:, 1, :] = movemask
 
         # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
         mask_hex1[:, 2, :] = amovemask.any(dim=-1)
 
         # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
@@ -744,7 +735,7 @@ class Model(nn.Module):
         mask_hex1[:, 1, :] = movemask
 
         # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(12) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
         mask_hex1[:, 2, :] = amovemask.any(dim=-1)
 
         # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
@@ -1930,7 +1921,7 @@ def init_config(args):
             name=config["name_template"].format(
                 id=run_id,
                 datetime=dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S"),
-                suffix="v13" if args.suffix is None else args.suffix
+                suffix="v14" if args.suffix is None else args.suffix
             ),
             out_dir=os.path.abspath(config["out_dir_template"].format(id=run_id)),
             resumed_config=None,

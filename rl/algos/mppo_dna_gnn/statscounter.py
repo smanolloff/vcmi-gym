@@ -1,7 +1,7 @@
 import time
 import numpy as np
 
-from vcmi_gym.envs.v13.vcmi_env import VcmiEnv, LINK_TYPES
+from vcmi_gym.envs.v14.vcmi_env import VcmiEnv, LINK_TYPES
 
 
 if __name__ == "__main__":
