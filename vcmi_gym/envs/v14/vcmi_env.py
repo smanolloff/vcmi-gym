@@ -33,7 +33,7 @@ from .pyconnector import (
     N_ACTIONS,
     MAX_ROUNDS,
     HEX_ACT_MAP,
-    LINK_TYPES
+    LINK_ATTR_SIZES
 )
 
 TRACE = os.getenv("VCMIGYM_DEBUG", "0") == "1"
@@ -150,11 +150,11 @@ class VcmiEnv(gym.Env):
     obs_space = gym.spaces.Box(low=STATE_VALUE_NA, high=1, shape=(STATE_SIZE,), dtype=np.float32)
     actmask_space = gym.spaces.Box(low=0, high=1, shape=(N_ACTIONS,), dtype=bool)
     links_space = gym.spaces.Dict({
-        k: gym.spaces.Dict({
+        name: gym.spaces.Dict({
             "index": EdgeIndexSpace(num_nodes=165),
-            "attrs": EdgeAttrsSpace(attrs_space=gym.spaces.Box(low=0, high=2, shape=(1,), dtype=np.float32))
+            "attrs": EdgeAttrsSpace(attrs_space=gym.spaces.Box(low=0, high=1, shape=(size,), dtype=np.float32))
         })
-        for k in LINK_TYPES.keys()
+        for name, size in LINK_ATTR_SIZES.items()
     })
 
     OBSERVATION_SPACE = gym.spaces.Dict({

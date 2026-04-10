@@ -54,7 +54,7 @@ from vcmi_gym.envs.v14.pyconnector import (
     GLOBAL_ACT_MAP,
     HEX_ATTR_MAP,
     HEX_ACT_MAP,
-    LINK_TYPES,
+    LINK_ATTR_SIZES,
 )
 
 from .dual_vec_env import DualVecEnv, AbstractModelLoader, to_hdata_list
@@ -365,23 +365,22 @@ class GNNBlock(nn.Module):
         hidden_channels,
         out_channels,
         gnn_kwargs,
-        link_types=LINK_TYPES.keys(),
+        edge_attrs=LINK_ATTR_SIZES,
         node_type="hex",
-        edge_dim=1
     ):
         super().__init__()
 
         # at least 1 "hidden" layer is required for shapes to match
         assert num_layers >= 2
 
-        kwargs = dict(gnn_kwargs, edge_dim=edge_dim)
+        kwargs = dict(gnn_kwargs)
 
         # NOTE: the code below will likely fail if len(node_types) > 1 unless
         #       all they all have the same shape
         def make_hetero_dict(inchan, outchan):
             return {
-                (node_type, lt, node_type): gnn.GENConv(**kwargs, in_channels=inchan, out_channels=outchan)
-                for lt in link_types
+                (node_type, edge_type, node_type): gnn.GENConv(**kwargs, in_channels=inchan, out_channels=outchan, edge_dim=edge_dim)
+                for (edge_type, edge_dim) in edge_attrs.items()
             }
 
         layers = []
@@ -395,7 +394,6 @@ class GNNBlock(nn.Module):
         # No activation after last layer
         hetero_dict = make_hetero_dict(hidden_channels, out_channels)
         layers.append((gnn.HeteroConv(hetero_dict), "x_dict, edge_index_dict, edge_attr_dict -> x_dict"))
-
         self.layers = gnn.Sequential("x_dict, edge_index_dict, edge_attr_dict", layers)
 
     def forward(self, hdata):
