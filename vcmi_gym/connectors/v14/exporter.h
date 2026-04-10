@@ -58,12 +58,14 @@ namespace Connector::V14 {
         virtual const std::vector<std::string> getGlobalActions() const;
         virtual const std::vector<std::string> getHexActions() const;
         virtual const std::vector<std::string> getHexStates() const;
+        virtual const std::vector<std::string> getGateStates() const;
         virtual const std::vector<AttributeMapping> getHexAttributeMapping() const;
         virtual const std::vector<AttributeMapping> getPlayerAttributeMapping() const;
         virtual const std::vector<AttributeMapping> getGlobalAttributeMapping() const;
         virtual const std::vector<FlagMapping> getStackFlag1Mapping() const;
         virtual const std::vector<FlagMapping> getStackFlag2Mapping() const;
         virtual const std::vector<std::string> getLinkTypes() const;
+        virtual const std::vector<int> getLinkAttrSizes() const;
 
     protected:
         const std::string getEncodingName(Encoding e) const;

@@ -307,17 +307,22 @@ namespace Connector::V14::Thread {
             // auto pyattrs = py::array_t<const float>(d0, attrs.data());
             // ----------------------------------
             // copy (safer)
-            if (srcinds.size() != dstinds.size() || srcinds.size() != attrs.size())
-                throw std::runtime_error("inds/attrs size mismatch: " + std::to_string(srcinds.size()) + " / " + std::to_string(dstinds.size()) + " / " + std::to_string(attrs.size()));
+            if (srcinds.size() != dstinds.size())
+                throw std::runtime_error("inds size mismatch: " + std::to_string(srcinds.size()) + " / " + std::to_string(dstinds.size()));
 
-            ssize_t n = attrs.size();
+            ssize_t n = srcinds.size();
+            ssize_t attrsize = LINK_SIZES.at(EI(type));
+            ssize_t flatattrsize = n * attrsize;
+
+            if (attrs.size() != flatattrsize)
+                throw std::runtime_error("attrs size mismatch: " + std::to_string(attrs.size()) + " / " + std::to_string(flatattrsize) + " / ");
 
             auto pyinds = py::array_t<int64_t>({ssize_t(2), n});
             std::memcpy(pyinds.mutable_data(), srcinds.data(), n*sizeof(int64_t));
             std::memcpy(pyinds.mutable_data() + n, dstinds.data(), n*sizeof(int64_t));
 
-            auto pyattrs = py::array_t<float>({n, ssize_t(1)});
-            std::memcpy(pyattrs.mutable_data(), attrs.data(), n*sizeof(float));
+            auto pyattrs = py::array_t<float>({n, attrsize});
+            std::memcpy(pyattrs.mutable_data(), attrs.data(), flatattrsize*sizeof(float));
             // ----------------------------------
 
             // pylinks[pytype] = py::make_tuple(pyinds, pyattrs);

@@ -52,8 +52,10 @@ STACK_FLAG2_MAP = types.MappingProxyType(OrderedDict([(k, v) for k, v in EXPORTE
 GLOBAL_ACT_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_global_actions())]))
 HEX_ACT_MAP = types.MappingProxyType(OrderedDict([(action, i) for i, action in enumerate(EXPORTER.get_hex_actions())]))
 HEX_STATE_MAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_hex_states())]))
+GATE_STATE_MAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_gate_states())]))
 SIDE_MAP = types.MappingProxyType(OrderedDict([("LEFT", EXPORTER.get_side_left()), ("RIGHT", EXPORTER.get_side_right())]))
 LINK_TYPES = types.MappingProxyType(OrderedDict([(type, i) for i, type in enumerate(EXPORTER.get_link_types())]))
+LINK_ATTR_SIZES = types.MappingProxyType(OrderedDict([(type, size) for type, size in zip(EXPORTER.get_link_types(), EXPORTER.get_link_attr_sizes())]))
 
 TRACE = os.getenv("VCMIGYM_DEBUG", "0") == "1"
 MAXLEN = 80

@@ -18,7 +18,7 @@ import numpy as np
 
 from .battlefield import Battlefield
 from .value import Value
-from .stats import GlobalStats, PlayerStats
+from .stats import GlobalStats, PlayerStats, GateStateFlags
 from .hex import Hex, HexStateFlags, HexActionFlags
 from .stack import Stack, StackFlags1, StackFlags2
 from .. import pyconnector
@@ -80,7 +80,7 @@ class Decoder:
 
         for attr, (enctype, offset, n, vmax, slope) in pyconnector.GLOBAL_ATTR_MAP.items():
             attrdata = globaldata[offset:][:n]
-            res[attr] = Value(
+            kwargs = dict(
                 name=attr,
                 enctype=enctype,
                 n=n,
@@ -89,6 +89,11 @@ class Decoder:
                 raw=attrdata,
                 verbose=verbose
             )
+
+            if attr == "SIEGE_GATE_STATE":
+                kwargs = dict(kwargs, struct_cls=GateStateFlags, struct_mapping=pyconnector.GATE_STATE_MAP)
+
+            res[attr] = Value(**kwargs)
 
         return GlobalStats(**res, data=globaldata)
 

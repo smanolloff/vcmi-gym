@@ -65,6 +65,12 @@ namespace Connector::V14 {
             break; case HexAction::AMOVE_BL: actname = "AMOVE_BL";
             break; case HexAction::AMOVE_L: actname = "AMOVE_L";
             break; case HexAction::AMOVE_TL: actname = "AMOVE_TL";
+            break; case HexAction::AMOVE_2TR: actname = "AMOVE_2TR";
+            break; case HexAction::AMOVE_2R: actname = "AMOVE_2R";
+            break; case HexAction::AMOVE_2BR: actname = "AMOVE_2BR";
+            break; case HexAction::AMOVE_2BL: actname = "AMOVE_2BL";
+            break; case HexAction::AMOVE_2L: actname = "AMOVE_2L";
+            break; case HexAction::AMOVE_2TL: actname = "AMOVE_2TL";
             break; case HexAction::MOVE: actname = "MOVE";
             break; case HexAction::SHOOT: actname = "SHOOT";
             break; default:
@@ -87,6 +93,9 @@ namespace Connector::V14 {
             break; case HexState::STOPPING: statename = "STOPPING";
             break; case HexState::DAMAGING_L: statename = "DAMAGING_L";
             break; case HexState::DAMAGING_R: statename = "DAMAGING_R";
+            break; case HexState::SIEGE_WALL: statename = "SIEGE_WALL";
+            break; case HexState::SIEGE_GATE: statename = "SIEGE_GATE";
+            break; case HexState::SIEGE_BRIDGE: statename = "SIEGE_BRIDGE";
             break; case HexState::_count:
             break; default:
                 throw std::runtime_error("Unexpected HexState: " + std::to_string(i));
@@ -98,6 +107,26 @@ namespace Connector::V14 {
         return states;
     }
 
+    const std::vector<std::string> Exporter::getGateStates() const {
+        auto states = std::vector<std::string> {};
+        std::string statename;
+
+        for (int i=0; i < static_cast<int>(GateState::_count); i++) {
+            switch (GateState(i)) {
+            break; case GateState::OPEN: statename = "OPEN";
+            break; case GateState::CLOSED: statename = "CLOSED";
+            break; case GateState::BLOCKED: statename = "BLOCKED";
+            break; case GateState::JAMMED: statename = "JAMMED";
+            break; case GateState::_count:
+            break; default:
+                throw std::runtime_error("Unexpected GateState: " + std::to_string(i));
+            }
+
+            states.push_back(statename);
+        }
+
+        return states;
+    }
     const std::vector<AttributeMapping> Exporter::getHexAttributeMapping() const {
         // attrname => (encname, offset, n, vmax)
         auto res = std::vector<AttributeMapping> {};
@@ -117,27 +146,21 @@ namespace Connector::V14 {
             break; case HA::STATE_MASK:                  attrname = "STATE_MASK";
             break; case HA::ACTION_MASK:                 attrname = "ACTION_MASK";
             break; case HA::IS_REAR:                     attrname = "IS_REAR";
+            break; case HA::IS_RUFR:                     attrname = "IS_RUFR";
+            break; case HA::WALL_HEALTH:                 attrname = "WALL_HEALTH";
             break; case HA::STACK_SIDE:                  attrname = "STACK_SIDE";
             break; case HA::STACK_SLOT:                  attrname = "STACK_SLOT";
             break; case HA::STACK_QUANTITY:              attrname = "STACK_QUANTITY";
-            // break; case HA::STACK_QUANTITY_BINS:         attrname = "STACK_QUANTITY_BINS";
             break; case HA::STACK_ATTACK:                attrname = "STACK_ATTACK";
-            // break; case HA::STACK_ATTACK_BINS:           attrname = "STACK_ATTACK_BINS";
             break; case HA::STACK_DEFENSE:               attrname = "STACK_DEFENSE";
-            // break; case HA::STACK_DEFENSE_BINS:          attrname = "STACK_DEFENSE_BINS";
             break; case HA::STACK_SHOTS:                 attrname = "STACK_SHOTS";
             break; case HA::STACK_DMG_MIN:               attrname = "STACK_DMG_MIN";
-            // break; case HA::STACK_DMG_MIN_BINS:          attrname = "STACK_DMG_MIN_BINS";
             break; case HA::STACK_DMG_MAX:               attrname = "STACK_DMG_MAX";
-            // break; case HA::STACK_DMG_MAX_BINS:          attrname = "STACK_DMG_MAX_BINS";
             break; case HA::STACK_HP:                    attrname = "STACK_HP";
-            // break; case HA::STACK_HP_BINS:               attrname = "STACK_HP_BINS";
             break; case HA::STACK_HP_LEFT:               attrname = "STACK_HP_LEFT";
-            // break; case HA::STACK_HP_LEFT_REL:           attrname = "STACK_HP_LEFT_REL";
             break; case HA::STACK_SPEED:                 attrname = "STACK_SPEED";
             break; case HA::STACK_QUEUE:                 attrname = "STACK_QUEUE";
             break; case HA::STACK_VALUE_ONE:             attrname = "STACK_VALUE_ONE";
-            // break; case HA::STACK_VALUE_ONE_BINS:        attrname = "STACK_VALUE_ONE_BINS";
             break; case HA::STACK_FLAGS1:                attrname = "STACK_FLAGS1";
             break; case HA::STACK_FLAGS2:                attrname = "STACK_FLAGS2";
             break; case HA::STACK_VALUE_REL:             attrname = "STACK_VALUE_REL";
@@ -259,15 +282,15 @@ namespace Connector::V14 {
             break; case GA::BATTLE_SIDE_ACTIVE_PLAYER:   attrname = "BATTLE_SIDE_ACTIVE_PLAYER";
             break; case GA::BATTLE_WINNER:               attrname = "BATTLE_WINNER";
             break; case GA::BFIELD_VALUE_START_ABS:      attrname = "BFIELD_VALUE_START_ABS";
-            // break; case GA::BFIELD_VALUE_START_ABS_BINS: attrname = "BFIELD_VALUE_START_ABS_BINS";
             break; case GA::BFIELD_VALUE_NOW_ABS:        attrname = "BFIELD_VALUE_NOW_ABS";
-            // break; case GA::BFIELD_VALUE_NOW_ABS_BINS:   attrname = "BFIELD_VALUE_NOW_ABS_BINS";
             break; case GA::BFIELD_VALUE_NOW_REL0:       attrname = "BFIELD_VALUE_NOW_REL0";
             break; case GA::BFIELD_HP_START_ABS:         attrname = "BFIELD_HP_START_ABS";
-            // break; case GA::BFIELD_HP_START_ABS_BINS:    attrname = "BFIELD_HP_START_ABS_BINS";
             break; case GA::BFIELD_HP_NOW_ABS:           attrname = "BFIELD_HP_NOW_ABS";
-            // break; case GA::BFIELD_HP_NOW_ABS_BINS:      attrname = "BFIELD_HP_NOW_ABS_BINS";
             break; case GA::BFIELD_HP_NOW_REL0:          attrname = "BFIELD_HP_NOW_REL0";
+            break; case GA::SIEGE_GATE_STATE:            attrname = "SIEGE_GATE_STATE";
+            break; case GA::SIEGE_TOWER_UPPER:           attrname = "SIEGE_TOWER_UPPER";
+            break; case GA::SIEGE_TOWER_CENTRAL:         attrname = "SIEGE_TOWER_CENTRAL";
+            break; case GA::SIEGE_TOWER_LOWER:           attrname = "SIEGE_TOWER_LOWER";
             break; case GA::ACTION_MASK:                 attrname = "ACTION_MASK";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
@@ -297,36 +320,26 @@ namespace Connector::V14 {
             switch (a) {
             break; case PA::BATTLE_SIDE:                attrname = "BATTLE_SIDE";
             break; case PA::ARMY_VALUE_NOW_ABS:         attrname = "ARMY_VALUE_NOW_ABS";
-            // break; case PA::ARMY_VALUE_NOW_ABS_BINS:    attrname = "ARMY_VALUE_NOW_ABS_BINS";
             break; case PA::ARMY_VALUE_NOW_REL:         attrname = "ARMY_VALUE_NOW_REL";
             break; case PA::ARMY_VALUE_NOW_REL0:        attrname = "ARMY_VALUE_NOW_REL0";
             break; case PA::ARMY_HP_NOW_ABS:            attrname = "ARMY_HP_NOW_ABS";
-            // break; case PA::ARMY_HP_NOW_ABS_BINS:       attrname = "ARMY_HP_NOW_ABS_BINS";
             break; case PA::ARMY_HP_NOW_REL:            attrname = "ARMY_HP_NOW_REL";
             break; case PA::ARMY_HP_NOW_REL0:           attrname = "ARMY_HP_NOW_REL0";
             break; case PA::VALUE_KILLED_NOW_ABS:       attrname = "VALUE_KILLED_NOW_ABS";
-            // break; case PA::VALUE_KILLED_NOW_ABS_BINS:  attrname = "VALUE_KILLED_NOW_ABS_BINS";
             break; case PA::VALUE_KILLED_NOW_REL:       attrname = "VALUE_KILLED_NOW_REL";
             break; case PA::VALUE_KILLED_ACC_ABS:       attrname = "VALUE_KILLED_ACC_ABS";
-            // break; case PA::VALUE_KILLED_ACC_ABS_BINS:  attrname = "VALUE_KILLED_ACC_ABS_BINS";
             break; case PA::VALUE_KILLED_ACC_REL0:      attrname = "VALUE_KILLED_ACC_REL0";
             break; case PA::VALUE_LOST_NOW_ABS:         attrname = "VALUE_LOST_NOW_ABS";
-            // break; case PA::VALUE_LOST_NOW_ABS_BINS:    attrname = "VALUE_LOST_NOW_ABS_BINS";
             break; case PA::VALUE_LOST_NOW_REL:         attrname = "VALUE_LOST_NOW_REL";
             break; case PA::VALUE_LOST_ACC_ABS:         attrname = "VALUE_LOST_ACC_ABS";
-            // break; case PA::VALUE_LOST_ACC_ABS_BINS:    attrname = "VALUE_LOST_ACC_ABS_BINS";
             break; case PA::VALUE_LOST_ACC_REL0:        attrname = "VALUE_LOST_ACC_REL0";
             break; case PA::DMG_DEALT_NOW_ABS:          attrname = "DMG_DEALT_NOW_ABS";
-            // break; case PA::DMG_DEALT_NOW_ABS_BINS:     attrname = "DMG_DEALT_NOW_ABS_BINS";
             break; case PA::DMG_DEALT_NOW_REL:          attrname = "DMG_DEALT_NOW_REL";
             break; case PA::DMG_DEALT_ACC_ABS:          attrname = "DMG_DEALT_ACC_ABS";
-            // break; case PA::DMG_DEALT_ACC_ABS_BINS:     attrname = "DMG_DEALT_ACC_ABS_BINS";
             break; case PA::DMG_DEALT_ACC_REL0:         attrname = "DMG_DEALT_ACC_REL0";
             break; case PA::DMG_RECEIVED_NOW_ABS:       attrname = "DMG_RECEIVED_NOW_ABS";
-            // break; case PA::DMG_RECEIVED_NOW_ABS_BINS:  attrname = "DMG_RECEIVED_NOW_ABS_BINS";
             break; case PA::DMG_RECEIVED_NOW_REL:       attrname = "DMG_RECEIVED_NOW_REL";
             break; case PA::DMG_RECEIVED_ACC_ABS:       attrname = "DMG_RECEIVED_ACC_ABS";
-            // break; case PA::DMG_RECEIVED_ACC_ABS_BINS:  attrname = "DMG_RECEIVED_ACC_ABS_BINS";
             break; case PA::DMG_RECEIVED_ACC_REL0:      attrname = "DMG_RECEIVED_ACC_REL0";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
@@ -394,6 +407,16 @@ namespace Connector::V14 {
         return res;
     }
 
+    const std::vector<int> Exporter::getLinkAttrSizes() const {
+        auto res = std::vector<int> {};
+        int size;
+
+        for (const int s : LINK_SIZES)
+            res.push_back(s);
+
+        return res;
+    }
+
     PYBIND11_MODULE(exporter_v14, m) {
         pybind11::class_<Exporter>(m, "Exporter")
             .def(pybind11::init<>())
@@ -413,11 +436,13 @@ namespace Connector::V14 {
             .def("get_global_actions", &Exporter::getGlobalActions, "Get a list of the GlobalAction enum value names")
             .def("get_hex_actions", &Exporter::getHexActions, "Get a list of the HexAction enum value names")
             .def("get_hex_states", &Exporter::getHexStates, "Get a list of the HexState enum value names")
+            .def("get_gate_states", &Exporter::getGateStates, "Get a list of the GateState enum value names")
             .def("get_hex_attribute_mapping", &Exporter::getHexAttributeMapping, "Get attrname => (encname, offset, n, vmax, slope)")
             .def("get_player_attribute_mapping", &Exporter::getPlayerAttributeMapping, "Get attrname => (encname, offset, n, vmax, slope)")
             .def("get_global_attribute_mapping", &Exporter::getGlobalAttributeMapping, "Get attrname => (encname, offset, n, vmax, slope)")
             .def("get_stack_flag1_mapping", &Exporter::getStackFlag1Mapping, "Get flagname => offset")
             .def("get_stack_flag2_mapping", &Exporter::getStackFlag2Mapping, "Get flagname => offset")
-            .def("get_link_types", &Exporter::getLinkTypes, "Get a list of LinkType enum value names");
+            .def("get_link_types", &Exporter::getLinkTypes, "Get a list of LinkType enum value names")
+            .def("get_link_attr_sizes", &Exporter::getLinkAttrSizes, "Get a list of LinkType attribute sizes");
     }
 }

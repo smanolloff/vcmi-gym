@@ -63,19 +63,32 @@ from .dual_vec_env import DualVecEnv, AbstractModelLoader, to_hdata_list
 # (row,col) offsets (from * POV)
 OFFSETS_0 = [   # even rows offsets
     (-1, 1),    # AMOVE_0    .| .| .| .| .| .|
-    (0, 1),     # AMOVE_1   . |. |. |5 |0 |. |= row 5
-    (1, 1),     # AMOVE_2    .| .| 4| *| 1| .|= row 6
-    (1, 0),     # AMOVE_3   . |. |. |3 |2 |. |= row 7
+    (0, 1),     # AMOVE_1   . |. |F |5 |0 |A |= row 5
+    (1, 1),     # AMOVE_2    .| E| 4| *| 1| B|= row 6
+    (1, 0),     # AMOVE_3   . |. |D |3 |2 |C |= row 7
     (0, -1),    # AMOVE_4    .| .| .| .| .| .|
     (-1, 0),    # AMOVE_5
+    (-1, 2),    # AMOVE_6  (A)
+    (0, 2),     # AMOVE_7  (B)
+    (1, 2),     # AMOVE_8  (C)
+    (1, -1),    # AMOVE_9  (D)
+    (0, -2),    # AMOVE_10 (E)
+    (-1, -1),   # AMOVE_11 (F)
+
 ]               # -------------------------------------------------------------
 OFFSETS_1 = [   # odd rows offsets
-    (-1, 0),    # AMOVE_0   . |. |. |. |. |. |
-    (0, 1),     # AMOVE_1    .| .| .| 5| 0| .|= row 6
-    (1, 0),     # AMOVE_2   . |. |. |4 |* |1 |= row 7
-    (1, -1),    # AMOVE_3    .| .| .| 3| 2| .|= row 8
-    (0, -1),    # AMOVE_4   . |. |. |. |. |. |
+    (-1, 0),    # AMOVE_0   . |. |. |. |. |. |. |
+    (0, 1),     # AMOVE_1    .| .| F| 5| 0| A| .|= row 6
+    (1, 0),     # AMOVE_2   . |. |E |4 |* |1 |B |= row 7
+    (1, -1),    # AMOVE_3    .| .| D| 3| 2| C| .|= row 8
+    (0, -1),    # AMOVE_4   . |. |. |. |. |. |. |
     (-1, -1),   # AMOVE_5
+    (-1, 1),    # AMOVE_6  (A)
+    (0, 2),     # AMOVE_7  (B)
+    (1, 1),     # AMOVE_8  (C)
+    (1, -2),    # AMOVE_9  (D)
+    (0, -2),    # AMOVE_10 (E)
+    (-1, -2),   # AMOVE_11 (F)
 ]
 
 OFFSETS_1D_0 = [y * 15 + x for y, x in OFFSETS_0]
@@ -458,7 +471,7 @@ class Model(nn.Module):
 
         # TODO: temporary backward-compat
         # XXX: new encoder is not yet ported to Exporter
-        self.legacy_global_encoder = config.get("legacy_global_encoder", True)
+        self.legacy_global_encoder = config.get("legacy_global_encoder", False)
 
         if self.legacy_global_encoder:
             self.encoder_other = nn.Sequential(

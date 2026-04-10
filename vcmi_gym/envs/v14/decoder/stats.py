@@ -18,8 +18,14 @@ from collections import namedtuple
 
 from ..pyconnector import (
     GLOBAL_ATTR_MAP,
-    PLAYER_ATTR_MAP
+    PLAYER_ATTR_MAP,
+    GATE_STATE_MAP,
 )
+
+
+class GateStateFlags(namedtuple("GateStateFlags", list(GATE_STATE_MAP.keys()))):
+    def __repr__(self):
+        return "{%s}" % ", ".join([f for f in self._fields if getattr(self, f)])
 
 
 class GlobalStats(namedtuple("GlobalStats", ["data"] + list(GLOBAL_ATTR_MAP.keys()))):
