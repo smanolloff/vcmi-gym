@@ -493,36 +493,6 @@ class VcmiEnv(gym.Env):
             res += "%s (y=%s x=%s)" % (act, hex.Y_COORD.v, hex.X_COORD.v)
         return res
 
-    def render_transitions(self, add_regular_render=True):
-        def prepare(obs, action, reward):
-            import re
-            bf = Decoder.decode(obs)
-            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-            rewtxt = "" if reward is None else "Reward: %s" % round(reward, 2)
-            render = {}
-            render["bf_lines"] = bf.render_battlefield()[0][:-1]
-            render["bf_len"] = [len(l) for l in render["bf_lines"]]
-            render["bf_printlen"] = [len(ansi_escape.sub('', l)) for l in render["bf_lines"]]
-            render["bf_maxlen"] = max(render["bf_len"])
-            render["bf_maxprintlen"] = max(render["bf_printlen"])
-            render["bf_lines"].insert(0, rewtxt.ljust(render["bf_maxprintlen"]))
-            render["bf_printlen"].insert(0, len(render["bf_lines"][0]))
-            render["bf_lines"] = [l + " "*(render["bf_maxprintlen"] - pl) for l, pl in zip(render["bf_lines"], render["bf_printlen"])]
-            render["bf_lines"].append(VcmiEnv.action_text(action, bf=bf).rjust(render["bf_maxprintlen"]))
-            return render["bf_lines"]
-
-        trans = self.obs["transitions"]
-        bfields = [prepare(s, a, None) for s, a, r in zip(trans["observations"][:1], trans["actions"][:1], trans["rewards"][:1])]
-        bfields += [prepare(s, a, r) for s, a, r in zip(trans["observations"][1:], trans["actions"][1:], trans["rewards"][1:])]
-
-        # for i in range(len(bfields)):
-        print("")
-        print("\n".join([(" → ".join(rowlines)) for rowlines in zip(*bfields)]))
-        print("")
-
-        if add_regular_render:
-            print(self.render())
-
     def __del__(self):
         self.close()
 
@@ -531,7 +501,7 @@ class VcmiEnv(gym.Env):
 
     def defend_action(self, bf=None):
         if bf is None:
-            bf = Decoder.decode(self.obs["transitions"]["observations"][-1])
+            bf = Decoder.decode(self.obs["observation"])
 
         ahex = None
         for hex in [h for row in bf.hexes for h in row]:

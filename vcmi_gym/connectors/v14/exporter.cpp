@@ -107,26 +107,6 @@ namespace Connector::V14 {
         return states;
     }
 
-    const std::vector<std::string> Exporter::getGateStates() const {
-        auto states = std::vector<std::string> {};
-        std::string statename;
-
-        for (int i=0; i < static_cast<int>(GateState::_count); i++) {
-            switch (GateState(i)) {
-            break; case GateState::OPEN: statename = "OPEN";
-            break; case GateState::CLOSED: statename = "CLOSED";
-            break; case GateState::BLOCKED: statename = "BLOCKED";
-            break; case GateState::JAMMED: statename = "JAMMED";
-            break; case GateState::_count:
-            break; default:
-                throw std::runtime_error("Unexpected GateState: " + std::to_string(i));
-            }
-
-            states.push_back(statename);
-        }
-
-        return states;
-    }
     const std::vector<AttributeMapping> Exporter::getHexAttributeMapping() const {
         // attrname => (encname, offset, n, vmax)
         auto res = std::vector<AttributeMapping> {};
@@ -287,10 +267,8 @@ namespace Connector::V14 {
             break; case GA::BFIELD_HP_START_ABS:         attrname = "BFIELD_HP_START_ABS";
             break; case GA::BFIELD_HP_NOW_ABS:           attrname = "BFIELD_HP_NOW_ABS";
             break; case GA::BFIELD_HP_NOW_REL0:          attrname = "BFIELD_HP_NOW_REL0";
-            break; case GA::SIEGE_GATE_STATE:            attrname = "SIEGE_GATE_STATE";
-            break; case GA::SIEGE_TOWER_UPPER:           attrname = "SIEGE_TOWER_UPPER";
-            break; case GA::SIEGE_TOWER_CENTRAL:         attrname = "SIEGE_TOWER_CENTRAL";
-            break; case GA::SIEGE_TOWER_LOWER:           attrname = "SIEGE_TOWER_LOWER";
+            break; case GA::SIEGE_TOWERS:                attrname = "SIEGE_TOWERS";
+            break; case GA::SIEGE_CORPSES:               attrname = "SIEGE_CORPSES";
             break; case GA::ACTION_MASK:                 attrname = "ACTION_MASK";
             break; default:
                 throw std::runtime_error("Unexpected attribute: " + std::to_string(static_cast<int>(a)));
@@ -436,7 +414,6 @@ namespace Connector::V14 {
             .def("get_global_actions", &Exporter::getGlobalActions, "Get a list of the GlobalAction enum value names")
             .def("get_hex_actions", &Exporter::getHexActions, "Get a list of the HexAction enum value names")
             .def("get_hex_states", &Exporter::getHexStates, "Get a list of the HexState enum value names")
-            .def("get_gate_states", &Exporter::getGateStates, "Get a list of the GateState enum value names")
             .def("get_hex_attribute_mapping", &Exporter::getHexAttributeMapping, "Get attrname => (encname, offset, n, vmax, slope)")
             .def("get_player_attribute_mapping", &Exporter::getPlayerAttributeMapping, "Get attrname => (encname, offset, n, vmax, slope)")
             .def("get_global_attribute_mapping", &Exporter::getGlobalAttributeMapping, "Get attrname => (encname, offset, n, vmax, slope)")

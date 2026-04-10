@@ -58,7 +58,6 @@ namespace Connector::V14 {
         virtual const std::vector<std::string> getGlobalActions() const;
         virtual const std::vector<std::string> getHexActions() const;
         virtual const std::vector<std::string> getHexStates() const;
-        virtual const std::vector<std::string> getGateStates() const;
         virtual const std::vector<AttributeMapping> getHexAttributeMapping() const;
         virtual const std::vector<AttributeMapping> getPlayerAttributeMapping() const;
         virtual const std::vector<AttributeMapping> getGlobalAttributeMapping() const;

@@ -18,7 +18,7 @@ import numpy as np
 
 from .battlefield import Battlefield
 from .value import Value
-from .stats import GlobalStats, PlayerStats, GateStateFlags
+from .stats import GlobalStats, PlayerStats
 from .hex import Hex, HexStateFlags, HexActionFlags
 from .stack import Stack, StackFlags1, StackFlags2
 from .. import pyconnector
@@ -89,9 +89,6 @@ class Decoder:
                 raw=attrdata,
                 verbose=verbose
             )
-
-            if attr == "SIEGE_GATE_STATE":
-                kwargs = dict(kwargs, struct_cls=GateStateFlags, struct_mapping=pyconnector.GATE_STATE_MAP)
 
             res[attr] = Value(**kwargs)
 
