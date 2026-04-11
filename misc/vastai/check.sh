@@ -37,24 +37,15 @@ function http() {
 SECONDS_CHECK=$((N_ROLLOUTS * ROLLOUT_SECONDS))
 SECONDS_TIMEOUT=$((INIT_SECONDS + SECONDS_CHECK * 2))
 
-CHECKPOINT=ytoowqgj-1773645017
-RUN_ID=${CHECKPOINT%-*}
-
 function check() {
   . ~/.simorc
   cd /workspace/vcmi-gym
-
-  if ! [ -f data/mppo-dna-heads/$CHECKPOINT-model-dna.pt ]; then
-    download_checkpoint ytoowqgj-1773645017
-  fi
-
-  link_checkpoint -y ytoowqgj-1773645017 ytoowqgj data/mppo-dna-heads/
 
   # timeout returns:
   #   0   command finished
   #   124 command timed out
   #   other = command failed
-  command="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn --dry-run --max-rollouts $N_ROLLOUTS --skip-eval -f data/mppo-dna-heads/$CHECKPOINT-config.json"
+  command="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn --dry-run --max-rollouts $N_ROLLOUTS --skip-eval"
   date
   # Temporary disable -e to capture non-0 exit statuses without aborting
   set +e
