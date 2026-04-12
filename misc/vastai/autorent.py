@@ -140,7 +140,7 @@ def vastai_rent(offer_id: int) -> int:
             r'cd\\\ /workspace\\\;'
             r'bash\\\ init.sh\\\;'
             r'bash\\\ check.sh\\\ -t\\\ -i90\\\ -r28\\\ -n5\;'
-            r'touch\ /workspace/.preinit \;'
+            r'touch\ /workspace/.preinit\;'
             r'exec\ \$SHELL'
         )
     )
