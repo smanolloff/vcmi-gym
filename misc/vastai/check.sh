@@ -45,10 +45,10 @@ function check() {
   cd /workspace/vcmi-gym
 
   if ! [ -f data/mppo-dna-heads/$CHECKPOINT-model-dna.pt ]; then
-    download_checkpoint ytoowqgj-1773645017
+    download_checkpoint $CHECKPOINT
   fi
 
-  link_checkpoint -y ytoowqgj-1773645017 ytoowqgj data/mppo-dna-heads/
+  link_checkpoint -y $CHECKPOINT $RUN_ID data/mppo-dna-heads/
 
   # timeout returns:
   #   0   command finished
