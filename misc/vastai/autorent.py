@@ -18,7 +18,7 @@ goldcounter = 0
 DPH = 0.17
 
 DB_PATH = "autorent.db"
-SLEEP_SECONDS = 60
+SLEEP_SECONDS = 30
 
 # 9950X with 15MB/s dload speed inits in ~10 minutes
 INIT_TIMEOUT_MINUTES = 30
