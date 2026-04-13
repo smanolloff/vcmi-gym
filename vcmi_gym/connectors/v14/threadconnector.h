@@ -51,8 +51,8 @@ namespace Connector::V14::Thread {
         std::condition_variable cond1;
         std::condition_variable cond2;
 
-        bool connectedClient0;
-        bool connectedClient1;
+        bool connectedClient0 = false;
+        bool connectedClient1 = false;
 
         std::atomic<bool> _shutdown = false;
 
