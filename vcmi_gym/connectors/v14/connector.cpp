@@ -34,6 +34,7 @@ namespace Connector::V14 {
                 const std::string &, // battlefieldPattern
                 const int &,         // manaMin
                 const int &,         // manaMax
+                const int &,         // randomPrimarySkills
                 const int &,         // swapSides
                 const std::string &, // loglevelGlobal
                 const std::string &, // loglevelAI

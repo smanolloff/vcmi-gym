@@ -16,6 +16,21 @@
 
 from .decoder.other import HexAction
 
+# from vcmi_gym.envs.v14.test_helper import *; from vcmi_gym.envs.v14.vcmi_env import VcmiEnv; env = VcmiEnv(mapname="gym/generated/4096/4x1024.vmap", role="defender", town_chance=100); t = TestHelper(env)
+
+AMOVE_TR = HexAction.AMOVE_TR
+AMOVE_R = HexAction.AMOVE_R
+AMOVE_BR = HexAction.AMOVE_BR
+AMOVE_BL = HexAction.AMOVE_BL
+AMOVE_L = HexAction.AMOVE_L
+AMOVE_TL = HexAction.AMOVE_TL
+AMOVE_2TR = HexAction.AMOVE_2TR
+AMOVE_2R = HexAction.AMOVE_2R
+AMOVE_2BR = HexAction.AMOVE_2BR
+AMOVE_2BL = HexAction.AMOVE_2BL
+AMOVE_2L = HexAction.AMOVE_2L
+AMOVE_2TL = HexAction.AMOVE_2TL
+
 
 class TestHelper:
     def __init__(self, env, auto_render=True):
@@ -78,3 +93,6 @@ class TestHelper:
             self.reset()
         else:
             self._maybe_render(self.env.random_action())
+
+    def dump(self, y, x):
+        return self.battlefield.get_hex(y, x).dump()

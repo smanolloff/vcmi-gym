@@ -16,6 +16,7 @@ train_env_kwargs = dict(
     warmachine_chance=40,
     mana_min=0,
     mana_max=0,
+    random_primary_skills=0,
     reward_step_fixed=-0.5,
 
     # These require BATTLE_ROUND in obs

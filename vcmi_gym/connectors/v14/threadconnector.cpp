@@ -181,6 +181,7 @@ namespace Connector::V14::Thread {
         const std::string battlefieldPattern_,
         const int manaMin_,
         const int manaMax_,
+        const int randomPrimarySkills_,
         const int swapSides_,
         const std::string loglevelGlobal_,
         const std::string loglevelAI_,
@@ -212,6 +213,7 @@ namespace Connector::V14::Thread {
         battlefieldPattern(battlefieldPattern_),
         manaMin(manaMin_),
         manaMax(manaMax_),
+        randomPrimarySkills(randomPrimarySkills_),
         swapSides(swapSides_),
         loglevelGlobal(loglevelGlobal_),
         loglevelAI(loglevelAI_),
@@ -651,6 +653,7 @@ namespace Connector::V14::Thread {
             battlefieldPattern,  // battlefieldPattern
             manaMin,            // manaMin
             manaMax,            // manaMax
+            randomPrimarySkills,            // randomPrimarySkills
             swapSides,          // swapSides
             loglevelGlobal,     // loglevelGlobal
             loglevelAI,         // loglevelAI
