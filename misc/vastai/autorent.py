@@ -389,21 +389,22 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
             continue
 
         label = running_instances[instance_id]["label"]
+        txt = f"{instance_id} {host_id}/{machine_id}"
 
         if label in ["autorent", "init...", "check..."] and is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
             vastai_destroy(instance_id)
-            db_audit_log(conn, f"destroy: instance_id={instance_id} reason=timeout")
+            db_audit_log(conn, f"destroy: {txt} reason=timeout")
             db_instance_update(conn, instance_id, "timeout")
             db_blacklist_add(conn, machine_id, host_id)
             del running_instances[instance_id]
         elif label == "FAILED":
             vastai_destroy(instance_id)
-            db_audit_log(conn, f"destroy: instance_id={instance_id} reason=FAILED")
+            db_audit_log(conn, f"destroy: {txt} reason=FAILED")
             db_instance_update(conn, instance_id, "FAILED")
             db_blacklist_add(conn, machine_id, host_id)
             del running_instances[instance_id]
         elif label == "PASSED":
-            db_audit_log(conn, f"keep: instance_id={instance_id} reason=PASSED")
+            db_audit_log(conn, f"keep: {txt} reason=PASSED")
             db_instance_update(conn, instance_id, "PASSED")
             db_goldlist_add(conn, machine_id, host_id)
             global goldcounter
