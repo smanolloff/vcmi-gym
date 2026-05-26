@@ -633,41 +633,39 @@ namespace Connector::V14::Thread {
 
         // auto oldcwd = std::filesystem::current_path();
 
-        auto initargs = ML::InitArgs(
-            mapname,            // mapname
-            leftModel,          // leftModel
-            rightModel,         // rightModel
-            redAllowMlBot,      // leftAllowMlBot
-            blueAllowMlBot,     // rightAllowMlBot
-            0,                  // maxBattles
-            seed,               // seed
-            randomHeroes,       // randomHeroes
-            randomObstacles,    // randomObstacles
-            townChance,         // townChance
-            warmachineChance,   // warmachineChance
-            randomStackChance,  // randomStackChance
-            tightFormationChance,  // tightFormationChance
-            randomTerrainChance,  // randomTerrainChance
-            leftVipChance,
-            rightVipChance,
-            battlefieldPattern,  // battlefieldPattern
-            manaMin,            // manaMin
-            manaMax,            // manaMax
-            randomPrimarySkills,            // randomPrimarySkills
-            swapSides,          // swapSides
-            loglevelGlobal,     // loglevelGlobal
-            loglevelAI,         // loglevelAI
-            loglevelStats,      // loglevelStats
-            statsMode,          // statsMode
-            statsStorage,       // statsStorage
-            60000,              // statsTimeout
-            statsPersistFreq,   // statsPersistFreq
-            true                // headless (disable the GUI, as it cannot run in a non-main thread)
-        );
+        auto initargs = ML::InitArgs{
+            .leftAllowMlBot=redAllowMlBot,
+            .rightAllowMlBot=blueAllowMlBot,
+            .mapname=mapname,
+            .maxBattles=0,
+            .seed=seed,
+            .randomHeroes=randomHeroes,
+            .randomObstacles=randomObstacles,
+            .townChance=townChance,
+            .warmachineChance=warmachineChance,
+            .randomStackChance=randomStackChance,
+            .tightFormationChance=tightFormationChance,
+            .randomTerrainChance=randomTerrainChance,
+            .leftVipChance=leftVipChance,
+            .rightVipChance=rightVipChance,
+            .battlefieldPattern=battlefieldPattern,
+            .manaMin=manaMin,
+            .manaMax=manaMax,
+            .randomPrimarySkills=randomPrimarySkills,
+            .swapSides=swapSides,
+            .loglevelGlobal=loglevelGlobal,
+            .loglevelAI=loglevelAI,
+            .loglevelStats=loglevelStats,
+            .statsMode=statsMode,
+            .statsStorage=statsStorage,
+            .statsTimeout=60000,
+            .statsPersistFreq=statsPersistFreq,
+            .headless=true,
+        };
 
         // This must happen in the main thread (SDL requires it)
         LOG("call init_vcmi(...)");
-        init_vcmi(initargs);
+        init_vcmi(leftModel, rightModel, initargs);
 
         LOG("set connstate = AWAITING_STATE");
         connstate = ConnectorState::AWAITING_STATE;

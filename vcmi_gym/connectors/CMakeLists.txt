@@ -5,7 +5,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_HOME_DIRECTORY}/cmake_modules)
 
 # https://stackoverflow.com/a/69527824
 set(Python_VIRTUALENV FIRST)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(VCMI_DIR "${CMAKE_SOURCE_DIR}/../../vcmi")
 
 # find_package(pybind11 REQUIRED)
@@ -73,4 +74,24 @@ set_property(TARGET connector_v14 PROPERTY SUFFIX)
 if(DEBUG_BUILD)
     target_compile_definitions(connector_v14 PRIVATE DEBUG_BUILD)
     target_compile_definitions(exporter_v14 PRIVATE DEBUG_BUILD)
+endif()
+
+#
+# V15
+#
+set(CONNECTOR_V15_FILES v15/common.h v15/common.cpp v15/connector.cpp v15/threadconnector.h v15/threadconnector.cpp)
+set(EXPORTER_V15_FILES v15/exporter.h v15/exporter.cpp v15/names.h v15/names.cpp)
+pybind11_add_module(connector_v15 ${CONNECTOR_V15_FILES})
+pybind11_add_module(exporter_v15 ${EXPORTER_V15_FILES})
+target_include_directories(connector_v15 PUBLIC "${VCMI_DIR}")
+target_include_directories(connector_v15 PUBLIC "${VCMI_DIR}/AI/MMAI")
+target_include_directories(exporter_v15 PUBLIC "${VCMI_DIR}")
+target_include_directories(exporter_v15 PUBLIC "${VCMI_DIR}/AI/MMAI")
+target_link_libraries(connector_v15 PRIVATE "${Boost_LIBRARIES}")
+target_link_libraries(connector_v15 PUBLIC ${LIBMLCLIENT})
+set_property(TARGET exporter_v15 PROPERTY SUFFIX)
+set_property(TARGET connector_v15 PROPERTY SUFFIX)
+if(DEBUG_BUILD)
+    target_compile_definitions(connector_v15 PRIVATE DEBUG_BUILD)
+    target_compile_definitions(exporter_v15 PRIVATE DEBUG_BUILD)
 endif()

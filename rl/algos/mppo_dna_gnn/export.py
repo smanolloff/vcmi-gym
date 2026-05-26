@@ -180,6 +180,7 @@ def test_block():
         link_types=link_types,
     ).eval()
 
+    import ipdb; ipdb.set_trace()  # noqa
     mydict = {transform_key(k, node_type, link_types): v for k, v in block.state_dict().items()}
     myblock.load_state_dict(mydict, strict=True)
 

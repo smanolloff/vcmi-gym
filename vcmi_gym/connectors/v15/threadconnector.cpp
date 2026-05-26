@@ -17,26 +17,26 @@
 #include "threadconnector.h"
 #include "common.h"
 #include "schema/base.h"
-#include "schema/v13/constants.h"
-#include "schema/v13/types.h"
+#include "schema/v15/constants.h"
+#include "schema/v15/graph.h"
+#include "schema/v15/types.h"
 #include "ML/MLClient.h"
 #include "ML/model_wrappers/function.h"
 #include "ML/model_wrappers/scripted.h"
 #include "ML/model_wrappers/path.h"
 #include "exporter.h"
-#include <algorithm>
 
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
 #include <mutex>
+#include <pybind11/cast.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/stl.h>
 
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <unistd.h>
 
@@ -71,9 +71,10 @@
     } \
 }
 
-namespace Connector::V13::Thread {
+namespace Connector::V15::Thread {
+    namespace S15 = MMAI::Schema::V15;
 
-    const std::vector<std::string> Connector::getLogs() {
+    std::vector<std::string> Connector::getLogs() {
         return std::vector<std::string>(logs.begin(), logs.end());
     }
 
@@ -92,7 +93,7 @@ namespace Connector::V13::Thread {
 
         std::string entry = boost::str(boost::format("++ %s <%ld/%s>[GIL=%d] <%s> %s")
             % boost::posix_time::to_iso_extended_string(t)
-            % static_cast<long>(getpid())
+            % static_cast<int64_t>(getpid())
             // % std::this_thread::get_id()
             % to_base36(native_thread_id())
             % PyGILState_Check()
@@ -163,38 +164,38 @@ namespace Connector::V13::Thread {
     // EOF TEST SIGNAL HANDLING
 
     Connector::Connector(
-        const int maxlogs_,
-        const int bootTimeout_,
-        const int vcmiTimeout_,
-        const int userTimeout_,
-        const std::string mapname_,
-        const int seed_,
-        const int randomHeroes_,
-        const int randomObstacles_,
-        const int townChance_,
-        const int warmachineChance_,
-        const int randomStackChance_,
-        const int tightFormationChance_,
-        const int randomTerrainChance_,
-        const int leftVipChance_,
-        const int rightVipChance_,
-        const std::string battlefieldPattern_,
-        const int manaMin_,
-        const int manaMax_,
-        const int randomPrimarySkills_,
-        const int swapSides_,
-        const std::string loglevelGlobal_,
-        const std::string loglevelAI_,
-        const std::string loglevelStats_,
-        const std::string red_,
-        const std::string blue_,
-        const std::string redModel_,
-        const std::string blueModel_,
-        const bool redAllowMlBot_,
-        const bool blueAllowMlBot_,
-        const std::string statsMode_,
-        const std::string statsStorage_,
-        const int statsPersistFreq_
+        int maxlogs_,
+        int bootTimeout_,
+        int vcmiTimeout_,
+        int userTimeout_,
+        const std::string & mapname_,
+        int seed_,
+        int randomHeroes_,
+        int randomObstacles_,
+        int townChance_,
+        int warmachineChance_,
+        int randomStackChance_,
+        int tightFormationChance_,
+        int randomTerrainChance_,
+        int leftVipChance_,
+        int rightVipChance_,
+        const std::string & battlefieldPattern_,
+        int manaMin_,
+        int manaMax_,
+        int randomPrimarySkills_,
+        int swapSides_,
+        const std::string & loglevelGlobal_,
+        const std::string & loglevelAI_,
+        const std::string & loglevelStats_,
+        const std::string & red_,
+        const std::string & blue_,
+        const std::string & redModel_,
+        const std::string & blueModel_,
+        bool redAllowMlBot_,
+        bool blueAllowMlBot_,
+        const std::string & statsMode_,
+        const std::string & statsStorage_,
+        int statsPersistFreq_
     ) : maxlogs(maxlogs_),
         bootTimeout(bootTimeout_),
         vcmiTimeout(vcmiTimeout_),
@@ -229,154 +230,111 @@ namespace Connector::V13::Thread {
         statsPersistFreq(statsPersistFreq_)
         {};
 
-    const MMAI::Schema::V13::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
+    const MMAI::Schema::V15::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
         LOG("Extracting supplementary data...");
         auto any = s->getSupplementaryData();
         if(!any.has_value()) throw std::runtime_error("extractSupplementaryData: supdata is empty");
-        auto &t = typeid(const MMAI::Schema::V13::ISupplementaryData*);
-        auto err = MMAI::Schema::AnyCastError(any, typeid(const MMAI::Schema::V13::ISupplementaryData*));
+        const auto & t = typeid(const MMAI::Schema::V15::ISupplementaryData*);
+        auto err = MMAI::Schema::AnyCastError(any, typeid(const MMAI::Schema::V15::ISupplementaryData*));
 
         if(!err.empty()) {
             LOGFMT("anycast for getSumpplementaryData error: %s", err);
         }
 
-        return std::any_cast<const MMAI::Schema::V13::ISupplementaryData*>(s->getSupplementaryData());
+        return std::any_cast<const MMAI::Schema::V15::ISupplementaryData*>(s->getSupplementaryData());
     };
 
-    const P_State Connector::convertState(const MMAI::Schema::IState* s) {
+    P_State Connector::convertState(const MMAI::Schema::IState * s) {
         LOG("Convert IState -> P_State");
-        auto sup = extractSupplementaryData(s);
-        assert(sup->getType() == MMAI::Schema::V13::ISupplementaryData::Type::REGULAR);
+        const auto * sup = extractSupplementaryData(s);
+        assert(sup->getType() == MMAI::Schema::V15::ISupplementaryData::Type::REGULAR);
 
-        // XXX: these do not improve performance, better avoid the const_cast
-        // auto pbs = P_BattlefieldState(bs.size(), const_cast<float*>(bs.data()));
-        // auto patm = P_AttentionMask(attnmask.size(), const_cast<float*>(attnmask.data()));
+        const auto * G = sup->getGraph();
 
-        // XXX: manually copying the state into py::array_t<float> is
-        //      ~10% faster than storing the BattlefieldState& reference in
-        //      P_State as pybind's STL automatically converts it to a python
-        //      list of python floats, which needs to be converted to a numpy
-        //      array of float32 floats in pyconnector.set_v_result_act()
-        //      (which copies the data anyway and is ultimately slower).
+        auto nodeTypeMap = std::unordered_map<S15::Graph::ElementType, std::string>{};
 
-        auto transitions = sup->getStateTransitions();
-        auto curstate = s->getBattlefieldState();
-        auto curmask = s->getActionMask();
-        ssize_t d0 = transitions.size() + 1;  // will also add the current state
+        auto p_nodesdict = py::dict();
+        for (const auto & [type, name, size] : MMAI::Schema::V15::NODE_TYPES)
+        {
+            const auto & nodes = G->getNodes(type);
+            const auto N = static_cast<py::ssize_t>(nodes.size());
+            const auto D = static_cast<py::ssize_t>(size);
 
-        constexpr ssize_t dstate = MMAI::Schema::V13::BATTLEFIELD_STATE_SIZE;
-        constexpr ssize_t dmask = MMAI::Schema::V13::N_ACTIONS;
-        auto intstates = P_IntermediateStates({d0, dstate});  // np.ndarray((d0, dstate), dtype=np.float32)
-        auto intmasks = P_IntermediateActionMasks({d0, dmask});  // np.ndarray((d0, dmask), dtype=np.bool)
-        auto intactions = P_IntermediateActions(d0);
+            auto p_attrs = py::array_t<float, py::array::c_style>({N, D});
+            auto info = p_attrs.request();
+            auto * ptr = static_cast<float*>(info.ptr);
+            auto out = std::span<float>(ptr, N * D);
 
-        for (int i = 0; i < static_cast<int>(transitions.size()); ++i) {
-            auto [a, m, s] = transitions.at(i);
-            LOG("TREHADCONNECTOR[%d]: m.size=" + std::to_string(m->size()) + ", s.size()=" + std::to_string(s->size()));
-        }
+            std::ranges::fill(out, 0.0f);
 
-        LOG("Dims: b=" + std::to_string(d0) +", dstate=" + std::to_string(dstate) + ", dmask=" + std::to_string(dmask));
-        int i = 0;
-        int j = 0;
-        try {
-            for (i = 0; i < d0; ++i) {
-                auto [act, mask, state] = (i < d0 - 1)
-                    ? transitions.at(i)
-                    : std::tuple{-1, curmask, curstate};
-
-                intactions.mutable_at(i) = act;
-
-                static_assert(dmask < dstate);
-
-                LOG("Mutating masks AND states shared...");
-                LOG("(mask.size()=" + std::to_string(mask->size()) + ", state.size()=" + std::to_string(state->size()));
-                for (j = 0; j < dmask; ++j) {
-                    intmasks.mutable_at(i, j) = mask->at(j);
-                    intstates.mutable_at(i, j) = state->at(j);
-                }
-
-                LOG("Mutating states only...");
-                for (j = dmask; j < dstate; ++j) {
-                    intstates.mutable_at(i, j) = state->at(j);
-                }
-            }
-        } catch (const std::exception& e) {
-            std::cout << "FATAL ERROR: " << e.what() << "\n";
-            std::cout << "i=" << i << ", j=" << j << "\n";
-            throw;
-        }
-
-        //
-        // LINKS
-        //
-
-        auto pylinks = P_LinksDict();
-
-        for (const auto &[type, links] : sup->getAllLinks()) {
-            py::str pytype;
-
-            switch(type) {
-            break; case MMAI::Schema::V13::LinkType::ADJACENT:
-                pytype = "ADJACENT";
-            break; case MMAI::Schema::V13::LinkType::REACH:
-                pytype = "REACH";
-            break; case MMAI::Schema::V13::LinkType::RANGED_MOD:
-                pytype = "RANGED_MOD";
-            break; case MMAI::Schema::V13::LinkType::ACTS_BEFORE:
-                pytype = "ACTS_BEFORE";
-            break; case MMAI::Schema::V13::LinkType::MELEE_DMG_REL:
-                pytype = "MELEE_DMG_REL";
-            break; case MMAI::Schema::V13::LinkType::RETAL_DMG_REL:
-                pytype = "RETAL_DMG_REL";
-            break; case MMAI::Schema::V13::LinkType::RANGED_DMG_REL:
-                pytype = "RANGED_DMG_REL";
-            break; default:
-                throw std::runtime_error("Unexpected links type: " + std::to_string(EI(type)));
+            for (std::size_t j = 0; j < N; ++j)
+            {
+                auto row = out.subspan(j * D, D);
+                int written = nodes[j]->encode(row);
+                assert(written == D);
             }
 
-            const auto srcinds = links->getSrcIndex();
-            const auto dstinds = links->getDstIndex();
-            const auto attrs = links->getAttributes();
+            p_nodesdict[py::str(name)] = p_attrs;
+            nodeTypeMap.emplace(type, name);
+        }
 
-            // ----------------------------------
-            // view (no copy) -- no speed improvement
-            // auto pyinds = py::array_t<const int64_t>({d0, d1}, inds.data());
-            // auto pyattrs = py::array_t<const float>(d0, attrs.data());
-            // ----------------------------------
-            // copy (safer)
-            if (srcinds.size() != dstinds.size() || srcinds.size() != attrs.size())
-                throw std::runtime_error("inds/attrs size mismatch: " + std::to_string(srcinds.size()) + " / " + std::to_string(dstinds.size()) + " / " + std::to_string(attrs.size()));
+        auto p_edgesdict = py::dict();
+        for (const auto & [type, name, endpoints, size] : MMAI::Schema::V15::EDGE_TYPES)
+        {
+            auto p_edict = py::dict();
 
-            ssize_t n = attrs.size();
+            const auto & edges = G->getEdges(type);
+            const auto E = static_cast<py::ssize_t>(edges.size());
+            const auto D = static_cast<py::ssize_t>(size);
 
-            auto pyinds = py::array_t<int64_t>({ssize_t(2), n});
-            std::memcpy(pyinds.mutable_data(), srcinds.data(), n*sizeof(int64_t));
-            std::memcpy(pyinds.mutable_data() + n, dstinds.data(), n*sizeof(int64_t));
+            auto p_attrs = py::array_t<float, py::array::c_style>({E, D});
+            auto p_index = py::array_t<int64_t, py::array::c_style>({static_cast<py::ssize_t>(2), E});
+            auto mp_index = p_index.mutable_unchecked<2>();
 
-            auto pyattrs = py::array_t<float>({n, ssize_t(1)});
-            std::memcpy(pyattrs.mutable_data(), attrs.data(), n*sizeof(float));
-            // ----------------------------------
+            auto info = p_attrs.request();
+            auto * ptr = static_cast<float*>(info.ptr);
+            auto out = std::span<float>(ptr, E * D);
+            std::ranges::fill(out, 0.0f);
 
-            // pylinks[pytype] = py::make_tuple(pyinds, pyattrs);
-            auto pytypelinks = py::dict();
-            pytypelinks[py::str("index")] = pyinds;
-            pytypelinks[py::str("attrs")] = pyattrs;
-            pylinks[pytype] = pytypelinks;
+            for (std::size_t j = 0; j < E; ++j)
+            {
+                auto row = out.subspan(j * D, D);
+                const auto * edge = edges[j];
+                int written = edge->encode(row);
+                if (written != D)
+                    throw std::runtime_error("written: " + std::to_string(written) + ": expected: " + std::to_string(D) + " ET=" + std::to_string(EI(edge->getType())));
+                assert(written == D);
+
+                const auto & [srcNode, dstNode] = edge->endpoints();
+                int64_t isrc = G->getNodeIndex(srcNode);
+                int64_t idst = G->getNodeIndex(dstNode);
+                mp_index(0, static_cast<py::ssize_t>(j)) = isrc;
+                mp_index(1, static_cast<py::ssize_t>(j)) = idst;
+            }
+
+            p_edict[py::str("index")] = p_index;
+            p_edict[py::str("attrs")] = p_attrs;
+
+            const auto & [src_type, dst_type] = endpoints;
+            const auto & src_name = nodeTypeMap.at(src_type);
+            const auto & dst_name = nodeTypeMap.at(dst_type);
+            const auto key = py::make_tuple(
+                py::str(src_name),
+                py::str(name),
+                py::str(dst_name)
+            );
+            p_edgesdict[key] = p_edict;
         }
 
         LOG("Creating P_State...");
 
-        auto res = P_State(
-             sup->getType(),
-             intstates,
-             intmasks,
-             intactions,
-             pylinks,
-             sup->getErrorCode(),
-             sup->getAnsiRender()
+        return P_State(
+            sup->getType(),
+            p_nodesdict,
+            p_edgesdict,
+            G->getActiveActionIds(),
+            sup->getAnsiRender()
         );
-
-        return res;
     }
 
     ReturnCode Connector::getState(const char* funcname, int side, MMAI::Schema::Action action_) {
@@ -422,27 +380,27 @@ namespace Connector::V13::Thread {
         return res;
     }
 
-    const std::tuple<int, std::string> Connector::render(int side) {
+    std::tuple<int, const std::string> Connector::render(int side) {
         SHUTDOWN_PYTHON_RETURN("");
         auto code = getState(__func__, side, MMAI::Schema::ACTION_RENDER_ANSI);
-        auto sup = extractSupplementaryData(state);
-        assert(sup->getType() == MMAI::Schema::V13::ISupplementaryData::Type::ANSI_RENDER);
+        const auto * sup = extractSupplementaryData(state);
+        assert(sup->getType() == MMAI::Schema::V15::ISupplementaryData::Type::ANSI_RENDER);
         LOG("return state->ansiRender");
         return {static_cast<int>(code), sup->getAnsiRender()};
     }
 
-    const std::tuple<int, P_State> Connector::reset(int side) {
+    std::tuple<int, const P_State> Connector::reset(int side) {
         SHUTDOWN_PYTHON_RETURN(convertState(state)); // reuse last state if shutting down
         auto code = getState(__func__, side, MMAI::Schema::ACTION_RESET);
-        auto pstate = convertState(state);
+        const auto pstate = convertState(state);
         LOG("return P_State");
         return {static_cast<int>(code), pstate};
     }
 
-    const std::tuple<int, P_State> Connector::step(int side, MMAI::Schema::Action a) {
+    std::tuple<int, const P_State> Connector::step(int side, MMAI::Schema::Action a) {
         SHUTDOWN_PYTHON_RETURN(convertState(state)); // reuse last state if shutting down
         auto code = getState(__func__, side, a);
-        auto pstate = convertState(state);
+        const auto pstate = convertState(state);
         LOG("return P_State");
         return {static_cast<int>(code), pstate};
     }
@@ -514,7 +472,7 @@ namespace Connector::V13::Thread {
     }
 
     // initial connect is a special case and cannot reuse getState()
-    const std::tuple<int, P_State> Connector::connect(int side) {
+    std::tuple<int, const P_State> Connector::connect(int side) {
         LOG("connect called with side=" + std::to_string(side));
 
         LOG("obtain lock2");
@@ -568,7 +526,7 @@ namespace Connector::V13::Thread {
     void Connector::start() {
         ASSERT_STATE("start", ConnectorState::NEW);
 
-        setvbuf(stdout, NULL, _IONBF, 0);
+        setvbuf(stdout, nullptr, _IONBF, 0);
         LOG("start");
 
         // struct sigaction sa;
@@ -639,6 +597,8 @@ namespace Connector::V13::Thread {
         auto f_getRandomAction = [](const MMAI::Schema::IState* s) {
             return RandomValidAction(s);
         };
+
+        using Side = MMAI::Schema::Side;
 
         if (red == "MMAI_RANDOM") {
             leftModel = new ML::ModelWrappers::Function(version(), "MMAI_RANDOM", Side::LEFT, f_getRandomAction, f_getValueDummy);

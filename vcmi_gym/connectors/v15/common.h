@@ -18,7 +18,7 @@
 
 // Linux builds fail without this include (used in types.h)
 #include "schema/base.h"
-#include "schema/v14/types.h"
+#include "schema/v15/types.h"
 
 #include <pybind11/numpy.h>
 
@@ -44,11 +44,11 @@ static std::string to_base36(uint64_t v) {
     if (v == 0) return "0";
     std::string s;
     while (v) {
-        unsigned d = static_cast<unsigned>(v % 36);
-        s.push_back(d < 10 ? char('0' + d) : char('a' + (d - 10)));
+        auto d = static_cast<unsigned>(v % 36);
+        s.push_back(d < 10 ? static_cast<char>('0' + d) : static_cast<char>('a' + (d - 10)));
         v /= 36;
     }
-    std::reverse(s.begin(), s.end());
+    std::ranges::reverse(s);
     return s;
 }
 
@@ -91,50 +91,53 @@ static std::string to_base36(uint64_t v) {
 #endif
 
 
-namespace Connector::V14 {
+namespace Connector::V15 {
     namespace py = pybind11;
-
-    using P_BattlefieldState = py::array_t<float>;
-    using P_ActionMask = py::array_t<bool>;
-
-    using P_LinksDict = py::dict;
-    // {
-    //      "ADJACENT": (
-    //          "index": [[src0, src1, ...], [dst0, dst1, ...]],    // shape (2, num_links)
-    //          "attrs": [[attr0], [attr1], ...],                   // shape (1, num_links,)
-    //      ),
-    //      "REACH": ...
-    // }
 
     MMAI::Schema::Action RandomValidAction(const MMAI::Schema::IState * s);
 
     class P_State {
     public:
         P_State(
-            MMAI::Schema::V14::ISupplementaryData::Type type_,
-            P_BattlefieldState state_,
-            P_ActionMask mask_,
-            P_LinksDict linksDict_,
-            const MMAI::Schema::V14::ErrorCode errcode_,
-            const std::string ansiRender_
-        ) : type(type_)
-          , state(state_)
-          , mask(mask_)
-          , linksDict(linksDict_)
-          , errcode(static_cast<int>(errcode_))
-          , ansiRender(ansiRender_) {}
+            MMAI::Schema::V15::ISupplementaryData::Type type,
 
-        const MMAI::Schema::V14::ISupplementaryData::Type type;
-        const P_BattlefieldState state;
-        const P_ActionMask mask;
-        const P_LinksDict linksDict;
-        const int errcode;
+            // {
+            //      "HEX":  [[...], [...], ...],                             // shape (D, num_nodes)
+            //      "UNIT": [[...], [...], ...],                             // shape (D, num_nodes)
+            //      ...
+            // }
+            py::dict & nodes,
+
+
+            // edges:
+            //      keys = tuple(src_name, edge_name, dst_name)
+            //      values = see example below
+            //
+            // {
+            //      ("Hex", "Adjacent", "Hex"): {
+            //          "index": [[src0, src1, ...], [dst0, dst1, ...]],    // shape (2, num_edges)
+            //          "attrs": [[...], [...], ...],                       // shape (D, num_edges)
+            //      },
+            //      ...
+            // }
+            py::dict & edges,
+
+            const std::vector<int64_t> & activeActionIds,
+            const std::string & ansiRender
+        ) : type(type)
+          , nodes(nodes)
+          , edges(edges)
+          , activeActionIds(activeActionIds)
+          , ansiRender(ansiRender) {}
+
+        const MMAI::Schema::V15::ISupplementaryData::Type type;
+        const py::dict nodes;
+        const py::dict edges;
         const std::string ansiRender;
+        const std::vector<int64_t> activeActionIds;
 
-        const P_BattlefieldState get_state() const { return state; }
-        const P_ActionMask get_action_mask() const { return mask; }
-        const P_LinksDict get_links_dict() const { return linksDict; }
-
-        const int get_errcode() const { return errcode; }
+        py::dict get_nodes() const { return nodes; }
+        py::dict get_edges() const { return edges; }
+        std::vector<int64_t> get_active_action_ids() const { return activeActionIds; }
     };
 }

@@ -1,0 +1,43 @@
+{
+    "version": 10,
+    "$comment": [
+        "To use this preset, include it via CmakeUserPresets.json",
+        "// CmakeUserPresets.json (replace single with double quotes):",
+        "{",
+        "    'version': 4,",
+        "    'vendor': {",
+        "        'conan': {}",
+        "    },",
+        "    'include': [",
+        "        'CMakeUserPresets-vcmigym.json',",
+        "}"
+    ],
+    "configurePresets": [
+        {
+            "name": "vcmigym-common",
+            "hidden": true,
+            "generator": "Unix Makefiles",
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "conan-generated/conan_toolchain.cmake"
+            }
+        },
+        {
+            "name": "vcmigym-build",
+            "inherits": "vcmigym-common",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "vcmigym-rel",
+            "inherits": "vcmigym-common",
+            "binaryDir": "${sourceDir}/rel",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "OFF"
+            }
+        }
+    ]
+}
