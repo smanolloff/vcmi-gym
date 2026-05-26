@@ -13,8 +13,8 @@ torch<2.9
 torch_geometric
 wandb
 #vastai
-vastai_sdk
-gymnasium
+vastai_sdk>=0.5.1
+gymnasium>=1.3.0
 pygit2
 boto3
 ipdb
