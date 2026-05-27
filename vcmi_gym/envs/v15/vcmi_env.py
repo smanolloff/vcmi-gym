@@ -25,10 +25,9 @@ from .decode import make_node_namedtuple_class, dump
 
 from .pyconnector import (
     PyConnector,
-    # STATE_VALUE_NA,
-    # N_ACTIONS,
     MAX_ROUNDS,
     NODE_TYPES,
+    EDGE_TYPES,
     COMBAT_RESULTS,
     ACTION_TYPES
 )
@@ -115,14 +114,14 @@ class RewardValues(NamedTuple):
     relval_mult: float = 0.0
 
 
-# class EdgeIndexSpace(gym.spaces.Space):
-#     def __init__(self, num_nodes):
-#         super().__init__(shape=None, dtype=np.int64)
-#         assert num_nodes > 0
-#         self.max_index = num_nodes - 1
+class EdgeIndexSpace(gym.spaces.Space):
+    def __init__(self, num_nodes):
+        super().__init__(shape=None, dtype=np.int64)
+        assert num_nodes > 0
+        self.max_index = num_nodes - 1
 
-#     def sample(self, num_edges=10):
-#         return np.random.uniform(low=0, high=self.max_index, size=(2, num_edges)).astype(np.int64)
+    def sample(self, num_edges=10):
+        return np.random.uniform(low=0, high=self.max_index, size=(2, num_edges)).astype(np.int64)
 
 
 # class EdgeAttrsSpace(gym.spaces.Space):
@@ -134,6 +133,16 @@ class RewardValues(NamedTuple):
 #         return np.stack([self.attrs_space.sample() for _ in range(num_edges)])
 
 
+
+class AttrsSpace(gym.spaces.Space):
+    def __init__(self, attrs_space):
+        super().__init__(shape=None, dtype=attrs_space.dtype)
+        self.attrs_space = attrs_space
+
+    def sample(self, num_edges=10):
+        return np.stack([self.attrs_space.sample() for _ in range(num_edges)])
+
+
 class VcmiEnv(gym.Env):
     metadata = {"render_modes": ["ansi", "rgb_array"], "render_fps": 30}
 
@@ -141,26 +150,29 @@ class VcmiEnv(gym.Env):
     ROLES = ["attacker", "defender"]
     OPPONENTS = ["StupidAI", "BattleAI", "MMAI_BATTLEAI", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
 
-    # ACTION_SPACE = gym.spaces.Discrete(N_ACTIONS)
-    # REWARD_SPACE = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32)
-
-    # obs_space = gym.spaces.Box(low=STATE_VALUE_NA, high=1, shape=(STATE_SIZE,), dtype=np.float32)
-    # actmask_space = gym.spaces.Box(low=0, high=1, shape=(N_ACTIONS,), dtype=bool)
-    # links_space = gym.spaces.Dict({
-    #     name: gym.spaces.Dict({
-    #         "index": EdgeIndexSpace(num_nodes=165),
-    #         "attrs": EdgeAttrsSpace(attrs_space=gym.spaces.Box(low=0, high=1, shape=(size,), dtype=np.float32))
-    #     })
-    #     for name, size in LINK_ATTR_SIZES.items()
-    # })
-
-    # OBSERVATION_SPACE = gym.spaces.Dict({
-    #     "observation": obs_space,
-    #     "action_mask": actmask_space,
-    #     "links": links_space
-    # })
+    # Number of actions in v15 varies per observation...
+    ACTION_SPACE = gym.spaces.Discrete(9999)
+    OBSERVATION_SPACE = gym.spaces.Dict({
+        "nodes": gym.spaces.Dict({
+            name: AttrsSpace(attrs_space=gym.spaces.Box(low=-1, high=1, shape=(typeinfo["size"],), dtype=np.float32))
+            for name, typeinfo in NODE_TYPES.items()
+        }),
+        "edges": gym.spaces.Dict({
+            name: gym.spaces.Dict({
+                "index": EdgeIndexSpace(num_nodes=5),
+                "attrs": AttrsSpace(attrs_space=gym.spaces.Box(low=-1, high=1, shape=(typeinfo["size"],), dtype=np.float32))
+            })
+            for name, typeinfo in EDGE_TYPES.items()
+        })
+    })
 
     ENV_VERSION = 15
+
+    Global = Global
+    Player = Player
+    Unit = Unit
+    Hex = Hex
+    Action = Action
 
     def __init__(
         self,
@@ -247,8 +259,8 @@ class VcmiEnv(gym.Env):
         assert role in self.__class__.ROLES
         assert opponent in self.__class__.OPPONENTS, f"{opponent} in {self.__class__.OPPONENTS}"
 
-        # self.action_space = self.__class__.ACTION_SPACE
-        # self.observation_space = self.__class__.OBSERVATION_SPACE
+        self.action_space = self.__class__.ACTION_SPACE
+        self.observation_space = self.__class__.OBSERVATION_SPACE
 
         # <params>
         self.render_mode = render_mode

@@ -29,10 +29,40 @@ else:
     from ...connectors.rel import exporter_v15 as exporter
 
 MAX_ROUNDS = exporter.get_max_rounds()
-NODE_TYPES = exporter.get_node_types()
-EDGE_TYPES = exporter.get_edge_types()
 COMBAT_RESULTS = exporter.get_combat_results()
 ACTION_TYPES = exporter.get_action_types()
+
+# NODE_TYPES:
+# {
+#   "Global": {
+#       "size": 10
+#       "attributes": [
+#           {'name': 'BATTLE_WINNER', 'encoding': 'CATEGORICAL', 'size': 4, 'vmax': 3},
+#           {'name': 'BATTLE_ROUND', 'encoding': 'LINNORM', 'size': 1, 'vmax': 31},
+#           ...
+#       ]
+#   },
+#   "Player": {...},
+#   "Hex": {...}
+#   ...
+# }
+NODE_TYPES = exporter.get_node_types()
+
+# EDGE_TYPES:
+# {
+#   ("Global", "To", "Player"): {
+#       "size": 0
+#       "attributes": []
+#   },
+#   ("Hex", "Adjacent", "Hex"): {
+#       "size": 6,
+#       "attributes": [
+#           {"name": "DIRECTION", "encoding": "CATEGORICAL", "size": 6, "vmax": 5}
+#       ]
+#   }
+#   ...
+# }
+EDGE_TYPES = exporter.get_edge_types()
 
 # HEX_STATE_MAP = types.MappingProxyType(OrderedDict([(state, i) for i, state in enumerate(EXPORTER.get_hex_states())]))
 

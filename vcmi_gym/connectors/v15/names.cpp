@@ -49,7 +49,7 @@ namespace Connector::V15::Names {
         case NA::Global::HAS_GATE_CORPSE: return "HAS_GATE_CORPSE";
         case NA::Global::HAS_BRIDGE_CORPSE: return "HAS_BRIDGE_CORPSE";
         default:
-            throw std::runtime_error("Names: unexpected Global: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Global attribute: " + std::to_string(EI(a)));
         }
     }
 
@@ -65,7 +65,7 @@ namespace Connector::V15::Names {
         case NA::Player::DMG_DEALT_NOW_REL: return "DMG_DEALT_NOW_REL";
         case NA::Player::DMG_RECEIVED_NOW_REL: return "DMG_RECEIVED_NOW_REL";
         default:
-            throw std::runtime_error("Names: unexpected Player: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Player attribute: " + std::to_string(EI(a)));
         }
     }
 
@@ -107,7 +107,7 @@ namespace Connector::V15::Names {
         case NA::Unit::HAS_WEAKNESS: return "HAS_WEAKNESS";
         case NA::Unit::HAS_WEAKNESS_ATTACK: return "HAS_WEAKNESS_ATTACK";
         default:
-            throw std::runtime_error("Names: unexpected Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit attribute: " + std::to_string(EI(a)));
         }
     }
 
@@ -124,44 +124,80 @@ namespace Connector::V15::Names {
         case NA::Hex::IS_OBSTACLE: return "IS_OBSTACLE";
         case NA::Hex::WALL_HEALTH: return "WALL_HEALTH";
         default:
-            throw std::runtime_error("Names: unexpected Hex: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Hex attribute: " + std::to_string(EI(a)));
         }
     }
 
     std::string Attr(NA::Action a) {
         switch(a) {
         case NA::Action::ACTION_TYPE: return "ACTION_TYPE";
+        case NA::Action::IS_ACTIVE: return "IS_ACTIVE";
         default:
-            throw std::runtime_error("Names: unexpected Action: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Action attribute: " + std::to_string(EI(a)));
         }
     }
 
 
-    std::string Attr(EA::Global_Has_Player a) {
+    std::string Attr(EA::Global_To_Player a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Global_Has_Player: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Global_To_Player attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Global_Has_Unit a) {
+    std::string Attr(EA::Player_To_Global a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Global_Has_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Player_To_Global attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Global_Has_Hex a) {
+    std::string Attr(EA::Global_To_Unit a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Global_Has_Hex: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Global_To_Unit attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Unit_To_Global a) {
+        switch(a) {
+        default:
+            throw std::runtime_error("Names: unexpected Unit_To_Global attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Global_To_Hex a) {
+        switch(a) {
+        default:
+            throw std::runtime_error("Names: unexpected Global_To_Hex attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Hex_To_Global a) {
+        switch(a) {
+        default:
+            throw std::runtime_error("Names: unexpected Hex_To_Global attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Global_To_Action a) {
+        switch(a) {
+        default:
+            throw std::runtime_error("Names: unexpected Global_To_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
     std::string Attr(EA::Player_Owns_Unit a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Player_Owns_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Player_Owns_Unit attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Unit_OwnedBy_Player a) {
+        switch(a) {
+        default:
+            throw std::runtime_error("Names: unexpected Unit_OwnedBy_Player attribute: " + std::to_string(EI(a)));
         }
     }
 
@@ -169,7 +205,7 @@ namespace Connector::V15::Names {
         switch(a) {
         case EA::Hex_Adjacent_Hex::DIRECTION: return "DIRECTION";
         default:
-            throw std::runtime_error("Names: unexpected Hex_Adjacent_Hex: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Hex_Adjacent_Hex attribute: " + std::to_string(EI(a)));
         }
     }
 
@@ -177,7 +213,7 @@ namespace Connector::V15::Names {
         switch(a) {
         case EA::Unit_ActsBefore_Unit::TIMES: return "TIMES";
         default:
-            throw std::runtime_error("Names: unexpected Unit_ActsBefore_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_ActsBefore_Unit attribute: " + std::to_string(EI(a)));
         }
     }
 
@@ -189,7 +225,7 @@ namespace Connector::V15::Names {
         case EA::Unit_MeleeDmg_Unit::ESTIMATED_DEFENDER_HPDIFF_REL_BF: return "ESTIMATED_DEFENDER_HPDIFF_REL_BF";
         case EA::Unit_MeleeDmg_Unit::ESTIMATED_NET_VALUE_REL_BF: return "ESTIMATED_NET_VALUE_REL_BF";
         default:
-            throw std::runtime_error("Names: unexpected Unit_MeleeDmg_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_MeleeDmg_Unit attribute: " + std::to_string(EI(a)));
         }
     }
 
@@ -201,28 +237,42 @@ namespace Connector::V15::Names {
         case EA::Unit_ShootDmg_Unit::ESTIMATED_DEFENDER_HPDIFF_REL_BF: return "ESTIMATED_DEFENDER_HPDIFF_REL_BF";
         case EA::Unit_ShootDmg_Unit::ESTIMATED_NET_VALUE_REL_BF: return "ESTIMATED_NET_VALUE_REL_BF";
         default:
-            throw std::runtime_error("Names: unexpected Unit_ShootDmg_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_ShootDmg_Unit attribute: " + std::to_string(EI(a)));
         }
     }
 
     std::string Attr(EA::Unit_Blocks_Unit a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Unit_Blocks_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_Blocks_Unit attribute: " + std::to_string(EI(a)));
         }
     }
 
     std::string Attr(EA::Unit_Occupies_Hex a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Unit_Occupies_Hex: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_Occupies_Hex attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Hex_OccupiedBy_Unit a) {
+        switch(a) {
+        default:
+            throw std::runtime_error("Names: unexpected Hex_OccupiedBy_Unit attribute: " + std::to_string(EI(a)));
         }
     }
 
     std::string Attr(EA::Action_By_Unit a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Action_By_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Action_By_Unit attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Unit_Has_Action a) {
+        switch(a) {
+        default:
+            throw std::runtime_error("Names: unexpected Unit_Has_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
@@ -230,76 +280,83 @@ namespace Connector::V15::Names {
         switch(a) {
         case EA::Action_EndsAt_Hex::IS_REAR: return "IS_REAR";
         default:
-            throw std::runtime_error("Names: unexpected Action_EndsAt_Hex: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Action_EndsAt_Hex attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Hex_IsEndOf_Action a) {
+        switch(a) {
+        case EA::Hex_IsEndOf_Action::IS_REAR: return "IS_REAR";
+        default:
+            throw std::runtime_error("Names: unexpected Hex_IsEndOf_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
     std::string Attr(EA::Action_Blocks_Unit a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Action_Blocks_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Action_Blocks_Unit attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Action_ExposesToMeleeFrom_Unit a) {
+    std::string Attr(EA::Unit_BecomesMeleeThreatAfter_Action a) {
         switch(a) {
         default:
-            throw std::runtime_error("Names: unexpected Action_ExposesToMeleeFrom_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_BecomesMeleeThreatAfter_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Action_ExposesToShootFrom_Unit a) {
+    std::string Attr(EA::Unit_BecomesShootThreatAfter_Action a) {
         switch(a) {
-        case EA::Action_ExposesToShootFrom_Unit::DMG_MULT: return "DMG_MULT";
+        case EA::Unit_BecomesShootThreatAfter_Action::DMG_MULT: return "DMG_MULT";
         default:
-            throw std::runtime_error("Names: unexpected Action_ExposesToShootFrom_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_BecomesShootThreatAfter_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Action_Melees_Unit a) {
+    std::string Attr(EA::Unit_IsMeleedBy_Action a) {
         switch(a) {
-        case EA::Action_Melees_Unit::IS_PRIMARY_TARGET: return "IS_PRIMARY_TARGET";
+        case EA::Unit_IsMeleedBy_Action::IS_PRIMARY_TARGET: return "IS_PRIMARY_TARGET";
         default:
-            throw std::runtime_error("Names: unexpected Action_Melees_Unit: " + std::to_string(EI(a)));
-          break;
+            throw std::runtime_error("Names: unexpected Unit_IsMeleedBy_Action attribute: " + std::to_string(EI(a)));
+        }
+     }
+
+    std::string Attr(EA::Unit_IsShotBy_Action a) {
+        switch(a) {
+        case EA::Unit_IsShotBy_Action::IS_PRIMARY_TARGET: return "IS_PRIMARY_TARGET";
+        default:
+            throw std::runtime_error("Names: unexpected Unit_IsShotBy_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Action_Shoots_Unit a) {
+    std::string Attr(EA::Unit_BecomesMeleeTargetAfter_Action a) {
         switch(a) {
-        case EA::Action_Shoots_Unit::IS_PRIMARY_TARGET: return "IS_PRIMARY_TARGET";
         default:
-            throw std::runtime_error("Names: unexpected Action_Shoots_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_BecomesMeleeTargetAfter_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Action_EnablesMeleeAt_Unit a) {
+    std::string Attr(EA::Unit_BecomesShootTargetAfter_Action a) {
         switch(a) {
+        case EA::Unit_BecomesShootTargetAfter_Action::DMG_MULT: return "DMG_MULT";
         default:
-            throw std::runtime_error("Names: unexpected Action_EnablesMeleeAt_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Unit_BecomesShootTargetAfter_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Action_EnablesShootAt_Unit a) {
+    std::string Attr(EA::Hex_BecomesMeleeTargetAfter_Action a) {
         switch(a) {
-        case EA::Action_EnablesShootAt_Unit::DMG_MULT: return "DMG_MULT";
         default:
-            throw std::runtime_error("Names: unexpected Action_EnablesShootAt_Unit: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Hex_BecomesMeleeTargetAfter_Action attribute: " + std::to_string(EI(a)));
         }
     }
 
-    std::string Attr(EA::Action_EnablesMeleeAt_Hex a) {
+    std::string Attr(EA::Hex_BecomesShootTargetAfter_Action a) {
         switch(a) {
+        case EA::Hex_BecomesShootTargetAfter_Action::DMG_MULT: return "DMG_MULT";
         default:
-            throw std::runtime_error("Names: unexpected Action_EnablesMeleeAt_Hex: " + std::to_string(EI(a)));
-        }
-    }
-
-    std::string Attr(EA::Action_EnablesShootAt_Hex a) {
-        switch(a) {
-        case EA::Action_EnablesShootAt_Hex::DMG_MULT: return "DMG_MULT";
-        default:
-            throw std::runtime_error("Names: unexpected Action_EnablesShootAt_Hex: " + std::to_string(EI(a)));
+            throw std::runtime_error("Names: unexpected Hex_BecomesShootTargetAfter_Action attribute: " + std::to_string(EI(a)));
         }
     }
 

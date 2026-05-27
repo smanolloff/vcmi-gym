@@ -22,9 +22,11 @@
 #include "schema/v15/graph.h"
 #include "schema/v15/types.h"
 
+#include <pybind11/cast.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
+#include <unordered_map>
 
 namespace Connector::V15 {
     namespace S15 = MMAI::Schema::V15;
@@ -55,27 +57,35 @@ namespace Connector::V15 {
             case ET::NODE_UNIT: return process(S15::EncodingTraits<NA::Unit>::encoding);
             case ET::NODE_HEX: return process(S15::EncodingTraits<NA::Hex>::encoding);
             case ET::NODE_ACTION: return process(S15::EncodingTraits<NA::Action>::encoding);
-            case ET::EDGE_GLOBAL_HAS_PLAYER: return process(S15::EncodingTraits<EA::Global_Has_Player>::encoding);
-            case ET::EDGE_GLOBAL_HAS_UNIT: return process(S15::EncodingTraits<EA::Global_Has_Unit>::encoding);
-            case ET::EDGE_GLOBAL_HAS_HEX: return process(S15::EncodingTraits<EA::Global_Has_Hex>::encoding);
+            case ET::EDGE_GLOBAL_TO_PLAYER: return process(S15::EncodingTraits<EA::Global_To_Player>::encoding);
+            case ET::EDGE_PLAYER_TO_GLOBAL: return process(S15::EncodingTraits<EA::Player_To_Global>::encoding);
+            case ET::EDGE_GLOBAL_TO_UNIT: return process(S15::EncodingTraits<EA::Global_To_Unit>::encoding);
+            case ET::EDGE_UNIT_TO_GLOBAL: return process(S15::EncodingTraits<EA::Unit_To_Global>::encoding);
+            case ET::EDGE_GLOBAL_TO_HEX: return process(S15::EncodingTraits<EA::Global_To_Hex>::encoding);
+            case ET::EDGE_HEX_TO_GLOBAL: return process(S15::EncodingTraits<EA::Hex_To_Global>::encoding);
+            case ET::EDGE_GLOBAL_TO_ACTION: return process(S15::EncodingTraits<EA::Global_To_Action>::encoding);
             case ET::EDGE_PLAYER_OWNS_UNIT: return process(S15::EncodingTraits<EA::Player_Owns_Unit>::encoding);
+            case ET::EDGE_UNIT_OWNED_BY_PLAYER: return process(S15::EncodingTraits<EA::Unit_OwnedBy_Player>::encoding);
             case ET::EDGE_HEX_ADJACENT_HEX: return process(S15::EncodingTraits<EA::Hex_Adjacent_Hex>::encoding);
             case ET::EDGE_UNIT_ACTS_BEFORE_UNIT: return process(S15::EncodingTraits<EA::Unit_ActsBefore_Unit>::encoding);
             case ET::EDGE_UNIT_MELEE_DMG_UNIT: return process(S15::EncodingTraits<EA::Unit_MeleeDmg_Unit>::encoding);
             case ET::EDGE_UNIT_SHOOT_DMG_UNIT: return process(S15::EncodingTraits<EA::Unit_ShootDmg_Unit>::encoding);
             case ET::EDGE_UNIT_BLOCKS_UNIT: return process(S15::EncodingTraits<EA::Unit_Blocks_Unit>::encoding);
             case ET::EDGE_UNIT_OCCUPIES_HEX: return process(S15::EncodingTraits<EA::Unit_Occupies_Hex>::encoding);
+            case ET::EDGE_HEX_OCCUPIED_BY_UNIT: return process(S15::EncodingTraits<EA::Hex_OccupiedBy_Unit>::encoding);
             case ET::EDGE_ACTION_BY_UNIT: return process(S15::EncodingTraits<EA::Action_By_Unit>::encoding);
+            case ET::EDGE_UNIT_HAS_ACTION: return process(S15::EncodingTraits<EA::Unit_Has_Action>::encoding);
             case ET::EDGE_ACTION_ENDS_AT_HEX: return process(S15::EncodingTraits<EA::Action_EndsAt_Hex>::encoding);
+            case ET::EDGE_HEX_IS_END_OF_ACTION: return process(S15::EncodingTraits<EA::Hex_IsEndOf_Action>::encoding);
             case ET::EDGE_ACTION_BLOCKS_UNIT: return process(S15::EncodingTraits<EA::Action_Blocks_Unit>::encoding);
-            case ET::EDGE_ACTION_EXPOSES_TO_MELEE_FROM_UNIT: return process(S15::EncodingTraits<EA::Action_ExposesToMeleeFrom_Unit>::encoding);
-            case ET::EDGE_ACTION_EXPOSES_TO_SHOOT_FROM_UNIT: return process(S15::EncodingTraits<EA::Action_ExposesToShootFrom_Unit>::encoding);
-            case ET::EDGE_ACTION_MELEES_UNIT: return process(S15::EncodingTraits<EA::Action_Melees_Unit>::encoding);
-            case ET::EDGE_ACTION_SHOOTS_UNIT: return process(S15::EncodingTraits<EA::Action_Shoots_Unit>::encoding);
-            case ET::EDGE_ACTION_ENABLES_MELEE_AT_UNIT: return process(S15::EncodingTraits<EA::Action_EnablesMeleeAt_Unit>::encoding);
-            case ET::EDGE_ACTION_ENABLES_SHOOT_AT_UNIT: return process(S15::EncodingTraits<EA::Action_EnablesShootAt_Unit>::encoding);
-            case ET::EDGE_ACTION_ENABLES_MELEE_AT_HEX: return process(S15::EncodingTraits<EA::Action_EnablesMeleeAt_Hex>::encoding);
-            case ET::EDGE_ACTION_ENABLES_SHOOT_AT_HEX: return process(S15::EncodingTraits<EA::Action_EnablesShootAt_Hex>::encoding);
+            case ET::EDGE_UNIT_BECOMES_MELEE_THREAT_AFTER_ACTION: return process(S15::EncodingTraits<EA::Unit_BecomesMeleeThreatAfter_Action>::encoding);
+            case ET::EDGE_UNIT_BECOMES_SHOOT_THREAT_AFTER_ACTION: return process(S15::EncodingTraits<EA::Unit_BecomesShootThreatAfter_Action>::encoding);
+            case ET::EDGE_UNIT_IS_MELEED_BY_ACTION: return process(S15::EncodingTraits<EA::Unit_IsMeleedBy_Action>::encoding);
+            case ET::EDGE_UNIT_IS_SHOT_BY_ACTION: return process(S15::EncodingTraits<EA::Unit_IsShotBy_Action>::encoding);
+            case ET::EDGE_UNIT_BECOMES_MELEE_TARGET_AFTER_ACTION: return process(S15::EncodingTraits<EA::Unit_BecomesMeleeTargetAfter_Action>::encoding);
+            case ET::EDGE_UNIT_BECOMES_SHOOT_TARGET_AFTER_ACTION: return process(S15::EncodingTraits<EA::Unit_BecomesShootTargetAfter_Action>::encoding);
+            case ET::EDGE_HEX_BECOMES_MELEE_TARGET_AFTER_ACTION: return process(S15::EncodingTraits<EA::Hex_BecomesMeleeTargetAfter_Action>::encoding);
+            case ET::EDGE_HEX_BECOMES_SHOOT_TARGET_AFTER_ACTION: return process(S15::EncodingTraits<EA::Hex_BecomesShootTargetAfter_Action>::encoding);
             default:
                 throw std::runtime_error("GetEncoding: unexpected ElementType: " + std::to_string(EI(type)));
             }
@@ -125,8 +135,42 @@ namespace Connector::V15 {
     }
 
     py::dict getEdgeTypes() {
+        auto nodetypes = std::unordered_map<S15::Graph::ElementType, std::string>{};
+
+        for (const auto & [type, name, size] : S15::NODE_TYPES)
+            nodetypes.emplace(type, name);
+
         auto res = py::dict();
-        res[py::str("asdqwe")] = 123;
+        for (const auto & [type, name, endpoints, size] : S15::EDGE_TYPES)
+        {
+            const auto & [srcType, dstType] = endpoints;
+            const auto & srcName = nodetypes.at(srcType);
+            const auto & dstName = nodetypes.at(dstType);
+
+            auto attrs = py::list();
+            for (const auto & [a, e, n, vmax] : GetEncoding(type))
+            {
+                attrs.append(py::dict(
+                    py::arg("name") = py::str(a),
+                    py::arg("encoding") = py::str(e),
+                    py::arg("size") = n,
+                    py::arg("vmax") = vmax
+                ));
+            }
+
+            auto edgedict = py::dict(
+                py::arg("size")=size,
+                py::arg("attributes")=attrs
+            );
+
+            const auto key = py::make_tuple(
+                py::str(srcName),
+                py::str(name),
+                py::str(dstName)
+            );
+            res[key] = edgedict;
+
+        }
         return res;
     }
 

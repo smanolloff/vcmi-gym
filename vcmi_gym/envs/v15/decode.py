@@ -113,8 +113,18 @@ def make_node_namedtuple_class(class_name: str, node_type_dict: dict[str, Any]):
 
         return [cls.decode_one(row) for row in arr]
 
+    @classmethod
+    def decode(cls, row_or_arr: np.ndarray):
+        arr = np.asarray(row_or_arr)
+
+        if arr.ndim == 1:
+            return cls.decode_one(row_or_arr)
+        else:
+            return cls.decode_many(row_or_arr)
+
     cls.decode_one = decode_one
     cls.decode_many = decode_many
+    cls.decode = decode
 
     return cls
 

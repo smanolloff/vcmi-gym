@@ -1,4 +1,5 @@
 import gymnasium as gym
+import numpy as np
 
 
 class LegacyActionSpaceWrapper(gym.Wrapper):
@@ -45,3 +46,30 @@ class LegacyObservationSpaceWrapper(gym.Wrapper):
         obs, *rest = self.env.reset(*args, **kwargs)
         self._dict_obs = obs
         return obs["observation"], *rest
+
+class BlankObservationSpaceWrapper(gym.Wrapper):
+    """
+    Designed for env v15+ where the observation space has irregular shape
+    on each step and gymnasium's AsyncVectorEnv can't batch it, throwing an
+    error.
+    """
+
+    EMPTY_OBS = np.empty(1)
+    SPACE = gym.spaces.Box(low=0,high=0,shape=(1,))
+
+    @property
+    def observation_space(self):
+        return BlankObservationSpaceWrapper.SPACE
+
+    def step(self, *args, **kwargs):
+        obs, *rest = self.env.step(*args, **kwargs)
+        self._graph_obs = obs
+        return BlankObservationSpaceWrapper.EMPTY_OBS, *rest
+
+    def reset(self, *args, **kwargs):
+        obs, *rest = self.env.reset(*args, **kwargs)
+        self._graph_obs = obs
+        return BlankObservationSpaceWrapper.EMPTY_OBS, *rest
+
+    def graph_obs(self):
+        return self._graph_obs
