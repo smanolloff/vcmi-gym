@@ -141,9 +141,7 @@ config = dict(
     ),
     model=dict(
         policy_head_hidden_channels=128,
-        policy_head_dropout=0.3,
         value_head_hidden_channels=128,
-        value_head_dropout=0.3,
         gnn_num_layers=3,
         gnn_hidden_channels=128,
         gnn_out_channels=64,
