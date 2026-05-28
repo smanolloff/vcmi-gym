@@ -34,14 +34,13 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.utils import softmax as gnn_softmax
 import torch_geometric.nn as gnn
 
-from rl.algos.common import CategoricalMasked
-from rl.world.util.structured_logger import StructuredLogger
-from rl.world.util.persistence import load_checkpoint, save_checkpoint, download_latest_model
-from rl.world.util.wandb import setup_wandb
-from rl.world.util.timer import Timer
-from rl.world.util.misc import dig, safe_mean, timer_stats
+from .util.structured_logger import StructuredLogger
+from .util.persistence import load_checkpoint, save_checkpoint, download_latest_model
+from .util.wandb import setup_wandb
+from .util.timer import Timer
+from .util.misc import dig, safe_mean, timer_stats
 
-from .dual_vec_env_v15 import DualVecEnv, AbstractModelLoader
+from .dual_vec_env import DualVecEnv, AbstractModelLoader
 from .gnn_model import GNNModel, to_hdata_list, add_action_active_local_ids
 
 if os.getenv("PYDEBUG", None) == "1":

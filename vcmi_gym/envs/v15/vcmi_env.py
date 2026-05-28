@@ -392,18 +392,7 @@ class VcmiEnv(gym.Env):
         if (self.terminated or self.truncated) and action != -1:
             raise Exception("Reset needed")
 
-        # Prevent VCMI exceptions (mid-battle retreats are not handled)
-        if action == 0 and not self.allow_retreat:
-            if self.allow_invalid_actions:
-                self.logger.warn("Attempted a retreat action (action=%d), but retreat is not allowed" % action)
-                defend = self.defend_action()
-                self.logger.warn("Falling to defend action=%d)" % defend)
-                return self.step(defend, fallback=True)
-            else:
-                self.logger.error("Attempted a retreat action (action=%d), but retreat is not allowed" % action)
-
         obs = self.connector.step(action)
-
         gnode = Global.decode_one(obs["nodes"]["Global"][0])
         term = gnode.BATTLE_WINNER != COMBAT_RESULTS["NONE"]
         trunc = gnode.BATTLE_ROUND >= MAX_ROUNDS  # vcmi should have retreated
