@@ -402,16 +402,15 @@ class VcmiEnv(gym.Env):
             else:
                 self.logger.error("Attempted a retreat action (action=%d), but retreat is not allowed" % action)
 
-        res = self.connector.step(action)
+        obs = self.connector.step(action)
 
-        obs = self.__class__.build_obs(res)
         gnode = Global.decode_one(obs["nodes"]["Global"][0])
         term = gnode.BATTLE_WINNER != COMBAT_RESULTS["NONE"]
         trunc = gnode.BATTLE_ROUND >= MAX_ROUNDS  # vcmi should have retreated
         rewvals = VcmiEnv.calc_reward(term, trunc, obs, self.pnodes_start, self.reward_cfg)
         rew = sum(rewvals)
 
-        self._update_vars_after_step(action, obs, res, rew, term, trunc, rewvals)
+        self._update_vars_after_step(action, obs, rew, term, trunc, rewvals)
         self._maybe_render()
 
         info = self.__class__.build_info(obs, term, trunc, self.side, self.pnodes_start, self.steps_this_episode, self.rewvals_total)
@@ -422,10 +421,9 @@ class VcmiEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
 
-        result = self.connector.reset()
-        obs = self.__class__.build_obs(result)
+        obs = self.connector.reset()
 
-        self._reset_vars(result, obs)
+        self._reset_vars(obs)
         if self.render_each_step:
             print(self.render())
 
@@ -493,10 +491,10 @@ class VcmiEnv(gym.Env):
         self.close()
 
     def decode(self):
-        return self.__class__.decode_obs(self.result.state)
+        return self.__class__.decode_obs(self.obs)
 
     def defend_action(self, bf=None):
-        active_ids = self.result.get_active_action_ids()
+        active_ids = self.obs["active_action_ids"]
         active_actions = Action.decode_many(self.obs["nodes"]["Action"][active_ids])
 
         return next(
@@ -509,14 +507,7 @@ class VcmiEnv(gym.Env):
         if self.terminated or self.truncated:
             return None
 
-        return random.choice(self.result.get_active_action_ids())
-
-    @staticmethod
-    def build_obs(res):
-        return {
-            "nodes": res.get_nodes(),
-            "edges": res.get_edges()
-        }
+        return random.choice(self.obs["active_action_ids"])
 
     @staticmethod
     def decode_obs(state):
@@ -526,11 +517,10 @@ class VcmiEnv(gym.Env):
     # private
     #
 
-    def _update_vars_after_step(self, action, obs, res, rew, term, trunc, rewvals):
+    def _update_vars_after_step(self, action, obs, rew, term, trunc, rewvals):
         self.last_action = action
         self.steps_this_episode += 1
         self.obs = obs
-        self.result = res
         self.reward = rew
         self.reward_total += rew
         self.rewvals = rewvals
@@ -538,7 +528,7 @@ class VcmiEnv(gym.Env):
         self.terminated = term
         self.truncated = trunc
 
-    def _reset_vars(self, res, obs):
+    def _reset_vars(self, obs):
         gnode = Global.decode_one(obs["nodes"]["Global"][0])
         pnodes = Player.decode_many(obs["nodes"]["Player"])
 
@@ -550,7 +540,6 @@ class VcmiEnv(gym.Env):
         self.last_action = None
         self.steps_this_episode = 0
         self.obs = obs
-        self.result = res
         self.reward = 0
         self.reward_total = 0
         self.rewvals = RewardValues()

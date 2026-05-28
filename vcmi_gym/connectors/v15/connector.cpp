@@ -8,11 +8,6 @@ namespace Connector::V15 {
     namespace py = pybind11;
 
     PYBIND11_MODULE(connector_v15, m) {
-        py::class_<P_State>(m, "P_State")
-            .def("get_nodes", &P_State::get_nodes)
-            .def("get_edges", &P_State::get_edges)
-            .def("get_active_action_ids", &P_State::get_active_action_ids);
-
         py::class_<Thread::Connector, std::unique_ptr<Thread::Connector>>(m, "ThreadConnector")
             .def(py::init<
                 int,                    // maxlogs

@@ -36,6 +36,7 @@
 #include <pybind11/stl.h>
 
 #include <stdexcept>
+#include <random>
 #include <string>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <unistd.h>
@@ -69,6 +70,28 @@
         LOG("connector is shutting down"); \
         return {static_cast<int>(ReturnCode::SHUTDOWN), ret}; \
     } \
+}
+
+namespace {
+    int RandomValidAction(const MMAI::Schema::IState * s) {
+        auto any = s->getSupplementaryData();
+        const auto * sup = std::any_cast<const MMAI::Schema::V15::ISupplementaryData*>(any);
+        const auto * G = sup->getGraph();
+
+        auto activeIds = G->getActiveActionIds();
+
+        if (activeIds.empty()) {
+            std::cout << "No valid actions => reset\n";
+            return MMAI::Schema::ACTION_RESET;
+        }
+
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dist(0, static_cast<int>(activeIds.size()) - 1);
+        int randomIndex = dist(gen);
+        const auto id = activeIds[randomIndex];
+        return static_cast<int>(id);
+    }
 }
 
 namespace Connector::V15::Thread {
@@ -244,8 +267,8 @@ namespace Connector::V15::Thread {
         return std::any_cast<const MMAI::Schema::V15::ISupplementaryData*>(s->getSupplementaryData());
     };
 
-    P_State Connector::convertState(const MMAI::Schema::IState * s) {
-        LOG("Convert IState -> P_State");
+    py::dict Connector::buildObsDict(const MMAI::Schema::IState * s) {
+        LOG("Convert IState -> p_dict");
         const auto * sup = extractSupplementaryData(s);
         assert(sup->getType() == MMAI::Schema::V15::ISupplementaryData::Type::REGULAR);
 
@@ -326,14 +349,20 @@ namespace Connector::V15::Thread {
             p_edgesdict[key] = p_edict;
         }
 
-        LOG("Creating P_State...");
+        const auto & activeActionIds = G->getActiveActionIds();
+        const auto A = static_cast<py::ssize_t>(activeActionIds.size());
+        auto p_activeids = py::array_t<int64_t, py::array::c_style>(A);
+        auto mp_activeids = p_activeids.mutable_unchecked<1>();
 
-        return P_State(
-            sup->getType(),
-            p_nodesdict,
-            p_edgesdict,
-            G->getActiveActionIds(),
-            sup->getAnsiRender()
+        for (ssize_t i = 0; i < activeActionIds.size(); ++i)
+            mp_activeids(i) = activeActionIds[i];
+
+        LOG("Creating p_dict...");
+
+        return py::dict(
+            py::arg("nodes") = p_nodesdict,
+            py::arg("edges") = p_edgesdict,
+            py::arg("active_action_ids") = p_activeids
         );
     }
 
@@ -389,20 +418,20 @@ namespace Connector::V15::Thread {
         return {static_cast<int>(code), sup->getAnsiRender()};
     }
 
-    std::tuple<int, const P_State> Connector::reset(int side) {
-        SHUTDOWN_PYTHON_RETURN(convertState(state)); // reuse last state if shutting down
+    std::tuple<int, const py::dict> Connector::reset(int side) {
+        SHUTDOWN_PYTHON_RETURN(buildObsDict(state)); // reuse last state if shutting down
         auto code = getState(__func__, side, MMAI::Schema::ACTION_RESET);
-        const auto pstate = convertState(state);
-        LOG("return P_State");
-        return {static_cast<int>(code), pstate};
+        const auto p_dict = buildObsDict(state);
+        LOG("return p_dict");
+        return {static_cast<int>(code), p_dict};
     }
 
-    std::tuple<int, const P_State> Connector::step(int side, MMAI::Schema::Action a) {
-        SHUTDOWN_PYTHON_RETURN(convertState(state)); // reuse last state if shutting down
+    std::tuple<int, const py::dict> Connector::step(int side, MMAI::Schema::Action a) {
+        SHUTDOWN_PYTHON_RETURN(buildObsDict(state)); // reuse last state if shutting down
         auto code = getState(__func__, side, a);
-        const auto pstate = convertState(state);
-        LOG("return P_State");
-        return {static_cast<int>(code), pstate};
+        const auto p_dict = buildObsDict(state);
+        LOG("return p_dict");
+        return {static_cast<int>(code), p_dict};
     }
 
     // this is called by a VCMI thread (the runNetwork thread)
@@ -472,7 +501,7 @@ namespace Connector::V15::Thread {
     }
 
     // initial connect is a special case and cannot reuse getState()
-    std::tuple<int, const P_State> Connector::connect(int side) {
+    std::tuple<int, const py::dict> Connector::connect(int side) {
         LOG("connect called with side=" + std::to_string(side));
 
         LOG("obtain lock2");
@@ -517,10 +546,10 @@ namespace Connector::V15::Thread {
             LOGFMT("cond%1%.wait(lock%1%): done", side);
         }
 
-        auto pstate = convertState(state);
+        auto py_dict = buildObsDict(state);
         LOGFMT("release lock%d (return)", side);
-        LOG("return P_State");
-        return {static_cast<int>(res), pstate};
+        LOG("return p_dict");
+        return {static_cast<int>(res), py_dict};
     }
 
     void Connector::start() {

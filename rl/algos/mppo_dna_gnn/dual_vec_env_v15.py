@@ -396,6 +396,8 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         )
 
         if num_envs_model > 0:
+            raise NotImplementedError("num_envs_model: shm buffers for v15 obs not implemented")
+
             # test model exists (avoids errors in sub-processes)
             model_loader.get_model()
 
@@ -462,40 +464,6 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
 
     def reload_model(self):
         self.controller.reload_model()
-
-
-def to_hdata(done, obs):
-    device = obs.device
-    res = HeteroData()
-    res.done = done.unsqueeze(0).float()
-    res.value = torch.tensor(0., device=device)
-    res.action = torch.tensor(0, device=device)
-    res.reward = torch.tensor(0., device=device)
-    res.logprob = torch.tensor(0., device=device)
-    res.advantage = torch.tensor(0., device=device)
-    res.ep_return = torch.tensor(0., device=device)
-
-    for node, attrs in obs["nodes"]:
-        res[node].x = torch.as_tensor(attrs, device=device)
-
-    for key, edge in obs["edges"]:
-        res[key].edge_index = torch.as_tensor(edge["index"], device=device)
-        res[key].edge_attr = torch.as_tensor(edge["attrs"], device=device)
-
-    return res
-
-
-# b_obs: torch.tensor of shape (B, STATE_SIZE)
-# tuple_links: tuple of B dicts, where each dict is a single obs's "links"
-def to_hdata_list(b_done, obs):
-    b_hdatas = []
-    for done, obs in zip(b_done, obs):
-        b_hdatas.append(to_hdata(done, obs))
-    # XXX: this concatenates along the first dim
-    # i.e. stacking two (165, STATE_SIZE_ONE_HEX)
-    #       gives  (330, STATE_SIZE_ONE_HEX)
-    #       (that's how GNN batching works)
-    return b_hdatas
 
 
 if __name__ == "__main__":

@@ -99,7 +99,7 @@ namespace Connector::V15::Thread {
         int action = -666;
         const MMAI::Schema::IState * state = nullptr;
 
-        P_State convertState(const MMAI::Schema::IState * s);
+        py::dict buildObsDict(const MMAI::Schema::IState * s);
         MMAI::Schema::Action getAction(const MMAI::Schema::IState * s, int side);
         MMAI::Schema::Action getActionDummy(MMAI::Schema::IState);
         const MMAI::Schema::V15::ISupplementaryData* extractSupplementaryData(const MMAI::Schema::IState *s);
@@ -174,11 +174,32 @@ namespace Connector::V15::Thread {
             int statsPersistFreq
         );
 
+
+        // Observation structure (step(), reset()):
+        // {
+        //      "nodes": {
+        //          "Hex":  [[...], [...], ...],    // shape (num_nodes, D)
+        //          "Unit": [[...], [...], ...],    // shape (num_nodes, D)
+        //          ...
+        //      },
+        //      "edges": {
+        //          ("Hex", "Adjacent", "Hex"): {
+        //              "index": [                      // shape (2, num_edges)
+        //                  [srcId0, srcId1, ...],
+        //                  [dstId0, dstId1, ...]
+        //              ],
+        //              "attrs": [[...], [...], ...],   // shape (num_edges, D)
+        //          },
+        //          ...
+        //      }
+        // }
+        const py::dict obs;
+
         // timeouts are in seconds
         void start();
-        std::tuple<int, const P_State> connect(int side);
-        std::tuple<int, const P_State> reset(int side);
-        std::tuple<int, const P_State> step(int side, MMAI::Schema::Action a);
+        std::tuple<int, const py::dict> connect(int side);
+        std::tuple<int, const py::dict> reset(int side);
+        std::tuple<int, const py::dict> step(int side, MMAI::Schema::Action a);
         std::tuple<int, const std::string> render(int side);
         void shutdown();
         std::vector<std::string> getLogs();

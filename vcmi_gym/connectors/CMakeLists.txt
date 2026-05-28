@@ -79,7 +79,7 @@ endif()
 #
 # V15
 #
-set(CONNECTOR_V15_FILES v15/common.h v15/common.cpp v15/connector.cpp v15/threadconnector.h v15/threadconnector.cpp)
+set(CONNECTOR_V15_FILES v15/common.h v15/connector.cpp v15/threadconnector.h v15/threadconnector.cpp)
 set(EXPORTER_V15_FILES v15/exporter.h v15/exporter.cpp v15/names.h v15/names.cpp)
 pybind11_add_module(connector_v15 ${CONNECTOR_V15_FILES})
 pybind11_add_module(exporter_v15 ${EXPORTER_V15_FILES})

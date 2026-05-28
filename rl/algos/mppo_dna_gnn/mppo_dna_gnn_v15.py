@@ -28,11 +28,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 # from torch.distributions import kl_divergence as kld
+from torch_scatter import scatter_sum
 from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader
-from torch_geometric.utils import to_dense_batch
+from torch_geometric.utils import softmax as gnn_softmax
 import torch_geometric.nn as gnn
-
 
 from rl.algos.common import CategoricalMasked
 from rl.world.util.structured_logger import StructuredLogger
@@ -41,60 +41,8 @@ from rl.world.util.wandb import setup_wandb
 from rl.world.util.timer import Timer
 from rl.world.util.misc import dig, safe_mean, timer_stats
 
-from vcmi_gym.envs.v15.vcmi_env import VcmiEnv
-
-from vcmi_gym.envs.v15.pyconnector import (
-    STATE_SIZE,
-    STATE_SIZE_ONE_HEX,
-    STATE_SIZE_HEXES,
-    N_ACTIONS,
-    N_HEX_ACTIONS,
-    N_NONHEX_ACTIONS,
-    GLOBAL_ATTR_MAP,
-    GLOBAL_ACT_MAP,
-    HEX_ATTR_MAP,
-    HEX_ACT_MAP,
-    LINK_ATTR_SIZES,
-)
-
-from .dual_vec_env import DualVecEnv, AbstractModelLoader, to_hdata_list
-
-
-# (row,col) offsets (from * POV)
-OFFSETS_0 = [   # even rows offsets
-    (-1, 1),    # AMOVE_0    .| .| .| .| .| .|
-    (0, 1),     # AMOVE_1   . |. |F |5 |0 |A |= row 5
-    (1, 1),     # AMOVE_2    .| E| 4| *| 1| B|= row 6
-    (1, 0),     # AMOVE_3   . |. |D |3 |2 |C |= row 7
-    (0, -1),    # AMOVE_4    .| .| .| .| .| .|
-    (-1, 0),    # AMOVE_5
-    (-1, 2),    # AMOVE_6  (A)
-    (0, 2),     # AMOVE_7  (B)
-    (1, 2),     # AMOVE_8  (C)
-    (1, -1),    # AMOVE_9  (D)
-    (0, -2),    # AMOVE_10 (E)
-    (-1, -1),   # AMOVE_11 (F)
-
-]               # -------------------------------------------------------------
-OFFSETS_1 = [   # odd rows offsets
-    (-1, 0),    # AMOVE_0   . |. |. |. |. |. |. |
-    (0, 1),     # AMOVE_1    .| .| F| 5| 0| A| .|= row 6
-    (1, 0),     # AMOVE_2   . |. |E |4 |* |1 |B |= row 7
-    (1, -1),    # AMOVE_3    .| .| D| 3| 2| C| .|= row 8
-    (0, -1),    # AMOVE_4   . |. |. |. |. |. |. |
-    (-1, -1),   # AMOVE_5
-    (-1, 1),    # AMOVE_6  (A)
-    (0, 2),     # AMOVE_7  (B)
-    (1, 1),     # AMOVE_8  (C)
-    (1, -2),    # AMOVE_9  (D)
-    (0, -2),    # AMOVE_10 (E)
-    (-1, -2),   # AMOVE_11 (F)
-]
-
-OFFSETS_1D_0 = [y * 15 + x for y, x in OFFSETS_0]
-OFFSETS_1D_1 = [y * 15 + x for y, x in OFFSETS_1]
-
-N_AMOVES = len(OFFSETS_0)
+from .dual_vec_env_v15 import DualVecEnv, AbstractModelLoader
+from .gnn_model import GNNModel, to_hdata_list, add_action_active_local_ids
 
 if os.getenv("PYDEBUG", None) == "1":
     def excepthook(exc_type, exc_value, tb):
@@ -149,7 +97,7 @@ class Storage:
         v = venv.num_envs
         self.rollout_buffer = []  # contains Batch() objects
         self.v_next_hdata_list = to_hdata_list(
-            venv.call("graph_obs"),
+            venv.call("obs"),
             torch.zeros(v, device=device),
         )
 
@@ -216,628 +164,11 @@ class MultiStats(SampleStats):
         self.ep_rew_prog_mean = safe_mean([v.ep_rew_prog_mean for v in self.variants.values() if v.num_episodes > 0])
 
 
-class MainAction(enum.IntEnum):
-    WAIT = 0
-    MOVE = enum.auto()
-    AMOVE = enum.auto()
-    SHOOT = enum.auto()
-
-
-class DebugInfo():
-    z_global: torch.Tensor = None
-    z_hexes: torch.Tensor = None
-    act0_logits: torch.Tensor = None
-    act0_emb_in: torch.Tensor = None
-    act0_emb_out: torch.Tensor = None
-    q_hex1_in: torch.Tensor = None
-    q_hex1_out: torch.Tensor = None
-    k_hex1_in: torch.Tensor = None
-    k_hex1_out: torch.Tensor = None
-    hex1_logits_in: tuple = None
-    hex1_logits_out: torch.Tensor = None
-    q_hex2_in: torch.Tensor = None
-    q_hex2_out: torch.Tensor = None
-    k_hex2_in: torch.Tensor = None
-    k_hex2_out: torch.Tensor = None
-    hex2_logits_in: tuple = None
-    hex2_logits_out: torch.Tensor = None
-
-
-class ActionSample:
-    def __init__(
-        self,
-        act0,
-        act0_logits,
-        act0_dist,
-        hex1,
-        hex1_logits,
-        hex1_dist,
-        hex2,
-        hex2_logits,
-        hex2_dist,
-        action
-    ):
-        self.act0 = act0
-        self.act0_dist = act0_dist
-        self.act0_logits = act0_logits
-        self.act0_logprob = act0_dist.log_prob(act0)
-        self.act0_entropy = act0_dist.entropy()
-
-        self.hex1 = hex1
-        self.hex1_dist = hex1_dist
-        self.hex1_logits = hex1_logits
-        self.hex1_logprob = hex1_dist.log_prob(hex1)
-        self.hex1_entropy = hex1_dist.entropy()
-
-        self.hex2 = hex2
-        self.hex2_dist = hex2_dist
-        self.hex2_logits = hex2_logits
-        self.hex2_logprob = hex2_dist.log_prob(hex2)
-        self.hex2_entropy = hex2_dist.entropy()
-
-        self.action = action
-        self.logprob = self.act0_logprob + self.hex1_logprob + self.hex2_logprob
-        self.entropy = self.act0_entropy + self.hex1_entropy + self.hex2_entropy
-
-    def cpu(self):
-        for t in ["act0", "hex1", "hex2"]:
-            setattr(self, t, getattr(self, t).cpu())
-            # setattr(self, f"{t}_dist", getattr(self, f"{t}_dist").cpu())
-            setattr(self, f"{t}_logits", getattr(self, f"{t}_logits").cpu())
-            setattr(self, f"{t}_logprob", getattr(self, f"{t}_logprob").cpu())
-            setattr(self, f"{t}_entropy", getattr(self, f"{t}_entropy").cpu())
-
-        self.action = self.action.cpu()
-        self.logprob = self.logprob.cpu()
-        self.entropy = self.entropy.cpu()
-        return self
-
-
-class ActionLogits(NamedTuple):
-    action_table: torch.Tensor      # (4, 165, 165)
-    inverse_table: torch.Tensor     # (N_ACTIONS, 3)
-    act0_logits: torch.Tensor       # (B, 4)
-    act0_mask: torch.Tensor         # (B, 4)
-    hex1_logits: torch.Tensor       # (B, 4, 165)
-    hex1_mask: torch.Tensor         # (B, 4, 165)
-    hex2_logits: torch.Tensor       # (B, 165, 165)     # !!!
-    hex2_mask: torch.Tensor         # (B, 4, 165, 165)  # !!!
-
-    def sample(self, action=None, deterministic=False):
-        if action is None:
-            act0, hex1, hex2 = None, None, None
-        else:
-            act0, hex1, hex2 = self.inverse_table[action].unbind(1)
-
-        b_inds = torch.arange(self.act0_logits.shape[0], device=self.act0_logits.device)
-        act0_dist = CategoricalMasked(logits=self.act0_logits, mask=self.act0_mask)
-
-        if act0 is None:
-            act0 = act0_dist.probs.argmax(dim=1) if deterministic else act0_dist.sample()
-
-        # hex1 depends on act0
-        hex1_logits_scoped = self.hex1_logits[b_inds, act0]
-        hex1_mask_scoped = self.hex1_mask[b_inds, act0]
-        hex1_dist = CategoricalMasked(logits=hex1_logits_scoped, mask=hex1_mask_scoped)
-
-        if hex1 is None:
-            hex1 = hex1_dist.probs.argmax(dim=-1) if deterministic else hex1_dist.sample()
-
-        # hex1 depends on (act0, hex1)
-        # HERE IS THE BUG:
-        # hex2_dist does not depend on act0
-        hex2_logits_scoped = self.hex2_logits[b_inds, hex1]
-        hex2_mask_scoped = self.hex2_mask[b_inds, hex1]
-        hex2_mask_scoped[act0 != MainAction.AMOVE] = False
-        hex2_dist = CategoricalMasked(logits=hex2_logits_scoped, mask=hex2_mask_scoped)
-
-        if hex2 is None:
-            hex2 = hex2_dist.probs.argmax(dim=-1) if deterministic else hex2_dist.sample()
-
-        if action is None:
-            action = self.action_table[act0, hex1, hex2]
-
-        return ActionSample(
-            act0, self.act0_logits, act0_dist,
-            hex1, hex1_logits_scoped, hex1_dist,
-            hex2, hex2_logits_scoped, hex2_dist,
-            action
-        )
-
-
-class NonGNNLayer(nn.Module):
-    def __init__(self, fn):
-        super().__init__()
-        self.fn = fn
-
-    def forward(self, x_dict):
-        return {k: self.fn(x) for k, x in x_dict.items()}
-
-
-class GNNBlock(nn.Module):
-    # XXX: in_channels must be a tuple of (size_a, size_b) in case of
-    #       bipartite graphs.
-    def __init__(
-        self,
-        num_layers,
-        in_channels,
-        hidden_channels,
-        out_channels,
-        gnn_kwargs,
-        edge_attrs=LINK_ATTR_SIZES,
-        node_type="hex",
-    ):
-        super().__init__()
-
-        # at least 1 "hidden" layer is required for shapes to match
-        assert num_layers >= 2
-
-        kwargs = dict(gnn_kwargs)
-
-        # NOTE: the code below will likely fail if len(node_types) > 1 unless
-        #       all they all have the same shape
-        def make_hetero_dict(inchan, outchan):
-            return {
-                (node_type, edge_type, node_type): gnn.GENConv(**kwargs, in_channels=inchan, out_channels=outchan, edge_dim=edge_dim)
-                for (edge_type, edge_dim) in edge_attrs.items()
-            }
-
-        layers = []
-
-        for i in range(num_layers - 1):
-            ch_in = in_channels if i == 0 else hidden_channels
-            hetero_dict = make_hetero_dict(ch_in, hidden_channels)
-            layers.append((gnn.HeteroConv(hetero_dict), "x_dict, edge_index_dict, edge_attr_dict -> x_dict"))
-            layers.append((NonGNNLayer(nn.LeakyReLU()), "x_dict -> x_dict"))
-
-        # No activation after last layer
-        hetero_dict = make_hetero_dict(hidden_channels, out_channels)
-        layers.append((gnn.HeteroConv(hetero_dict), "x_dict, edge_index_dict, edge_attr_dict -> x_dict"))
-        self.layers = gnn.Sequential("x_dict, edge_index_dict, edge_attr_dict", layers)
-
-    def forward(self, hdata):
-        return self.layers(hdata.x_dict, hdata.edge_index_dict, hdata.edge_attr_dict)
-
-
-class Model(nn.Module):
-    @staticmethod
-    def build_action_tables():
-        # Maps [mainact, hex1, hex2] -> VCMI action
-        action_table = torch.zeros([4, 165, 165], dtype=torch.long)
-        action_table[MainAction.WAIT, :, :] = GLOBAL_ACT_MAP["WAIT"]  # WAIT is irrelevant of hex
-
-        # Map VCMI action -> [mainact, hex1, hex2]
-        # XXX: don't use -1 for hex1 and hex2 even if action has no hex (e.g. WAIT)
-        #      This is because a -1 index brakes torch.gather. Using 0 is OK,
-        #      since the "logits" for hex1 and/or hex2 for those actions are
-        #      replaced by -inf (see CategoricalMasked) which blocks gradient flow.
-        inverse_table = torch.zeros([N_ACTIONS, 3], dtype=torch.long)
-        inverse_table[GLOBAL_ACT_MAP["WAIT"]] = torch.tensor([MainAction.WAIT, 0, 0])
-
-        amove_hexes = torch.zeros([165, N_AMOVES], dtype=torch.long)
-        calcind = lambda y, x: y*15 + x if (y in range(0, 11) and x in range(0, 15)) else -1
-
-        for y in range(11):
-            o = OFFSETS_0 if y % 2 == 0 else OFFSETS_1
-            for x in range(15):
-                hex1 = calcind(y, x)
-                amove_hexes[hex1, :] = torch.tensor([calcind(y + oy, x + ox) for oy, ox in o])
-
-                move_action = N_NONHEX_ACTIONS + hex1*N_HEX_ACTIONS + HEX_ACT_MAP["MOVE"]
-                action_table[MainAction.MOVE, hex1, :] = move_action
-                inverse_table[move_action] = torch.tensor([MainAction.MOVE, hex1, 0])
-
-                shoot_action = N_NONHEX_ACTIONS + hex1*N_HEX_ACTIONS + HEX_ACT_MAP["SHOOT"]
-                action_table[MainAction.SHOOT, hex1, :] = shoot_action
-                inverse_table[shoot_action] = torch.tensor([MainAction.SHOOT, hex1, 0])
-
-                for amove, (oy, ox) in enumerate(o):
-                    hex2 = calcind(y + oy, x + ox)
-                    amove_hexes[hex1, amove] = hex2
-                    if hex2 >= 0:
-                        amove_action = N_NONHEX_ACTIONS + hex1*N_HEX_ACTIONS + amove
-                        action_table[MainAction.AMOVE, hex1, hex2] = amove_action
-                        inverse_table[amove_action] = torch.tensor([MainAction.AMOVE, hex1, hex2])
-
-        return action_table, inverse_table, amove_hexes
-
-    def __init__(self, config):
-        super().__init__()
-
-        self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
-
-        action_table, inverse_table, amove_hexes = self.__class__.build_action_tables()
-
-        self.register_buffer("amove_hexes", amove_hexes.unsqueeze(0))
-        self.register_buffer("amove_hexes_valid", self.amove_hexes != -1)
-        self.register_buffer("action_table", action_table)
-        self.register_buffer("inverse_table", inverse_table)
-
-        # XXX: todo: over-arching global node connected to all hexes
-        #           (for non-hex data)
-
-        self.encoder_hexes = GNNBlock(
-            config["gnn_num_layers"],
-            STATE_SIZE_ONE_HEX,
-            config["gnn_hidden_channels"],
-            config["gnn_out_channels"],
-            config.get("gnn_kwargs", {}),
-        )
-
-        d = config["gnn_out_channels"]
-
-        # TODO: temporary backward-compat
-        # XXX: new encoder is not yet ported to Exporter
-        self.legacy_global_encoder = config.get("legacy_global_encoder", False)
-
-        if self.legacy_global_encoder:
-            self.encoder_other = nn.Sequential(
-                nn.Linear(self.dim_other, d),
-                nn.LeakyReLU()
-            )
-        else:
-            self.encoder_global = nn.Sequential(
-                nn.Linear(self.dim_other + 2*d, 3*d),
-                nn.LeakyReLU(),
-                nn.Linear(3*d, d),
-                nn.LeakyReLU(),
-            )
-
-        self.act0_head = nn.Linear(d, len(MainAction))
-        self.emb_act0 = nn.Embedding(len(MainAction), d)
-        self.Wk_hex1 = nn.Linear(d, d, bias=False)
-        self.Wk_hex2 = nn.Linear(d, d, bias=False)
-        self.Wq_hex1 = nn.Linear(2*d, d)
-        self.Wq_hex2 = nn.Linear(2*d, d)
-
-        self.critic = nn.Sequential(
-            # nn.LayerNorm(d), helps?
-            nn.Linear(d, config["critic_hidden_features"]),
-            nn.LeakyReLU(),
-            nn.Linear(config["critic_hidden_features"], 1)
-        )
-
-        # Init lazy layers (must be before weight/bias init)
-        with torch.no_grad():
-            graph_obs = 2 * [VcmiEnv.OBSERVATION_SPACE.sample()]
-            done = torch.zeros(2)
-            hdata = Batch.from_data_list(to_hdata_list(graph_obs, done))
-            z, z_actions = self.encode(hdata)
-            self._get_action_logits(z_hexes, z_global, graph_obs)
-            self._get_value(z_global)
-
-        def kaiming_init(linlayer):
-            # Assume LeakyReLU's negative slope is the default
-            a = torch.nn.LeakyReLU().negative_slope
-            nn.init.kaiming_uniform_(linlayer.weight, nonlinearity='leaky_relu', a=a)
-            if linlayer.bias is not None:
-                nn.init.zeros_(linlayer.bias)
-
-        def xavier_init(linlayer):
-            nn.init.xavier_uniform_(linlayer.weight)
-            if linlayer.bias is not None:
-                nn.init.zeros_(linlayer.bias)
-
-        # For layers followed by ReLU or LeakyReLU, use Kaiming (He).
-        if self.legacy_global_encoder:
-            kaiming_init(self.encoder_other[0])
-        else:
-            kaiming_init(self.encoder_global[0])
-            kaiming_init(self.encoder_global[2])
-
-        # For other layers, use Xavier.
-        xavier_init(self.act0_head)
-        xavier_init(self.Wk_hex1)
-        xavier_init(self.Wk_hex2)
-        xavier_init(self.Wq_hex1)
-        xavier_init(self.Wq_hex2)
-        kaiming_init(self.critic[0])
-        xavier_init(self.critic[2])
-
-    def encode(self, hdata):
-        z_hexes_dict = self.encoder_hexes(hdata)
-        z_hexes, hmask = to_dense_batch(z_hexes_dict["hex"], hdata["hex"].batch)
-
-        # zhex is (B, Nmax, Z)
-        # hmask is (B, Nmax)
-        # where Nmax is 165 (all graphs have N=165 nodes in this case)
-        # => hmask will be all-true (no padded nodes)
-        # Note that this would not be the case if e.g. units were also nodes.
-        assert torch.all(hmask)
-
-        z_global = self.encoder_global(torch.cat([
-            hdata.obs[:, :self.dim_other],  # [B, dim_other]
-            z_hexes.mean(1),                # [B, D]
-            z_hexes.max(1).values,          # [B, D]
-        ], dim=-1))
-
-        return z_hexes, z_global
-
-    def _get_value(self, z_global):
-        return self.critic(z_global)
-
-    def _get_actsample_train(self, z_hexes, z_global, obs, action):
-        B = obs.shape[0]
-        b_inds = torch.arange(B, device=obs.device)
-
-        act0, hex1, hex2 = self.inverse_table[action].unbind(1)
-
-        act0_logits = self.act0_head(z_global)
-
-        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
-        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
-        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
-
-        # 1.1 for 0=WAIT: nothing to do (all zeros)
-        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
-        mask_hex1[:, 1, :] = movemask
-
-        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
-        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
-
-        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
-        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
-        mask_hex1[:, 3, :] = shootmask
-
-        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
-
-        # 2.1 for 0=WAIT: nothing to do (all zeros)
-        # 2.2 for 1=MOVE: nothing to do (all zeros)
-        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
-        dest = self.amove_hexes.expand(B, -1, -1)
-        valid = amovemask & self.amove_hexes_valid.expand_as(dest)
-        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
-        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
-
-        # Select only valid triples and write
-        b_sel = b_idx[valid]
-        s_sel = s_idx[valid]
-        t_sel = dest[valid]
-
-        mask_hex2[b_sel, 2, s_sel, t_sel] = True
-
-        # 2.4 for 3=SHOOT: nothing to do (all zeros)
-
-        # 3. MASK_ACTION - ie. allowed main action mask
-        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
-
-        # 0=WAIT
-        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
-
-        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
-        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
-
-        # Next, we sample:
-        #
-        # 1. Sample MAIN ACTION
-        dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
-
-        # 2. Sample HEX1 (with mask corresponding to the main action)
-        act0_emb = self.emb_act0(act0)
-        d = act0_emb.size(-1)
-        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
-        k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
-        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
-
-        # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
-        z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
-        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
-        k_hex2 = self.Wk_hex2(z_hexes)                                         # (B, 165, d)
-        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
-
-        return ActionSample(
-            act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
-            hex1=hex1, hex1_logits=hex1_logits, hex1_dist=dist_hex1,
-            hex2=hex2, hex2_logits=hex2_logits, hex2_dist=dist_hex2,
-            action=action,
-        )
-
-    def _get_actsample_eval(self, z_hexes, z_global, obs, deterministic=False):
-        B = obs.shape[0]
-        b_inds = torch.arange(B, device=obs.device)
-
-        act0_logits = self.act0_head(z_global)
-
-        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
-        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
-        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
-
-        # 1.1 for 0=WAIT: nothing to do (all zeros)
-        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
-        mask_hex1[:, 1, :] = movemask
-
-        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
-        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
-
-        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
-        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
-        mask_hex1[:, 3, :] = shootmask
-
-        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        mask_hex2 = torch.zeros([B, 4, 165, 165], dtype=torch.bool, device=obs.device)
-
-        # 2.1 for 0=WAIT: nothing to do (all zeros)
-        # 2.2 for 1=MOVE: nothing to do (all zeros)
-        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
-        dest = self.amove_hexes.expand(B, -1, -1)
-        valid = amovemask & self.amove_hexes_valid.expand_as(dest)
-        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
-        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
-
-        # Select only valid triples and write
-        b_sel = b_idx[valid]
-        s_sel = s_idx[valid]
-        t_sel = dest[valid]
-
-        mask_hex2[b_sel, 2, s_sel, t_sel] = True
-
-        # 2.4 for 3=SHOOT: nothing to do (all zeros)
-
-        # 3. MASK_ACTION - ie. allowed main action mask
-        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
-
-        # 0=WAIT
-        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
-
-        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
-        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
-
-        # Next, we sample:
-        #
-        # 1. Sample MAIN ACTION
-        dist_act0 = CategoricalMasked(logits=act0_logits, mask=mask_action)
-        act0 = dist_act0.probs.argmax(dim=1) if deterministic else dist_act0.sample()  # for testing vs. executorch
-
-        # 2. Sample HEX1 (with mask corresponding to the main action)
-        act0_emb = self.emb_act0(act0)
-        d = act0_emb.size(-1)
-        q_hex1 = self.Wq_hex1(torch.cat([z_global, act0_emb], -1))              # (B, d)
-        k_hex1 = self.Wk_hex1(z_hexes)                                          # (B, 165, d)
-        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        dist_hex1 = CategoricalMasked(logits=hex1_logits, mask=mask_hex1[b_inds, act0])
-        hex1 = dist_hex1.probs.argmax(dim=1) if deterministic else dist_hex1.sample()
-
-        # 3. Sample HEX2 (with mask corresponding to the main action + HEX1)
-        z_hex1 = z_hexes[b_inds, hex1, :]                                       # (B, d)
-        q_hex2 = self.Wq_hex2(torch.cat([z_global, z_hex1], -1))                # (B, d)
-        k_hex2 = self.Wk_hex2(z_hexes)                                          # (B, 165, d)
-        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165)
-        dist_hex2 = CategoricalMasked(logits=hex2_logits, mask=mask_hex2[b_inds, act0, hex1])
-        hex2 = dist_hex2.probs.argmax(dim=1) if deterministic else dist_hex2.sample()  # for testing vs. executorch
-
-        action = self.action_table[act0, hex1, hex2]
-
-        return ActionSample(
-            act0=act0, act0_logits=act0_logits, act0_dist=dist_act0,
-            hex1=hex1, hex1_logits=hex1_logits, hex1_dist=dist_hex1,
-            hex2=hex2, hex2_logits=hex2_logits, hex2_dist=dist_hex2,
-            action=action,
-        )
-
-    def _get_action_logits(self, z_hexes, z_global, obs) -> ActionLogits:
-        B = obs.shape[0]
-        # b_inds = torch.arange(B, device=obs.device)
-
-        act0_logits = self.act0_head(z_global)
-
-        # 1. MASK_HEX1 - ie. allowed hex#1 for each action
-        mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
-        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
-
-        # 1.1 for 0=WAIT: nothing to do (all zeros)
-        # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
-        mask_hex1[:, 1, :] = movemask
-
-        # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
-        mask_hex1[:, 2, :] = amovemask.any(dim=-1)
-
-        # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
-        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
-        mask_hex1[:, 3, :] = shootmask
-
-        # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
-        # (it's only for AMOVE action, => shape is (B, 165, 165) instead of (B, 4, 165, 165))
-        mask_hex2 = torch.zeros([B, 165, 165], dtype=torch.bool, device=obs.device)
-
-        # 2.1 for 0=WAIT: nothing to do (all zeros)
-        # 2.2 for 1=MOVE: nothing to do (all zeros)
-        # 2.3 for 2=AMOVE: For each SRC hex, create a DST hex mask of allowed hexes
-        dest = self.amove_hexes.expand(B, -1, -1)
-        valid = amovemask & self.amove_hexes_valid.expand_as(dest)
-        b_idx = torch.arange(B, device=obs.device).view(B, 1, 1).expand_as(dest)
-        s_idx = torch.arange(165, device=obs.device).view(1, 165, 1).expand_as(dest)
-
-        # Select only valid triples and write
-        b_sel = b_idx[valid]
-        s_sel = s_idx[valid]
-        t_sel = dest[valid]
-
-        mask_hex2[b_sel, s_sel, t_sel] = True
-
-        # 2.4 for 3=SHOOT: nothing to do (all zeros)
-
-        # 3. MASK_ACTION - ie. allowed main action mask
-        mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
-
-        # 0=WAIT
-        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
-
-        # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
-        mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
-
-        # HEX1
-        assert len(MainAction) == 4
-        act0_emb = self.emb_act0(torch.arange(4, device=obs.device))            # (4, d)
-        d = act0_emb.size(-1)
-
-        q_hex1 = self.Wq_hex1(
-            torch.cat([
-                z_global.unsqueeze(1).expand(B, 4, d),                          # (B, 4, d)
-                act0_emb.unsqueeze(0).expand(B, 4, d)                           # (B, 4, d)
-            ], dim=-1)                                                          # (B, 4, 2d)
-        )                                                                       # (B, 4, d)
-        k_hex1 = self.Wk_hex1(z_hexes).unsqueeze(1).expand(B, 4, 165, d)        # (B, 4, 165, d)
-        hex1_logits = (k_hex1 @ q_hex1.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 4, 165)
-
-        # HEX2
-        # XXX: technically, HEX2 logits should be (B, 4, 165, 165), i.e conditioned on act0 AND hex1
-        # However, HEX2 is only relevant for a single act0 case (3=AMOVE)
-        # => simply omit it and go with (B, 165, 165)
-        q_hex2 = self.Wq_hex2(
-            torch.cat([
-                z_global.unsqueeze(1).expand(B, 165, d),                        # (B, 165, d)
-                z_hexes                                                         # (B, 165, d)
-            ], dim=-1)                                                          # (B, 165, 2d)
-        )                                                                       # (B, 165, d)
-        k_hex2 = self.Wk_hex2(z_hexes).unsqueeze(1).expand(B, 165, 165, d)      # (B, 165, 165, d)
-        hex2_logits = (k_hex2 @ q_hex2.unsqueeze(-1)).squeeze(-1) / (d ** 0.5)  # (B, 165, 165)
-
-        return ActionLogits(
-            action_table=self.action_table,
-            inverse_table=self.inverse_table,
-            act0_logits=act0_logits,
-            act0_mask=mask_action,
-            hex1_logits=hex1_logits,
-            hex1_mask=mask_hex1,
-            hex2_logits=hex2_logits,
-            hex2_mask=mask_hex2,
-        )
-
-    def get_actsample_train(self, hdata):
-        z_hexes, z_global = self.encode(hdata)
-        return self._get_actsample_train(z_hexes, z_global, hdata.obs, hdata.action)
-
-    def get_actsample_eval(self, hdata, deterministic=False):
-        z_hexes, z_global = self.encode(hdata)
-        return self._get_actsample_eval(z_hexes, z_global, hdata.obs, deterministic)
-
-    # For producing full action logits
-    # Not used in training (too much memory consumption)
-    # Keeping here since will be needed in exported models
-    def get_action_logits(self, hdata) -> ActionLogits:
-        z_hexes, z_global = self.encode(hdata)
-        obs = hdata.obs
-        return self._get_action_logits(z_hexes, z_global, obs)
-
-    def get_value(self, hdata):
-        _, z_global = self.encode(hdata)
-        return self._get_value(z_global)
-
-
 class DNAModel(nn.Module):
     def __init__(self, config, device):
         super().__init__()
-        self.model_policy = Model(config)
-        self.model_value = Model(config)
+        self.model_policy = GNNModel(config)
+        self.model_value = GNNModel(config)
         self.device = device
         self.to(device)
 
@@ -885,6 +216,7 @@ class ModelLoaderInfo():
     weights_file: str
 
 
+
 def collect_samples(logger, model, venv, num_vsteps, storage):
     assert not torch.is_inference_mode_enabled()  # causes issues during training
     assert not torch.is_grad_enabled()
@@ -897,18 +229,16 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         logger.debug("(train) vstep: %d" % vstep)
         v_hdata_list = storage.v_next_hdata_list
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
+        add_action_active_local_ids(v_hdata_batch)
 
-        if USE_MODEL_SAMPLING:
-            v_actsample = model.model_policy.get_actsample_eval(v_hdata_batch).cpu()
-        else:
-            v_actsample = model.model_policy.get_action_logits(v_hdata_batch).sample().cpu()
-        v_value = model.model_value.get_value(v_hdata_batch).flatten().cpu()
-        _, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.numpy())
+        v_action, v_logprob, v_entropy = model.model_policy.forward_policy(v_hdata_batch)
+        v_value = model.model_policy.forward_value(v_hdata_batch)
+        _, v_rew, v_term, v_trunc, v_info = venv.step(v_action.cpu().numpy())
         v_rew = torch.as_tensor(v_rew)
 
         for i, hdata in enumerate(v_hdata_list):
-            hdata.action = v_actsample.action[i]
-            hdata.logprob = v_actsample.logprob[i]
+            hdata.action = v_action[i]
+            hdata.logprob = v_logprob[i]
             hdata.value = v_value[i]
             hdata.reward = v_rew[i]
 
@@ -917,7 +247,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             storage.bv_rewards[vstep, i] = hdata.reward
 
         storage.v_next_hdata_list = to_hdata_list(
-            venv.call("graph_obs")
+            venv.call("obs"),
             torch.as_tensor(np.logical_or(v_term, v_trunc)),
         )
 
@@ -957,7 +287,8 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
 
     # bootstrap value if not done
     v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list).to(model.device)
-    v_next_value = model.model_value.get_value(v_next_hdata_batch).flatten().cpu()
+    add_action_active_local_ids(v_next_hdata_batch)
+    v_next_value = model.model_value.forward_value(v_next_hdata_batch).flatten().cpu()
 
     for i, hdata in enumerate(storage.v_next_hdata_list):
         hdata.value = v_next_value[i]
@@ -976,13 +307,12 @@ def eval_model(logger, model, venv, num_vsteps):
         # logger.debug("(eval) vstep: %d" % vstep)
         # print(venv.render()[0])
 
-        v_hdata_list = to_hdata_list(torch.as_tensor(v_obs), v_done, venv.call("links"))
+        v_hdata_list = to_hdata_list(venv.call("obs"), v_done)
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
-        if USE_MODEL_SAMPLING:
-            v_actsample = model.model_policy.get_actsample_eval(v_hdata_batch)
-        else:
-            v_actsample = model.model_policy.get_action_logits(v_hdata_batch).sample()
-        v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.cpu().numpy())
+        add_action_active_local_ids(v_hdata_batch)
+
+        v_action, v_logprob, v_entropy = model.model_policy.forward_policy(v_hdata_batch)
+        _, v_rew, v_term, v_trunc, v_info = venv.step(v_action.cpu().numpy())
 
         # See notes/gym_vector.txt
         if "_final_info" in v_info:
@@ -1021,7 +351,7 @@ def eval_model(logger, model, venv, num_vsteps):
 def train_model(
     logger,
     model: DNAModel,
-    old_model_policy: Model,
+    old_model_policy: GNNModel,
     optimizer_policy,
     optimizer_value,
     optimizer_distill,
@@ -1035,6 +365,7 @@ def train_model(
     num_vsteps = train_config["num_vsteps"]
     num_envs = sum(train_config["env"]["num_envs_per_opponent"].values())
     v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list)
+    add_action_active_local_ids(v_next_hdata_batch)
 
     # compute advantages
     with torch.no_grad():
@@ -1079,13 +410,10 @@ def train_model(
         for i, mb in enumerate(dataloader):
             logger.debug("(train.policy) minibatch: %d" % i)
             mb = mb.to(model.device, non_blocking=True)
+            add_action_active_local_ids(mb)
 
-            if USE_MODEL_SAMPLING:
-                newactsample = model.model_policy.get_actsample_train(mb)
-            else:
-                newactsample = model.model_policy.get_action_logits(mb).sample(mb.action)
-
-            logratio = newactsample.logprob - mb.logprob
+            _newaction, newlogprob, newentropy = model.model_policy.forward_policy(mb)
+            logratio = newlogprob - mb.logprob
             ratio = logratio.exp()
 
             with torch.no_grad():
@@ -1108,7 +436,7 @@ def train_model(
             pg_loss1 = -mb_advantages * ratio
             pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - train_config["clip_coef"], 1 + train_config["clip_coef"])
             policy_loss = torch.max(pg_loss1, pg_loss2).mean()
-            entropy_loss = newactsample.entropy.mean()
+            entropy_loss = newentropy.mean()
 
             policy_losses[i] = policy_loss.detach()
             entropy_losses[i] = entropy_loss.detach()
@@ -1132,8 +460,9 @@ def train_model(
         for i, mb in enumerate(dataloader):
             logger.debug("(train.value) minibatch: %d" % i)
             mb = mb.to(model.device, non_blocking=True)
+            add_action_active_local_ids(mb)
 
-            newvalue = model.model_value.get_value(mb)
+            newvalue = model.model_value.forward_value(mb)
 
             # Value loss
             # XXX: this overflows under autocast since ep_returns values are around ~1000
@@ -1177,52 +506,40 @@ def train_model(
         for i, mb in enumerate(dataloader):
             logger.debug("(train.distill) minibatch: %d" % i)
             mb = mb.to(model.device, non_blocking=True)
+            add_action_active_local_ids(mb)
 
-            if USE_MODEL_SAMPLING:
-                # Compute policy and value targets
-                with torch.no_grad():
-                    old_actsample = old_model_policy.get_actsample_eval(mb)
-                    value_target = model.model_value.get_value(mb)
+            old_gnn_out = old_model_policy.gnn(mb)
+            new_gnn_out = model.model_policy.gnn(mb)
 
-                # XXX: must pass action=<old_action> to ensure masks for hex1 and hex2 are the same
-                #     (if actions differ, masks will differ and KLD will become NaN)
-                new_z_hexes, new_z_global = model.model_policy.encode(mb)
-                new_actsample = model.model_policy._get_actsample_train(new_z_hexes, new_z_global, mb.obs, old_actsample.action)
-                new_value = model.model_policy._get_value(new_z_global)
+            (
+                old_active_logits,
+                old_active_batch_index,
+                old_active_local_action_ids,
+                old_batch_size
+            ) = old_model_policy._get_active_logits(old_gnn_out, mb)
 
-                # Distillation loss
-                distill_actloss = (
-                    CategoricalMasked.kld(old_actsample.act0_dist, new_actsample.act0_dist)
-                    + CategoricalMasked.kld(old_actsample.hex1_dist, new_actsample.hex1_dist)
-                    + CategoricalMasked.kld(old_actsample.hex2_dist, new_actsample.hex2_dist)
-                ).mean()
-            else:
-                # Compute policy and value targets
-                with torch.no_grad():
-                    old_actlogits = old_model_policy.get_action_logits(mb)
-                    value_target = model.model_value.get_value(mb)
+            (
+                new_active_logits,
+                new_active_batch_index,
+                new_active_local_action_ids,
+                new_batch_size
+            ) = model.model_policy._get_active_logits(new_gnn_out, mb)
 
-                new_z_hexes, new_z_global = model.model_policy.encode(mb)
-                new_actlogits = model.model_policy._get_action_logits(new_z_hexes, new_z_global, mb.obs)
-                new_value = model.model_policy._get_value(new_z_global)
+            assert old_batch_size == new_batch_size
+            assert torch.equal(old_active_batch_index, new_active_batch_index)
+            assert torch.equal(old_active_local_action_ids, new_active_local_action_ids)
 
-                old_act0_dist = CategoricalMasked(old_actlogits.act0_logits, old_actlogits.act0_mask)
-                old_hex1_dist = CategoricalMasked(old_actlogits.hex1_logits, old_actlogits.hex1_mask)
-                old_hex2_dist = CategoricalMasked(old_actlogits.hex2_logits, old_actlogits.hex2_mask)
-                new_act0_dist = CategoricalMasked(new_actlogits.act0_logits, new_actlogits.act0_mask)
-                new_hex1_dist = CategoricalMasked(new_actlogits.hex1_logits, new_actlogits.hex1_mask)
-                new_hex2_dist = CategoricalMasked(new_actlogits.hex2_logits, new_actlogits.hex2_mask)
+            old_log_probs = torch.log(gnn_softmax(old_active_logits, old_active_batch_index).clamp_min(1e-12))
+            new_log_probs = torch.log(gnn_softmax(new_active_logits, new_active_batch_index).clamp_min(1e-12))
+            per_action_kl = old_log_probs.exp() * (old_log_probs - new_log_probs)
+            b_kl = scatter_sum(per_action_kl, old_active_batch_index, dim=0, dim_size=batch_size)
+            distill_actloss = b_kl.mean()
 
-                # Distillation loss
-                distill_actloss = (
-                    CategoricalMasked.kld(old_act0_dist, new_act0_dist).mean()
-                    + CategoricalMasked.kld(old_hex1_dist, new_hex1_dist).mean()
-                    + CategoricalMasked.kld(old_hex2_dist, new_hex2_dist).mean()
-                )
-
+            value_target = model.model_value.forward_value(mb)
+            new_value = model.model_policy._forward_value(new_gnn_out)
             distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
-            distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
 
+            distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
             distill_losses[i] = distill_loss.detach()
 
             if not torch.isfinite(distill_loss).all():
@@ -1498,7 +815,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         train_config["env"]["num_envs_per_opponent"]["model"],
         train_model_loader,
         logprefix="train-",
-        e_max=3300
     )
 
     logger.info("Initialized %d train envs (%s)" % (train_venv.num_envs, train_config["env"]["num_envs_per_opponent"]))
@@ -1524,7 +840,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
             envcfg["num_envs_per_opponent"]["model"],
             eval_model_loader,
             logprefix=f"eval/{name}-",
-            e_max=3300
         )
 
         logger.info("Initialized %d eval envs (variant '%s', %s)" % (eval_venv_variants[name].num_envs, name, envcfg["num_envs_per_opponent"]))
