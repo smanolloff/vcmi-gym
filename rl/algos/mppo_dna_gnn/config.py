@@ -140,24 +140,12 @@ config = dict(
         torch_compile=False,
     ),
     model=dict(
-        policy_head_hidden_channels=128,
-        policy_head_dropout=0.3,
-        value_head_hidden_channels=128,
-        value_head_dropout=0.3,
+        critic_hidden_features=256,
         gnn_num_layers=3,
-        gnn_hidden_channels=128,
-        gnn_out_channels=64,
-        gnn_conv_kwargs=dict(
-            aggr="softmax",
-            learn_t=True,
-            num_layers=2,
-            norm="layer",
-
-            # For this comprehensive heterogeneous graph, prefer explicit
-            # residual connections over automatic self-loops. Node types have
-            # very different meanings and many relations are directional or
-            # role-specific.
-            add_self_loops=False,
+        gnn_out_channels=128,
+        gnn_hidden_channels=256,
+        gnn_kwargs=dict(
+            add_self_loops=True,
         )
     ),
 )
@@ -166,13 +154,14 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 
 # Debug
 if os.getenv("VASTAI", None) != "1":
-    config["train"]["num_vsteps"] = 10
-    config["train"]["num_minibatches"] = 2
-    config["train"]["update_epochs"] = 1
+    config["train"]["num_vsteps"] = 40
+    config["train"]["num_minibatches"] = 4
+    config["train"]["update_epochs"] = 2
     config["train"]["env"]["num_envs_per_opponent"] = {k: min(v, 2) for k, v in config["train"]["env"]["num_envs_per_opponent"].items()}
     # config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     # config["train"]["env"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
+    config["eval"]["num_vsteps"] = 100
     # config["eval"]["env_variants"] = dict(list(config["eval"]["env_variants"].items())[:1])
     for name, envcfg in config["eval"]["env_variants"].items():
         envcfg["num_envs_per_opponent"] = {k: min(v, 1) for k, v in envcfg["num_envs_per_opponent"].items()}
@@ -183,12 +172,14 @@ if os.getenv("VASTAI", None) != "1":
     # DEBUG dual vec env:
     config["train"]["env"]["kwargs"] = list(config["eval"]["env_variants"].values())[0]["kwargs"]
 
-    config["eval"]["at_script_start"] = False
     config["eval"]["interval_s"] = 300
     config["wandb_log_interval_s"] = 180
 
     config["model"]["gnn_num_layers"] = 3
-    config["model"]["gnn_hidden_channels"] = 16
-    config["model"]["gnn_out_channels"] = 8
-    config["model"]["value_head_hidden_channels"] = 16
-    config["model"]["policy_head_hidden_channels"] = 16
+    config["model"]["gnn_num_heads"] = 1
+    config["model"]["gnn_hidden_channels"] = 32
+    config["model"]["gnn_out_channels"] = 16
+    config["model"]["critic_hidden_features"] = 16
+    config["model"]["result_predictor_hidden_features"] = 16
+    config["model"]["z_size_other"] = 16
+    config["model"]["z_size_merged"] = 50
