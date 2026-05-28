@@ -150,8 +150,8 @@ config = dict(
         gnn_conv_kwargs=dict(
             aggr="softmax",
             learn_t=True,
-            num_layers=2,
-            norm="layer",
+            num_layers=2,  # number of MLP layers (within a single GNN layer)
+            norm=None,  # already applying LayerNorm externally (with the residual)
 
             # For this comprehensive heterogeneous graph, prefer explicit
             # residual connections over automatic self-loops. Node types have
@@ -166,9 +166,9 @@ config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].repl
 
 # Debug
 if os.getenv("VASTAI", None) != "1":
-    config["train"]["num_vsteps"] = 10
-    config["train"]["num_minibatches"] = 2
-    config["train"]["update_epochs"] = 1
+    config["train"]["num_vsteps"] = 40
+    config["train"]["num_minibatches"] = 4
+    config["train"]["update_epochs"] = 2
     config["train"]["env"]["num_envs_per_opponent"] = {k: min(v, 2) for k, v in config["train"]["env"]["num_envs_per_opponent"].items()}
     # config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     # config["train"]["env"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
@@ -188,7 +188,7 @@ if os.getenv("VASTAI", None) != "1":
     config["wandb_log_interval_s"] = 180
 
     config["model"]["gnn_num_layers"] = 3
-    config["model"]["gnn_hidden_channels"] = 16
-    config["model"]["gnn_out_channels"] = 8
-    config["model"]["value_head_hidden_channels"] = 16
-    config["model"]["policy_head_hidden_channels"] = 16
+    config["model"]["gnn_hidden_channels"] = 32
+    config["model"]["gnn_out_channels"] = 16
+    config["model"]["value_head_hidden_channels"] = 32
+    config["model"]["policy_head_hidden_channels"] = 32
