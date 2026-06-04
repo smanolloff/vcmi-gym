@@ -86,7 +86,7 @@ config = dict(
         env_variants={
             # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0, 0), town_chance=100),
             "BattleAI.open": eval_variant(
-                num_envs_per_opponent=gen_num_envs(0, 2, 0, 0),
+                num_envs_per_opponent=gen_num_envs(2, 0, 0, 0),
                 model=None,
                 town_chance=0,
             ),
@@ -186,7 +186,7 @@ if os.getenv("VASTAI", None) != "1":
     config["wandb_log_interval_s"] = 180
 
     config["model"]["gnn_num_layers"] = 3
-    config["model"]["gnn_hidden_channels"] = 32
-    config["model"]["gnn_out_channels"] = 16
-    config["model"]["value_head_hidden_channels"] = 32
-    config["model"]["policy_head_hidden_channels"] = 32
+    config["model"]["gnn_hidden_channels"] = 64
+    config["model"]["gnn_out_channels"] = 32
+    config["model"]["value_head_hidden_channels"] = 64
+    config["model"]["policy_head_hidden_channels"] = 64
