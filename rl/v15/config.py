@@ -137,7 +137,6 @@ config = dict(
         torch_autocast=False,
         torch_cuda_matmul=False,
         torch_detect_anomaly=False,
-        torch_compile=False,
     ),
     model=dict(
         policy_head_hidden_channels=128,

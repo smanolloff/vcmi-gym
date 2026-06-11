@@ -439,7 +439,7 @@ class GNNModel(nn.Module):
         device = active_logits.device
 
         counts = torch.bincount(active_batch_index, minlength=batch_size)
-        max_actions = counts.max().item()
+        max_actions = int(counts.max().item())
 
         padded_logits = torch.full(
             (batch_size, max_actions),
@@ -559,7 +559,7 @@ class GNNModel(nn.Module):
 
 
 if __name__ == "__main__":
-    from rl.algos.mppo_dna_gnn.dual_vec_env_v15 import DualVecEnv
+    from rl.v15.dual_vec_env import DualVecEnv
 
     # venv = DualVecEnv(num_envs_stupidai=2, env_kwargs=dict(mapname="gym/generated/4096/4x1024.vmap", random_heroes=1))
     venv = DualVecEnv(num_envs_stupidai=2, env_kwargs=dict(mapname="gym/A1.vmap"))
@@ -585,9 +585,9 @@ if __name__ == "__main__":
 
     # DualVecEnv returns dummy obs due to issues with dynamic obs in VectorEnv
     _dummy, b_rew, b_term, b_trunc, b_info = venv.step(venv.call("random_action"))
-    b_obs = venv.call("obs")
+    b_obs = venv.call("graph_obs")
     b_done = torch.as_tensor(np.logical_or(b_term, b_trunc))
-    hdata = to_hdata_batch(to_hdata_list(b_obs, b_done))
+    hdata = Batch.from_data_list(to_hdata_list(b_obs, b_done))
 
     import ipdb; ipdb.set_trace()  # noqa
 

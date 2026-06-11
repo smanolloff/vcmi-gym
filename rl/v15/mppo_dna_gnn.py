@@ -96,7 +96,7 @@ class Storage:
         v = venv.num_envs
         self.rollout_buffer = []  # contains Batch() objects
         self.v_next_hdata_list = to_hdata_list(
-            venv.call("obs"),
+            venv.call("graph_obs"),
             torch.zeros(v, device=device),
         )
 
@@ -115,7 +115,8 @@ class TrainStats:
     policy_loss: float
     entropy_loss: float
     distill_loss: float
-    approx_kl: float
+    policy_approx_kl: float
+    distill_approx_kl: float
     clipfrac: float
     explained_var: float
 
@@ -231,14 +232,14 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         add_action_active_local_ids(v_hdata_batch)
 
         v_action, v_logprob, v_entropy = model.model_policy.forward_policy(v_hdata_batch)
-        v_value = model.model_policy.forward_value(v_hdata_batch)
+        v_value = model.model_value.forward_value(v_hdata_batch).flatten()
         _, v_rew, v_term, v_trunc, v_info = venv.step(v_action.cpu().numpy())
         v_rew = torch.as_tensor(v_rew)
 
         for i, hdata in enumerate(v_hdata_list):
-            hdata.action = v_action[i]
-            hdata.logprob = v_logprob[i]
-            hdata.value = v_value[i]
+            hdata.action = v_action[i].detach().cpu()
+            hdata.logprob = v_logprob[i].detach().cpu()
+            hdata.value = v_value[i].detach().cpu()
             hdata.reward = v_rew[i]
 
             storage.bv_dones[vstep, i] = hdata.done
@@ -246,7 +247,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
             storage.bv_rewards[vstep, i] = hdata.reward
 
         storage.v_next_hdata_list = to_hdata_list(
-            venv.call("obs"),
+            venv.call("graph_obs"),
             torch.as_tensor(np.logical_or(v_term, v_trunc)),
         )
 
@@ -306,12 +307,13 @@ def eval_model(logger, model, venv, num_vsteps):
         # logger.debug("(eval) vstep: %d" % vstep)
         # print(venv.render()[0])
 
-        v_hdata_list = to_hdata_list(venv.call("obs"), v_done)
+        v_hdata_list = to_hdata_list(venv.call("graph_obs"), v_done)
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
         add_action_active_local_ids(v_hdata_batch)
 
-        v_action, v_logprob, v_entropy = model.model_policy.forward_policy(v_hdata_batch)
+        v_action, v_logprob, v_entropy = model.model_policy.forward_policy(v_hdata_batch, deterministic=True)
         _, v_rew, v_term, v_trunc, v_info = venv.step(v_action.cpu().numpy())
+        v_done = torch.as_tensor(np.logical_or(v_term, v_trunc), dtype=torch.bool)
 
         # See notes/gym_vector.txt
         if "_final_info" in v_info:
@@ -399,36 +401,47 @@ def train_model(
 
     clipfracs = []
 
-    policy_losses = torch.zeros(train_config["num_minibatches"])
-    entropy_losses = torch.zeros(train_config["num_minibatches"])
-    value_losses = torch.zeros(train_config["num_minibatches"])
-    distill_losses = torch.zeros(train_config["num_minibatches"])
+    approx_kl = 0
+    kl_exceeded = False
+    policy_approx_kls = []
+    policy_losses = []
+    entropy_losses = []
+    value_losses = []
+    distill_losses = []
 
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.policy) epoch: %d" % epoch)
         for i, mb in enumerate(dataloader):
             logger.debug("(train.policy) minibatch: %d" % i)
+
             mb = mb.to(model.device, non_blocking=True)
+
             add_action_active_local_ids(mb)
 
-            _newaction, newlogprob, newentropy = model.model_policy.forward_policy(mb)
+            with autocast_ctx(True):
+                _newaction, newlogprob, newentropy = model.model_policy.forward_policy(mb, b_action=mb.action)
+
             logratio = newlogprob - mb.logprob
             ratio = logratio.exp()
 
             with torch.no_grad():
                 # calculate approx_kl http://joschu.net/blog/kl-approx.html
                 approx_kl = ((ratio - 1) - logratio).mean()
+                policy_approx_kls.append(approx_kl.detach().item())
                 clipfracs += [((ratio - 1.0).abs() > train_config["clip_coef"]).float().mean().item()]
+
+            if train_config["target_kl"] is not None and approx_kl > train_config["target_kl"]:
+                kl_exceeded = True
+                break
 
             mb_advantages = mb.advantage
             if train_config["norm_adv"]:
                 # The 1e-8 is not numerically safe under autocast
                 # mb_advantages = (mb.advantage - mb.advantage.mean()) / (mb.advantage.std() + 1e-8)
-                with autocast_ctx(False):
-                    adv32 = mb.advantage.float()
-                    mean = adv32.mean()
-                    var = adv32.var(unbiased=False)
-                    norm = (adv32 - mean) * torch.rsqrt(var + 1e-8)
+                adv32 = mb.advantage.float()
+                mean = adv32.mean()
+                var = adv32.var(unbiased=False)
+                norm = (adv32 - mean) * torch.rsqrt(var + 1e-8)
                 mb_advantages = norm.to(mb.advantage.dtype)
 
             # Policy loss
@@ -437,20 +450,19 @@ def train_model(
             policy_loss = torch.max(pg_loss1, pg_loss2).mean()
             entropy_loss = newentropy.mean()
 
-            policy_losses[i] = policy_loss.detach()
-            entropy_losses[i] = entropy_loss.detach()
+            policy_losses.append(policy_loss.detach().item())
+            entropy_losses.append(entropy_loss.detach().item())
 
             action_loss = policy_loss - entropy_loss * train_config["ent_coef"]
 
-            with autocast_ctx(False):
-                scaler.scale(action_loss).backward()
-                scaler.unscale_(optimizer_policy)  # needed for clip_grad_norm
-                nn.utils.clip_grad_norm_(model.model_policy.parameters(), train_config["max_grad_norm"])
-                scaler.step(optimizer_policy)
-                scaler.update()
-                optimizer_policy.zero_grad()
+            scaler.scale(action_loss).backward()
+            scaler.unscale_(optimizer_policy)  # needed for clip_grad_norm
+            nn.utils.clip_grad_norm_(model.model_policy.parameters(), train_config["max_grad_norm"])
+            scaler.step(optimizer_policy)
+            scaler.update()
+            optimizer_policy.zero_grad()
 
-        if train_config["target_kl"] is not None and approx_kl > train_config["target_kl"]:
+        if kl_exceeded:
             break
 
     # Value network optimization
@@ -461,72 +473,98 @@ def train_model(
             mb = mb.to(model.device, non_blocking=True)
             add_action_active_local_ids(mb)
 
-            newvalue = model.model_value.forward_value(mb)
+            with autocast_ctx(True):
+                newvalue = model.model_value.forward_value(mb)
 
             # Value loss
-            # XXX: this overflows under autocast since ep_returns values are around ~1000
-            #       (e.g. value loss becomes 484841.34375, too big for float16)
-            #       => wrapped it in autocast(false), but that does NOT fix the NaN (why?)
-            with autocast_ctx(False):
-                newvalue = newvalue.view(-1).float()
-                mb.value = mb.value.float()
-                mb.ep_return = mb.ep_return.float()
+            newvalue = newvalue.view(-1).float()
+            mb.value = mb.value.float()
+            mb.ep_return = mb.ep_return.float()
 
-                if train_config["clip_vloss"]:
-                    v_loss_unclipped = (newvalue - mb.ep_return) ** 2
-                    v_clipped = mb.value + torch.clamp(
-                        newvalue - mb.value,
-                        -train_config["clip_coef"],
-                        train_config["clip_coef"],
-                    )
-                    v_loss_clipped = (v_clipped - mb.ep_return) ** 2
-                    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
-                    value_loss = 0.5 * v_loss_max.mean()
-                else:
-                    # XXX: SIMO: SB3 does not multiply by 0.5 here
-                    value_loss = 0.5 * ((newvalue - mb.ep_return) ** 2).mean()
+            if train_config["clip_vloss"]:
+                v_loss_unclipped = (newvalue - mb.ep_return) ** 2
+                v_clipped = mb.value + torch.clamp(
+                    newvalue - mb.value,
+                    -train_config["clip_coef"],
+                    train_config["clip_coef"],
+                )
+                v_loss_clipped = (v_clipped - mb.ep_return) ** 2
+                v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+                value_loss = 0.5 * v_loss_max.mean()
+            else:
+                # XXX: SIMO: SB3 does not multiply by 0.5 here
+                value_loss = 0.5 * ((newvalue - mb.ep_return) ** 2).mean()
 
-            value_losses[i] = value_loss.detach()
+            value_losses.append(value_loss.detach().item())
 
-            with autocast_ctx(False):
-                scaler.scale(value_loss).backward()
-                scaler.unscale_(optimizer_value)  # needed for clip_grad_norm
-                nn.utils.clip_grad_norm_(model.model_value.parameters(), train_config["max_grad_norm"])
-                scaler.step(optimizer_value)
-                scaler.update()
-                optimizer_value.zero_grad()
+            scaler.scale(value_loss).backward()
+            scaler.unscale_(optimizer_value)  # needed for clip_grad_norm
+            nn.utils.clip_grad_norm_(model.model_value.parameters(), train_config["max_grad_norm"])
+            scaler.step(optimizer_value)
+            scaler.update()
+            optimizer_value.zero_grad()
 
     # Value network to policy network distillation
     old_model_policy.load_state_dict(model.model_policy.state_dict(), strict=True)
     old_model_policy.eval()
 
+    approx_kl = 0
+    kl_exceeded = False
+    distill_approx_kls = []
+
     for epoch in range(train_config["update_epochs"]):
         logger.debug("(train.distill) epoch: %d" % epoch)
         for i, mb in enumerate(dataloader):
             logger.debug("(train.distill) minibatch: %d" % i)
+
             mb = mb.to(model.device, non_blocking=True)
             add_action_active_local_ids(mb)
 
             old_gnn_out = old_model_policy.gnn(mb)
             new_gnn_out = model.model_policy.gnn(mb)
+            batch_size = mb.num_graphs
 
-            (
-                old_active_logits,
-                old_active_batch_index,
-                old_active_local_action_ids,
-                old_batch_size
-            ) = old_model_policy._get_active_logits(old_gnn_out, mb)
+            with autocast_ctx(True):
+                (
+                    old_active_logits,
+                    old_active_batch_index,
+                    old_active_local_action_ids,
+                    old_batch_size
+                ) = old_model_policy._get_active_logits(old_gnn_out, mb)
 
-            (
-                new_active_logits,
-                new_active_batch_index,
-                new_active_local_action_ids,
-                new_batch_size
-            ) = model.model_policy._get_active_logits(new_gnn_out, mb)
+                (
+                    new_active_logits,
+                    new_active_batch_index,
+                    new_active_local_action_ids,
+                    new_batch_size
+                ) = model.model_policy._get_active_logits(new_gnn_out, mb)
 
             assert old_batch_size == new_batch_size
+            assert batch_size == old_batch_size
             assert torch.equal(old_active_batch_index, new_active_batch_index)
             assert torch.equal(old_active_local_action_ids, new_active_local_action_ids)
+
+            # XXX: need to compute approx_kl here because model_policy has
+            #       changed after distillation, i.e.
+            #       the approx_kl from the regular PPO train step is outdated.
+            with torch.no_grad():
+                _, new_logprob, _ = GNNModel.process_flat_logits(
+                    active_logits=new_active_logits,
+                    active_batch_index=new_active_batch_index,
+                    active_local_action_ids=new_active_local_action_ids,
+                    batch_size=new_batch_size,
+                    b_action=mb.action,
+                    deterministic=False,
+                )
+
+                logratio = new_logprob.float() - mb.logprob.float()
+                ratio = logratio.exp()
+                approx_kl = ((ratio - 1) - logratio).mean()
+                distill_approx_kls.append(approx_kl.detach().item())
+
+            if train_config["target_kl"] is not None and approx_kl > train_config["target_kl"]:
+                kl_exceeded = True
+                break
 
             old_log_probs = torch.log(gnn_softmax(old_active_logits, old_active_batch_index).clamp_min(1e-12))
             new_log_probs = torch.log(gnn_softmax(new_active_logits, new_active_batch_index).clamp_min(1e-12))
@@ -534,36 +572,41 @@ def train_model(
             b_kl = scatter_sum(per_action_kl, old_active_batch_index, dim=0, dim_size=batch_size)
             distill_actloss = b_kl.mean()
 
-            value_target = model.model_value.forward_value(mb)
+            with torch.no_grad():
+                value_target = model.model_value.forward_value(mb)
             new_value = model.model_policy._forward_value(new_gnn_out)
-            distill_vloss = 0.5 * (new_value.view(-1) - value_target).square().mean()
+            distill_vloss = 0.5 * (new_value.view(-1) - value_target.view(-1)).square().mean()
 
             distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
-            distill_losses[i] = distill_loss.detach()
 
             if not torch.isfinite(distill_loss).all():
                 optimizer_distill.zero_grad()
                 print("WARNING: nan/inf values vound in distill_loss! Skipping backprop")
                 continue
 
-            with autocast_ctx(False):
-                scaler.scale(distill_loss).backward()
-                scaler.unscale_(optimizer_distill)  # needed for clip_grad_norm
-                nn.utils.clip_grad_norm_(model.model_policy.parameters(), train_config["max_grad_norm"])
-                scaler.step(optimizer_distill)
-                scaler.update()
-                optimizer_distill.zero_grad()
+            distill_losses.append(distill_loss.detach().item())
+
+            scaler.scale(distill_loss).backward()
+            scaler.unscale_(optimizer_distill)  # needed for clip_grad_norm
+            nn.utils.clip_grad_norm_(model.model_policy.parameters(), train_config["max_grad_norm"])
+            scaler.step(optimizer_distill)
+            scaler.update()
+            optimizer_distill.zero_grad()
+
+        if kl_exceeded:
+            break
 
     y_pred, y_true = storage.bv_values.cpu().numpy(), storage.bv_returns.cpu().numpy()
     var_y = np.var(y_true)
     explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
     return TrainStats(
-        value_loss=value_losses.mean().item(),
-        policy_loss=policy_losses.mean().item(),
-        entropy_loss=entropy_losses.mean().item(),
-        distill_loss=distill_losses.mean().item(),
-        approx_kl=approx_kl.item(),
+        value_loss=safe_mean(value_losses),
+        policy_loss=safe_mean(policy_losses),
+        entropy_loss=safe_mean(entropy_losses),
+        distill_loss=safe_mean(distill_losses),
+        policy_approx_kl=safe_mean(policy_approx_kls),
+        distill_approx_kl=safe_mean(distill_approx_kls),
         clipfrac=float(np.mean(clipfracs)),
         explained_var=float(explained_var),
     )
@@ -587,6 +630,8 @@ def prepare_wandb_log(
             + abs(eval_multistats.ep_rew_relval_mult_mean)
             + abs(eval_multistats.ep_rew_prog_mean)
         )
+
+        assert reward_abs_tot > 0
 
         wlog.update({
             "eval/ep_rew_mean": eval_multistats.ep_rew_mean,
@@ -664,7 +709,8 @@ def prepare_wandb_log(
         "train/nan/policy_loss": math.isnan(train_stats.policy_loss) or math.isinf(train_stats.policy_loss),
         "train/nan/entropy_loss": math.isnan(train_stats.entropy_loss) or math.isinf(train_stats.entropy_loss),
         "train/nan/distill_loss": math.isnan(train_stats.distill_loss) or math.isinf(train_stats.distill_loss),
-        "train/approx_kl": train_stats.approx_kl,
+        "train/policy_approx_kl": train_stats.policy_approx_kl,
+        "train/distill_approx_kl": train_stats.distill_approx_kl,
         "train/clipfrac": train_stats.clipfrac,
         "train/explained_var": train_stats.explained_var,
         "train/ep_value_mean_100": safe_mean(state.rollout_net_value_queue_100),
@@ -685,7 +731,7 @@ def prepare_wandb_log(
     return wlog
 
 
-def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
+def init_model_loader(env_config, checkpoint_config, out_dir, logger, dry_run, device):
     if env_config["num_envs_per_opponent"]["model"] == 0:
         return None
 
@@ -721,7 +767,7 @@ def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
         latest_ts, config_file, weights_file = download_latest_model(
             logger,
             dry_run=dry_run,
-            out_dir=config["run"]["out_dir"],
+            out_dir=out_dir,
             run_id=modelcfg["run_id"],
             optimize_local_storage=checkpoint_config["optimize_local_storage"],
             s3_config=checkpoint_config["s3"],
@@ -798,7 +844,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
     loader_infos = []
 
-    train_loader_info = init_model_loader(train_config["env"], checkpoint_config, logger, dry_run, device)
+    train_loader_info = init_model_loader(train_config["env"], checkpoint_config, config["run"]["out_dir"], logger, dry_run, device)
 
     if train_loader_info:
         loader_infos.append(train_loader_info)
@@ -824,7 +870,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         # i.e. one cycle of collect_samples() + train_model()
         # Real value depends on num_steps, num_envs, opponent & hardware
         assert envcfg["kwargs"]["user_timeout"] >= config["eval"]["interval_s"] + 300
-        eval_loader_info = init_model_loader(envcfg, checkpoint_config, logger, dry_run, device)
+        eval_loader_info = init_model_loader(envcfg, checkpoint_config, config["run"]["out_dir"], logger, dry_run, device)
         if eval_loader_info:
             loader_infos.append(eval_loader_info)
             eval_model_loader = eval_loader_info.model_loader
@@ -854,11 +900,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
     for p in old_model_policy.parameters():
         p.requires_grad = False
-
-    if train_config["torch_compile"]:
-        model = torch.compile(model, mode="max-autotune", fullgraph=True, dynamic=True)
-        # XXX: compiling this causes load_state_dict to fail
-        # old_model_policy = torch.compile(old_model_policy, mode="max-autotune", fullgraph=True, dynamic=True)
 
     optimizer_policy = torch.optim.Adam(model.model_policy.parameters(), lr=learning_rate)
     optimizer_value = torch.optim.Adam(model.model_value.parameters(), lr=learning_rate)
@@ -1022,7 +1063,8 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         # We upload only timestamped (unique) checkpoints
         # => no risk of overwriting a file that is still being uploaded
         # => always pass a new, unset event
-        uploading_event=threading.Event(),
+        uploading_event=uploading_event,
+        async_upload=True,
     )
 
     try:
@@ -1112,37 +1154,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                         for fut in as_completed(futures):
                             eval_multistats.add(*fut.result())
 
-            with timers["sample"], torch.no_grad(), autocast_ctx(True):
-                model.eval()
-                train_sample_stats = collect_samples(
-                    logger=logger,
-                    model=model,
-                    venv=train_venv,
-                    num_vsteps=train_config["num_vsteps"],
-                    storage=storage,
-                )
-
-            state.current_vstep += train_config["num_vsteps"]
-            state.current_timestep += train_config["num_vsteps"] * num_envs
-            state.global_timestep += train_config["num_vsteps"] * num_envs
-            state.current_episode += train_sample_stats.num_episodes
-            state.global_episode += train_sample_stats.num_episodes
-
-            model.train()
-            with timers["train"], autocast_ctx(True):
-                train_stats = train_model(
-                    logger=logger,
-                    model=model,
-                    old_model_policy=old_model_policy,
-                    optimizer_policy=optimizer_policy,
-                    optimizer_value=optimizer_value,
-                    optimizer_distill=optimizer_distill,
-                    autocast_ctx=autocast_ctx,
-                    scaler=scaler,
-                    storage=storage,
-                    train_config=train_config,
-                )
-
             if eval_multistats.num_episodes > 0:
                 eval_net_value = eval_multistats.ep_value_mean
 
@@ -1160,14 +1171,43 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                         eval_net_value_best = eval_net_value
                         # Add resumes to filename to prevent overwriting pre-crash best results
                         # (functions in init.sh expect  alphanumeric tags => no separator)
-                        thread = threading.Thread(target=save_fn, kwargs=dict(s3_config=None, tag=f"best{state.resumes}"))
-                        thread.start()
+                        save_fn(s3_config=None, tag=f"best{state.resumes}")
+
+            with timers["sample"], torch.no_grad(), autocast_ctx(True):
+                model.eval()
+                train_sample_stats = collect_samples(
+                    logger=logger,
+                    model=model,
+                    venv=train_venv,
+                    num_vsteps=train_config["num_vsteps"],
+                    storage=storage,
+                )
+
+            state.current_vstep += train_config["num_vsteps"]
+            state.current_timestep += train_config["num_vsteps"] * num_envs
+            state.global_timestep += train_config["num_vsteps"] * num_envs
+            state.current_episode += train_sample_stats.num_episodes
+            state.global_episode += train_sample_stats.num_episodes
+
+            model.train()
+            with timers["train"]:
+                train_stats = train_model(
+                    logger=logger,
+                    model=model,
+                    old_model_policy=old_model_policy,
+                    optimizer_policy=optimizer_policy,
+                    optimizer_value=optimizer_value,
+                    optimizer_distill=optimizer_distill,
+                    autocast_ctx=autocast_ctx,
+                    scaler=scaler,
+                    storage=storage,
+                    train_config=train_config,
+                )
 
             if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:
                 permanent_checkpoint_timer.reset(start=True)
                 logger.info("Time for a permanent checkpoint")
-                thread = threading.Thread(target=save_fn, kwargs=dict(s3_config=checkpoint_config["s3"], tag=f"{time.time():.0f}"))
-                thread.start()
+                save_fn(s3_config=checkpoint_config["s3"], tag=f"{time.time():.0f}")
 
             wlog = prepare_wandb_log(
                 model=model.model_policy,

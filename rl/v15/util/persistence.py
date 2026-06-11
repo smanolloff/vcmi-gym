@@ -11,6 +11,7 @@ import boto3
 import botocore.exceptions
 import datetime as dt
 import re
+from functools import partial
 from boto3.s3.transfer import TransferConfig
 
 
@@ -77,7 +78,7 @@ def download_latest_model(
     optimize_local_storage,
     s3_config,
     timestamp
-) -> (dt.datetime, str, str):
+) -> tuple[dt.datetime | None, str | None, str | None]:
     assert isinstance(timestamp, dt.datetime)
     assert timestamp.tzinfo
 
@@ -216,6 +217,7 @@ def save_checkpoint(
     config,
     tag,
     states={},      # dict with name=>obj, where obj has .to_json() and .from_json(string)
+    async_upload=False
 ):
     assert tag, "tag is required"
     prefix = f"{run_id}-{tag}"
@@ -350,6 +352,32 @@ def save_checkpoint(
         logger.info("No s3_config, will not upoad checkpoint to S3")
         return
 
+    upload_fn = partial(
+        upload_checkpoint,
+        logger,
+        dry_run,
+        out_dir,
+        s3_config,
+        uploading_event,
+        prefix,
+        filelist,
+    )
+
+    if async_upload:
+        thread = threading.Thread(target=upload_fn)
+        thread.start()
+    else:
+        upload_fn()
+
+def upload_checkpoint(
+    logger,
+    dry_run,
+    out_dir,
+    s3_config,
+    uploading_event,
+    prefix,
+    filelist,
+):
     uploading_event.set()
     logger.debug("uploading_event: set")
 

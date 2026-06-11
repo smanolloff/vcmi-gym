@@ -63,13 +63,11 @@ class BlankObservationSpaceWrapper(gym.Wrapper):
 
     def step(self, *args, **kwargs):
         obs, *rest = self.env.step(*args, **kwargs)
-        self._graph_obs = obs
         return BlankObservationSpaceWrapper.EMPTY_OBS, *rest
 
     def reset(self, *args, **kwargs):
         obs, *rest = self.env.reset(*args, **kwargs)
-        self._graph_obs = obs
         return BlankObservationSpaceWrapper.EMPTY_OBS, *rest
 
     def graph_obs(self):
-        return self._graph_obs
+        return self.env.obs
