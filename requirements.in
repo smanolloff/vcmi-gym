@@ -9,19 +9,30 @@
 #
 
 #
-# For CPU:
+# Use `make pip-compile` to install appropriate torch wheels.
 #
+# Alternatively, use the commands below:
+# - CPU:
 #   pip-compile requirements.in -o requirements-cpu.txt \
-#       -f https://data.pyg.org/whl/torch-2.12.0+cpu.html
+#       --index-url https://pypi.org/simple \
+#       --extra-index-url https://download.pytorch.org/whl/cpu \
+#       --find-links https://data.pyg.org/whl/torch-2.11.0+cpu.html
 #
-# For GPU:
-#
+# - GPU (CUDA 12.8):
 #   pip-compile requirements.in -o requirements-gpu.txt \
-#       -f https://data.pyg.org/whl/torch-2.12.0+cu132.html
+#       --index-url https://pypi.org/simple \
+#       --extra-index-url https://download.pytorch.org/whl/cu128 \
+#       --find-links https://data.pyg.org/whl/torch-2.11.0+cu128.html
+#
+# - GPU (CUDA 13.2):
+#   pip-compile requirements.in -o requirements-gpu.txt \
+#       --index-url https://pypi.org/simple \
+#       --extra-index-url https://download.pytorch.org/whl/cu132 \
+#       --find-links https://data.pyg.org/whl/torch-2.12.0+cu132.html
 #
 
-torch==2.12.0
-torch_geometric>=2.8
+torch
+torch_geometric
 torch_scatter
 wandb
 #vastai

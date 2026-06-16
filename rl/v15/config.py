@@ -66,10 +66,10 @@ eval_variant = lambda num_envs_per_opponent, model, **env_kwargs: dict(
 
 config = dict(
     name_template="{datetime}-{id}-{suffix}",
-    out_dir_template="data/mppo-dna-heads",
+    out_dir_template="data/v15",
 
     # XXX: s3_dir's "{wandb_group}" substring will be replaced with this value
-    wandb_group="mppo-dna-heads",
+    wandb_group="v15",
     wandb_log_interval_s=60,
 
     checkpoint=dict(

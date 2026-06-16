@@ -114,8 +114,7 @@ set +x
 . /workspace/vcmi-gym/.venv/bin/activate
 set -x
 
-pip install -r requirements-gpu.txt
-# pip install --break-system-packages jax[cuda12]
+make pip-install
 
 #
 # ~/.bashrc setup

@@ -501,7 +501,7 @@ class GNNModel(nn.Module):
             raise RuntimeError("Each batch item must have exactly one matching action.")
 
         chosen_batch = active_batch_index[chosen_mask]
-        b_logprob = torch.empty(batch_size, device=active_logits.device)
+        b_logprob = torch.empty(batch_size, device=active_logits.device, dtype=log_probs_all.dtype)
         b_logprob[chosen_batch] = log_probs_all[chosen_mask]
 
         return b_action, b_logprob, b_entropy

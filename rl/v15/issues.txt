@@ -1,0 +1,47 @@
+venvs=10
+vsteps=70
+
+=== vanilla
+GPU RAM=30G (!!!)
+t=7..8s (actually 10..11s)
+
+-- with gnn_num_layers=2
+GPU RAM=20G (...but still aborts after 80 (even 20) rollouts ?!?)
+
+Tried benchmark w/ mlclient-cli on 9950X3D: ~90 steps/s, no crashes
+
+
+=== cuda_matmul
+GPU RAM=30G (!!!)
+t=9..10s
+
+
+=== autocast=True
+GPU RAM=25G, but after a while it aborted (maybe got 32G+)
+t=12..13s
+
+-- after agent fixes (autocast during distillation fwd + optimizer set_to_none=True)
+GPU RAM=23G
+t=12..13s
+
+-- trying bf16 + disabled autoscaler instead of fp16
+~same as with fp16
+
+
+=========== SIGSEGV
+On my mac, `python envtest.py` failed on step 73000:
+
+73000/100000 (73%) ...
+fish: Job 1, 'python envtest.py' terminated by signal SIGSEGV (Address boundary error)
+
+Additionally, it throws a lot of VCMI complaints avbout invalid actions, e.g.
+[runServer][global] ERROR Given destination is not reachable!
+[runServer][global] ERROR Stack failed movement!
+[runServer][global] ERROR Given destination is not reachable!
+[runServer][global] ERROR Stack failed attack - unable to reach target!
+[runServer][global] ERROR Unit can not attack itself
+
+=> crash not related to CUDA, torch or AsyncVecEnv
+ALSO, no such errors on mlclient-cli --benchmark (which also uses random actions)
+
+=> threadconnector / pyconnector issue?
