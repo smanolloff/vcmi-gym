@@ -1,4 +1,5 @@
 #include "names.h"
+#include "schema/v15/graph.h"
 #include "schema/v15/types.h"
 
 namespace Connector::V15::Names {
@@ -18,7 +19,6 @@ namespace Connector::V15::Names {
 
     std::string ActionType(S15::ActionType at) {
         switch (at) {
-        case S15::ActionType::RETREAT: return "RETREAT";
         case S15::ActionType::WAIT: return "WAIT";
         case S15::ActionType::DEFEND: return "DEFEND";
         case S15::ActionType::MOVE: return "MOVE";
@@ -245,6 +245,13 @@ namespace Connector::V15::Names {
         switch(a) {
         default:
             throw std::runtime_error("Names: unexpected Unit_Blocks_Unit attribute: " + std::to_string(EI(a)));
+        }
+    }
+
+    std::string Attr(EA::Unit_BlockedBy_Action a) {
+        switch(a) {
+        default:
+            throw std::runtime_error("Names: unexpected Unit_BlockedBy_Action attribute: " + std::to_string(EI(a)));
         }
     }
 

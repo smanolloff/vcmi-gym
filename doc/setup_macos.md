@@ -38,7 +38,7 @@ $ source .venv/bin/activate
 > python virtual env will be indicated with a `(.venv) $` prompt.
 
 ```bash
-(.venv)$ pip install -r requirements.txt
+(.venv)$ pip install -r requirements-cpu.txt
 ```
 
 ### Build VCMI
@@ -51,12 +51,21 @@ These libraries are the "link" between the gym env and VCMI itself.
 
 ```bash
 $ cd "$VCMIGYM/vcmi_gym/connectors"
-$ conan install . --output-folder=conan-generated --profile=../../vcmi/dependencies/conan_profiles/macos-arm
-$ cmake -S . -B rel -Wno-dev \
-    -D CMAKE_TOOLCHAIN_FILE=conan-generated/conan_toolchain.cmake \
-    -D CMAKE_BUILD_TYPE=Release \
-    -D CMAKE_EXPORT_COMPILE_COMMANDS=0
+$ conan install . \
+            --output-folder=conan-generated-debug \
+            --build=missing \
+            --profile=../../vcmi/dependencies/conan_profiles/macos-arm \
+            --profile=../../vcmi/dependencies/conan_profiles/base/apple-system \
+            -s "&:build_type=Debug"
 
+$ conan install . \
+            --output-folder=conan-generated \
+            --build=missing \
+            --profile=../../vcmi/dependencies/conan_profiles/macos-arm \
+            --profile=../../vcmi/dependencies/conan_profiles/base/apple-system \
+            -s "&:build_type=Release"
+
+$ cmake --preset vcmigym-rel
 $ cmake --build rel/
 ```
 

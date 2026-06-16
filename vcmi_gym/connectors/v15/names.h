@@ -37,6 +37,7 @@ namespace Connector::V15::Names {
     std::string Attr(S15::Graph::EdgeAttributes::Action_EndsAt_Hex a);
     std::string Attr(S15::Graph::EdgeAttributes::Hex_IsEndOf_Action a);
     std::string Attr(S15::Graph::EdgeAttributes::Action_Blocks_Unit a);
+    std::string Attr(S15::Graph::EdgeAttributes::Unit_BlockedBy_Action a);
     std::string Attr(S15::Graph::EdgeAttributes::Unit_BecomesMeleeThreatAfter_Action a);
     std::string Attr(S15::Graph::EdgeAttributes::Unit_BecomesShootThreatAfter_Action a);
     std::string Attr(S15::Graph::EdgeAttributes::Unit_IsMeleedBy_Action a);
@@ -45,4 +46,5 @@ namespace Connector::V15::Names {
     std::string Attr(S15::Graph::EdgeAttributes::Unit_BecomesShootTargetAfter_Action a);
     std::string Attr(S15::Graph::EdgeAttributes::Hex_BecomesMeleeTargetAfter_Action a);
     std::string Attr(S15::Graph::EdgeAttributes::Hex_BecomesShootTargetAfter_Action a);
+    static_assert(static_cast<int>(S15::Graph::ElementType::_count) == 35);
 }

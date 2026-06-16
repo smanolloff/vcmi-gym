@@ -78,6 +78,7 @@ namespace Connector::V15 {
             case ET::EDGE_ACTION_ENDS_AT_HEX: return process(S15::EncodingTraits<EA::Action_EndsAt_Hex>::encoding);
             case ET::EDGE_HEX_IS_END_OF_ACTION: return process(S15::EncodingTraits<EA::Hex_IsEndOf_Action>::encoding);
             case ET::EDGE_ACTION_BLOCKS_UNIT: return process(S15::EncodingTraits<EA::Action_Blocks_Unit>::encoding);
+            case ET::EDGE_UNIT_BLOCKED_BY_ACTION: return process(S15::EncodingTraits<EA::Unit_BlockedBy_Action>::encoding);
             case ET::EDGE_UNIT_BECOMES_MELEE_THREAT_AFTER_ACTION: return process(S15::EncodingTraits<EA::Unit_BecomesMeleeThreatAfter_Action>::encoding);
             case ET::EDGE_UNIT_BECOMES_SHOOT_THREAT_AFTER_ACTION: return process(S15::EncodingTraits<EA::Unit_BecomesShootThreatAfter_Action>::encoding);
             case ET::EDGE_UNIT_IS_MELEED_BY_ACTION: return process(S15::EncodingTraits<EA::Unit_IsMeleedBy_Action>::encoding);
@@ -89,6 +90,7 @@ namespace Connector::V15 {
             default:
                 throw std::runtime_error("GetEncoding: unexpected ElementType: " + std::to_string(EI(type)));
             }
+            static_assert(static_cast<int>(S15::Graph::ElementType::_count) == 35);
         }
     }
 

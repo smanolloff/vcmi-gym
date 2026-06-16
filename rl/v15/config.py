@@ -154,7 +154,8 @@ config = dict(
             # residual connections over automatic self-loops. Node types have
             # very different meanings and many relations are directional or
             # role-specific.
-            add_self_loops=False,
+            # XXX: in PyG 2.8.0, this option gives an error anyway
+            # add_self_loops=False,
         )
     ),
 )
@@ -167,14 +168,14 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 2
     config["train"]["env"]["num_envs_per_opponent"] = {k: min(v, 2) for k, v in config["train"]["env"]["num_envs_per_opponent"].items()}
-    # config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
+    config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     # config["train"]["env"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     # config["eval"]["env_variants"] = dict(list(config["eval"]["env_variants"].items())[:1])
     for name, envcfg in config["eval"]["env_variants"].items():
         envcfg["num_envs_per_opponent"] = {k: min(v, 1) for k, v in envcfg["num_envs_per_opponent"].items()}
         envcfg["kwargs"]["warmachine_chance"] = 0
-        # envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
+        envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
         # envcfg["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     # DEBUG dual vec env:
