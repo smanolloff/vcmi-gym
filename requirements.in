@@ -11,12 +11,12 @@
 #
 # For CPU:
 #
-#   pip-compile requirements.in -o requirements.cpu.txt \
+#   pip-compile requirements.in -o requirements-cpu.txt \
 #       -f https://data.pyg.org/whl/torch-2.12.0+cpu.html
 #
 # For GPU:
 #
-#   pip-compile requirements.in -o requirements.cpu.txt \
+#   pip-compile requirements.in -o requirements-gpu.txt \
 #       -f https://data.pyg.org/whl/torch-2.12.0+cu132.html
 #
 
