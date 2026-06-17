@@ -26,3 +26,9 @@ pip-compile:
 pip-install: PYTORCH_BACKEND ?= cpu
 pip-install:
 	pip install -r requirements-$(PYTORCH_BACKEND).txt
+
+build-connector:
+	cd vcmi_gym/connectors/ \
+	&& cmake --preset vcmigym-rel \
+	&& cmake --build rel -- -j8 \
+	&& cd ../../

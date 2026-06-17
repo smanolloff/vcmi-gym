@@ -492,11 +492,17 @@ class VcmiEnv(gym.Env):
             if action.ACTION_TYPE == ACTION_TYPES["DEFEND"]
         )
 
+    np.set_printoptions(linewidth=10_000)
+
     def random_action(self):
         if self.terminated or self.truncated:
             return None
 
         return random.choice(self.obs["active_action_ids"])
+
+        # choice = random.choice(self.obs["active_action_ids"])
+        # print("{PY} %s; Chosen: %s {/PY}" % (self.obs["active_action_ids"], choice), flush=True)
+        # return choice
 
     @staticmethod
     def decode_obs(state):

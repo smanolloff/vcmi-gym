@@ -354,8 +354,15 @@ namespace Connector::V15::Thread {
         auto p_activeids = py::array_t<int64_t, py::array::c_style>(A);
         auto mp_activeids = p_activeids.mutable_unchecked<1>();
 
+        // std::stringstream ss;
+        // ss << "<CONN> activeActionIds: [";
         for (ssize_t i = 0; i < activeActionIds.size(); ++i)
+        {
             mp_activeids(i) = activeActionIds[i];
+            // ss << activeActionIds[i] << ", ";
+        }
+        // ss << "] </CONN>\n";
+        // std::cout << ss.str() << std::flush;
 
         LOG("Creating p_dict...");
 
