@@ -14,13 +14,21 @@ namespace Connector::V15 {
                 int,                    // bootTimeout
                 int,                    // vcmiTimeout
                 int,                    // userTimeout
+                const std::string &,    // red
+                const std::string &,    // redModel
+                const std::string &,    // blue
+                const std::string &,    // blueModel
+
                 const std::string &,    // mapname
                 int,                    // seed
                 int,                    // randomHeroes
                 int,                    // randomObstacles
                 int,                    // townChance
                 int,                    // warmachineChance
-                int,                    // randomStackChance
+                bool,                   // randomArmies
+                int,                    // randomArmyValueMin
+                int,                    // randomArmyValueMax
+                int,                    // randomArmyTargetVar
                 int,                    // tightFormationChance
                 int,                    // randomTerrainChance
                 int,                    // leftVipChance
@@ -33,10 +41,6 @@ namespace Connector::V15 {
                 const std::string &,    // loglevelGlobal
                 const std::string &,    // loglevelAI
                 const std::string &,    // loglevelStats
-                const std::string &,    // red
-                const std::string &,    // blue
-                const std::string &,    // redModel
-                const std::string &,    // blueModel
                 bool,                   // redAllowMlBot
                 bool,                   // blueAllowMlBot
                 const std::string &,    // statsMode
@@ -47,13 +51,20 @@ namespace Connector::V15 {
                 py::arg("bootTimeout"),
                 py::arg("vcmiTimeout"),
                 py::arg("userTimeout"),
+                py::arg("red"),
+                py::arg("redModel"),
+                py::arg("blue"),
+                py::arg("blueModel"),
                 py::arg("mapname"),
                 py::arg("seed"),
                 py::arg("randomHeroes"),
                 py::arg("randomObstacles"),
                 py::arg("townChance"),
                 py::arg("warmachineChance"),
-                py::arg("randomStackChance"),
+                py::arg("randomArmies"),
+                py::arg("randomArmyValueMin"),
+                py::arg("randomArmyValueMax"),
+                py::arg("randomArmyTargetVar"),
                 py::arg("tightFormationChance"),
                 py::arg("randomTerrainChance"),
                 py::arg("leftVipChance"),
@@ -66,10 +77,6 @@ namespace Connector::V15 {
                 py::arg("loglevelGlobal"),
                 py::arg("loglevelAI"),
                 py::arg("loglevelStats"),
-                py::arg("red"),
-                py::arg("blue"),
-                py::arg("redModel"),
-                py::arg("blueModel"),
                 py::arg("redAllowMlBot"),
                 py::arg("blueAllowMlBot"),
                 py::arg("statsMode"),

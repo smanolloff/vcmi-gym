@@ -32,3 +32,9 @@ build-connector:
 	&& cmake --preset vcmigym-rel \
 	&& cmake --build rel -- -j8 \
 	&& cd ../../
+
+build-connector-debug:
+	cd vcmi_gym/connectors/ \
+	&& cmake --preset vcmigym-build \
+	&& cmake --build build -- -j8 \
+	&& cd ../../

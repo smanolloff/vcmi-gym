@@ -26,7 +26,10 @@ namespace Connector::V14 {
                 const int &,         // randomObstacles
                 const int &,         // townChance
                 const int &,         // warmachineChance
-                const int &,         // randomStackChance
+                const bool &,        // randomArmies
+                const int &,         // randomArmyValueMin
+                const int &,         // randomArmyValueMax
+                const int &,         // randomArmyTargetVar
                 const int &,         // tightFormationChance
                 const int &,         // randomTerrainChance
                 const int &,         // leftVipChance

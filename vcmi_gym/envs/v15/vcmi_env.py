@@ -150,22 +150,8 @@ class VcmiEnv(gym.Env):
     ROLES = ["attacker", "defender"]
     OPPONENTS = ["StupidAI", "BattleAI", "MMAI_BATTLEAI", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
 
-    # Number of actions in v15 varies per observation...
+    # Number of actions in v15 varies per observation => use large enough number
     ACTION_SPACE = gym.spaces.Discrete(9999)
-    OBSERVATION_SPACE = gym.spaces.Dict({
-        "nodes": gym.spaces.Dict({
-            name: AttrsSpace(attrs_space=gym.spaces.Box(low=-1, high=1, shape=(typeinfo["size"],), dtype=np.float32))
-            for name, typeinfo in NODE_TYPES.items()
-        }),
-        "edges": gym.spaces.Dict({
-            name: gym.spaces.Dict({
-                "index": EdgeIndexSpace(num_nodes=5),
-                "attrs": AttrsSpace(attrs_space=gym.spaces.Box(low=-1, high=1, shape=(typeinfo["size"],), dtype=np.float32))
-            })
-            for name, typeinfo in EDGE_TYPES.items()
-        })
-    })
-
     ENV_VERSION = 15
 
     Global = Global
@@ -173,6 +159,40 @@ class VcmiEnv(gym.Env):
     Unit = Unit
     Hex = Hex
     Action = Action
+
+    @staticmethod
+    def node_types():
+        return NODE_TYPES
+
+    @staticmethod
+    def filtered_edge_types(ignored_edge_keys):
+        # Guard against non-existend edge keys given
+        # Also, prevents errors when keys are lists instead of tuples
+        # (e.g. when loaded by a json config which can only store lists)
+        ignored_edge_tuple_keys = [tuple(k) for k in ignored_edge_keys]
+        for k in ignored_edge_tuple_keys:
+            assert k in EDGE_TYPES.keys(), k
+
+        return {
+            tuple(k): v for k, v in EDGE_TYPES.items()
+            if k not in ignored_edge_tuple_keys
+        }
+
+    @staticmethod
+    def filtered_observation_space(ignored_edge_keys):
+        return gym.spaces.Dict({
+            "nodes": gym.spaces.Dict({
+                name: AttrsSpace(attrs_space=gym.spaces.Box(low=-1, high=1, shape=(typeinfo["size"],), dtype=np.float32))
+                for name, typeinfo in VcmiEnv.node_types().items()
+            }),
+            "edges": gym.spaces.Dict({
+                name: gym.spaces.Dict({
+                    "index": EdgeIndexSpace(num_nodes=5),
+                    "attrs": AttrsSpace(attrs_space=gym.spaces.Box(low=-1, high=1, shape=(typeinfo["size"],), dtype=np.float32))
+                })
+                for name, typeinfo in VcmiEnv.filtered_edge_types(ignored_edge_keys).items()
+            })
+        })
 
     def __init__(
         self,
@@ -202,7 +222,10 @@ class VcmiEnv(gym.Env):
         town_chance: int = 0,
         warmachine_chance: int = 0,
         random_terrain_chance: int = 0,
-        random_stack_chance: int = 0,
+        random_armies: bool = False,
+        random_army_value_min: int = 5000,
+        random_army_value_max: int = 5_000_000,
+        random_army_target_var: int = 30,
         tight_formation_chance: int = 0,
         vip_chance: int = 0,
         opponent_vip_chance: int = 0,
@@ -226,6 +249,8 @@ class VcmiEnv(gym.Env):
         reward_dmg_mult: float = 1,
         reward_term_mult: float = 1,
         reward_relval_mult: float = 1,
+
+        ignored_edge_keys: list[tuple[str, str, str]] = [],
 
         # If this is a secondary env in a dual-env scenario,
         # the "main" env is to be provided here.
@@ -259,8 +284,8 @@ class VcmiEnv(gym.Env):
         assert role in self.__class__.ROLES
         assert opponent in self.__class__.OPPONENTS, f"{opponent} in {self.__class__.OPPONENTS}"
 
-        self.action_space = self.__class__.ACTION_SPACE
-        self.observation_space = self.__class__.OBSERVATION_SPACE
+        self.action_space = VcmiEnv.ACTION_SPACE
+        self.observation_space = VcmiEnv.filtered_observation_space(ignored_edge_keys)
 
         # <params>
         self.render_mode = render_mode
@@ -272,6 +297,7 @@ class VcmiEnv(gym.Env):
         self.opponent = opponent
         self.opponent_model = opponent_model
         self.allow_retreat = allow_retreat
+        self.ignored_edge_keys = ignored_edge_keys
         # </params>
 
         # accessed externally for vector env creation
@@ -350,7 +376,10 @@ class VcmiEnv(gym.Env):
             randomObstacles=random_obstacles,
             townChance=town_chance,
             warmachineChance=warmachine_chance,
-            randomStackChance=random_stack_chance,
+            randomArmies=random_armies,
+            randomArmyValueMin=random_army_value_min,
+            randomArmyValueMax=random_army_value_max,
+            randomArmyTargetVar=random_army_target_var,
             tightFormationChance=tight_formation_chance,
             randomTerrainChance=random_terrain_chance,
             leftVipChance=attacker_vip_chance,
@@ -392,7 +421,7 @@ class VcmiEnv(gym.Env):
         if (self.terminated or self.truncated) and action != -1:
             raise Exception("Reset needed")
 
-        obs = self.connector.step(action)
+        obs = self.filter_obs(self.connector.step(action))
         gnode = Global.decode_one(obs["nodes"]["Global"][0])
         term = gnode.BATTLE_WINNER != COMBAT_RESULTS["NONE"]
         trunc = gnode.BATTLE_ROUND >= MAX_ROUNDS  # vcmi should have retreated
@@ -478,6 +507,12 @@ class VcmiEnv(gym.Env):
 
     def __del__(self):
         self.close()
+
+    def filter_obs(self, obs):
+        return dict(obs, edges={
+            k: v for k, v in obs["edges"].items()
+            if k not in self.ignored_edge_keys
+        })
 
     def decode(self):
         return self.__class__.decode_obs(self.obs)

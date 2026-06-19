@@ -197,6 +197,7 @@ class PyConnector():
     def render(self):
         try:
             assert self.thread.is_alive(), "VCMI thread is dead."
+            print
             code, res = self._connector.render(self.side)
             assert code == 0, "bad return code: %s" % code
             return res
