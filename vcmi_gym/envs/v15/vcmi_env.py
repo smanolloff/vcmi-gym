@@ -165,11 +165,11 @@ class VcmiEnv(gym.Env):
         return NODE_TYPES
 
     @staticmethod
-    def filtered_edge_types(ignored_edge_keys):
+    def filtered_edge_types(ignored_edges):
         # Guard against non-existend edge keys given
         # Also, prevents errors when keys are lists instead of tuples
         # (e.g. when loaded by a json config which can only store lists)
-        ignored_edge_tuple_keys = [tuple(k) for k in ignored_edge_keys]
+        ignored_edge_tuple_keys = [tuple(k) for k in ignored_edges]
         for k in ignored_edge_tuple_keys:
             assert k in EDGE_TYPES.keys(), k
 
@@ -179,7 +179,7 @@ class VcmiEnv(gym.Env):
         }
 
     @staticmethod
-    def filtered_observation_space(ignored_edge_keys):
+    def filtered_observation_space(ignored_edges):
         return gym.spaces.Dict({
             "nodes": gym.spaces.Dict({
                 name: AttrsSpace(attrs_space=gym.spaces.Box(low=-1, high=1, shape=(typeinfo["size"],), dtype=np.float32))
@@ -190,7 +190,7 @@ class VcmiEnv(gym.Env):
                     "index": EdgeIndexSpace(num_nodes=5),
                     "attrs": AttrsSpace(attrs_space=gym.spaces.Box(low=-1, high=1, shape=(typeinfo["size"],), dtype=np.float32))
                 })
-                for name, typeinfo in VcmiEnv.filtered_edge_types(ignored_edge_keys).items()
+                for name, typeinfo in VcmiEnv.filtered_edge_types(ignored_edges).items()
             })
         })
 
@@ -250,7 +250,7 @@ class VcmiEnv(gym.Env):
         reward_term_mult: float = 1,
         reward_relval_mult: float = 1,
 
-        ignored_edge_keys: list[tuple[str, str, str]] = [],
+        ignored_edges: list[tuple[str, str, str]] = [],
 
         # If this is a secondary env in a dual-env scenario,
         # the "main" env is to be provided here.
@@ -285,7 +285,7 @@ class VcmiEnv(gym.Env):
         assert opponent in self.__class__.OPPONENTS, f"{opponent} in {self.__class__.OPPONENTS}"
 
         self.action_space = VcmiEnv.ACTION_SPACE
-        self.observation_space = VcmiEnv.filtered_observation_space(ignored_edge_keys)
+        self.observation_space = VcmiEnv.filtered_observation_space(ignored_edges)
 
         # <params>
         self.render_mode = render_mode
@@ -297,7 +297,7 @@ class VcmiEnv(gym.Env):
         self.opponent = opponent
         self.opponent_model = opponent_model
         self.allow_retreat = allow_retreat
-        self.ignored_edge_keys = ignored_edge_keys
+        self.ignored_edges = ignored_edges
         # </params>
 
         # accessed externally for vector env creation
@@ -511,7 +511,7 @@ class VcmiEnv(gym.Env):
     def filter_obs(self, obs):
         return dict(obs, edges={
             k: v for k, v in obs["edges"].items()
-            if k not in self.ignored_edge_keys
+            if k not in self.ignored_edges
         })
 
     def decode(self):

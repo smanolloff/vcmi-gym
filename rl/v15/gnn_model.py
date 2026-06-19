@@ -7,8 +7,6 @@ from torch_geometric.utils import softmax as gnn_softmax
 from torch_geometric.data import HeteroData, Batch
 from torch_scatter import scatter_sum, scatter_max
 
-from vcmi_gym.envs.v15.vcmi_env import NODE_TYPES, EDGE_TYPES
-
 # obs: graph obs with {"nodes": ..., "edges": ...} (VcmiEnv v15 obs)
 def to_hdata(obs, done, device=torch.device("cpu")):
     res = HeteroData()
@@ -199,8 +197,8 @@ class GNNBlock(nn.Module):
         if conv_kwargs is None:
             conv_kwargs = {}
 
-        self.node_type_names = list(node_types.keys())
-        self.edge_type_names = list(edge_types.keys())
+        self.node_types = node_types
+        self.edge_types = edge_types
         self.num_gnn_layers = num_gnn_layers
         self.hidden_channels = hidden_channels
         self.out_channels = out_channels
@@ -251,7 +249,7 @@ class GNNBlock(nn.Module):
 
             if use_residual and hidden_channels == layer_out_channels:
                 self.norms.append(
-                    HeteroResidualNorm(self.node_type_names, hidden_channels)
+                    HeteroResidualNorm(self.node_types, hidden_channels)
                 )
             else:
                 self.norms.append(nn.Identity())
@@ -300,8 +298,11 @@ class GNNBlock(nn.Module):
         """
 
         x_dict = self.node_encoder(hdata.x_dict)
+
         edge_index_dict = hdata.edge_index_dict
-        edge_attr_dict = self._clean_edge_attr_dict(hdata.edge_attr_dict)
+        edge_attr_dict = self._clean_edge_attr_dict(
+            getattr(hdata, "edge_attr_dict", None)
+        )
 
         for conv, norm, activation in zip(
             self.convs,
@@ -332,15 +333,12 @@ class GNNBlock(nn.Module):
         return x_dict
 
 class GNNModel(nn.Module):
-    def __init__(self, config):
+    def __init__(self, node_types, edge_types, config):
         super().__init__()
 
-        self.ignored_node_types = config["ignored_node_types"]
-        self.ignored_edge_types = [tuple(x) for x in config["ignored_edge_types"]]
-
         self.gnn = GNNBlock(
-            node_types={k: v for k, v in NODE_TYPES.items() if k not in self.ignored_node_types},
-            edge_types={k: v for k, v in EDGE_TYPES.items() if k not in self.ignored_edge_types},
+            node_types=node_types,
+            edge_types=edge_types,
             num_gnn_layers=config["gnn_num_layers"],
             hidden_channels=config["gnn_hidden_channels"],
             out_channels=config["gnn_out_channels"],
@@ -505,27 +503,18 @@ class GNNModel(nn.Module):
 
         return b_action, b_logprob, b_entropy
 
-    def _filter_hdata(self, hdata):
-        hdata.x_dict = {k: v for k, v in hdata.x_dict.items() if k not in self.ignored_node_types}
-        hdata.edge_index_dict = {k: v for k, v in hdata.edge_index_dict.items() if k not in self.ignored_edge_types}
-        hdata.edge_attr_dict = {k: v for k, v in hdata.edge_attr_dict.items() if k not in self.ignored_edge_types}
-        return hdata
-
     def forward(self, hdata, b_action=None, deterministic=False):
-        hdata = self._filter_hdata(hdata)
         gnn_out = self.gnn(hdata)
         b_value = self._forward_value(gnn_out)
         b_action, b_logprob, b_entropy = self._forward_policy(gnn_out, hdata, b_action, deterministic)
         return b_value, b_action, b_logprob, b_entropy
 
     def forward_value(self, hdata, b_action=None, deterministic=False):
-        hdata = self._filter_hdata(hdata)
         gnn_out = self.gnn(hdata)
         b_value = self._forward_value(gnn_out)
         return b_value
 
     def forward_policy(self, hdata, b_action=None, deterministic=False):
-        hdata = self._filter_hdata(hdata)
         gnn_out = self.gnn(hdata)
         b_action, b_logprob, b_entropy = self._forward_policy(gnn_out, hdata, b_action, deterministic)
         return b_action, b_logprob, b_entropy
@@ -553,7 +542,6 @@ class GNNModel(nn.Module):
         return b_action, b_logprob, b_entropy
 
     def _get_active_logits(self, gnn_out, hdata):
-        import ipdb; ipdb.set_trace()  # noqa
         action_embeddings = gnn_out["Action"]
 
         active_global_ids = hdata["Action"].active_global_ids

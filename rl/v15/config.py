@@ -7,12 +7,15 @@ train_env_kwargs = dict(
     vcmi_loglevel_global="error",
     vcmi_loglevel_ai="error",
     vcmienv_loglevel="WARN",
-    random_heroes=1,
+    random_heroes=0,
     random_obstacles=1,
     random_terrain_chance=100,
     tight_formation_chance=0,
     town_chance=10,
-    random_stack_chance=20,  # makes armies unbalanced
+    random_armies=True,
+    random_army_value_min=5000,
+    random_army_value_max=5_000_000,
+    random_army_target_var=30,
     warmachine_chance=40,
     mana_min=0,
     mana_max=0,
@@ -29,6 +32,16 @@ train_env_kwargs = dict(
     reward_term_mult=0.01,
     reward_relval_mult=0.01,
     swap_sides=0,
+
+    # ignored_edges=[],
+    # If keys are lists, they will be converted to tuples by VcmiEnv
+    # Prefer lists here (for consistence with json-serialized configs)
+    ignored_edges=[
+        # These often dominate the graph (e.g. 30k of total 40k edges)
+        ["Hex", "BecomesMeleeTargetAfter", "Action"],
+        ["Hex", "BecomesShootTargetAfter", "Action"],
+    ],
+
     # With DualVecEnv, all timeouts must be the same (large enough)
     user_timeout=2400,
     vcmi_timeout=2400,
@@ -57,8 +70,9 @@ eval_variant = lambda num_envs_per_opponent, model, **env_kwargs: dict(
     num_envs_per_opponent=num_envs_per_opponent,
     kwargs=dict(
         train_env_kwargs,
-        mapname="gym/generated/evaluation/8x512.vmap",
-        random_stack_chance=0,
+        mapname="gym/ml-eval.vmap",
+        random_armies=False,
+        random_heroes=1,
         **env_kwargs,
     ),
     model=model,
@@ -107,7 +121,7 @@ config = dict(
         env=dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
-            kwargs=dict(train_env_kwargs, mapname="gym/generated/4096/4x1024.vmap"),
+            kwargs=dict(train_env_kwargs, mapname="gym/ml-mini.vmap"),
             num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, MMAI_BATTLEAI=40, model=0),
 
             # num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, MMAI_BATTLEAI=0, model=1),
@@ -156,7 +170,7 @@ config = dict(
             # role-specific.
             # XXX: in PyG 2.8.0, this option gives an error anyway
             # add_self_loops=False,
-        )
+        ),
     ),
 )
 

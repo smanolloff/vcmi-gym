@@ -32,7 +32,7 @@ from .util.wandb import setup_wandb
 from .util.timer import Timer
 from .util.misc import dig, safe_mean, timer_stats
 
-from .dual_vec_env import DualVecEnv, AbstractModelLoader
+from .dual_vec_env import DualVecEnv, AbstractModelLoader, VcmiEnv
 from .gnn_model import GNNModel, to_hdata_list, add_action_active_local_ids
 
 if os.getenv("PYDEBUG", None) == "1":
@@ -155,9 +155,9 @@ class MultiStats(SampleStats):
 
 
 class PPOModel(nn.Module):
-    def __init__(self, config, device):
+    def __init__(self, node_types, edge_types, config, device):
         super().__init__()
-        self.model = GNNModel(config)
+        self.model = GNNModel(node_types, edge_types, config)
         self.device = device
         self.to(device)
 
@@ -194,8 +194,15 @@ class ModelLoader(AbstractModelLoader):
     def load(self, weights_file):
         self.logger.info(f"Loading model weights from {weights_file}")
         weights = torch.load(weights_file, weights_only=True, map_location=self.device_type)
+
         if not self.model:
-            self.model = PPOModel(self.config["model"], torch.device(self.device_type)).eval()
+            self.model = PPOModel(
+                node_types=VcmiEnv.node_types(),
+                edge_types=VcmiEnv.filtered_edge_types(config["train"]["env"]["kwargs"]["ignored_edges"]),
+                config=self.config["model"],
+                device=torch.device(self.device_type)
+            ).eval()
+
         self.model.load_state_dict(weights, strict=True)
 
     def get_model(self):
@@ -764,9 +771,14 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     storage = Storage(train_venv, train_config["num_vsteps"], torch.device("cpu"))  # force storage on cpu
     state = State()
 
-    model = PPOModel(config=config["model"], device=device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    model = PPOModel(
+        node_types=VcmiEnv.node_types(),
+        edge_types=VcmiEnv.filtered_edge_types(config["train"]["env"]["kwargs"]["ignored_edges"]),
+        config=config["model"],
+        device=device
+    )
 
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     optimizer.param_groups[0].setdefault("initial_lr", learning_rate)
 
     if train_config["torch_autocast"]:
