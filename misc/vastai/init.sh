@@ -154,8 +154,8 @@ function link_checkpoint() {
         set -e
         cd \$workdir
 
-        if ! [ -e \$prefix-model-dna.pt ]; then
-            echo "Source model not found: \$prefix-model-dna.pt"
+        if ! [ -e \$prefix-model-ppo.pt ]; then
+            echo "Source model not found: \$prefix-model-ppo.pt"
             return 1
         fi
 
@@ -183,7 +183,7 @@ function upload_checkpoint() {
 
     rid=\${1%-*}
     tag=\${1#*-}
-    s3_dir=mppo-dna-heads/models
+    s3_dir=ppo-gnn/models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG"; return 1; }
 
@@ -192,7 +192,7 @@ function upload_checkpoint() {
         cd \$workdir
 
         files=()
-        for suffix in config.json state-default.json model-dna.pt optimizer-distill.pt optimizer-policy.pt optimizer-value.pt scaler-default.pt; do
+        for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do
             f=\$rid-\$tag-\$suffix
             [ -r \$f ] || { echo "Not found: \$f"; return 1; }
             files+=(\$f)
@@ -212,7 +212,7 @@ function download_checkpoint() {
 
     rid=\${1%-*}
     tag=\${1#*-}
-    s3_dir=mppo-dna-heads/models
+    s3_dir=ppo-gnn/models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
 
@@ -225,7 +225,7 @@ function download_checkpoint() {
     echo "\$cfg_json" > \$out_dir/\$rid-\$tag-config.json
 
     files=()
-    for suffix in state-default.json model-dna.pt optimizer-distill.pt optimizer-policy.pt optimizer-value.pt scaler-default.pt; do
+    for suffix in state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do
         files+=(\$rid-\$tag-\$suffix)
     done
 
@@ -242,7 +242,7 @@ function download_model() {
 
     rid=\${1%-*}
     tag=\${1#*-}
-    s3_dir=mppo-dna-heads/models
+    s3_dir=ppo-gnn/models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
 
@@ -254,7 +254,7 @@ function download_model() {
     # Copy config separately (already downloaded as text)
     echo "\$cfg_json" > \$out_dir/\$rid-\$tag-config.json
 
-    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$tag-model-dna.pt \$out_dir/  || { echo "ERROR"; return 1; }
+    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$tag-model-ppo.pt \$out_dir/  || { echo "ERROR"; return 1; }
 }
 #
 # Copy a checkpoint
@@ -292,13 +292,13 @@ function copy_checkpoint() {
         prefix1=\$rid1-\$tag1
         prefix2=\$rid2-\$tag2
 
-        if ! [ -e \$prefix1-model-dna.pt ]; then
-            echo "Source model not found: \$prefix1-model-dna.pt"
+        if ! [ -e \$prefix1-model-ppo.pt ]; then
+            echo "Source model not found: \$prefix1-model-ppo.pt"
             return 1
         fi
 
-        if [ -e \$prefix2-model-dna.pt ]; then
-            echo "Destination already exists: \$prefix2-model-dna.pt"
+        if [ -e \$prefix2-model-ppo.pt ]; then
+            echo "Destination already exists: \$prefix2-model-ppo.pt"
             return 1
         fi
 
@@ -306,7 +306,7 @@ function copy_checkpoint() {
           cp {\$prefix1-,\$prefix2-}\$f.json
         done
 
-        for f in model-dna optimizer-distill optimizer-policy optimizer-value scaler-default; do
+        for f in model-ppo optimizer-default scaler-default; do
           cp {\$prefix1-,\$prefix2-}\$f.pt
         done
     )
@@ -373,7 +373,7 @@ USAGE
     local dry_run
     echo \$* | grep -- --dry-run && dry_run=true || dry_run=false
 
-    local f="data/mppo-dna-heads/\$run_id-config.json"
+    local f="data/v15/\$run_id-config.json"
 
     if [ -r "\$f" ] && \$new_run; then
         echo "Config already exists, but this should be a new run"
@@ -385,7 +385,7 @@ USAGE
         return 1
     fi
 
-    local basecmd="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn"
+    local basecmd="python -m rl.algos.v15.ppo_gnn"
     local newcmd="\$basecmd --run-id \$run_id \$rest"
 
     # Resuming does not use any args except -f and (optionally) --dry-run
@@ -484,7 +484,7 @@ date
 
 # Deletes non-symlinked files older than X hours
 # Usage:
-#   cleanup 12 /workspace/vcmi-gym/data/mppo-dna-heads
+#   cleanup 12 /workspace/vcmi-gym/data/v15
 
 HOURS="\${1:?Hours required}"
 DIR="\${2:?Directory required}"
@@ -517,7 +517,7 @@ EOFCLEANUP
 
 chmod +x /root/cleanup.sh
 cat <<EOF >>/etc/cron.d/cleanup
-0 0 * * * root /root/cleanup.sh 48 /workspace/vcmi-gym/data/mppo-dna-heads >> /root/cleanup.log
+0 0 * * * root /root/cleanup.sh 48 /workspace/vcmi-gym/data/v15 >> /root/cleanup.log
 EOF
 chmod 644 /etc/cron.d/cleanup
 service cron start
