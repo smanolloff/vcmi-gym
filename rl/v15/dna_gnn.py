@@ -12,6 +12,7 @@ import contextlib
 import importlib
 import math
 import traceback
+import copy
 
 from dataclasses import dataclass, field, asdict
 from collections import deque
@@ -25,6 +26,8 @@ import torch.nn as nn
 
 from torch_geometric.data import Batch
 from torch_geometric.loader import DataLoader
+from torch_geometric.utils import softmax as gnn_softmax
+from torch_scatter import scatter_sum
 
 from .util.structured_logger import StructuredLogger
 from .util.persistence import load_checkpoint, save_checkpoint, download_latest_model
@@ -106,6 +109,7 @@ class TrainStats:
     value_loss: float
     policy_loss: float
     entropy_loss: float
+    distill_loss: float
     approx_kl: float
     clipfrac: float
     explained_var: float
@@ -154,21 +158,16 @@ class MultiStats(SampleStats):
         self.ep_rew_prog_mean = safe_mean([v.ep_rew_prog_mean for v in self.variants.values() if v.num_episodes > 0])
 
 
-class PPOModel(nn.Module):
+class DNAModel(nn.Module):
     def __init__(self, node_types, edge_types, config, device):
         super().__init__()
-        self.model = GNNModel(node_types, edge_types, config)
+        self.model_policy = GNNModel(node_types, edge_types, config)
+        self.model_value = GNNModel(node_types, edge_types, config)
         self.device = device
         self.to(device)
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)
-
-    def forward_policy(self, *args, **kwargs):
-        return self.model.forward_policy(*args, **kwargs)
-
-    def forward_value(self, *args, **kwargs):
-        return self.model.forward_value(*args, **kwargs)
 
 
 class ModelLoader(AbstractModelLoader):
@@ -196,7 +195,7 @@ class ModelLoader(AbstractModelLoader):
         weights = torch.load(weights_file, weights_only=True, map_location=self.device_type)
 
         if not self.model:
-            self.model = PPOModel(
+            self.model = DNAModel(
                 node_types=VcmiEnv.node_types(),
                 edge_types=VcmiEnv.filtered_edge_types(config["train"]["env"]["kwargs"]["ignored_edges"]),
                 config=self.config["model"],
@@ -221,7 +220,6 @@ class ModelLoaderInfo():
     weights_file: str
 
 
-
 def collect_samples(logger, model, venv, num_vsteps, storage):
     assert not torch.is_inference_mode_enabled()  # causes issues during training
     assert not torch.is_grad_enabled()
@@ -236,8 +234,8 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
         add_action_active_local_ids(v_hdata_batch)
 
-        v_action, v_logprob, v_entropy = model.forward_policy(v_hdata_batch)
-        v_value = model.forward_value(v_hdata_batch).flatten()
+        v_action, v_logprob, v_entropy = model.model_policy.forward_policy(v_hdata_batch)
+        v_value = model.model_value.forward_value(v_hdata_batch).flatten()
         _, v_rew, v_term, v_trunc, v_info = venv.step(v_action.cpu().numpy())
         v_rew = torch.as_tensor(v_rew)
 
@@ -293,7 +291,7 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
     # bootstrap value if not done
     v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list).to(model.device)
     add_action_active_local_ids(v_next_hdata_batch)
-    v_next_value = model.forward_value(v_next_hdata_batch).flatten().cpu()
+    v_next_value = model.model_value.forward_value(v_next_hdata_batch).flatten().cpu()
 
     for i, hdata in enumerate(storage.v_next_hdata_list):
         hdata.value = v_next_value[i]
@@ -316,7 +314,7 @@ def eval_model(logger, model, venv, num_vsteps):
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
         add_action_active_local_ids(v_hdata_batch)
 
-        v_action, v_logprob, v_entropy = model.forward_policy(v_hdata_batch, deterministic=True)
+        v_action, v_logprob, v_entropy = model.model_policy.forward_policy(v_hdata_batch, deterministic=True)
         _, v_rew, v_term, v_trunc, v_info = venv.step(v_action.cpu().numpy())
         v_done = torch.as_tensor(np.logical_or(v_term, v_trunc), dtype=torch.bool)
 
@@ -356,8 +354,11 @@ def eval_model(logger, model, venv, num_vsteps):
 
 def train_model(
     logger,
-    model: PPOModel,
-    optimizer,
+    model: DNAModel,
+    old_model_policy: GNNModel,
+    optimizer_policy,
+    optimizer_value,
+    optimizer_distill,
     autocast_ctx,
     scaler,
     storage,
@@ -406,21 +407,19 @@ def train_model(
     value_losses = []
     policy_losses = []
     entropy_losses = []
+    distill_losses = []
     kl_exceeded = False
 
     for epoch in range(train_config["update_epochs"]):
-        logger.debug("(train) epoch: %d" % epoch)
+        logger.debug("(train.policy) epoch: %d" % epoch)
         for i, mb in enumerate(dataloader):
-            logger.debug("(train) minibatch: %d" % i)
+            logger.debug("(train.policy) minibatch: %d" % i)
             mb = mb.to(model.device, non_blocking=True)
             add_action_active_local_ids(mb)
 
             with autocast_ctx(True):
-                newvalue, _newaction, newlogprob, newentropy = model(mb, b_action=mb.action)
+                _newaction, newlogprob, newentropy = model.model_policy.forward_policy(mb, b_action=mb.action)
 
-            newvalue = newvalue.view(-1).float()
-            oldvalue = mb.value.float()
-            returns = mb.ep_return.float()
             oldlogprob = mb.logprob.float()
             newlogprob = newlogprob.float()
 
@@ -447,6 +446,36 @@ def train_model(
             policy_loss = torch.max(pg_loss1, pg_loss2).mean()
             entropy_loss = newentropy.float().mean()
 
+            loss = policy_loss - entropy_loss * train_config["ent_coef"]
+
+            policy_losses.append(policy_loss.detach().item())
+            entropy_losses.append(entropy_loss.detach().item())
+
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer_policy)  # needed for clip_grad_norm
+            nn.utils.clip_grad_norm_(model.parameters(), train_config["max_grad_norm"])
+            scaler.step(optimizer_policy)
+            scaler.update()
+            optimizer_policy.zero_grad(set_to_none=True)
+
+        if kl_exceeded:
+            break
+
+    # Value network optimization
+    for epoch in range(train_config["update_epochs"]):
+        logger.debug("(train.value) epoch: %d" % epoch)
+        for i, mb in enumerate(dataloader):
+            logger.debug("(train.value) minibatch: %d" % i)
+            mb = mb.to(model.device, non_blocking=True)
+            add_action_active_local_ids(mb)
+
+            with autocast_ctx(True):
+                newvalue = model.model_value.forward_value(mb)
+
+            newvalue = newvalue.view(-1).float()
+            oldvalue = mb.value.float()
+            returns = mb.ep_return.float()
+
             if train_config["clip_vloss"]:
                 v_loss_unclipped = (newvalue - returns) ** 2
                 v_clipped = oldvalue + torch.clamp(
@@ -459,21 +488,71 @@ def train_model(
             else:
                 value_loss = 0.5 * ((newvalue - returns) ** 2).mean()
 
-            loss = policy_loss - entropy_loss * train_config["ent_coef"] + value_loss
-
-            policy_losses.append(policy_loss.detach().item())
-            entropy_losses.append(entropy_loss.detach().item())
             value_losses.append(value_loss.detach().item())
 
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)  # needed for clip_grad_norm
-            nn.utils.clip_grad_norm_(model.parameters(), train_config["max_grad_norm"])
-            scaler.step(optimizer)
+            scaler.scale(value_loss).backward()
+            scaler.unscale_(optimizer_value)  # needed for clip_grad_norm
+            nn.utils.clip_grad_norm_(model.model_value.parameters(), train_config["max_grad_norm"])
+            scaler.step(optimizer_value)
             scaler.update()
-            optimizer.zero_grad(set_to_none=True)
+            optimizer_value.zero_grad(set_to_none=True)
 
-        if kl_exceeded:
-            break
+    # Value network to policy network distillation
+    old_model_policy.load_state_dict(model.model_policy.state_dict(), strict=True)
+    old_model_policy.eval()
+
+    for epoch in range(train_config["update_epochs"]):
+        logger.debug("(train.distill) epoch: %d" % epoch)
+        for i, mb in enumerate(dataloader):
+            logger.debug("(train.distill) minibatch: %d" % i)
+            mb = mb.to(model.device, non_blocking=True)
+            add_action_active_local_ids(mb)
+
+            batch_size = mb.num_graphs
+
+            with torch.no_grad(), autocast_ctx(True):
+                # Compute policy and value targets
+                old_gnn_out = old_model_policy.gnn(mb)
+                (
+                    old_active_logits,
+                    old_active_batch_index,
+                    old_active_local_action_ids,
+                    old_batch_size,
+                ) = old_model_policy._get_active_logits(old_gnn_out, mb)
+                value_target = model.model_value.forward_value(mb)
+
+            with autocast_ctx(True):
+                new_gnn_out = model.model_policy.gnn(mb)
+                (
+                    new_active_logits,
+                    new_active_batch_index,
+                    new_active_local_action_ids,
+                    new_batch_size,
+                ) = model.model_policy._get_active_logits(new_gnn_out, mb)
+                new_value = model.model_policy._forward_value(new_gnn_out)
+
+            assert old_batch_size == new_batch_size
+            assert batch_size == old_batch_size
+            assert torch.equal(old_active_batch_index, new_active_batch_index)
+            assert torch.equal(old_active_local_action_ids, new_active_local_action_ids)
+
+            old_log_probs = torch.log(gnn_softmax(old_active_logits.float(), old_active_batch_index).clamp_min(1e-12))
+            new_log_probs = torch.log(gnn_softmax(new_active_logits.float(), new_active_batch_index).clamp_min(1e-12))
+            per_action_kl = old_log_probs.exp() * (old_log_probs - new_log_probs)
+            b_kl = scatter_sum(per_action_kl, old_active_batch_index, dim=0, dim_size=batch_size)
+            distill_actloss = b_kl.mean()
+
+            distill_vloss = 0.5 * (new_value.view(-1) - value_target.view(-1)).square().mean()
+            distill_loss = distill_vloss + train_config["distill_beta"] * distill_actloss
+
+            distill_losses.append(distill_loss.detach().item())
+
+            scaler.scale(distill_loss).backward()
+            scaler.unscale_(optimizer_distill)  # needed for clip_grad_norm
+            nn.utils.clip_grad_norm_(model.model_policy.parameters(), train_config["max_grad_norm"])
+            scaler.step(optimizer_distill)
+            scaler.update()
+            optimizer_distill.zero_grad(set_to_none=True)
 
     y_pred, y_true = storage.bv_values.cpu().numpy(), storage.bv_returns.cpu().numpy()
     var_y = np.var(y_true)
@@ -483,6 +562,7 @@ def train_model(
         value_loss=safe_mean(value_losses),
         policy_loss=safe_mean(policy_losses),
         entropy_loss=safe_mean(entropy_losses),
+        distill_loss=safe_mean(distill_losses),
         approx_kl=safe_mean(approx_kls),
         clipfrac=safe_mean(clipfracs),
         explained_var=float(explained_var),
@@ -581,9 +661,11 @@ def prepare_wandb_log(
         "train/value_loss": train_stats.value_loss,
         "train/policy_loss": train_stats.policy_loss,
         "train/entropy_loss": train_stats.entropy_loss,
+        "train/distill_loss": train_stats.distill_loss,
         "train/nan/value_loss": math.isnan(train_stats.value_loss) or math.isinf(train_stats.value_loss),
         "train/nan/policy_loss": math.isnan(train_stats.policy_loss) or math.isinf(train_stats.policy_loss),
         "train/nan/entropy_loss": math.isnan(train_stats.entropy_loss) or math.isinf(train_stats.entropy_loss),
+        "train/nan/distill_loss": math.isnan(train_stats.distill_loss) or math.isinf(train_stats.distill_loss),
         "train/approx_kl": train_stats.approx_kl,
         "train/clipfrac": train_stats.clipfrac,
         "train/explained_var": train_stats.explained_var,
@@ -770,15 +852,24 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     storage = Storage(train_venv, train_config["num_vsteps"], torch.device("cpu"))  # force storage on cpu
     state = State()
 
-    model = PPOModel(
+    model = DNAModel(
         node_types=VcmiEnv.node_types(),
         edge_types=VcmiEnv.filtered_edge_types(config["train"]["env"]["kwargs"]["ignored_edges"]),
         config=config["model"],
         device=device
     )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    optimizer.param_groups[0].setdefault("initial_lr", learning_rate)
+    old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
+    for p in old_model_policy.parameters():
+        p.requires_grad = False
+
+    optimizer_policy = torch.optim.Adam(model.model_policy.parameters(), lr=learning_rate)
+    optimizer_value = torch.optim.Adam(model.model_value.parameters(), lr=learning_rate)
+    optimizer_distill = torch.optim.Adam(model.model_policy.parameters(), lr=learning_rate)
+
+    optimizer_policy.param_groups[0].setdefault("initial_lr", learning_rate)
+    optimizer_value.param_groups[0].setdefault("initial_lr", learning_rate)
+    optimizer_distill.param_groups[0].setdefault("initial_lr", learning_rate)
 
     if train_config["torch_autocast"]:
         autocast_ctx = lambda enabled: torch.autocast(device.type, enabled=enabled)
@@ -794,8 +885,12 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         load_checkpoint(
             logger=logger,
             dry_run=dry_run,
-            models={"ppo": model},
-            optimizers={"default": optimizer},
+            models={"dna": model},
+            optimizers={
+                "policy": optimizer_policy,
+                "value": optimizer_value,
+                "distill": optimizer_distill,
+            },
             scalers={"default": scaler},
             states={"default": state},
             out_dir=config["run"]["out_dir"],
@@ -812,7 +907,9 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         state.current_vstep = 0
 
         # lr is lost after loading weights
-        optimizer.param_groups[0]["lr"] = learning_rate
+        optimizer_policy.param_groups[0]["lr"] = learning_rate
+        optimizer_value.param_groups[0]["lr"] = learning_rate
+        optimizer_distill.param_groups[0]["lr"] = learning_rate
 
         state.resumes += 1
         logger.info("Resumes: %d" % state.resumes)
@@ -852,6 +949,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         "train_config/norm_adv": int(train_config["norm_adv"]),
         "train_config/clip_vloss": int(train_config["clip_vloss"]),
         "train_config/max_grad_norm": train_config["max_grad_norm"],
+        "train_config/distill_beta": train_config["distill_beta"],
     }, commit=False)
 
     # during training, we simply check if the event is set and optionally skip the upload
@@ -888,9 +986,13 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         lr_scheduler_mod = importlib.import_module(train_config["lr_scheduler_mod"])
         lr_scheduler_cls = getattr(lr_scheduler_mod, train_config["lr_scheduler_cls"])
 
-        lr_schedule_policy = lr_scheduler_cls(optimizer, **train_config["lr_scheduler_kwargs"])
+        lr_schedule_policy = lr_scheduler_cls(optimizer_policy, **train_config["lr_scheduler_kwargs"])
+        lr_schedule_value = lr_scheduler_cls(optimizer_value, **train_config["lr_scheduler_kwargs"])
+        lr_schedule_distill = lr_scheduler_cls(optimizer_distill, **train_config["lr_scheduler_kwargs"])
     else:
-        lr_schedule_policy = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _: 1)
+        lr_schedule_policy = torch.optim.lr_scheduler.LambdaLR(optimizer_policy, lr_lambda=lambda _: 1)
+        lr_schedule_value = torch.optim.lr_scheduler.LambdaLR(optimizer_value, lr_lambda=lambda _: 1)
+        lr_schedule_distill = torch.optim.lr_scheduler.LambdaLR(optimizer_distill, lr_lambda=lambda _: 1)
 
     # TODO: torch LR schedulers are very buggy and cannot be resumed reliably
     # (they perform just 1 step for StepLR; they change the step size for LinearLR, ...etc)
@@ -898,6 +1000,8 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     # Also, calling .step(N) raises deprecation warning...
     for _ in range(state.global_second // train_config["lr_scheduler_interval_s"]):
         lr_schedule_policy.step()
+        lr_schedule_value.step()
+        lr_schedule_distill.step()
 
     global_second_start = state.global_second
 
@@ -905,8 +1009,12 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         save_checkpoint,
         logger=logger,
         dry_run=dry_run,
-        models={"ppo": model},
-        optimizers={"default": optimizer},
+        models={"dna": model},
+        optimizers={
+            "policy": optimizer_policy,
+            "value": optimizer_value,
+            "distill": optimizer_distill,
+        },
         scalers={"default": scaler},
         states={"default": state},
         out_dir=config["run"]["out_dir"],
@@ -931,11 +1039,13 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
             [v.reset(start=(k == "all")) for k, v in timers.items()]
 
-            logger.debug("learning_rate: %s" % optimizer.param_groups[0]['lr'])
+            logger.debug("learning_rate: %s" % optimizer_policy.param_groups[0]['lr'])
             if lr_schedule_timer.peek() > train_config["lr_scheduler_interval_s"]:
                 lr_schedule_timer.reset(start=True)
                 lr_schedule_policy.step()
-                logger.info("New learning_rate: %s" % optimizer.param_groups[0]['lr'])
+                lr_schedule_value.step()
+                lr_schedule_distill.step()
+                logger.info("New learning_rate: %s" % optimizer_policy.param_groups[0]['lr'])
 
             now = dt.datetime.now().astimezone(dt.timezone.utc)
             for loader_info in loader_infos:
@@ -1046,7 +1156,10 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                 train_stats = train_model(
                     logger=logger,
                     model=model,
-                    optimizer=optimizer,
+                    old_model_policy=old_model_policy,
+                    optimizer_policy=optimizer_policy,
+                    optimizer_value=optimizer_value,
+                    optimizer_distill=optimizer_distill,
                     autocast_ctx=autocast_ctx,
                     scaler=scaler,
                     storage=storage,
@@ -1059,8 +1172,8 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                 save_fn(s3_config=checkpoint_config["s3"], tag=f"{time.time():.0f}")
 
             wlog = prepare_wandb_log(
-                model=model,
-                optimizer=optimizer,
+                model=model.model_policy,
+                optimizer=optimizer_policy,
                 state=state,
                 train_stats=train_stats,
                 train_sample_stats=train_sample_stats,
@@ -1075,7 +1188,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                 wlog.update(aggregate_logs())
                 tstats = timer_stats(timers)
                 wlog.update(tstats)
-                wlog["train_config/learning_rate"] = optimizer.param_groups[0]['lr']
+                wlog["train_config/learning_rate"] = optimizer_policy.param_groups[0]['lr']
                 wandb.log(wlog, commit=True)
 
             logger.info(wlog)

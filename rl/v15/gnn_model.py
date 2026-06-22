@@ -531,12 +531,12 @@ class GNNModel(nn.Module):
         ) = self._get_active_logits(gnn_out, hdata)
 
         b_action, b_logprob, b_entropy = GNNModel.process_flat_logits(
-                active_logits=active_logits,
-                active_batch_index=active_batch_index,
-                active_local_action_ids=active_local_action_ids,
-                batch_size=batch_size,
-                b_action=b_action,
-                deterministic=deterministic,
+            active_logits=active_logits,
+            active_batch_index=active_batch_index,
+            active_local_action_ids=active_local_action_ids,
+            batch_size=batch_size,
+            b_action=b_action,
+            deterministic=deterministic,
         )
 
         return b_action, b_logprob, b_entropy
