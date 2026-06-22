@@ -385,7 +385,7 @@ USAGE
         return 1
     fi
 
-    local basecmd="python -m rl.algos.v15.ppo_gnn"
+    local basecmd="python -m rl.v15.ppo_gnn"
     local newcmd="\$basecmd --run-id \$run_id \$rest"
 
     # Resuming does not use any args except -f and (optionally) --dry-run
@@ -607,26 +607,11 @@ apt-get -y install vim ccache cmake g++ liblzma-dev \
   libluajit-5.1-dev libminizip-dev libfuzzylite-dev libsqlite3-dev \
   libsquish-dev
 
-cmake -S . -B rel -Wno-dev \
-    -D CMAKE_BUILD_TYPE=Release \
-    -D CMAKE_EXPORT_COMPILE_COMMANDS=0 \
-    -D ENABLE_CCACHE=1 \
-    -D ENABLE_NULLKILLER2_AI=0 \
-    -D ENABLE_LAUNCHER=0 \
-    -D ENABLE_VIDEO=0 \
-    -D ENABLE_DISCORD=0 \
-    -D ENABLE_TRANSLATIONS=0 \
-    -D ENABLE_ML=1 \
-    -D ENABLE_MMAI=1 \
-    -D ONNXRUNTIME_ROOT="$ONNXRUNTIME_ROOT"
-cmake --build rel/ -- -j$CPU_COUNT
+make vastai-build
 
 cd ../vcmi_gym/connectors
 apt-get -y install libboost-all-dev
-cmake -S . -B rel -Wno-dev \
-    -D CMAKE_BUILD_TYPE=Release \
-    -D CMAKE_EXPORT_COMPILE_COMMANDS=0
-cmake --build rel/ -- -j$CPU_COUNT
+make vastai-build-connector
 
 cd ../../
 wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
