@@ -154,8 +154,8 @@ function link_checkpoint() {
         set -e
         cd \$workdir
 
-        if ! [ -e \$prefix-model-ppo.pt ]; then
-            echo "Source model not found: \$prefix-model-ppo.pt"
+        if ! [ -e \$prefix-model-ppo.pt -o -e \$prefix-model-dna.pt ]; then
+            echo "Source model not found: \$prefix-model-ppo.pt | \$prefix-model-dna.pt"
             return 1
         fi
 
@@ -183,7 +183,7 @@ function upload_checkpoint() {
 
     rid=\${1%-*}
     tag=\${1#*-}
-    s3_dir=ppo-gnn/models
+    s3_dir=models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG"; return 1; }
 
@@ -191,8 +191,17 @@ function upload_checkpoint() {
         set -e
         cd \$workdir
 
+        if [ -e \$rid-\$tag-model-ppo.pt ]; then
+            suffixes="config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt"
+        elif [ -e \$rid-\$tag-model-dna.pt ]; then
+            suffixes="config.json state-default.json model-dna.pt optimizer-policy.pt optimizer-value.pt optimizer-distill.pt scaler-default.pt"
+        else
+            echo "Neither ppo nor dna model found"
+            return 1
+        fi
+
         files=()
-        for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do
+        for suffix in \$suffixes; do
             f=\$rid-\$tag-\$suffix
             [ -r \$f ] || { echo "Not found: \$f"; return 1; }
             files+=(\$f)
@@ -208,11 +217,12 @@ function upload_checkpoint() {
 # Download a timestamped checkpoint (to out_dir as per the config)
 #
 function download_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
+    [ "\$1" = ppo -o "\$1" = dna ] || { echo "Usage: download_checkpoint ppo|dna RUN_ID-TAG"; return 1; }
+    [ -n "\${2:-}" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
 
-    rid=\${1%-*}
-    tag=\${1#*-}
-    s3_dir=ppo-gnn/models
+    rid=\${2%-*}
+    tag=\${2#*-}
+    s3_dir=models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
 
@@ -224,8 +234,14 @@ function download_checkpoint() {
     # Copy config separately (already downloaded as text)
     echo "\$cfg_json" > \$out_dir/\$rid-\$tag-config.json
 
+    if [ "\$1" = ppo ]; then
+        suffixes="state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt"
+    else
+        suffixes="state-default.json model-dna.pt optimizer-policy.pt optimizer-value.pt optimizer-distill.pt scaler-default.pt"
+    fi
+
     files=()
-    for suffix in state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do
+    for suffix in \$suffixes; do
         files+=(\$rid-\$tag-\$suffix)
     done
 
@@ -238,11 +254,12 @@ function download_checkpoint() {
 # Same as download_checkpoint(), but only for the config & model weights
 #
 function download_model() {
-    [ -n "\${1:-}" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
+    [ "\$1" = ppo -o "\$1" = dna ] || { echo "Usage: download_model ppo|dna RUN_ID-TAG"; return 1; }
+    [ -n "\${2:-}" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
 
-    rid=\${1%-*}
-    tag=\${1#*-}
-    s3_dir=ppo-gnn/models
+    rid=\${2%-*}
+    tag=\${2#*-}
+    s3_dir=models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
 
@@ -292,13 +309,21 @@ function copy_checkpoint() {
         prefix1=\$rid1-\$tag1
         prefix2=\$rid2-\$tag2
 
-        if ! [ -e \$prefix1-model-ppo.pt ]; then
-            echo "Source model not found: \$prefix1-model-ppo.pt"
+        if [ -e \$prefix1-model-ppo.pt ]; then
+            model1=\$prefix1-model-ppo.pt
+            model2=\$prefix2-model-ppo.pt
+            suffixes="model-ppo optimizer-default scaler-default"
+        elif [ -e \$prefix1-model-dna.pt ]; then
+            model2=\$prefix1-model-dna.pt
+            model2=\$prefix2-model-dna.pt
+            suffixes="model-dna optimizer-policy optimizer-value optimizer-distill scaler-default"
+        else
+            echo "Neither ppo nor dna source model found"
             return 1
         fi
 
-        if [ -e \$prefix2-model-ppo.pt ]; then
-            echo "Destination already exists: \$prefix2-model-ppo.pt"
+        if [ -e \$model2 ]; then
+            echo "Destination already exists: \$model2"
             return 1
         fi
 
@@ -306,8 +331,8 @@ function copy_checkpoint() {
           cp {\$prefix1-,\$prefix2-}\$f.json
         done
 
-        for f in model-ppo optimizer-default scaler-default; do
-          cp {\$prefix1-,\$prefix2-}\$f.pt
+        for suffix in \$suffixes; do
+          cp {\$prefix1-,\$prefix2-}\$suffix.pt
         done
     )
 }
@@ -353,9 +378,15 @@ function retry_until_sigint() {
 }
 
 function train_gnn() {
-    local run_id=\$1
-    shift
+    local algo_type=\$1
+    local run_id=\$2
+    shift 2
     local rest=\$*
+
+    if ! [[ \$algo_type =~ ^(dna|gnn)$ ]]; then
+        echo "bad algo type: want: (dna|gnn), have: \$algo_type"
+        return 1
+    fi
 
     local new_run=false
     if [ -z "\$run_id" ]; then
@@ -365,7 +396,7 @@ function train_gnn() {
 
     [[ \$run_id =~ ^[a-z]{8}\$ ]] || {
         cat <<-USAGE
-Usage: train_gnn run_id [opts]
+Usage: train_gnn algo run_id [opts]
 USAGE
         return 1
     }
@@ -385,7 +416,7 @@ USAGE
         return 1
     fi
 
-    local basecmd="python -m rl.v15.ppo_gnn"
+    local basecmd="python -m rl.v15.\${algo}_gnn"
     local newcmd="\$basecmd --run-id \$run_id \$rest"
 
     # Resuming does not use any args except -f and (optionally) --dry-run
