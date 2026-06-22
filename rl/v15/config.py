@@ -100,7 +100,7 @@ config = dict(
         env_variants={
             # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0, 0), town_chance=100),
             "BattleAI.open": eval_variant(
-                num_envs_per_opponent=gen_num_envs(2, 0, 0, 0),
+                num_envs_per_opponent=gen_num_envs(0, 2, 0, 0),
                 model=None,
                 town_chance=0,
             ),
