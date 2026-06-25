@@ -21,7 +21,7 @@ import random
 from typing import Optional, NamedTuple
 
 from ..util import log
-from .decode import make_node_namedtuple_class, dump
+from .decode import make_node_namedtuple_class
 
 from .pyconnector import (
     PyConnector,
@@ -39,6 +39,7 @@ Player = make_node_namedtuple_class("Player", NODE_TYPES["Player"])
 Unit = make_node_namedtuple_class("Unit", NODE_TYPES["Unit"])
 Hex = make_node_namedtuple_class("Hex", NODE_TYPES["Hex"])
 Action = make_node_namedtuple_class("Action", NODE_TYPES["Action"])
+
 
 def tracelog(func, maxlen=80):
     if not TRACE:
@@ -70,7 +71,7 @@ class RewardConfig(NamedTuple):
     # Progressive rewards is a per-step penalty which increases each round
     # until it reaches a specific value (cap), after which it stops growing.
     #
-    # Use https://www.desmos.com/calculator to visualize:
+    # Visualize on https://www.desmos.com/calculator
     #
     #       Equation:
     #           \min\left(a\left(\max\left(\operatorname{floor}\left(x\right),b\right)-b\right)^{c},d\right)
@@ -131,7 +132,6 @@ class EdgeIndexSpace(gym.spaces.Space):
 
 #     def sample(self, num_edges=10):
 #         return np.stack([self.attrs_space.sample() for _ in range(num_edges)])
-
 
 
 class AttrsSpace(gym.spaces.Space):

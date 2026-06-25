@@ -24,7 +24,6 @@
 #include "ML/model_wrappers/scripted.h"
 #include "ML/model_wrappers/path.h"
 #include "exporter.h"
-#include <algorithm>
 
 #include <chrono>
 #include <condition_variable>
@@ -36,7 +35,6 @@
 
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <unistd.h>
 
@@ -161,79 +159,6 @@ namespace Connector::V14::Thread {
     }
 
     // EOF TEST SIGNAL HANDLING
-
-    Connector::Connector(
-        const int maxlogs_,
-        const int bootTimeout_,
-        const int vcmiTimeout_,
-        const int userTimeout_,
-        const std::string mapname_,
-        const int seed_,
-        const int randomHeroes_,
-        const int randomObstacles_,
-        const int townChance_,
-        const int warmachineChance_,
-        const bool randomArmies_,
-        const int randomArmyValueMin_,
-        const int randomArmyValueMax_,
-        const int randomArmyTargetVar_,
-        const int tightFormationChance_,
-        const int randomTerrainChance_,
-        const int leftVipChance_,
-        const int rightVipChance_,
-        const std::string battlefieldPattern_,
-        const int manaMin_,
-        const int manaMax_,
-        const int randomPrimarySkills_,
-        const int swapSides_,
-        const std::string loglevelGlobal_,
-        const std::string loglevelAI_,
-        const std::string loglevelStats_,
-        const std::string red_,
-        const std::string blue_,
-        const std::string redModel_,
-        const std::string blueModel_,
-        const bool redAllowMlBot_,
-        const bool blueAllowMlBot_,
-        const std::string statsMode_,
-        const std::string statsStorage_,
-        const int statsPersistFreq_
-    ) : maxlogs(maxlogs_),
-        bootTimeout(bootTimeout_),
-        vcmiTimeout(vcmiTimeout_),
-        userTimeout(userTimeout_),
-        mapname(mapname_),
-        seed(seed_),
-        randomHeroes(randomHeroes_),
-        randomObstacles(randomObstacles_),
-        townChance(townChance_),
-        warmachineChance(warmachineChance_),
-        randomArmies(randomArmies_),
-        randomArmyValueMin(randomArmyValueMin_),
-        randomArmyValueMax(randomArmyValueMax_),
-        randomArmyTargetVar(randomArmyTargetVar_),
-        tightFormationChance(tightFormationChance_),
-        randomTerrainChance(randomTerrainChance_),
-        leftVipChance(leftVipChance_),
-        rightVipChance(rightVipChance_),
-        battlefieldPattern(battlefieldPattern_),
-        manaMin(manaMin_),
-        manaMax(manaMax_),
-        randomPrimarySkills(randomPrimarySkills_),
-        swapSides(swapSides_),
-        loglevelGlobal(loglevelGlobal_),
-        loglevelAI(loglevelAI_),
-        loglevelStats(loglevelStats_),
-        red(red_),
-        blue(blue_),
-        redModel(redModel_),
-        blueModel(blueModel_),
-        redAllowMlBot(redAllowMlBot_),
-        blueAllowMlBot(blueAllowMlBot_),
-        statsMode(statsMode_),
-        statsStorage(statsStorage_),
-        statsPersistFreq(statsPersistFreq_)
-        {};
 
     const MMAI::Schema::V14::ISupplementaryData* Connector::extractSupplementaryData(const MMAI::Schema::IState *s) {
         LOG("Extracting supplementary data...");
@@ -636,40 +561,6 @@ namespace Connector::V14::Thread {
         } else {
             rightModel = new ML::ModelWrappers::Scripted(blue, Side::RIGHT);
         }
-
-        // auto oldcwd = std::filesystem::current_path();
-
-        auto initargs = ML::InitArgs{
-            .leftAllowMlBot=redAllowMlBot,
-            .rightAllowMlBot=blueAllowMlBot,
-            .mapname=mapname,
-            .maxBattles=0,
-            .seed=seed,
-            .randomHeroes=randomHeroes,
-            .randomObstacles=randomObstacles,
-            .townChance=townChance,
-            .warmachineChance=warmachineChance,
-            .randomArmyValueMin=randomArmyValueMin,
-            .randomArmyValueMax=randomArmyValueMax,
-            .randomArmyTargetVar=randomArmyTargetVar,
-            .tightFormationChance=tightFormationChance,
-            .randomTerrainChance=randomTerrainChance,
-            .leftVipChance=leftVipChance,
-            .rightVipChance=rightVipChance,
-            .battlefieldPattern=battlefieldPattern,
-            .manaMin=manaMin,
-            .manaMax=manaMax,
-            .randomPrimarySkills=randomPrimarySkills,
-            .swapSides=swapSides,
-            .loglevelGlobal=loglevelGlobal,
-            .loglevelAI=loglevelAI,
-            .loglevelStats=loglevelStats,
-            .statsMode=statsMode,
-            .statsStorage=statsStorage,
-            .statsTimeout=60000,
-            .statsPersistFreq=statsPersistFreq,
-            .headless=true,
-        };
 
         // This must happen in the main thread (SDL requires it)
         LOG("call init_vcmi(...)");

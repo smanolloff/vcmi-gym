@@ -16,42 +16,79 @@ namespace Connector::V14 {
 
         py::class_<Thread::Connector, std::unique_ptr<Thread::Connector>>(m, "ThreadConnector")
             .def(py::init<
-                const int &,         // maxlogs
-                const int &,         // bootTimeout
-                const int &,         // vcmiTimeout
-                const int &,         // userTimeout
-                const std::string &, // mapname
-                const int &,         // seed
-                const int &,         // randomHeroes
-                const int &,         // randomObstacles
-                const int &,         // townChance
-                const int &,         // warmachineChance
-                const bool &,        // randomArmies
-                const int &,         // randomArmyValueMin
-                const int &,         // randomArmyValueMax
-                const int &,         // randomArmyTargetVar
-                const int &,         // tightFormationChance
-                const int &,         // randomTerrainChance
-                const int &,         // leftVipChance
-                const int &,         // rightVipChance
-                const std::string &, // battlefieldPattern
-                const int &,         // manaMin
-                const int &,         // manaMax
-                const int &,         // randomPrimarySkills
-                const int &,         // swapSides
-                const std::string &, // loglevelGlobal
-                const std::string &, // loglevelAI
-                const std::string &, // loglevelStats
-                const std::string &, // red
-                const std::string &, // blue
-                const std::string &, // redModel
-                const std::string &, // blueModel
-                const bool &,        // redAllowMlBot
-                const bool &,        // blueAllowMlBot
-                const std::string &, // statsMode
-                const std::string &, // statsStorage
-                const int &          // statsPersistFreq
-            >())
+                int,                    // maxlogs
+                int,                    // bootTimeout
+                int,                    // vcmiTimeout
+                int,                    // userTimeout
+                const std::string &,    // red
+                const std::string &,    // redModel
+                const std::string &,    // blue
+                const std::string &,    // blueModel
+
+                const std::string &,    // mapname
+                int,                    // seed
+                int,                    // randomHeroes
+                int,                    // randomObstacles
+                int,                    // townChance
+                int,                    // warmachineChance
+                bool,                   // randomArmies
+                int,                    // randomArmyValueMin
+                int,                    // randomArmyValueMax
+                int,                    // randomArmyTargetVar
+                int,                    // tightFormationChance
+                int,                    // randomTerrainChance
+                int,                    // leftVipChance
+                int,                    // rightVipChance
+                const std::string &,    // battlefieldPattern
+                int,                    // manaMin
+                int,                    // manaMax
+                int,                    // randomPrimarySkills
+                int,                    // swapSides
+                const std::string &,    // loglevelGlobal
+                const std::string &,    // loglevelAI
+                const std::string &,    // loglevelStats
+                bool,                   // redAllowMlBot
+                bool,                   // blueAllowMlBot
+                const std::string &,    // statsMode
+                const std::string &,    // statsStorage
+                int                     // statsPersistFreq
+            >(),
+                py::arg("maxlogs"),
+                py::arg("bootTimeout"),
+                py::arg("vcmiTimeout"),
+                py::arg("userTimeout"),
+                py::arg("red"),
+                py::arg("redModel"),
+                py::arg("blue"),
+                py::arg("blueModel"),
+                py::arg("mapname"),
+                py::arg("seed"),
+                py::arg("randomHeroes"),
+                py::arg("randomObstacles"),
+                py::arg("townChance"),
+                py::arg("warmachineChance"),
+                py::arg("randomArmies"),
+                py::arg("randomArmyValueMin"),
+                py::arg("randomArmyValueMax"),
+                py::arg("randomArmyTargetVar"),
+                py::arg("tightFormationChance"),
+                py::arg("randomTerrainChance"),
+                py::arg("leftVipChance"),
+                py::arg("rightVipChance"),
+                py::arg("battlefieldPattern"),
+                py::arg("manaMin"),
+                py::arg("manaMax"),
+                py::arg("randomPrimarySkills"),
+                py::arg("swapSides"),
+                py::arg("loglevelGlobal"),
+                py::arg("loglevelAI"),
+                py::arg("loglevelStats"),
+                py::arg("redAllowMlBot"),
+                py::arg("blueAllowMlBot"),
+                py::arg("statsMode"),
+                py::arg("statsStorage"),
+                py::arg("statsPersistFreq")
+            )
             .def("shutdown", &Thread::Connector::shutdown)
             .def("start", &Thread::Connector::start)
             .def("reset", &Thread::Connector::reset)

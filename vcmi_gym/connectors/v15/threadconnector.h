@@ -22,7 +22,7 @@
 #include <deque>
 
 #include "ML/MLClient.h"
-#include "common.h"
+#include "schema/v15/types.h"
 #include "exporter.h"
 
 namespace Connector::V15::Thread {

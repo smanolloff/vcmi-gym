@@ -104,7 +104,7 @@ class PyConnector():
         self.finished = threading.Event()
 
     @tracelog
-    def start(self, *args, main_connector=None):
+    def start(self, main_connector=None, **kwargs):
         if main_connector:
             self.logger.info("Dual-env setup detected, using primary connector VCMI threadconnector.")
             self.thread = main_connector.thread
@@ -126,7 +126,7 @@ class PyConnector():
 
             self.thread = threading.Thread(
                 target=self.start_connector,
-                args=args,
+                kwargs=kwargs,
                 name="VCMI",
                 daemon=True
             )
@@ -218,7 +218,7 @@ class PyConnector():
     # It never returns (enters infinite loop in vcmi's main function)
     #
     @tracelog
-    def start_connector(self, *args):
+    def start_connector(self, **kwargs):
         self.logger.info("Starting VCMI")
 
         if (os.getenv("VCMIGYM_DEBUG", None) == "1"):
@@ -227,13 +227,13 @@ class PyConnector():
         else:
             from ...connectors.rel import connector_v14
 
-        self.logger.debug("VCMI connector args: %s" % str(args))
+        self.logger.debug("VCMI connector kwargs: %s" % str(kwargs))
         self._connector = connector_v14.ThreadConnector(
             self.maxlogs,
             self.boot_timeout,
             self.vcmi_timeout,
             self.user_timeout,
-            *args
+            **kwargs
         )
 
         self.__class__.VCMI_STARTED = True
