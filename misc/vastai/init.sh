@@ -183,7 +183,6 @@ function upload_checkpoint() {
 
     rid=\${1%-*}
     tag=\${1#*-}
-    s3_dir=models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG"; return 1; }
 
@@ -192,13 +191,17 @@ function upload_checkpoint() {
         cd \$workdir
 
         if [ -e \$rid-\$tag-model-ppo.pt ]; then
+            algo=ppo
             suffixes="config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt"
         elif [ -e \$rid-\$tag-model-dna.pt ]; then
+            algo=dna
             suffixes="config.json state-default.json model-dna.pt optimizer-policy.pt optimizer-value.pt optimizer-distill.pt scaler-default.pt"
         else
             echo "Neither ppo nor dna model found"
             return 1
         fi
+
+        s3_dir=\$algo-gnn/models
 
         files=()
         for suffix in \$suffixes; do
@@ -220,9 +223,10 @@ function download_checkpoint() {
     [ "\$1" = ppo -o "\$1" = dna ] || { echo "Usage: download_checkpoint ppo|dna RUN_ID-TAG"; return 1; }
     [ -n "\${2:-}" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
 
+    algo=\$1
     rid=\${2%-*}
     tag=\${2#*-}
-    s3_dir=models
+    s3_dir=\$algo-gnn/models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
 
@@ -257,9 +261,10 @@ function download_model() {
     [ "\$1" = ppo -o "\$1" = dna ] || { echo "Usage: download_model ppo|dna RUN_ID-TAG"; return 1; }
     [ -n "\${2:-}" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
 
+    algo=\$1
     rid=\${2%-*}
     tag=\${2#*-}
-    s3_dir=models
+    s3_dir=\$algo-gnn/models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
 
@@ -378,13 +383,13 @@ function retry_until_sigint() {
 }
 
 function train_gnn() {
-    local algo_type=\$1
+    local algo=\$1
     local run_id=\$2
     shift 2
     local rest=\$*
 
-    if ! [[ \$algo_type =~ ^(dna|gnn)$ ]]; then
-        echo "bad algo type: want: (dna|gnn), have: \$algo_type"
+    if ! [[ \$algo =~ ^(ppo|dna)$ ]]; then
+        echo "bad algo type: want: (ppo|dna), have: \$algo"
         return 1
     fi
 
@@ -547,7 +552,7 @@ EOF
 EOFCLEANUP
 
 chmod +x /root/cleanup.sh
-cat <<EOF >>/etc/cron.d/cleanup
+cat <<EOF >/etc/cron.d/cleanup
 0 0 * * * root /root/cleanup.sh 48 /workspace/vcmi-gym/data/v15 >> /root/cleanup.log
 EOF
 chmod 644 /etc/cron.d/cleanup

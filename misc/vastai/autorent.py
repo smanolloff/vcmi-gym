@@ -18,7 +18,7 @@ goldcounter = 0
 DPH = 0.17
 
 DB_PATH = "autorent.db"
-SLEEP_SECONDS = 30
+SLEEP_SECONDS = 60
 
 # 9950X with 15MB/s dload speed inits in ~10 minutes
 INIT_TIMEOUT_MINUTES = 30
@@ -128,7 +128,7 @@ def vastai_rent(offer_id: int) -> int:
         client_id="me",
         env=VASTAI_ENV,
         disk=25.0,
-        template_hash_id="9535ff4084fd850b4c1cae890febf5e0",
+        template_hash_id="f9ac4f52b001256dcdfbbb8a9733cb5f",  # "PyTorch (Vast) - 13.2"
         label="autorent",
         # :v
         onstart=(
