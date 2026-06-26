@@ -51,22 +51,44 @@ def build_inputs(hdata):
 
 def flatten_edges(hdata):
     assert len(hdata.node_types) == 1, hdata.node_types
-    assert all(list(hdata.num_edge_features.values())[i] == list(LINK_ATTR_SIZES.values())[i] for i in range(len(hdata.num_edge_features))), hdata.num_edge_features.values()
 
-    # HeteroData will convert edge indexes to int64 anyway
-    ei_flat = torch.zeros((2, 0), dtype=torch.int64)
-    ea_flat = torch.zeros((0, 1), dtype=torch.float32)
+    max_attr_dim = max(LINK_ATTR_SIZES.values())
+    node_type = hdata.node_types[0]
+    device = hdata[node_type].x.device
+
+    # HeteroData will convert edge indexes to int64 anyway.
+    # Edge types can have different attr widths, but exported models take one
+    # rectangular `ea_flat` input. Pad each edge type to the maximum width and
+    # let ExportableGNNBlock slice back to each conv's configured edge_dim.
+    ei_flat = torch.zeros((2, 0), dtype=torch.int64, device=device)
+    ea_flat = torch.zeros((0, max_attr_dim), dtype=torch.float32, device=device)
     lengths = []
 
-    for i, edge_type in enumerate(hdata.edge_types):
+    for edge_type in hdata.edge_types:
+        link_type = edge_type[1]
         reldata = hdata[edge_type]
+        edge_attr = reldata.edge_attr
+        expected_attr_dim = LINK_ATTR_SIZES[link_type]
+        actual_attr_dim = edge_attr.shape[1]
+        assert actual_attr_dim == expected_attr_dim, (edge_type, actual_attr_dim, expected_attr_dim)
+
         lengths.append(reldata.edge_index.shape[1])
         ei_flat = torch.cat([ei_flat, reldata.edge_index], dim=1)
-        ea_flat = torch.cat([ea_flat, reldata.edge_attr], dim=0)
+
+        if actual_attr_dim < max_attr_dim:
+            padding = torch.zeros(
+                (edge_attr.shape[0], max_attr_dim - actual_attr_dim),
+                dtype=edge_attr.dtype,
+                device=edge_attr.device,
+            )
+            edge_attr = torch.cat([edge_attr, padding], dim=1)
+
+        ea_flat = torch.cat([ea_flat, edge_attr], dim=0)
 
     sum_e = sum(hdata[et].edge_index.shape[1] for et in hdata.edge_types)
     assert ei_flat.shape[1] == sum_e
     assert ea_flat.shape[0] == sum_e
+    assert ea_flat.shape[1] == max_attr_dim
 
     return ei_flat, ea_flat, torch.tensor(lengths, dtype=torch.int32)
 
@@ -155,7 +177,7 @@ class ExportableModel(nn.Module):
 
         action_table, inverse_table, amove_hexes = Model.build_action_tables()
 
-        self.register_buffer("version", torch.tensor([13], dtype=torch.int32), persistent=False)
+        self.register_buffer("version", torch.tensor([14], dtype=torch.int32), persistent=False)
         self.register_buffer("side", torch.tensor([side], dtype=torch.int32), persistent=False)
 
         # XXX: these should have persistent=False, but due to a bug they were
@@ -225,7 +247,7 @@ class ExportableModel(nn.Module):
     @torch.jit.export
     def encode(self, obs, ei_flat, ea_flat, lengths):
         hexes = obs[0, self.dim_other:].view(165, self.state_size_one_hex)
-        other = obs[0, :self.dim_other]
+        other = obs[:, :self.dim_other]
         z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, lengths).unsqueeze(0)
 
         # if self.legacy_global_encoder:
@@ -555,7 +577,7 @@ class ExportableGNNBlock(nn.Module):
                 cur_e = e1
 
                 edge_inds = ei_flat[:, e0:e1]
-                edge_attrs = ea_flat[e0:e1, :]
+                edge_attrs = ea_flat[e0:e1, :conv.lin_edge.in_features]
 
                 out = conv(x, edge_inds, edge_attrs)
 

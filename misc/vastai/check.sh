@@ -45,7 +45,7 @@ function check() {
   cd /workspace/vcmi-gym
 
   if ! [ -f data/v15/$CHECKPOINT-model-ppo.pt ]; then
-    download_checkpoint $CHECKPOINT
+    download_checkpoint ppo $CHECKPOINT
   fi
 
   link_checkpoint -y $CHECKPOINT $RUN_ID data/v15/

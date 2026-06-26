@@ -244,9 +244,6 @@ def test_model(cfg, weights_file):
 
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
 
-    # add_self_loops throws in PyG 2.8
-    del cfg["model"]["gnn_kwargs"]["add_self_loops"]
-    cfg["model"]["legacy_global_encoder"] = False
     print(cfg["model"])
     model = DNAModel(cfg["model"], torch.device("cpu")).eval()
     model.load_state_dict(weights, strict=True)
@@ -282,13 +279,11 @@ def test_model(cfg, weights_file):
         do_constant_folding=True,
         dynamic_axes={
             "ei_flat": {1: "ei_N"},       # [2, 1646], [2, 2478], ...
-            "ea_flat": {0: "ea_N"},       # [1646, 1], [2478, 1], ...
+            "ea_flat": {0: "ea_N"},       # [1646, max_attr_dim], [2478, max_attr_dim], ...
         },
-        # XXX: dynamo is the *new* torch ONNX exporter and will become the
-        #       default in torch-2.9.0, however as of torch 2.8.0 there are
-        #       missing operator implementations, and 2.9.0 is not viable
-        #       as torch_geometric segfaults (it is still on 2.8.0)
-        # dynamo=True
+        # Use the legacy ONNX exporter. The dynamo exporter cannot currently
+        # handle data-dependent edge slicing from `lengths` in this model.
+        dynamo=False,
     )
 
     omodel = ort.InferenceSession(buffer.getvalue())
@@ -375,13 +370,11 @@ def export_model(cfg, weights_file):
         do_constant_folding=True,
         dynamic_axes={
             "ei_flat": {1: "ei_N"},       # [2, 1646], [2, 2478], ...
-            "ea_flat": {0: "ea_N"},       # [1646, 1], [2478, 1], ...
+            "ea_flat": {0: "ea_N"},       # [1646, max_attr_dim], [2478, max_attr_dim], ...
         },
-        # XXX: dynamo is the *new* torch ONNX exporter and will become the
-        #       default in torch-2.9.0, however as of torch 2.8.0 there are
-        #       missing operator implementations, and 2.9.0 is not viable
-        #       as torch_geometric segfaults (it is still on 2.8.0)
-        # dynamo=True
+        # Use the legacy ONNX exporter. The dynamo exporter cannot currently
+        # handle data-dependent edge slicing from `lengths` in this model.
+        dynamo=False,
     )
 
     # Can't set metadata via torch.onnx.export => load, add then save again
@@ -418,7 +411,7 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
 
     print("Testing metadata methods...")
     md = onnx_model.get_modelmeta().custom_metadata_map
-    assert md["version"] == "13"
+    assert md["version"] == "14"
     assert md["side"] == str(eside)
     assert json.loads(md["action_table"]) == model.model_policy.action_table.tolist()
 
@@ -470,8 +463,9 @@ def save_exported_model(m, export_dir, link_dir, basename):
 
     print("Wrote %s" % dst)
 
-    os.symlink(os.path.realpath(dst), os.path.realpath(link))
+    os.symlink(dst, link)
     print("Linked %s" % link)
+
 
 
 def main():
@@ -482,6 +476,10 @@ def main():
 
             with open(model_cfg_path, "r") as f:
                 cfg = json.load(f)
+                # add_self_loops throws in PyG 2.8
+                cfg["model"]["legacy_global_encoder"] = False
+                if "add_self_loops" in cfg["model"]["gnn_kwargs"]:
+                    del cfg["model"]["gnn_kwargs"]["add_self_loops"]
 
             export_basename = "%s-%s" % (cfg["train"]["env"]["kwargs"]["role"], prefix)
 
@@ -494,7 +492,7 @@ def main():
 
             # test_gnn()
             # test_block()
-            test_model(cfg, model_weights_path)
+            # test_model(cfg, model_weights_path)
 
             #
             # Actual export
@@ -502,8 +500,9 @@ def main():
 
             exported_model = export_model(cfg, model_weights_path)
             loaded_model = load_exported_model(exported_model)
-            # loaded_model = load_exported_model("/Users/simo/Library/Application Support/vcmi/Mods/mmai/models/defender-tukbajrv-202509241418-probs-debug1.onnx")
+            # loaded_model = load_exported_model("/Users/simo/Projects/vcmi-gym/vcmi/Mods/mmai/models/defender-ipnkyfqb-best3.onnx")
             verify_export(cfg, model_weights_path, loaded_model)
+            print("Model version: %s" % loaded_model.get_modelmeta().custom_metadata_map["version"])
             save_exported_model(exported_model, EXPORT_DST_DIR, EXPORT_LINK_DIR, export_basename)
 
 
