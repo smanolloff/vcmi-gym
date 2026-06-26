@@ -15,7 +15,7 @@ GOLD_TARGET = 0
 goldcounter = 0
 
 # Price threshold of $/hr
-DPH = 0.17
+DPH = 0.3
 
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
