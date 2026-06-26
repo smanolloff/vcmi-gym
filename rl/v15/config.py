@@ -73,7 +73,7 @@ eval_variant = lambda num_envs_per_opponent, model, **env_kwargs: dict(
         mapname="gym/ml-eval.vmap",
         random_armies=False,
         random_heroes=1,
-        user_timeout=2000,  # must be > eval.interval_s=1800
+        user_timeout=2100,  # must be >= eval.interval_s + 300
         **env_kwargs,
     ),
     model=model,

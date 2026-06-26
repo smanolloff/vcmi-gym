@@ -7,7 +7,7 @@ DEL=false    # -d
 FORCE=false  # -f
 
 INIT_SECONDS=90     # cold start (40 envs, load weights, etc.)
-ROLLOUT_SECONDS=28  # "ok" duration of 1 rollout
+ROLLOUT_SECONDS=29  # "ok" duration of 1 rollout
 N_ROLLOUTS=5
 
 while getopts "tdfi:r:n:" opt; do
@@ -54,7 +54,7 @@ function check() {
   #   0   command finished
   #   124 command timed out
   #   other = command failed
-  command="python -m rl.algos.mppo_dna_gnn.mppo_dna_gnn --dry-run --max-rollouts $N_ROLLOUTS --skip-eval -f data/mppo-dna-heads/$CHECKPOINT-config.json"
+  command="python -m rl.v15.ppo_gnn --dry-run --max-rollouts $N_ROLLOUTS --skip-eval -f data/v15/$CHECKPOINT-config.json"
   date
   # Temporary disable -e to capture non-0 exit statuses without aborting
   set +e
