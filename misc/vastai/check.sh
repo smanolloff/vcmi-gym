@@ -37,18 +37,18 @@ function http() {
 SECONDS_CHECK=$((N_ROLLOUTS * ROLLOUT_SECONDS))
 SECONDS_TIMEOUT=$((INIT_SECONDS + SECONDS_CHECK * 2))
 
-CHECKPOINT=ipnkyfqb-1776005610
+CHECKPOINT=zvytfdpo-best27
 RUN_ID=${CHECKPOINT%-*}
 
 function check() {
   . ~/.simorc
   cd /workspace/vcmi-gym
 
-  if ! [ -f data/mppo-dna-heads/$CHECKPOINT-model-dna.pt ]; then
+  if ! [ -f data/v15/$CHECKPOINT-model-ppo.pt ]; then
     download_checkpoint $CHECKPOINT
   fi
 
-  link_checkpoint -y $CHECKPOINT $RUN_ID data/mppo-dna-heads/
+  link_checkpoint -y $CHECKPOINT $RUN_ID data/v15/
 
   # timeout returns:
   #   0   command finished
