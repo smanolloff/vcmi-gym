@@ -71,12 +71,13 @@ function check() {
   fi
 
   line=$(printf "%s" "$output" | grep '"event": "finish"') || :
+  t=$(printf "%s" "$line" | jq -e ".message.timers.all | round")
 
-  if printf "%s" "$line" | jq -e ".message.timers.all < $SECONDS_CHECK"; then
-    echo "CHECK PASSED"
+  if [ "$t" -le $SECONDS_CHECK ]; then
+    echo "CHECK PASSED (t=$t, CHECK=$SECONDS_CHECK)"
     return 0
   else
-    echo "CHECK FAILED (slow)"
+    echo "CHECK FAILED (t=$t, CHECK=$SECONDS_CHECK)"
     return 1
   fi
 }

@@ -24,9 +24,9 @@ train_env_kwargs = dict(
 
     # These require BATTLE_ROUND in obs
     reward_prog_base=0.1,
-    reward_prog_trigger=9,
+    reward_prog_trigger=10,
     reward_prog_exponent=2,
-    reward_prog_limit=15,
+    reward_prog_limit=16,
 
     reward_dmg_mult=0.01,
     reward_term_mult=0.01,
@@ -43,9 +43,9 @@ train_env_kwargs = dict(
     ],
 
     # With DualVecEnv, all timeouts must be the same (large enough)
-    user_timeout=2400,
-    vcmi_timeout=2400,
-    boot_timeout=2400,
+    user_timeout=600,
+    vcmi_timeout=600,
+    boot_timeout=600,
 )
 
 # Example:
@@ -73,6 +73,7 @@ eval_variant = lambda num_envs_per_opponent, model, **env_kwargs: dict(
         mapname="gym/ml-eval.vmap",
         random_armies=False,
         random_heroes=1,
+        user_timeout=2000,  # must be > eval.interval_s=1800
         **env_kwargs,
     ),
     model=model,
