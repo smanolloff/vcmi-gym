@@ -645,11 +645,9 @@ apt-get -y install vim ccache cmake g++ liblzma-dev \
 
 make vastai-build
 
-cd ../vcmi_gym/connectors
+cd ..
 apt-get -y install libboost-all-dev
 make vastai-build-connector
-
-cd ../../
 wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
 
 pip cache purge
