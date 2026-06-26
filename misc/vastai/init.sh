@@ -201,7 +201,7 @@ function upload_checkpoint() {
             return 1
         fi
 
-        s3_dir=\$algo-gnn/models
+        s3_dir=v15/models
 
         files=()
         for suffix in \$suffixes; do
@@ -226,7 +226,7 @@ function download_checkpoint() {
     algo=\$1
     rid=\${2%-*}
     tag=\${2#*-}
-    s3_dir=\$algo-gnn/models
+    s3_dir=v15/models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
 
@@ -264,7 +264,7 @@ function download_model() {
     algo=\$1
     rid=\${2%-*}
     tag=\${2#*-}
-    s3_dir=\$algo-gnn/models
+    s3_dir=v15/models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
 
