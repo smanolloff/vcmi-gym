@@ -9,7 +9,6 @@ import onnx
 import onnxruntime as ort
 
 from .export_common import (
-    LINK_TYPES,
     ExportableGENConv,
     ExportableGNNBlock,
     ExportableDNAModel,
@@ -167,7 +166,7 @@ def test_block():
         in_channels=in_channels,
         hidden_channels=hidden_channels,
         out_channels=out_channels,
-        gnn_kwargs=dict(add_self_loops=True),
+        gnn_kwargs=dict(),
         link_types=link_types,
         node_type=node_type,
     ).eval()
@@ -180,7 +179,7 @@ def test_block():
         link_types=link_types,
     ).eval()
 
-    mydict = {transform_key(k, node_type, link_types): v for k, v in block.state_dict().items()}
+    mydict = {transform_key(k, node_type): v for k, v in block.state_dict().items()}
     myblock.load_state_dict(mydict, strict=True)
 
     # Test with two different "sizes"
@@ -238,13 +237,17 @@ def test_model(cfg, weights_file):
     # venv = DualVecEnv(dict(mapname="gym/generated/4096/4x1024.vmap", role="defender"), num_envs_stupidai=1)
     # venv = DualVecEnv(dict(mapname="gym/archangels.vmap", role="defender", random_heroes=1), num_envs_stupidai=1)
     venv = DualVecEnv(dict(
-        mapname="gym/generated/4096/4x1024.vmap",
+        mapname="gym/ml-mini.vmap",
         # mapname="gym/A1.vmap",
         role=cfg["train"]["env"]["kwargs"]["role"]
     ), num_envs_stupidai=1)
 
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
 
+    # add_self_loops throws in PyG 2.8
+    del cfg["model"]["gnn_kwargs"]["add_self_loops"]
+    cfg["model"]["legacy_global_encoder"] = False
+    print(cfg["model"])
     model = DNAModel(cfg["model"], torch.device("cpu")).eval()
     model.load_state_dict(weights, strict=True)
     model = model.model_policy
@@ -253,7 +256,7 @@ def test_model(cfg, weights_file):
     emodel = ExportableDNAModel(cfg["model"], eside).eval()
 
     eweights = {
-        transform_key(k, "hex", list(LINK_TYPES)): v
+        transform_key(k, "hex"): v
         for k, v in weights.items()
     }
     emodel.load_state_dict(eweights, strict=True)
@@ -353,7 +356,7 @@ def export_model(cfg, weights_file):
     emodel0 = ExportableDNAModel(cfg["model"], eside).eval()
 
     eweights = {
-        transform_key(k, "hex", list(LINK_TYPES)): v
+        transform_key(k, "hex"): v
         for k, v in weights.items()
     }
     emodel0.load_state_dict(eweights, strict=True)

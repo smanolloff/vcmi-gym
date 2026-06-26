@@ -12,13 +12,13 @@ from .mppo_dna_gnn import (
     GLOBAL_ACT_MAP,
     HEX_ATTR_MAP,
     HEX_ACT_MAP,
-    LINK_TYPES,
+    LINK_ATTR_SIZES,
     Model,
     MainAction,
 )
 
 
-def transform_key(key, node_type, link_types):
+def transform_key(key, node_type):
     import re
     pattern = re.compile(rf"(.+)\.module_(\d+)\.convs\.<{node_type}___(\w+)___{node_type}>\.(.+)")
     match = pattern.match(key)
@@ -27,6 +27,7 @@ def transform_key(key, node_type, link_types):
     assert match, f"No match: {key}"
     pre, module_id, link_type, rest = match.groups()
     assert int(module_id) % 2 == 0
+    link_types = list(LINK_ATTR_SIZES.keys())
     assert link_type in link_types, f"{link_type} not in {link_types}"
     return "%s.%d.%d.%s" % (pre, int(module_id) / 2, link_types.index(link_type), rest)
 
@@ -50,7 +51,7 @@ def build_inputs(hdata):
 
 def flatten_edges(hdata):
     assert len(hdata.node_types) == 1, hdata.node_types
-    assert all(n == 1 for n in hdata.num_edge_features.values()), hdata.num_edge_features.values()
+    assert all(list(hdata.num_edge_features.values())[i] == list(LINK_ATTR_SIZES.values())[i] for i in range(len(hdata.num_edge_features))), hdata.num_edge_features.values()
 
     # HeteroData will convert edge indexes to int64 anyway
     ei_flat = torch.zeros((2, 0), dtype=torch.int64)
@@ -170,14 +171,24 @@ class ExportableModel(nn.Module):
             in_channels=STATE_SIZE_ONE_HEX,
             hidden_channels=config["gnn_hidden_channels"],
             out_channels=config["gnn_out_channels"],
-            link_types=list(LINK_TYPES),
+            edge_attrs=LINK_ATTR_SIZES,
         ).eval()
 
         d = config["gnn_out_channels"]
 
-        self.encoder_other = nn.Sequential(
-            nn.Linear(self.dim_other, d),
-            nn.LeakyReLU()
+        # XXX: if/else branches not supported in exportable models
+        #       => hardcode
+        # if self.legacy_global_encoder:
+        #     self.encoder_other = nn.Sequential(
+        #         nn.Linear(self.dim_other, d),
+        #         nn.LeakyReLU()
+        #     )
+        # else:
+        self.encoder_global = nn.Sequential(
+            nn.Linear(self.dim_other + 2*d, 3*d),
+            nn.LeakyReLU(),
+            nn.Linear(3*d, d),
+            nn.LeakyReLU(),
         )
 
         self.act0_head = nn.Linear(d, len(MainAction))
@@ -216,10 +227,17 @@ class ExportableModel(nn.Module):
         hexes = obs[0, self.dim_other:].view(165, self.state_size_one_hex)
         other = obs[0, :self.dim_other]
         z_hexes = self.encoder_hexes(hexes, ei_flat, ea_flat, lengths).unsqueeze(0)
-        z_other = self.encoder_other(other).unsqueeze(0)
-        # XXX: workaround for Vulkan partitioner bug https://github.com/pytorch/executorch/issues/12227?utm_source=chatgpt.com
-        # z_global = z_other + z_hexes.mean(1)
-        z_global = z_other + z_hexes.mean(dim=1, keepdim=True).squeeze(1)
+
+        # if self.legacy_global_encoder:
+        #     z_other = self.encoder_other(other).unsqueeze(0)
+        #     z_global = z_other + z_hexes.mean(dim=1, keepdim=True).squeeze(1)
+        # else:
+        z_global = self.encoder_global(torch.cat([
+            other,  # [B, dim_other]
+            z_hexes.mean(1),                # [B, D]
+            z_hexes.max(1).values,          # [B, D]
+        ], dim=-1))
+
         return z_hexes, z_global
 
     @torch.jit.export
@@ -494,8 +512,7 @@ class ExportableGNNBlock(nn.Module):
         in_channels,
         hidden_channels,
         out_channels,
-        link_types,
-        edge_dim: int = 1,
+        edge_attrs,
     ):
         super().__init__()
 
@@ -503,8 +520,14 @@ class ExportableGNNBlock(nn.Module):
         layers = []
         for i in range(num_layers - 1):
             ch_in = in_channels if i == 0 else hidden_channels
-            layers.append([ExportableGENConv(ch_in, hidden_channels, edge_dim) for _ in link_types])
-        layers.append([ExportableGENConv(hidden_channels, out_channels, edge_dim) for _ in link_types])
+            layers.append([
+                ExportableGENConv(ch_in, hidden_channels, edge_dim)
+                for (_edge_type, edge_dim) in edge_attrs.items()
+            ])
+        layers.append([
+            ExportableGENConv(hidden_channels, out_channels, edge_dim)
+            for (_edge_type, edge_dim) in edge_attrs.items()
+        ])
 
         self.layers = nn.ModuleList([nn.ModuleList(convs) for convs in layers])
         self.act = nn.LeakyReLU()
