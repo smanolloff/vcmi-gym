@@ -89,9 +89,9 @@ class DualEnvController():
             match name:
                 case "Global": nmax = 1
                 case "Player": nmax = 2
-                case "Unit": nmax = 30  # TODO: guard at runtime
+                case "Unit": nmax = 30
                 case "Hex": nmax = 165
-                case "Action": nmax = 200 * 30  # ~200 max actions per unit
+                case "Action": nmax = 3000
                 case _: raise Exception(f"Unknown node type: {name}")
 
             add_node_ipc(name, traits, nmax)
@@ -111,29 +111,74 @@ class DualEnvController():
                 emax=emax
             )
 
+        # ========== GRAPH NUMBERS (vanilla H3) ===========
+        # 1       NODE_GLOBAL
+        # 2       NODE_PLAYER
+        # 18      NODE_UNIT
+        # 165     NODE_HEX
+        # 1145    NODE_ACTION
+        # 2       EDGE_GLOBAL_TO_PLAYER
+        # 1       EDGE_PLAYER_TO_GLOBAL
+        # 18      EDGE_GLOBAL_TO_UNIT
+        # 18      EDGE_UNIT_TO_GLOBAL
+        # 165     EDGE_GLOBAL_TO_HEX
+        # 165     EDGE_HEX_TO_GLOBAL
+        # 1145    EDGE_GLOBAL_TO_ACTION
+        # 18      EDGE_PLAYER_OWNS_UNIT
+        # 18      EDGE_UNIT_OWNED_BY_PLAYER
+        # 24      EDGE_UNIT_OCCUPIES_HEX
+        # 24      EDGE_HEX_OCCUPIED_BY_UNIT
+        # 1145    EDGE_ACTION_BY_UNIT
+        # 1145    EDGE_UNIT_HAS_ACTION
+        # 888     EDGE_HEX_ADJACENT_HEX
+        # 136     EDGE_UNIT_ACTS_BEFORE_UNIT
+        # 126     EDGE_UNIT_MELEE_DMG_UNIT
+        # 48      EDGE_UNIT_SHOOT_DMG_UNIT
+        # 5       EDGE_UNIT_BLOCKS_UNIT
+        # 1946    EDGE_ACTION_ENDS_AT_HEX
+        # 1946    EDGE_HEX_IS_END_OF_ACTION
+        # 110     EDGE_ACTION_BLOCKS_UNIT
+        # 110     EDGE_UNIT_BLOCKED_BY_ACTION
+        # 4514    EDGE_UNIT_BECOMES_MELEE_THREAT_AFTER_ACTION
+        # 3277    EDGE_UNIT_BECOMES_SHOOT_THREAT_AFTER_ACTION
+        # 277     EDGE_UNIT_IS_MELEED_BY_ACTION
+        # 50      EDGE_UNIT_IS_SHOT_BY_ACTION
+        # 6419    EDGE_UNIT_BECOMES_MELEE_TARGET_AFTER_ACTION
+        # 2265    EDGE_UNIT_BECOMES_SHOOT_TARGET_AFTER_ACTION
+        # 28843   EDGE_HEX_BECOMES_MELEE_TARGET_AFTER_ACTION
+        # 20790   EDGE_HEX_BECOMES_SHOOT_TARGET_AFTER_ACTION
         for key, traits in EDGE_TYPES:
             match key:
-                case ("Global", "Has", "Player"): emax = 2
-                case ("Global", "Has", "Unit"): emax = self.ipc_nodes["Unit"]["nmax"]
-                case ("Global", "Has", "Hex"): emax = self.ipc_nodes["Hex"]["nmax"]
-                case ("Player", "Owns", "Unit"): emax = self.ipc_nodes["Unit"]["nmax"] / 2
+                case ("Global", "To", "Player"): emax = 2
+                case ("Player", "To", "Global"): emax = 1
+                case ("Global", "To", "Unit"): emax = 30
+                case ("Unit", "To", "Global"): emax = 30
+                case ("Global", "To", "Hex"): emax = 165
+                case ("Hex", "To", "Global"): emax = 165
+                case ("Global", "To", "Action"): emax = 3000
+                case ("Player", "Owns", "Unit"): emax = 30
+                case ("Unit", "OwnedBy", "Player"): emax = 30
+                case ("Unit", "Occupies", "Hex"): emax = 50
+                case ("Hex", "OccupiedBy", "Unit"): emax = 50
+                case ("Action", "By", "Unit"): emax = 3000
+                case ("Unit", "Has", "Action"): emax = 3000
                 case ("Hex", "Adjacent", "Hex"): emax = 888
-                case ("Unit", "ActsBefore", "Unit"): emax = self.ipc_nodes["Unit"]["nmax"]
-                case ("Unit", "MeleeDmg", "Unit"): emax = self.ipc_nodes["Unit"]["nmax"]
-                case ("Unit", "ShootDmg", "Unit"): emax = self.ipc_nodes["Unit"]["nmax"]
-                case ("Unit", "Blocks", "Unit"): emax = self.ipc_nodes["Unit"]["nmax"]
-                case ("Unit", "Occupies", "Hex"): emax = self.ipc_nodes["Unit"]["nmax"] * 2  # wide units occupy 2 hexes
-                case ("Action", "By", "Unit"): emax = self.ipc_nodes["Action"]["nmax"]
-                case ("Action", "EndsAt", "Hex"): emax = self.ipc_nodes["Action"]["nmax"] * 2
-                case ("Action", "Blocks", "Unit"): emax = self.ipc_nodes["Action"]["nmax"]
-                case ("Action", "ExposesToMeleeFrom", "Unit"): emax = self.ipc_nodes["Action"]["nmax"] * self.ipc_nodes["Unit"]["nmax"] / 2
-                case ("Action", "ExposesToShootFrom", "Unit"): emax = self.ipc_nodes["Action"]["nmax"] * self.ipc_nodes["Unit"]["nmax"] / 2
-                case ("Action", "Melees", "Unit"): emax = self.ipc_nodes["Action"]["nmax"] * self.ipc_nodes["Unit"]["nmax"] / 2
-                case ("Action", "Shoots", "Unit"): emax = self.ipc_nodes["Action"]["nmax"] * self.ipc_nodes["Unit"]["nmax"] / 2
-                case ("Action", "EnablesMeleeAt", "Unit"): emax = self.ipc_nodes["Action"]["nmax"] * self.ipc_nodes["Unit"]["nmax"] / 2
-                case ("Action", "EnablesShootAt", "Unit"): emax = self.ipc_nodes["Action"]["nmax"] * self.ipc_nodes["Unit"]["nmax"] / 2
-                case ("Action", "EnablesMeleeAt", "Hex"): emax = (self.ipc_nodes["Action"]["nmax"] / self.ipc_nodes["Unit"]["nmax"]) * 165 # these two are for active unit only
-                case ("Action", "EnablesShootAt", "Hex"): emax = (self.ipc_nodes["Action"]["nmax"] / self.ipc_nodes["Unit"]["nmax"]) * 165 #
+                case ("Unit", "ActsBefore", "Unit"): emax = 300
+                case ("Unit", "MeleeDmg", "Unit"): emax = 300
+                case ("Unit", "ShootDmg", "Unit"): emax = 300
+                case ("Unit", "Blocks", "Unit"): emax = 30
+                case ("Action", "EndsAt", "Hex"): emax = 6000
+                case ("Hex", "IsEndOf", "Action"): emax = 6000
+                case ("Action", "Blocks", "Unit"): emax = 300
+                case ("Unit", "BlockedBy", "Action"): emax = 300
+                case ("Unit", "BecomesMeleeThreatAfter", "Action"): emax = 15000
+                case ("Unit", "BecomesShootThreatAfter", "Action"): emax = 15000
+                case ("Unit", "IsMeleedBy", "Action"): emax = 700
+                case ("Unit", "IsShotBy", "Action"): emax = 200
+                case ("Unit", "BecomesMeleeTargetAfter", "Action"): emax = 20000
+                case ("Unit", "BecomesShootTargetAfter", "Action"): emax = 20000
+                case ("Hex", "BecomesMeleeTargetAfter", "Action"): emax = 60000
+                case ("Hex", "BecomesShootTargetAfter", "Action"): emax = 60000
                 case _: raise Exception(f"Unknown edge type: {key}")
 
             add_edge_ipc(key, traits, emax)
