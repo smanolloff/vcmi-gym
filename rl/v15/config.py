@@ -80,6 +80,7 @@ eval_variant = lambda num_envs_per_opponent, model, **env_kwargs: dict(
 )
 
 config = dict(
+    version=15,
     name_template="{datetime}-{id}-{suffix}",
     out_dir_template="data/v15",
 

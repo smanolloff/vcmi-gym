@@ -32,7 +32,7 @@ VASTAI_ENV = dict(
     VAST_API_KEY=os.environ["VASTAI_BENCHMARK_API_KEY"]
 )
 
-BADCPU_PATTERN = re.compile("EPYC|Xeon", re.IGNORECASE)
+BADCPU_PATTERN = re.compile("EPYC|Xeon|285K", re.IGNORECASE)
 
 # LOG_LEVEL = logging.DEBUG
 LOG_LEVEL = logging.INFO
@@ -91,7 +91,7 @@ def vastai_search(blacklist: List[int]):
 
     return [
         offer for offer in data["offers"]
-        if not BADCPU_PATTERN.search(offer["cpu_name"])
+        if not BADCPU_PATTERN.search(offer["cpu_name"] or "")
     ]
 
 
@@ -189,6 +189,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             machine_id INT NOT NULL,
             host_id INT NOT NULL,
             status TEXT,
+            dph REAL NOT NULL,
             created_at DATETIME NOT NULL
         )
         """
@@ -320,7 +321,7 @@ def db_warnlist_del_sel(conn: sqlite3.Connection, counter: int) -> None:
 
 def db_instances_get_pending(conn: sqlite3.Connection):
     sql = """
-        SELECT instance_id, machine_id, host_id, status, created_at
+        SELECT instance_id, machine_id, host_id, status, dph, created_at
         FROM instances
         WHERE status IS NULL
         """
@@ -336,11 +337,11 @@ def db_instance_update(conn: sqlite3.Connection, instance_id: int, status: str) 
     conn.commit()
 
 
-def db_instance_add(conn: sqlite3.Connection, instance_id: int, machine_id: int, host_id: int) -> None:
+def db_instance_add(conn: sqlite3.Connection, instance_id: int, machine_id: int, host_id: int, dph: float) -> None:
     logging.info(f"db_instance_add({instance_id}, {machine_id}, {host_id})")
     sql = f"""
-        INSERT INTO instances (instance_id, machine_id, host_id, status, created_at)
-        VALUES ({instance_id}, {machine_id}, {host_id}, NULL, CURRENT_TIMESTAMP)
+        INSERT INTO instances (instance_id, machine_id, host_id, status, dph, created_at)
+        VALUES ({instance_id}, {machine_id}, {host_id}, NULL, {round(dph, 4)}, CURRENT_TIMESTAMP)
         """
     logging.debug(f"SQL: {sql}")
     conn.execute(sql)
@@ -382,6 +383,7 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
         instance_id = row["instance_id"]
         machine_id = row["machine_id"]
         host_id = row["host_id"]
+        dph = row["dph"]
         created_at = row["created_at"]
 
         if instance_id not in running_instances:
@@ -389,7 +391,7 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
             continue
 
         label = running_instances[instance_id]["label"]
-        txt = f"{instance_id} {host_id}/{machine_id}"
+        txt = f"{instance_id} {host_id}/{machine_id} dph={round(dph, 4)}"
 
         if label in ["autorent", "init...", "check..."] and is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
             vastai_destroy(instance_id)
@@ -424,14 +426,15 @@ def handle_new_offers(conn: sqlite3.Connection) -> None:
     for offer in offers:
         n_pending = len(db_instances_get_pending(conn))
         if n_pending > 0:
-            logging.info(f"Will not rent {offer['id']} (already have {n_pending} instances)")
+            logging.info(f"Will not rent {offer['id']} (already have {n_pending} pending instances)")
             continue
 
         instance_id = vastai_rent(offer["id"])
         if instance_id:
             instance = vastai_get(instance_id)
-            db_audit_log(conn, f"rent: offer_id={offer['id']} instance_id={instance_id}")
-            db_instance_add(conn, instance_id, instance["machine_id"], instance["host_id"])
+            txt = f"{instance_id} {instance['host_id']}/{instance['machine_id']} dph={round(instance['dph_total'], 4)}"
+            db_audit_log(conn, txt)
+            db_instance_add(conn, instance_id, instance["machine_id"], instance["host_id"], instance["dph_total"])
         else:
             db_warnlist_add(conn, offer["machine_id"], offer["host_id"])
 
