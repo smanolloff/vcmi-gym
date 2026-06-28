@@ -35,7 +35,7 @@ pip-compile:
 
 pip-install: _require-python-venv
 pip-install:
-	pip install -r requirements/requirements-$(TORCH).txt
+	pip install -r requirements/requirements-torch-$(TORCH).txt
 
 build-connector:
 	cd vcmi_gym/connectors/ \

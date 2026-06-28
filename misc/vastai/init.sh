@@ -104,9 +104,6 @@ fi
 [ -d vcmi-gym ] || git clone --single-branch https://github.com/smanolloff/vcmi-gym.git
 cd vcmi-gym
 
-apt-get update
-apt-get -y install python3-venv
-
 # /venv/main is available on all instances from the "PyTorch (Vast)" template
 set +x
 . /venv/main/bin/activate
@@ -631,6 +628,7 @@ if ! [ -d /opt/onnxruntime/lib/libonnxruntime.so ]; then
 fi
 
 # Everything after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
+apt-get update
 apt-get -y install vim ccache cmake g++ liblzma-dev \
   libboost-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev \
   libboost-program-options-dev libboost-locale-dev libboost-iostreams-dev \
