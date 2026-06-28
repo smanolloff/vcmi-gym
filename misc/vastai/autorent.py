@@ -74,6 +74,7 @@ def vastai_search(blacklist: List[int]):
         "cpu_ram": {"gte": 55000.0},
         "dph_total": {"lte": DPH},
         "rentable": {"eq": True},
+        "duration": {"gte": 48*3600}  # < 1 day I may not even notice there was a rent
     }
 
     if blacklist:

@@ -642,7 +642,7 @@ apt-get -y install vim ccache cmake g++ liblzma-dev \
 make vastai-build
 
 cd ..
-apt-get -y install libboost-all-dev
+apt-get -y install libboost-dev libboost-format-dev libboost-date-time-dev
 make vastai-build-connector
 wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
 
