@@ -135,6 +135,7 @@ def load_checkpoint(
     optimize_local_storage,
     s3_config,
     device,
+    weights_mapper_fn=lambda x: x,
     states={},      # dict with name=>obj, where obj has .to_json() and .from_json(string)
 ):
     # XXX: PROBLEM:
@@ -176,7 +177,9 @@ def load_checkpoint(
 
     for f_model, model in files["models"].items():
         _s3_download(logger, dry_run, s3_config, f_model)
-        model.load_state_dict(torch.load(f_model, weights_only=True, map_location=device), strict=True)
+        weights = torch.load(f_model, weights_only=True, map_location=device)
+        # weights = weights_mapper_fn(weights)
+        model.load_state_dict(weights, strict=True)
         # _backup(f_model)
 
     for f_optimizer, optimizer in files["optimizers"].items():

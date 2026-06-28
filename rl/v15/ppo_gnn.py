@@ -221,6 +221,26 @@ class ModelLoaderInfo():
     weights_file: str
 
 
+def migrate_edge_key_typos(state_dict):
+    replacements = {
+        "<Global___Has___Action>": "<Global___To___Action>",
+        "<Unit___By___Action>": "<Unit___Has___Action>",
+    }
+
+    migrated = {}
+
+    for key, value in state_dict.items():
+        new_key = key
+        for old, new in replacements.items():
+            new_key = new_key.replace(old, new)
+
+        if new_key in migrated:
+            raise RuntimeError(f"Checkpoint migration collision: {key} -> {new_key}")
+
+        migrated[new_key] = value
+
+    return migrated
+
 
 def collect_samples(logger, model, venv, num_vsteps, storage):
     assert not torch.is_inference_mode_enabled()  # causes issues during training
@@ -803,6 +823,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
             optimize_local_storage=checkpoint_config["optimize_local_storage"],
             s3_config=checkpoint_config["s3"],
             device=device,
+            weights_mapper_fn=migrate_edge_key_typos
         )
 
         state.current_rollout = 0
