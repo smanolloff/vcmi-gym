@@ -43,9 +43,9 @@ train_env_kwargs = dict(
     ],
 
     # With DualVecEnv, all timeouts must be the same (large enough)
-    user_timeout=600,
-    vcmi_timeout=600,
-    boot_timeout=600,
+    user_timeout=1200,
+    vcmi_timeout=1200,
+    boot_timeout=1200,
 )
 
 # Example:
