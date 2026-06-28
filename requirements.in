@@ -8,34 +8,22 @@
 #   pip-compile requirements.in -o requirements.txt
 #
 
+# *** Regenerating the requirements lockfile ***
 #
-# Use `make pip-compile` to install appropriate torch wheels.
+# To do this, you must first ensure `torch` is installed:
+# - On VastAI instances, torch (CUDA) is pre-installed.
+# - On dev machines, torch (CPU) must be installed manually: `pip install torch==2.12.1`
 #
-# Alternatively, use the commands below:
-# - CPU:
-#   pip-compile requirements.in -o requirements-cpu.txt \
-#       --index-url https://pypi.org/simple \
-#       --extra-index-url https://download.pytorch.org/whl/cpu \
-#       --find-links https://data.pyg.org/whl/torch-2.11.0+cpu.html
+# Once torch is available, the lockfile can be recreated with:
 #
-# - GPU (CUDA 12.8):
-#   pip-compile requirements.in -o requirements-gpu.txt \
-#       --index-url https://pypi.org/simple \
-#       --extra-index-url https://download.pytorch.org/whl/cu128 \
-#       --find-links https://data.pyg.org/whl/torch-2.11.0+cu128.html
-#
-# - GPU (CUDA 13.2):
-#   pip-compile requirements.in -o requirements-gpu.txt \
-#       --index-url https://pypi.org/simple \
-#       --extra-index-url https://download.pytorch.org/whl/cu132 \
-#       --find-links https://data.pyg.org/whl/torch-2.12.0+cu132.html
+#   make pip-compile
 #
 
-torch
+#torch  # installed separately (NOT part of requirements.in)
+
 torch_geometric
 torch_scatter
 wandb
-#vastai
 vastai_sdk>=0.5.1
 gymnasium>=1.3.0
 pygit2

@@ -13,23 +13,26 @@ _require-pip-tools:
 	which pip-compile || pip install pip-tools
 
 _require-python-venv:
-	test -n $$VIRTUAL_ENV
+	test -n "$${VIRTUAL_ENV:-}" -o -n "$${CONDA_PREFIX:-}"
 
-# XXX: docker (i.e. vast) containers set these pytorch CUDA env vars accordingly
+# XXX: VastAI containers should have those according to the image used.
+# The CPU default is a fallback for local development.
+PYTORCH_VERSION ?= 2.12.1
+PYTORCH_BACKEND ?= cpu
+TORCH = $(PYTORCH_VERSION)+$(PYTORCH_BACKEND)
 
-pip-compile: PYTORCH_VERSION ?= 2.11.0
-pip-compile: PYTORCH_BACKEND ?= cpu
 pip-compile: _require-pip-tools
+pip-compile: _require-python-venv
 pip-compile:
-	pip-compile requirements.in -o requirements-$(PYTORCH_BACKEND).txt \
-		--index-url https://pypi.org/simple \
-		--extra-index-url https://download.pytorch.org/whl/$(PYTORCH_BACKEND) \
-		--find-links https://data.pyg.org/whl/torch-$(PYTORCH_VERSION)+$(PYTORCH_BACKEND).html
-
-pip-install: PYTORCH_BACKEND ?= cpu
-pip-install: _require-python-venv
-pip-install:
-	pip install -r requirements-$(PYTORCH_BACKEND).txt
+	pip-compile \
+		--strip-extras \
+		--no-build-isolation \
+		--pip-args="--only-binary=:all:" \
+		--constraint=<(echo "torch==$(TORCH)") \
+		--find-links="https://data.pyg.org/whl/torch-$(TORCH).html" \
+		--output-file=requirements/requirements-torch-$(TORCH).txt \
+		requirements/requirements.in
+	ln -s requirements/requirements-torch-$(TORCH).txt requirements.txt
 
 build-connector:
 	cd vcmi_gym/connectors/ \

@@ -107,14 +107,12 @@ cd vcmi-gym
 apt-get update
 apt-get -y install python3-venv
 
-# An alias will not work in non-login shells
-[ -e /usr/bin/python ] || ln -s python3 /usr/bin/python
-[ -d .venv ] || python3 -m venv .venv
+# /venv/main is available on all instances from the "PyTorch (Vast)" template
 set +x
-. /workspace/vcmi-gym/.venv/bin/activate
+. /venv/main/bin/activate
 set -x
 
-make pip-install
+pip install -r requirements.txt
 
 #
 # ~/.bashrc setup
@@ -276,7 +274,7 @@ function download_model() {
     # Copy config separately (already downloaded as text)
     echo "\$cfg_json" > \$out_dir/\$rid-\$tag-config.json
 
-    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$tag-model-ppo.pt \$out_dir/  || { echo "ERROR"; return 1; }
+    aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$tag-model-\$algo.pt \$out_dir/  || { echo "ERROR"; return 1; }
 }
 #
 # Copy a checkpoint
@@ -480,7 +478,7 @@ export RAY_memory_monitor_refresh_ms=0
 export VASTAI=1
 export VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
 cd /workspace/vcmi-gym
-. /workspace/vcmi-gym/.venv/bin/activate
+. /venv/main/bin/activate
 set -x
 EOF
 
@@ -501,7 +499,7 @@ if [ \$mb -lt 500 ]; then
 fi
 
 set +x
-. /workspace/vcmi-gym/.venv/bin/activate
+. /venv/main/bin/activate
 set -x
 
 # XXX: do NOT use exec here (does not call trap)

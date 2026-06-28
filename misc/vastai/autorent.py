@@ -127,10 +127,11 @@ def vastai_rent(offer_id: int) -> int:
     body = dict(
         client_id="me",
         env=VASTAI_ENV,
-        disk=25.0,
-        template_hash_id="f9ac4f52b001256dcdfbbb8a9733cb5f",  # "PyTorch (Vast) - 13.2"
+        disk=15.0,
+        template_hash_id="ecc6deee8dc72eba779819f7774dcbe2",  # "PyTorch (Vast) - 12.8"
         label="autorent",
-        # :v
+        # -r32 means "32 seconds per rollout" threshold (see check.sh)
+        # autorent instances as usually cheap => threshold is a bit higher.
         onstart=(
             'set -x; [ -e /workspace/.preinit ] && exit 0 || touch ~/.no_auto_tmux; mkdir -p /workspace; cd /workspace;'
             'curl -sLO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/preinit.sh;'

@@ -13,7 +13,7 @@ if __name__ == "__main__":
     steps = 0
     step = 0
 
-    CHECKPOINT_BASE = "zvytfdpo-best27"
+    CHECKPOINT_BASE = "zvytfdpo-best29"
     # CHECKPOINT_BASE = "zjiynpus-best6"
 
     with open(f"{CHECKPOINT_BASE}-config.json", "r") as f:

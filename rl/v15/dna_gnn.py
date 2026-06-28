@@ -197,7 +197,7 @@ class ModelLoader(AbstractModelLoader):
         if not self.model:
             self.model = DNAModel(
                 node_types=VcmiEnv.node_types(),
-                edge_types=VcmiEnv.filtered_edge_types(config["train"]["env"]["kwargs"]["ignored_edges"]),
+                edge_types=VcmiEnv.filtered_edge_types(self.config["train"]["env"]["kwargs"]["ignored_edges"]),
                 config=self.config["model"],
                 device=torch.device(self.device_type)
             ).eval()
