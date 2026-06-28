@@ -66,7 +66,7 @@ def vastai_search(blacklist: List[int]):
     body = {
         "type": "on-demand",
         "order": [["dph_total", "asc"]],
-        "allocated_storage": 25.0,
+        "allocated_storage": 15.0,  # NOTE: must correspond to `disk` in vastai_rent()
         "external": {"eq": True},
         "rented": {"eq": False},
         "gpu_name": {"eq": "RTX 5090"},
@@ -127,7 +127,7 @@ def vastai_rent(offer_id: int) -> int:
     body = dict(
         client_id="me",
         env=VASTAI_ENV,
-        disk=15.0,
+        disk=15.0,  # NOTE: must correspond to `allocated_storage` in vastai_search()
         template_hash_id="ecc6deee8dc72eba779819f7774dcbe2",  # "PyTorch (Vast) - 12.8"
         label="autorent",
         # -r32 means "32 seconds per rollout" threshold (see check.sh)
