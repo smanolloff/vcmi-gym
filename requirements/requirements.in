@@ -1,22 +1,18 @@
 #
-# To install pinned dependencies:
+# *** Regenerating lock (requirements-....txt) files ***
 #
-#   pip install -r requirements.txt
-#
-# To bump versions:
-#
-#   pip-compile requirements.in -o requirements.txt
-#
-
-# *** Regenerating the requirements lockfile ***
-#
-# To do this, you must first ensure `torch` is installed:
+# You must first ensure `torch` is installed:
 # - On VastAI instances, torch (CUDA) is pre-installed.
-# - On dev machines, torch (CPU) must be installed manually: `pip install torch==2.12.1`
+# - For local dev, torch (CPU) is installed manually: `pip install torch==2.12.1`
 #
 # Once torch is available, the lockfile can be recreated with:
 #
 #   make pip-compile
+#
+# It a torch-specific lockfile in requirements/requirements-<torch>.txt
+# Install with:
+#
+#   make pip-install
 #
 
 #torch  # installed separately (NOT part of requirements.in)

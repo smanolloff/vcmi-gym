@@ -32,7 +32,10 @@ pip-compile:
 		--find-links="https://data.pyg.org/whl/torch-$(TORCH).html" \
 		--output-file=requirements/requirements-torch-$(TORCH).txt \
 		requirements/requirements.in
-	ln -s requirements/requirements-torch-$(TORCH).txt requirements.txt
+
+pip-install: _require-python-venv
+pip-install:
+	pip install -r requirements/requirements-$(TORCH).txt
 
 build-connector:
 	cd vcmi_gym/connectors/ \

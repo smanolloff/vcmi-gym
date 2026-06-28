@@ -112,7 +112,7 @@ set +x
 . /venv/main/bin/activate
 set -x
 
-pip install -r requirements.txt
+make pip-install
 
 #
 # ~/.bashrc setup
