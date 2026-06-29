@@ -823,7 +823,6 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
             optimize_local_storage=checkpoint_config["optimize_local_storage"],
             s3_config=checkpoint_config["s3"],
             device=device,
-            weights_mapper_fn=migrate_edge_key_typos
         )
 
         state.current_rollout = 0
