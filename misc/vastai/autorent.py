@@ -21,7 +21,8 @@ DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
 
 # 9950X with 15MB/s dload speed inits in ~10 minutes
-INIT_TIMEOUT_MINUTES = 30
+# If image is not cached, pulling/building it may take a lot
+INIT_TIMEOUT_MINUTES = 60
 
 VASTAI_API_KEY = os.environ["VASTAI_API_KEY"]
 VASTAI_ENV = dict(

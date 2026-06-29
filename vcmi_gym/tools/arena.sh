@@ -17,7 +17,7 @@ players=(
 
 opponents=(
     BattleAI
-    MMAI/models/attacker-nkjrmrsq-202509291846-stochastic.onnx
+    mmai/models/attacker-nkjrmrsq-202509291846-stochastic.onnx
 )
 
 for player in "${players[@]}"; do
@@ -25,7 +25,7 @@ for player in "${players[@]}"; do
 done
 
 for opponent in "${opponents[@]}"; do
-    [ -f vcmi/Mods/$opponent ] || { echo "Not found: $opponent"; exit 1; }
+    [ -f vcmi/Mods/$opponent -o $opponent = "BattleAI" ] || { echo "Not found: vcmi/Mods/$opponent"; exit 1; }
 done
 
 for player in "${players[@]}"; do

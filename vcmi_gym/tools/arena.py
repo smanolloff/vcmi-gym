@@ -86,13 +86,20 @@ def parse_kv(text):
     if "=" not in text:
         raise argparse.ArgumentTypeError("Expected format key=value")
     key, value = text.split("=", 1)
+
     try:
         value = int(value)
     except ValueError:
-        value = float(value)
-    except ValueError:
-        # string
-        pass
+        try:
+            value = float(value)
+        except ValueError:
+            # string
+            if value == "True":
+                value = True
+            elif value == "False":
+                value = False
+            else:
+                pass
     return key, value
 
 
