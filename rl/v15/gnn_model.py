@@ -304,11 +304,7 @@ class GNNBlock(nn.Module):
             getattr(hdata, "edge_attr_dict", None)
         )
 
-        for conv, norm, activation in zip(
-            self.convs,
-            self.norms,
-            self.activations,
-        ):
+        for conv, norm, activation in zip(self.convs, self.norms, self.activations):
             x_old = x_dict
 
             if edge_attr_dict is not None:
@@ -342,7 +338,7 @@ class GNNModel(nn.Module):
             num_gnn_layers=config["gnn_num_layers"],
             hidden_channels=config["gnn_hidden_channels"],
             out_channels=config["gnn_out_channels"],
-            conv_cls=gnn.GENConv,
+            conv_cls=getattr(gnn, config.get("gnn_conv_cls", "GENConv")),
             conv_kwargs=config["gnn_conv_kwargs"],
         )
 

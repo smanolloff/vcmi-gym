@@ -160,20 +160,25 @@ config = dict(
         gnn_num_layers=3,
         gnn_hidden_channels=128,
         gnn_out_channels=64,
-        gnn_conv_kwargs=dict(
-            aggr="softmax",
-            learn_t=True,
-            num_layers=2,  # number of MLP layers (within a single GNN layer)
-            norm=None,  # already applying LayerNorm externally (with the residual)
 
-            # For this comprehensive heterogeneous graph, prefer explicit
-            # residual connections over automatic self-loops. Node types have
-            # very different meanings and many relations are directional or
-            # role-specific.
-            # XXX: in PyG 2.8.0, this option gives an error anyway
-            # add_self_loops=False,
+        # gnn_conv_cls="GENConv",
+        # gnn_conv_kwargs=dict(
+        #     aggr="softmax",
+        #     learn_t=True,
+        #     num_layers=2,  # number of MLP layers (within a single GNN layer)
+        #     norm=None,  # already applying LayerNorm externally (with the residual)
+        # ),
+
+        gnn_conv_cls="GATConv",
+        gnn_conv_kwargs=dict(
+            heads=4,
+            concat=False,
+            dropout=0.0,
+            add_self_loops=False,
         ),
     ),
+
+
 )
 
 config["checkpoint"]["s3"]["s3_dir"] = config["checkpoint"]["s3"]["s3_dir"].replace("{wandb_group}", config["wandb_group"])

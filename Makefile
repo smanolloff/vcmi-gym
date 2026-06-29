@@ -55,3 +55,17 @@ vastai-build-connector:
 		-D CMAKE_BUILD_TYPE=Release \
 		-D CMAKE_EXPORT_COMPILE_COMMANDS=0 \
 	&& cmake --build rel/ -- -j$$(nproc)
+
+# XXX: remove this once models trained on edges with typos are no longer used
+edge-typos:
+	sed -i'' -e 's/"Global", "To", "Action"/"Global", "Has", "Action"/' \
+		-e 's/"Unit", "Has", "Action"/"Unit", "By", "Action"/' \
+		rl/v15/dual_vec_env.py
+	cd vcmi
+	sed -i'' -e '/EdgeType{/,/},/{/EDGE_GLOBAL_TO_ACTION/{n;s/"To"/"Has"/;};}' \
+		-e '/EdgeType{/,/},/{/EDGE_UNIT_HAS_ACTION/{n;s/"Has"/"By"/;};}' \
+		AI/MMAI/schema/v15/constants.h
+	cmake --build rel -t MMAI/fast -- -j8
+	cd ..
+	$(MAKE) vastai-build-connector
+
