@@ -158,15 +158,26 @@ if __name__ == "__main__":
     is_bot_v15 = False
 
     if player_cfg.get("version", None) == 15 or player_cfg["wandb_group"] == "v15":
-        from rl.v15.ppo_gnn import (
-            VcmiEnv,
-            PPOModel,
-            DualVecEnv,
-            eval_model,
-        )
-        # TODO: use func from rl/v15/ppo_gnn.py
+        from rl.v15.dual_vec_env import DualVecEnv
+        from vcmi_gym.envs.v15.vcmi_env import VcmiEnv
+
+        dual_venv_kwargs["env_kwargs"]["ignored_edges"] = player_cfg["train"]["env"]["kwargs"]["ignored_edges"]
+
+        if any("model_policy." in k for k in pw.keys()):
+            print("[player] Using v15 (DNA) model")
+            from rl.v15.dna_gnn import (
+                DNAModel as player_Model,
+                eval_model,
+            )
+        else:
+            print("[player] Using v15 (PPO) model")
+            from rl.v15.ppo_gnn import (
+                PPOModel as player_Model,
+                eval_model,
+            )
+
         pw = migrate_edge_key_typos(pw)
-        player_model = PPOModel(
+        player_model = player_Model(
             node_types=VcmiEnv.node_types(),
             edge_types=VcmiEnv.filtered_edge_types(player_cfg["train"]["env"]["kwargs"]["ignored_edges"]),
             config=player_cfg["model"],
@@ -259,12 +270,14 @@ if __name__ == "__main__":
         if bot_cfg.get("version", None) == 15 or bot_cfg["wandb_group"] == "v15":
             is_bot_v15 = True
             # TODO: ppo or dna loader depending on bot weights
-            if any("dna" in k for k in bw.keys()):
+            if any("model_value." in k for k in bw.keys()):
                 print("[bot] Using v15 (DNA) model loader")
                 from rl.v15.dna_gnn import ModelLoader
             else:
                 print("[bot] Using v15 (PPO) model loader")
                 from rl.v15.ppo_gnn import ModelLoader
+
+            bot_loader = ModelLoader(device_type=DEVICE.type, role=bot_role)
         else:
             if any("encoder_other" in k for k in bw.keys()):
                 bot_cfg["model"]["legacy_global_encoder"] = True
@@ -318,8 +331,6 @@ if __name__ == "__main__":
         bot_loader.load(bot_weights)
         dual_venv_kwargs["num_envs_model"] = args.num_envs
         dual_venv_kwargs["model_loader"] = bot_loader
-
-    dual_venv_kwargs["env_kwargs"]["vcmi_loglevel_ai"] = "debug"
 
     print(dual_venv_kwargs)
     venv = DualVecEnv(**dual_venv_kwargs)
