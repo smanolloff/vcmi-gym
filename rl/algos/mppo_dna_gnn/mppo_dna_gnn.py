@@ -57,8 +57,23 @@ from vcmi_gym.envs.v14.pyconnector import (
     LINK_ATTR_SIZES,
 )
 
+CONSTANTS = {
+    "STATE_SIZE": STATE_SIZE,
+    "STATE_SIZE_ONE_HEX": STATE_SIZE_ONE_HEX,
+    "STATE_SIZE_HEXES": STATE_SIZE_HEXES,
+    "N_ACTIONS": N_ACTIONS,
+    "N_HEX_ACTIONS": N_HEX_ACTIONS,
+    "N_NONHEX_ACTIONS": N_NONHEX_ACTIONS,
+    "GLOBAL_ATTR_MAP": GLOBAL_ATTR_MAP,
+    "GLOBAL_ACT_MAP": GLOBAL_ACT_MAP,
+    "HEX_ATTR_MAP": HEX_ATTR_MAP,
+    "HEX_ACT_MAP": HEX_ACT_MAP,
+    "LINK_ATTR_SIZES": LINK_ATTR_SIZES,
+}
+
 from .dual_vec_env import DualVecEnv, AbstractModelLoader, to_hdata_list
 
+assert STATE_SIZE_HEXES == 165 * STATE_SIZE_ONE_HEX
 
 # (row,col) offsets (from * POV)
 OFFSETS_0 = [   # even rows offsets
@@ -145,13 +160,14 @@ class State:
 
 
 class Storage:
-    def __init__(self, venv, num_vsteps, device):
+    def __init__(self, venv, num_vsteps, state_size_one_hex, device):
         v = venv.num_envs
         self.rollout_buffer = []  # contains Batch() objects
         self.v_next_hdata_list = to_hdata_list(
             torch.as_tensor(venv.reset()[0], device=device),
             torch.zeros(v, device=device),
             venv.call("links"),
+            STATE_SIZE_ONE_HEX,
         )
 
         # Needed for the GAE computation (to prevent spaghetti)
@@ -442,10 +458,15 @@ class Model(nn.Module):
 
         return action_table, inverse_table, amove_hexes
 
-    def __init__(self, config):
+    def __init__(self, config, constants, obs_space):
         super().__init__()
 
-        self.dim_other = STATE_SIZE - STATE_SIZE_HEXES
+
+        for k in ["HEX_ATTR_MAP", "HEX_ACT_MAP", "GLOBAL_ATTR_MAP", "GLOBAL_ACT_MAP", "STATE_SIZE_ONE_HEX", "STATE_SIZE_ONE_HEX", "STATE_SIZE_HEXES", "LINK_ATTR_SIZES"]:
+            assert k in constants, f"missing key in constants: {k}"
+
+        self.constants = constants
+        self.dim_other = constants["STATE_SIZE"] - constants["STATE_SIZE_HEXES"]
 
         action_table, inverse_table, amove_hexes = self.__class__.build_action_tables()
 
@@ -459,10 +480,11 @@ class Model(nn.Module):
 
         self.encoder_hexes = GNNBlock(
             config["gnn_num_layers"],
-            STATE_SIZE_ONE_HEX,
+            constants["STATE_SIZE_ONE_HEX"],
             config["gnn_hidden_channels"],
             config["gnn_out_channels"],
             config.get("gnn_kwargs", {}),
+            constants["LINK_ATTR_SIZES"]
         )
 
         d = config["gnn_out_channels"]
@@ -500,10 +522,10 @@ class Model(nn.Module):
 
         # Init lazy layers (must be before weight/bias init)
         with torch.no_grad():
-            obs = torch.randn([2, STATE_SIZE])
+            obs = torch.randn([2, constants["STATE_SIZE"]])
             done = torch.zeros(2)
-            links = 2 * [VcmiEnv.OBSERVATION_SPACE["links"].sample()]
-            hdata = Batch.from_data_list(to_hdata_list(obs, done, links))
+            links = 2 * [obs_space["links"].sample()]
+            hdata = Batch.from_data_list(to_hdata_list(obs, done, links, constants["STATE_SIZE_ONE_HEX"]))
             z_hexes, z_global = self.encode(hdata)
             if USE_MODEL_SAMPLING:
                 self._get_actsample_eval(z_hexes, z_global, obs)
@@ -575,19 +597,19 @@ class Model(nn.Module):
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
         mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
-        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
+        hexobs = obs[:, -self.constants["STATE_SIZE_HEXES"]:].view([-1, 165, self.constants["STATE_SIZE_ONE_HEX"]])
 
         # 1.1 for 0=WAIT: nothing to do (all zeros)
         # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        movemask = hexobs[:, :, self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["HEX_ACT_MAP"]["MOVE"]]
         mask_hex1[:, 1, :] = movemask
 
         # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1]].bool()
         mask_hex1[:, 2, :] = amovemask.any(dim=-1)
 
         # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
-        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        shootmask = hexobs[:, :, self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["HEX_ACT_MAP"]["SHOOT"]]
         mask_hex1[:, 3, :] = shootmask
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
@@ -614,7 +636,7 @@ class Model(nn.Module):
         mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+        mask_action[:, 0] = obs[:, self.constants["GLOBAL_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["GLOBAL_ACT_MAP"]["WAIT"]]
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
@@ -654,19 +676,19 @@ class Model(nn.Module):
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
         mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
-        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
+        hexobs = obs[:, -self.constants["STATE_SIZE_HEXES"]:].view([-1, 165, self.constants["STATE_SIZE_ONE_HEX"]])
 
         # 1.1 for 0=WAIT: nothing to do (all zeros)
         # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        movemask = hexobs[:, :, self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["HEX_ACT_MAP"]["MOVE"]]
         mask_hex1[:, 1, :] = movemask
 
         # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1]].bool()
         mask_hex1[:, 2, :] = amovemask.any(dim=-1)
 
         # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
-        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        shootmask = hexobs[:, :, self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["HEX_ACT_MAP"]["SHOOT"]]
         mask_hex1[:, 3, :] = shootmask
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
@@ -693,7 +715,7 @@ class Model(nn.Module):
         mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+        mask_action[:, 0] = obs[:, self.constants["GLOBAL_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["GLOBAL_ACT_MAP"]["WAIT"]]
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
@@ -738,19 +760,19 @@ class Model(nn.Module):
 
         # 1. MASK_HEX1 - ie. allowed hex#1 for each action
         mask_hex1 = torch.zeros(B, 4, 165, dtype=torch.bool, device=obs.device)
-        hexobs = obs[:, -STATE_SIZE_HEXES:].view([-1, 165, STATE_SIZE_ONE_HEX])
+        hexobs = obs[:, -self.constants["STATE_SIZE_HEXES"]:].view([-1, 165, self.constants["STATE_SIZE_ONE_HEX"]])
 
         # 1.1 for 0=WAIT: nothing to do (all zeros)
         # 1.2 for 1=MOVE: Take MOVE bit from obs's action mask
-        movemask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["MOVE"]]
+        movemask = hexobs[:, :, self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["HEX_ACT_MAP"]["MOVE"]]
         mask_hex1[:, 1, :] = movemask
 
         # 1.3 for 2=AMOVE: Take any(AMOVEX) bits from obs's action mask
-        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + HEX_ATTR_MAP["ACTION_MASK"][1]].bool()
+        amovemask = hexobs[:, :, torch.arange(N_AMOVES) + self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1]].bool()
         mask_hex1[:, 2, :] = amovemask.any(dim=-1)
 
         # 1.4 for 3=SHOOT: Take SHOOT bit from obs's action mask
-        shootmask = hexobs[:, :, HEX_ATTR_MAP["ACTION_MASK"][1] + HEX_ACT_MAP["SHOOT"]]
+        shootmask = hexobs[:, :, self.constants["HEX_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["HEX_ACT_MAP"]["SHOOT"]]
         mask_hex1[:, 3, :] = shootmask
 
         # 2. MASK_HEX2 - ie. allowed hex2 for each (action, hex1) combo
@@ -778,7 +800,7 @@ class Model(nn.Module):
         mask_action = torch.zeros(B, 4, dtype=torch.bool, device=obs.device)
 
         # 0=WAIT
-        mask_action[:, 0] = obs[:, GLOBAL_ATTR_MAP["ACTION_MASK"][1] + GLOBAL_ACT_MAP["WAIT"]]
+        mask_action[:, 0] = obs[:, self.constants["GLOBAL_ATTR_MAP"]["ACTION_MASK"][1] + self.constants["GLOBAL_ACT_MAP"]["WAIT"]]
 
         # 1=MOVE, 2=AMOVE, 3=SHOOT: if at least 1 target hex
         mask_action[:, 1:] = mask_hex1[:, 1:, :].any(dim=-1)
@@ -843,29 +865,34 @@ class Model(nn.Module):
 
 
 class DNAModel(nn.Module):
-    def __init__(self, config, device):
+    def __init__(self, config, constants, obs_space, device):
         super().__init__()
-        self.model_policy = Model(config)
-        self.model_value = Model(config)
+        self.model_policy = Model(config, constants, obs_space)
+        self.model_value = Model(config, constants, obs_space)
         self.device = device
         self.to(device)
 
 
 class ModelLoader(AbstractModelLoader):
-    def __init__(self, device_type, role, loglevel="INFO"):
+    def __init__(
+        self,
+        device_type,
+        role,
+        constants,
+        obs_space,
+        loglevel="INFO"
+    ):
         assert role in ["attacker", "defender"]
         self.device_type = device_type
         self.role = role
         self.logger = StructuredLogger(level=getattr(logging, loglevel), context=dict(name="model_loader"))
         self.model = None
+        self.constants = constants
+        self.obs_space = obs_space
 
-    def configure(self, config_file):
+    def configure(self, config):
         assert not self.model, "Cannot call .configure() after .load()"
-        self.config_file = config_file
-        self.logger.debug(f"Loading model config from file: {config_file}")
-        with open(config_file, "r") as f:
-            self.config = json.load(f)
-
+        self.config = config
         loaded_role = self.config["train"]["env"]["kwargs"]["role"]
         assert loaded_role == self.role, f"{loaded_role} == {self.role}"
 
@@ -875,7 +902,12 @@ class ModelLoader(AbstractModelLoader):
         self.logger.info(f"Loading model weights from {weights_file}")
         weights = torch.load(weights_file, weights_only=True, map_location=self.device_type)
         if not self.model:
-            self.model = DNAModel(self.config["model"], torch.device(self.device_type)).eval()
+            self.model = DNAModel(
+                config=self.config["model"],
+                constants=self.constants,
+                obs_space=self.obs_space,
+                device=torch.device(self.device_type),
+            ).eval()
         self.model.load_state_dict(weights, strict=True)
 
     def get_model(self):
@@ -986,10 +1018,11 @@ def eval_model(logger, model, venv, num_vsteps):
         # logger.debug("(eval) vstep: %d" % vstep)
         # print(venv.render()[0])
 
-        v_hdata_list = to_hdata_list(torch.as_tensor(v_obs), v_done, venv.call("links"))
+        v_hdata_list = to_hdata_list(torch.as_tensor(v_obs), v_done, venv.call("links"), model.model_policy.constants["STATE_SIZE_ONE_HEX"])
         v_hdata_batch = Batch.from_data_list(v_hdata_list).to(model.device)
         if USE_MODEL_SAMPLING:
-            v_actsample = model.model_policy.get_actsample_eval(v_hdata_batch)
+            m = model.model_policy
+            v_actsample = m.get_actsample_eval(v_hdata_batch)
         else:
             v_actsample = model.model_policy.get_action_logits(v_hdata_batch).sample()
         v_obs, v_rew, v_term, v_trunc, v_info = venv.step(v_actsample.action.cpu().numpy())
@@ -1379,14 +1412,19 @@ def prepare_wandb_log(
     return wlog
 
 
-def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
+def init_model_loader(env_config, checkpoint_config, obs_space, logger, dry_run, device):
     if env_config["num_envs_per_opponent"]["model"] == 0:
         return None
 
     # Wanted bot role based on train role
     bot_roles = dict(defender="attacker", attacker="defender")
     bot_role = bot_roles[env_config["kwargs"]["role"]]
-    model_loader = ModelLoader(device.type, role=bot_role)
+    model_loader = ModelLoader(
+        device_type=device.type,
+        role=bot_role,
+        constants=CONSTANTS,
+        obs_space=obs_space,
+    )
 
     modelcfg = env_config["model"]
     assert modelcfg, str(modelcfg)
@@ -1397,7 +1435,9 @@ def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
         config_file = modelcfg["config_file"]
         weights_file = modelcfg["weights_file"]
         logger.info(f"Loading static model config from {config_file}")
-        model_loader.configure(config_file)
+        with open(config_file, "r") as f:
+            model_config = json.load(f)
+        model_loader.configure(model_config)
         logger.info(f"Loading static model weights from {weights_file}")
         model_loader.load(weights_file)
         # These models will never be reloaded => set a huge reload interval
@@ -1424,20 +1464,19 @@ def init_model_loader(env_config, checkpoint_config, logger, dry_run, device):
         )
 
         logger.info(f"Loading dynamic model config from {config_file} / {latest_ts.isoformat()}")
-        model_loader.configure(config_file)
+        with open(config_file, "r") as f:
+            model_config = json.load(f)
+        model_loader.configure(model_config)
         logger.info(f"Loading dynamic model weights from {weights_file}")
         model_loader.load(weights_file)
         reload_interval_s = modelcfg["reload_interval_s"]
-
-    with open(config_file, "r") as f:
-        run_id = json.load(f)["run"]["id"]
 
     return ModelLoaderInfo(
         model_loader=model_loader,
         model_ts=latest_ts,
         loaded_at=dt.datetime.now().astimezone(dt.timezone.utc),
         reload_interval_s=reload_interval_s,
-        run_id=run_id,
+        run_id=model_config["run"]["id"],
         config_file=config_file,
         weights_file=weights_file
     )
@@ -1492,7 +1531,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
     loader_infos = []
 
-    train_loader_info = init_model_loader(train_config["env"], checkpoint_config, logger, dry_run, device)
+    train_loader_info = init_model_loader(train_config["env"], checkpoint_config, VcmiEnv.OBSERVATION_SPACE, logger, dry_run, device)
 
     if train_loader_info:
         loader_infos.append(train_loader_info)
@@ -1546,7 +1585,13 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     storage = Storage(train_venv, train_config["num_vsteps"], torch.device("cpu"))  # force storage on cpu
     state = State()
 
-    model = DNAModel(config=config["model"], device=device)
+    model = DNAModel(
+        config=config["model"],
+        state_size=STATE_SIZE,
+        state_size_one_hex=STATE_SIZE_ONE_HEX,
+        link_attr_sizes=LINK_ATTR_SIZES,
+        device=device
+    )
     old_model_policy = copy.deepcopy(model.model_policy).to(device).eval()
     for p in old_model_policy.parameters():
         p.requires_grad = False

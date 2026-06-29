@@ -1,11 +1,10 @@
 import time
 import torch
-import numpy as np
 import json
 from torch_geometric.data import Batch
 from vcmi_gym.envs.v15.vcmi_env import VcmiEnv
 from rl.v15.gnn_model import to_hdata_list, add_action_active_local_ids
-from rl.v15.ppo_gnn import PPOModel
+from rl.v15.ppo_gnn import PPOModel, migrate_edge_key_typos
 
 
 if __name__ == "__main__":
@@ -13,7 +12,7 @@ if __name__ == "__main__":
     steps = 0
     step = 0
 
-    CHECKPOINT_BASE = "zvytfdpo-best29"
+    CHECKPOINT_BASE = "zvytfdpo-best31"
     # CHECKPOINT_BASE = "zjiynpus-best6"
 
     with open(f"{CHECKPOINT_BASE}-config.json", "r") as f:
@@ -28,13 +27,15 @@ if __name__ == "__main__":
     )
 
     weights = torch.load(f"{CHECKPOINT_BASE}-model-ppo.pt", weights_only=True, map_location="cpu")
+    weights = migrate_edge_key_typos(weights)
     model.load_state_dict(weights, strict=True)
 
     env = VcmiEnv(**dict(
         env_kwargs,
         mapname="gym/ml-eval.vmap",
-        opponent="MMAI_MODEL",
-        opponent_model="MMAI/models/attacker-nkjrmrsq-202509291846-stochastic.onnx",
+        # opponent="MMAI_MODEL",
+        # opponent_model="MMAI/models/attacker-nkjrmrsq-202509291846-stochastic.onnx",
+        opponent="BattleAI",
         vcmi_loglevel_ai="warn"
     ))
 

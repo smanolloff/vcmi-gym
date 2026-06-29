@@ -12,7 +12,15 @@ from multiprocessing.managers import SharedMemoryManager
 from types import SimpleNamespace
 from vcmi_gym.envs.util.wrappers import LegacyObservationSpaceWrapper
 from vcmi_gym.envs.util.log import get_logger, trunc
-from vcmi_gym.envs.v14.vcmi_env import VcmiEnv
+from vcmi_gym.envs.v13.vcmi_env import VcmiEnv as VcmiEnv_v13
+from vcmi_gym.envs.v14.vcmi_env import VcmiEnv as VcmiEnv_v14
+
+from vcmi_gym.envs.v13.pyconnector import (
+    LINK_TYPES,
+    STATE_SIZE,
+    STATE_SIZE_HEXES,
+    STATE_SIZE_ONE_HEX,
+)
 from vcmi_gym.envs.v14.pyconnector import (
     LINK_TYPES,
     STATE_SIZE,
@@ -61,9 +69,10 @@ class EnvState(enum.IntEnum):
 
 
 class DualEnvController():
-    def __init__(self, num_envs, model_loader: AbstractModelLoader, logprefix="", loglevel="INFO"):
+    def __init__(self, num_envs, model_loader: AbstractModelLoader, state_size_one_hex, logprefix="", loglevel="INFO"):
         self.num_envs = num_envs
         self.model_loader = model_loader
+        self.state_size_one_hex = state_size_one_hex
         self.logger = get_logger(f"{logprefix}controller", loglevel)
         self.logger.debug("Initializing...")
 
@@ -145,7 +154,7 @@ class DualEnvController():
                 with torch.inference_mode():
                     b_obs = torch.as_tensor(self.env_obs[ids])
                     b_done = torch.zeros(len(ids))
-                    hdata = Batch.from_data_list(to_hdata_list(b_obs, b_done, b_links)).to(self.model_loader.get_model().device)
+                    hdata = Batch.from_data_list(to_hdata_list(b_obs, b_done, b_links, self.state_size_one_hex)).to(self.model_loader.get_model().device)
 
                     with self.controller_act_cond:
                         self.logger.debug("model.model_policy.get_actdata_eval(hdata)")
@@ -336,13 +345,26 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         num_envs_stupidai=0,
         num_envs_battleai=0,
         num_envs_mmai_battleai=0,
+        num_envs_mmai_onnx=0,
         num_envs_model=0,
+        onnx_model=None,
         model_loader: AbstractModelLoader = None,
         e_max=3300,
+        env_version=14,
         logprefix="",
     ):
-        num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai + num_envs_mmai_battleai
+        num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai + num_envs_mmai_battleai + num_envs_mmai_onnx
         assert num_envs_total > 0, f"{num_envs_total} > 0"
+
+        if num_envs_mmai_onnx > 0:
+            assert onnx_model is not None, "onnx_model is required when num_envs_mmai_onnx > 0"
+
+        if env_version == 13:
+            VcmiEnv = VcmiEnv_v13
+        elif env_version == 14:
+            VcmiEnv = VcmiEnv_v14
+        else:
+            raise Exception(env_version)
 
         # AsyncVectorEnv creates a dummy_env() in the main process just to
         # extract metadata, which causes VCMI init pid error afterwards
@@ -362,6 +384,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             self.controller = DualEnvController(
                 num_envs_model,
                 model_loader,
+                state_size_one_hex=VcmiEnv.STATE_SIZE_HEXES // 165,
                 loglevel=env_kwargs.get("vcmienv_loglevel", "INFO"),
                 logprefix=logprefix,
             )
@@ -395,6 +418,9 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         def env_creator_mmai_battleai(i):
             return VcmiEnv(**env_kwargs, opponent="MMAI_BATTLEAI", vcmienv_logtag=f"{logprefix}env.mmaibattleai.{i}")
 
+        def env_creator_mmai_onnx(i):
+            return VcmiEnv(**env_kwargs, opponent="MMAI_MODEL", opponent_model=onnx_model, vcmienv_logtag=f"{logprefix}env.onnx.{i}")
+
         def env_creator_wrapper(env_creator):
             if os.getpid() == pid:
                 return dummy_env
@@ -409,6 +435,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         env_creators.extend([partial(env_creator_stupidai, i) for i in range(num_envs_stupidai)])
         env_creators.extend([partial(env_creator_battleai, i) for i in range(num_envs_battleai)])
         env_creators.extend([partial(env_creator_mmai_battleai, i) for i in range(num_envs_mmai_battleai)])
+        env_creators.extend([partial(env_creator_mmai_onnx, i) for i in range(num_envs_mmai_onnx)])
         funcs = [partial(env_creator_wrapper, env_creator) for env_creator in env_creators]
 
         super().__init__(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
@@ -417,7 +444,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         self.controller.reload_model()
 
 
-def to_hdata(obs, done, links):
+def to_hdata(obs, done, links, state_size_one_hex):
     device = obs.device
     res = HeteroData()
     res.obs = obs.unsqueeze(0)
@@ -429,7 +456,8 @@ def to_hdata(obs, done, links):
     res.advantage = torch.tensor(0., device=device)
     res.ep_return = torch.tensor(0., device=device)
 
-    res["hex"].x = obs[-STATE_SIZE_HEXES:].view(165, STATE_SIZE_ONE_HEX)
+    state_size_hexes = 165 * state_size_one_hex
+    res["hex"].x = obs[-state_size_hexes:].view(165, state_size_one_hex)
     for lt in LINK_TYPES.keys():
         res["hex", lt, "hex"].edge_index = torch.as_tensor(links[lt]["index"], device=device)
         res["hex", lt, "hex"].edge_attr = torch.as_tensor(links[lt]["attrs"], device=device)
@@ -439,10 +467,10 @@ def to_hdata(obs, done, links):
 
 # b_obs: torch.tensor of shape (B, STATE_SIZE)
 # tuple_links: tuple of B dicts, where each dict is a single obs's "links"
-def to_hdata_list(b_obs, b_done, tuple_links):
+def to_hdata_list(b_obs, b_done, tuple_links, state_size_one_hex):
     b_hdatas = []
     for obs, done, links in zip(b_obs, b_done, tuple_links):
-        b_hdatas.append(to_hdata(obs, done, links))
+        b_hdatas.append(to_hdata(obs, done, links, state_size_one_hex))
     # XXX: this concatenates along the first dim
     # i.e. stacking two (165, STATE_SIZE_ONE_HEX)
     #       gives  (330, STATE_SIZE_ONE_HEX)
@@ -476,20 +504,23 @@ if __name__ == "__main__":
         def get_model(self):
             return self.model
 
-    model_loader = TestModelLoader()
+    # model_loader = TestModelLoader()
     venv = DualVecEnv(
         env_kwargs=dict(mapname="gym/A1.vmap"),
         num_envs_stupidai=0,
         num_envs_battleai=0,
         num_envs_mmai_battleai=0,
-        num_envs_model=1,
-        model_loader=model_loader,
+        num_envs_mmai_onnx=1,
+        num_envs_model=0,
+        onnx_model="MMAI/models/attacker-nkjrmrsq-202509291846-stochastic.onnx",
+        # model_loader=model_loader,
+        model_loader=None,
         logprefix="test-",
         e_max=3300,
     )
 
-    model_loader.configure("export/tukbajrv-202509241418-config.json")
-    model_loader.load("export/tukbajrv-202509241418-model-dna.pt")
+    # model_loader.configure("export/tukbajrv-202509241418-config.json")
+    # model_loader.load("export/tukbajrv-202509241418-model-dna.pt")
 
     import ipdb; ipdb.set_trace()  # noqa
     pass
