@@ -73,6 +73,8 @@ class State:
     rollout_is_success_queue_100: deque = field(default_factory=lambda: deque(maxlen=100))
     rollout_is_success_queue_1000: deque = field(default_factory=lambda: deque(maxlen=1000))
 
+    volatile_checkpoint_counter: int = 0
+
     def to_json(self):
         j = {}
         for k, v in asdict(self).items():
@@ -971,6 +973,8 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
     permanent_checkpoint_timer = Timer()
     permanent_checkpoint_timer.start()
+    volatile_checkpoint_timer = Timer()
+    volatile_checkpoint_timer.start()
     wandb_log_commit_timer = Timer()
     wandb_log_commit_timer.start()
     wandb_log_commit_timer._started_at = 0  # force first trigger
@@ -1166,10 +1170,15 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                     train_config=train_config,
                 )
 
-            if permanent_checkpoint_timer.peek() > config["checkpoint"]["permanent_interval_s"]:
+            if permanent_checkpoint_timer.peek() > checkpoint_config["permanent_interval_s"]:
                 permanent_checkpoint_timer.reset(start=True)
+                volatile_checkpoint_timer.reset(start=True)
                 logger.info("Time for a permanent checkpoint")
                 save_fn(s3_config=checkpoint_config["s3"], tag=f"{time.time():.0f}")
+            elif volatile_checkpoint_timer.peek() > config["checkpoint"].get("volatile_interval_s", float("inf")):
+                volatile_id = state.volatile_checkpoint_counter % checkpoint_config.get("volatile_num_tags", 2)
+                save_fn(s3_config=checkpoint_config["s3"], tag=f"volatile-{volatile_id}")
+                state.volatile_checkpoint_counter += 1
 
             wlog = prepare_wandb_log(
                 model=model.model_policy,

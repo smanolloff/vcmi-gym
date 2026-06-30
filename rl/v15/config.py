@@ -92,6 +92,8 @@ config = dict(
         # Non-permanent checkpoint is made after eval if result is good
         # Permanent checkpoint is made every X seconds, regardless of eval result
         permanent_interval_s=12*3600,  # disable with int(2e9)
+        volatile_interval_s=3600,  # disable with int(2e9)
+        volatile_num_tags=2,  # disable with int(2e9)
         optimize_local_storage=False,
         s3=dict(
             bucket_name="vcmi-gym",
@@ -208,11 +210,15 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["env"]["kwargs"] = list(config["eval"]["env_variants"].values())[0]["kwargs"]
 
     config["eval"]["at_script_start"] = False
-    config["eval"]["interval_s"] = 300
-    config["wandb_log_interval_s"] = 180
+    config["eval"]["interval_s"] = 30
+    config["eval"]["num_vsteps"] = 40
+    config["wandb_log_interval_s"] = 30
 
     config["model"]["gnn_num_layers"] = 3
     config["model"]["gnn_hidden_channels"] = 64
     config["model"]["gnn_out_channels"] = 32
     config["model"]["value_head_hidden_channels"] = 64
     config["model"]["policy_head_hidden_channels"] = 64
+
+    config["checkpoint"]["permanent_interval_s"] = 300
+    config["checkpoint"]["volatile_interval_s"] = 100
