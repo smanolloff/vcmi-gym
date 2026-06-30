@@ -273,9 +273,6 @@ class GNNBlock(nn.Module):
             if edge_attr is None:
                 continue
 
-            if edge_attr.numel() == 0:
-                continue
-
             if edge_attr.dim() == 2 and edge_attr.size(-1) == 0:
                 continue
 

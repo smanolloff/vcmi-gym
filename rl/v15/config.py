@@ -161,21 +161,26 @@ config = dict(
         gnn_hidden_channels=128,
         gnn_out_channels=64,
 
-        # gnn_conv_cls="GENConv",
+        gnn_conv_cls="GENConv",
+        gnn_conv_kwargs=dict(
+            aggr="softmax",
+            learn_t=True,
+            num_layers=2,  # number of MLP layers (within a single GNN layer)
+            norm=None,  # already applying LayerNorm externally (with the residual)
+        ),
+
+        # gnn_conv_cls="GATConv",
         # gnn_conv_kwargs=dict(
-        #     aggr="softmax",
-        #     learn_t=True,
-        #     num_layers=2,  # number of MLP layers (within a single GNN layer)
-        #     norm=None,  # already applying LayerNorm externally (with the residual)
+        #     heads=4,
+        #     concat=False,
+        #     dropout=0.0,
+        #     add_self_loops=False,
         # ),
 
-        gnn_conv_cls="GATConv",
-        gnn_conv_kwargs=dict(
-            heads=4,
-            concat=False,
-            dropout=0.0,
-            add_self_loops=False,
-        ),
+        # gnn_conv_cls="ResGatedGraphConv",
+        # gnn_conv_kwargs=dict(
+        #     root_weight=False,
+        # ),
     ),
 
 

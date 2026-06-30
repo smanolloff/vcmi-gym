@@ -213,10 +213,12 @@ function upload_checkpoint() {
 # Download a timestamped checkpoint (to out_dir as per the config)
 #
 function download_checkpoint() {
-    [ -n "\${1:-}" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
+    [ "\$1" = ppo -o "\$1" = dna ] || { echo "Usage: download_checkpoint ppo|dna RUN_ID-TAG"; return 1; }
+    [ -n "\${2:-}" ] || { echo "Usage: download_checkpoint ppo|dna RUN_ID-TAG"; return 1; }
 
-    rid=\${1%-*}
-    tag=\${1#*-}
+    algo=\$1
+    rid=\${2%-*}
+    tag=\${2#*-}
     s3_dir=v15/models
 
     [ -n "\$rid" -a -n "\$tag" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
@@ -229,7 +231,7 @@ function download_checkpoint() {
     # Copy config separately (already downloaded as text)
     echo "\$cfg_json" > \$out_dir/\$rid-\$tag-config.json
 
-    if [ "\$1" = ppo ]; then
+    if [ "\$algo" = ppo ]; then
         suffixes="state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt"
     else
         suffixes="state-default.json model-dna.pt optimizer-policy.pt optimizer-value.pt optimizer-distill.pt scaler-default.pt"
