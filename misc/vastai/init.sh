@@ -24,6 +24,9 @@ set -x
 
 started_at=$(date +%s)
 
+# Just to get output in logs
+nvidia-smi
+
 #
 # TMUX setup
 # (ctrl+b - shift+p) to enable logging
@@ -48,6 +51,7 @@ fi
 tmux source ~/.tmux.conf || :
 ~/.tmux/plugins/tpm/bin/install_plugins
 
+echo 'set paste' >~/.vimrc
 
 set -a
 source /workspace/.env
