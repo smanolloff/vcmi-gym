@@ -75,6 +75,10 @@ class State:
 
     volatile_checkpoint_counter: int = 0
 
+    permanent_checkpoint_timer_elapsed: float = 0.0
+    volatile_checkpoint_timer_elapsed: float = 0.0
+    eval_timer_elapsed: float = 0.0
+
     def to_json(self):
         j = {}
         for k, v in asdict(self).items():
@@ -973,17 +977,17 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     timers["all"].start()
     eval_net_value_best = None
 
-    permanent_checkpoint_timer = Timer()
+    permanent_checkpoint_timer = Timer(elapsed=state.permanent_checkpoint_timer_elapsed)
     permanent_checkpoint_timer.start()
-    volatile_checkpoint_timer = Timer()
+    volatile_checkpoint_timer = Timer(elapsed=state.volatile_checkpoint_timer_elapsed)
     volatile_checkpoint_timer.start()
     wandb_log_commit_timer = Timer()
     wandb_log_commit_timer.start()
-    wandb_log_commit_timer._started_at = 0  # force first trigger
-    eval_timer = Timer()
+    eval_timer = Timer(elapsed=state.eval_timer_elapsed)
     eval_timer.start()
-    if config["eval"]["at_script_start"] and not skip_eval: # and not dry_run:
-        eval_timer._started_at = 0  # force first trigger
+
+    if skip_eval:
+        eval_timer.reset(start=True)
 
     lr_schedule_timer = Timer()
     lr_schedule_timer.start()
@@ -1042,6 +1046,10 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
             if state.current_second >= seconds_total:
                 break
+
+            state.permanent_checkpoint_timer_elapsed = permanent_checkpoint_timer.peek()
+            state.volatile_checkpoint_timer_elapsed = volatile_checkpoint_timer.peek()
+            state.eval_timer_elapsed = eval_timer.peek()
 
             [v.reset(start=(k == "all")) for k, v in timers.items()]
 

@@ -3,8 +3,9 @@ import torch
 
 
 class Timer:
-    def __init__(self, name="default", cuda_sync=True):
+    def __init__(self, name="default", elapsed=0, cuda_sync=True):
         self.name = name
+        self.elapsed = elapsed
         self._cuda = torch.cuda.is_available() and cuda_sync
         self.reset()
 
@@ -24,7 +25,9 @@ class Timer:
         self._maybe_synchronize()
         if start:
             self._is_running = True
-            self._started_at = time.perf_counter()
+            # XXX: using time.perf_counter() is undesirable as it may be less than self.elapsed
+            self._started_at = time.time() - self.elapsed
+            self.elapsed = 0
         else:
             self._is_running = False
             self._started_at = 0.0
@@ -34,8 +37,9 @@ class Timer:
         if self._is_running:
             print("WARNING: timer already started")
         self._is_running = True
-        self._started_at = time.perf_counter()
-        # print("========== START: %f" % self._started_at)
+        self._started_at = time.time() - self.elapsed
+        self.elapsed = 0
+        # print("========== START: %f (elapsed: %f)" % (self._started_at, self.elapsed))
 
     def stop(self):
         # print("========== STOPPING")
@@ -43,11 +47,11 @@ class Timer:
         if not self._is_running:
             print("WARNING: timer already stopped")
         self._is_running = False
-        self._time_total += (time.perf_counter() - self._started_at)
+        self._time_total += (time.time() - self._started_at)
         # print("========== STOP: %f" % self._time_total)
 
     def peek(self):
         res = self._time_total
         if self._is_running:
-            res += (time.perf_counter() - self._started_at)
-        return res
+            res += (time.time() - self._started_at)
+        return max(0.0, res)

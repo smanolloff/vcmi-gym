@@ -119,7 +119,6 @@ config = dict(
         },
         num_vsteps=10_000,
         interval_s=1800,
-        at_script_start=True,
     ),
     train=dict(
         env=dict(
