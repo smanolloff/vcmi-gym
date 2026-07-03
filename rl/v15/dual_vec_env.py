@@ -561,6 +561,8 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         if num_envs_mmai_onnx > 0:
             assert onnx_model is not None, "onnx_model is required when num_envs_mmai_onnx > 0"
 
+        assert env_kwargs["seed"] >= 0 and env_kwargs["seed"] <= (2**31 - 1 - num_envs_total)
+
         # AsyncVectorEnv creates a dummy_env() in the main process just to
         # extract metadata, which causes VCMI init pid error afterwards
         pid = os.getpid()
@@ -646,16 +648,16 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             model_env_creators = [partial(env_creator_model, i) for i in range(num_envs_model)]
 
         def env_creator_stupidai(i):
-            return VcmiEnv(**env_kwargs, opponent="StupidAI", vcmienv_logtag=f"{logprefix}env.stupidai.{i}")
+            return VcmiEnv(**dict(env_kwargs, seed=env_kwargs["seed"] + i), opponent="StupidAI", vcmienv_logtag=f"{logprefix}env.stupidai.{i}")
 
         def env_creator_battleai(i):
-            return VcmiEnv(**env_kwargs, opponent="BattleAI", vcmienv_logtag=f"{logprefix}env.battleai.{i}")
+            return VcmiEnv(**dict(env_kwargs, seed=env_kwargs["seed"] + i), opponent="BattleAI", vcmienv_logtag=f"{logprefix}env.battleai.{i}")
 
         def env_creator_mmai_battleai(i):
-            return VcmiEnv(**env_kwargs, opponent="MMAI_BATTLEAI", vcmienv_logtag=f"{logprefix}env.mmaibattleai.{i}")
+            return VcmiEnv(**dict(env_kwargs, seed=env_kwargs["seed"] + i), opponent="MMAI_BATTLEAI", vcmienv_logtag=f"{logprefix}env.mmaibattleai.{i}")
 
         def env_creator_mmai_onnx(i):
-            return VcmiEnv(**env_kwargs, opponent="MMAI_MODEL", opponent_model=onnx_model, vcmienv_logtag=f"{logprefix}env.onnx.{i}")
+            return VcmiEnv(**dict(env_kwargs, seed=env_kwargs["seed"] + i), opponent="MMAI_MODEL", opponent_model=onnx_model, vcmienv_logtag=f"{logprefix}env.onnx.{i}")
 
         def env_creator_wrapper(env_creator):
             if os.getpid() == pid:
@@ -768,6 +770,7 @@ if __name__ == "__main__":
         num_envs_model=2,
         model_loader=model_loader,
         logprefix="test-",
+        seed=0,
         e_max=3300,
     )
 

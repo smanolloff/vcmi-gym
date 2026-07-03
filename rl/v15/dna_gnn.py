@@ -810,8 +810,9 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     else:
         train_model_loader = None
 
+    train_venv_seed = random.randint(0, (2**30)-1)  # leave some room to add i (see DualVecEnv)
     train_venv = DualVecEnv(
-        env_kwargs=train_config["env"]["kwargs"],
+        env_kwargs=dict(train_config["env"]["kwargs"], seed=train_venv_seed),
         num_envs_stupidai=train_config["env"]["num_envs_per_opponent"]["StupidAI"],
         num_envs_battleai=train_config["env"]["num_envs_per_opponent"]["BattleAI"],
         num_envs_mmai_battleai=train_config["env"]["num_envs_per_opponent"]["MMAI_BATTLEAI"],
@@ -835,8 +836,9 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         else:
             eval_model_loader = None
 
+        eval_venv_seed = random.randint(0, (2**30)-1)  # leave some room to add i (see DualVecEnv)
         eval_venv_variants[name] = DualVecEnv(
-            env_kwargs=envcfg["kwargs"],
+            env_kwargs=dict(envcfg["kwargs"], seed=eval_venv_seed),
             num_envs_stupidai=envcfg["num_envs_per_opponent"]["StupidAI"],
             num_envs_battleai=envcfg["num_envs_per_opponent"]["BattleAI"],
             num_envs_mmai_battleai=envcfg["num_envs_per_opponent"]["MMAI_BATTLEAI"],

@@ -30,16 +30,17 @@ done
 
 for player in "${players[@]}"; do
     for opponent in "${opponents[@]}"; do
-        for town_chance in 0 100; do
+        for town_chance in 0; do
             cat <<-EOF
 =========================== $player vs. $opponent (town_chance=$town_chance)
 EOF
             python -m vcmi_gym.tools.arena \
-                --num-envs=${1-30} \
-                --num-vsteps=${2-1000} \
+                --num-envs=${1-40} \
+                --num-vsteps=${2-10000} \
                 --player=$player \
                 --opponent=$opponent \
                 --map=gym/ml-eval.vmap \
+                --envarg seed=42 \
                 --envarg town_chance=$town_chance \
                 --envarg warmachine_chance=20 \
                 --envarg random_armies=False \

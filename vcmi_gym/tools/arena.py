@@ -183,7 +183,11 @@ if __name__ == "__main__":
                 eval_model,
             )
 
+        # NOTE: `make edge-typos` must be reverted (so VCMI reports correct keys)
+        # the `migrate` fn below will allow loading old weights into the fixed model
+        # => the arena can work with both old and new models
         pw = migrate_edge_key_typos(pw)
+
         player_model = player_Model(
             node_types=VcmiEnv.node_types(),
             edge_types=VcmiEnv.filtered_edge_types(player_cfg["train"]["env"]["kwargs"]["ignored_edges"]),
