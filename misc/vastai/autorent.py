@@ -15,7 +15,7 @@ GOLD_TARGET = 0
 goldcounter = 0
 
 # Price threshold of $/hr
-DPH = 0.3
+DPH = 0.3  # may be overriden by ARGV ($1)
 
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
@@ -477,6 +477,9 @@ def install_signal_handlers() -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        DPH = float(sys.argv[1])
+
     setup_logging()
     install_signal_handlers()
     main_loop()
