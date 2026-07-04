@@ -16,6 +16,7 @@ _require-python-venv:
 	test -n "$${VIRTUAL_ENV:-}" -o -n "$${CONDA_PREFIX:-}"
 
 # XXX: VastAI containers should have those according to the image used.
+# (e.g. image "PyTorch (Vast) - 12.8" will have PYTORCH_BACKEND=cu128)
 # The CPU default is a fallback for local development.
 PYTORCH_VERSION ?= 2.12.1
 PYTORCH_BACKEND ?= cpu
