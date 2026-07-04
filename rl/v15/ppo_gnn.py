@@ -1094,7 +1094,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
             elif volatile_checkpoint_timer.peek() > checkpoint_config.get("volatile_interval_s", float("inf")):
                 volatile_checkpoint_timer.reset(start=True)
                 volatile_id = state.volatile_checkpoint_counter % checkpoint_config.get("volatile_num_tags", 2)
-                save_fn(s3_config=checkpoint_config["s3"], tag=f"volatile-{volatile_id}")
+                save_fn(s3_config=checkpoint_config["s3"], tag=f"volatile{volatile_id}")
                 state.volatile_checkpoint_counter += 1
 
             wlog = prepare_wandb_log(
