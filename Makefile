@@ -56,6 +56,12 @@ vastai-build-connector:
 		-D CMAKE_EXPORT_COMPILE_COMMANDS=0 \
 	&& cmake --build rel/ -- -j$$(nproc)
 
+vastai-rebuild:
+	cd vcmi/ \
+	&& cmake --build rel/ -- -j$$(nproc) \
+	&& cd ../vcmi_gym/connectors \
+	&& cmake --build rel/ -- -j$$(nproc)
+
 # XXX: remove this once models trained on edges with typos are no longer used
 edge-typos:
 	sed -i'' -e 's/"Global", "To", "Action"/"Global", "Has", "Action"/' \
