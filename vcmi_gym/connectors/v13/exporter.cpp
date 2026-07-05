@@ -253,7 +253,7 @@ namespace Connector::V13 {
 
             using GA = GlobalAttribute;
             switch (a) {
-            break; case GA::BATTLE_ROUND:                attrname = "BATTLE_ROUND";
+            break; case GA::BATTLE_SIDE:                 attrname = "BATTLE_SIDE";
             break; case GA::BATTLE_SIDE_ACTIVE_PLAYER:   attrname = "BATTLE_SIDE_ACTIVE_PLAYER";
             break; case GA::BATTLE_WINNER:               attrname = "BATTLE_WINNER";
             break; case GA::BFIELD_VALUE_START_ABS:      attrname = "BFIELD_VALUE_START_ABS";

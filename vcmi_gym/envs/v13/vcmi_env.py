@@ -210,7 +210,7 @@ class VcmiEnv(gym.Env):
         # Applied on every step:
         reward_step_fixed: float = -1,          # reward = value
 
-        # These require BATTLE_ROUND in obs (to add in future env version)
+        # These requires BATTLE_ROUND in obs (to add in future env version)
         # See RewardConfig for more info
         reward_prog_base: float = 0.1,
         reward_prog_trigger: int = 9,
@@ -419,7 +419,7 @@ class VcmiEnv(gym.Env):
 
         bf = Decoder.decode(res.state, only_global=True)
         term = bf.global_stats.BATTLE_WINNER.v is not None
-        trunc = bf.global_stats.BATTLE_ROUND.v == MAX_ROUNDS  # vcmi should have retreated
+        trunc = False
         rewvals = VcmiEnv.calc_reward(res.errcode, term, trunc, bf, self.bf, self.reward_cfg)
         rew = sum(rewvals)
         res.mask[0] = False  # prevent retreats for now
@@ -445,7 +445,7 @@ class VcmiEnv(gym.Env):
         if self.render_each_step:
             print(self.render())
 
-        info = {"side": self.side, "round": bf.global_stats.BATTLE_ROUND.v}
+        info = {"side": self.side, "round": 0}
         return obs, info
 
     @tracelog
@@ -604,9 +604,7 @@ class VcmiEnv(gym.Env):
         self.bf = bf
 
     def _reset_vars(self, res, obs, bf):
-        # Workaround for the legacy BATTLE_SIDE (now replaced by BATTLE_ROUND)
-        # Since active player may change at battle end => store it at start
-        self.side = bf.global_stats.BATTLE_SIDE_ACTIVE_PLAYER
+        self.side = bf.global_stats.BATTLE_SIDE
 
         self.last_action = None
         self.steps_this_episode = 0
@@ -637,13 +635,13 @@ class VcmiEnv(gym.Env):
         if not (term or trunc):
             return dict(
                 side=side,
-                round=bf.global_stats.BATTLE_ROUND.v,
+                round=0,
                 step=steps_this_episode
             )
 
         return dict(
             side=side,
-            round=bf.global_stats.BATTLE_ROUND.v,
+            round=0,
             step=steps_this_episode,
 
             net_value=bf.enemy_stats.VALUE_LOST_ACC_REL0.v - bf.my_stats.VALUE_LOST_ACC_REL0.v,
@@ -680,7 +678,7 @@ class VcmiEnv(gym.Env):
         b = cfg.prog_trigger
         c = cfg.prog_exponent
         d = cfg.prog_limit
-        x = bf.global_stats.BATTLE_ROUND.v
+        x = 0
         prog = -min(a*(max(b, int(x)) - b)**c, d)
 
         done = term or trunc
