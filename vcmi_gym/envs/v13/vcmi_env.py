@@ -678,7 +678,7 @@ class VcmiEnv(gym.Env):
         b = cfg.prog_trigger
         c = cfg.prog_exponent
         d = cfg.prog_limit
-        x = 0
+        x = 0  # BATTLE_ROUND not available in v13
         prog = -min(a*(max(b, int(x)) - b)**c, d)
 
         done = term or trunc
