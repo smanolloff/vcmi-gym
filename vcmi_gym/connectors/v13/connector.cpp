@@ -46,6 +46,7 @@ namespace Connector::V13 {
                 int,                    // swapSides
                 const std::string &,    // loglevelGlobal
                 const std::string &,    // loglevelAI
+                const std::string &,    // loglevelNetwork
                 const std::string &,    // loglevelStats
                 bool,                   // redAllowMlBot
                 bool,                   // blueAllowMlBot
@@ -82,6 +83,7 @@ namespace Connector::V13 {
                 py::arg("swapSides"),
                 py::arg("loglevelGlobal"),
                 py::arg("loglevelAI"),
+                py::arg("loglevelNetwork"),
                 py::arg("loglevelStats"),
                 py::arg("redAllowMlBot"),
                 py::arg("blueAllowMlBot"),
