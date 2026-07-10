@@ -16,6 +16,7 @@ goldcounter = 0
 
 # Price threshold of $/hr
 DPH = 0.3  # may be overriden by ARGV ($1)
+ROLLOUT_SECONDS = 30  # may be overriden by ARGV ($2)
 
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
@@ -142,10 +143,10 @@ def vastai_rent(offer_id: int) -> int:
             r'bash\ -xc\ unset\\\ FAKETIME_SHARED\\\;'
             r'cd\\\ /workspace\\\;'
             r'bash\\\ init.sh\\\;'
-            r'bash\\\ check.sh\\\ -t\\\ -i90\\\ -r32\\\ -n5\;'
+            r'bash\\\ check.sh\\\ -t\\\ -i90\\\ -r%s\\\ -n5\;'
             r'touch\ /workspace/.preinit\;'
             r'exec\ \$SHELL'
-        )
+        ) % ROLLOUT_SECONDS
     )
 
     logging.debug(f"Request body: {body}")
@@ -479,6 +480,9 @@ def install_signal_handlers() -> None:
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         DPH = float(sys.argv[1])
+
+    if len(sys.argv) > 2:
+        ROLLOUT_SECONDS = int(sys.argv[2])
 
     setup_logging()
     install_signal_handlers()
