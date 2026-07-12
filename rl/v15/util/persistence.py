@@ -74,6 +74,7 @@ def download_latest_model(
     logger,
     dry_run,
     out_dir,
+    algo,  # ppo|dna
     run_id,
     optimize_local_storage,
     s3_config,
@@ -86,7 +87,7 @@ def download_latest_model(
 
     # Normalize s3_path and build prefix for listing
     prefix = f"{s3_config['s3_dir']}/{run_id}-"
-    suffix = "-model-dna.pt"
+    suffix = f"-model-{algo}.pt"
     paginator = s3.get_paginator("list_objects_v2")
 
     logger.info(f"Listing S3 objects with prefix={prefix}")
@@ -117,7 +118,7 @@ def download_latest_model(
 
     myts = pattern.match(latest_key).group(1)
     config_path = os.path.join(out_dir, f"{run_id}-{myts}-config.json")
-    weights_path = os.path.join(out_dir, f"{run_id}-{myts}-model-dna.pt")
+    weights_path = os.path.join(out_dir, f"{run_id}-{myts}-model-{algo}.pt")
     _s3_download(logger, dry_run, s3_config, config_path)
     _s3_download(logger, dry_run, s3_config, weights_path)
 
