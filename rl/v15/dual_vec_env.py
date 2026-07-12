@@ -513,6 +513,7 @@ class DualEnvWrapper(gym.Wrapper):
     def reset(self, *args, **kwargs):
         obs, info = self.env.reset(*args, **kwargs)
         self.logger.debug("[reset] with self.controller_env_cond")
+
         with self.controller_env_cond:
             self.logger.debug(f"env_states[{self.env_id}] = {EnvState.DONE}")
             self.env_states[self.env_id] = EnvState.DONE
@@ -538,7 +539,12 @@ class DualEnvWrapper(gym.Wrapper):
                 self.env_states[self.env_id] = EnvState.DONE
                 self.logger.debug("[step] self.controller_env_cond.notify()")
                 self.controller_env_cond.notify()
+
         return obs, rew, term, trunc, info
+
+    @property
+    def obs(self):
+        return self.env.obs
 
 
 class DualVecEnv(gym.vector.AsyncVectorEnv):

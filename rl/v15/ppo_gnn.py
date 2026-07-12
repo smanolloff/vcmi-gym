@@ -187,6 +187,10 @@ class ModelLoader(AbstractModelLoader):
 
         migrated = {}
 
+        # Real model has *typo* => mapping must be reversed
+        if os.getenv("VCMIGYM_INVERT_EDGE_KEY_TYPOS", None) == "1":
+            mapping = {v: k for k, v in mapping.items()}
+
         for key, value in state_dict.items():
             new_key = key
             for old, new in mapping.items():
@@ -228,7 +232,7 @@ class ModelLoader(AbstractModelLoader):
                 device=torch.device(self.device_type)
             ).eval()
 
-        weights = migrate_edge_key_typos(weights)
+        weights = self.__class__.migrate_edge_key_typos(weights)
         self.model.load_state_dict(weights, strict=True)
 
     def get_model(self):
@@ -245,27 +249,6 @@ class ModelLoaderInfo():
     run_id: str
     config_file: str
     weights_file: str
-
-
-def migrate_edge_key_typos(state_dict):
-    replacements = {
-        "<Global___Has___Action>": "<Global___To___Action>",
-        "<Unit___By___Action>": "<Unit___Has___Action>",
-    }
-
-    migrated = {}
-
-    for key, value in state_dict.items():
-        new_key = key
-        for old, new in replacements.items():
-            new_key = new_key.replace(old, new)
-
-        if new_key in migrated:
-            raise RuntimeError(f"Checkpoint migration collision: {key} -> {new_key}")
-
-        migrated[new_key] = value
-
-    return migrated
 
 
 def collect_samples(logger, model, venv, num_vsteps, storage):

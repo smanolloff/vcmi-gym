@@ -47,6 +47,7 @@ class LegacyObservationSpaceWrapper(gym.Wrapper):
         self._dict_obs = obs
         return obs["observation"], *rest
 
+
 class BlankObservationSpaceWrapper(gym.Wrapper):
     """
     Designed for env v15+ where the observation space has irregular shape
@@ -55,7 +56,7 @@ class BlankObservationSpaceWrapper(gym.Wrapper):
     """
 
     EMPTY_OBS = np.empty(1)
-    SPACE = gym.spaces.Box(low=0,high=0,shape=(1,))
+    SPACE = gym.spaces.Box(low=0, high=0, shape=(1,))
 
     @property
     def observation_space(self):
