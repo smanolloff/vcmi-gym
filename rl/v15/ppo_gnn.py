@@ -392,7 +392,7 @@ def train_model(
     assert torch.is_grad_enabled()
 
     num_vsteps = train_config["num_vsteps"]
-    num_envs = sum(train_config["env"]["num_envs_per_opponent"].values())
+    num_envs = sum(v["num"] for v in train_config["env"]["envs_per_opponent"].values())
     v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list)
     add_action_active_local_ids(v_next_hdata_batch)
 
@@ -632,7 +632,7 @@ def prepare_wandb_log(
 
 
 def init_model_loader(env_config, checkpoint_config, out_dir, logger, dry_run, device):
-    if env_config["num_envs_per_opponent"]["model"] == 0:
+    if env_config["envs_per_opponent"]["model"]["num"] == 0:
         return None
 
     # Wanted bot role based on train role
@@ -755,15 +755,15 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     train_venv_seed = random.randint(0, (2**30)-1)  # leave some room to add i (see DualVecEnv)
     train_venv = DualVecEnv(
         env_kwargs=dict(train_config["env"]["kwargs"], seed=train_venv_seed),
-        num_envs_stupidai=train_config["env"]["num_envs_per_opponent"]["StupidAI"],
-        num_envs_battleai=train_config["env"]["num_envs_per_opponent"]["BattleAI"],
-        num_envs_mmai_battleai=train_config["env"]["num_envs_per_opponent"]["MMAI_BATTLEAI"],
-        num_envs_model=train_config["env"]["num_envs_per_opponent"]["model"],
+        envs_stupidai=train_config["env"]["envs_per_opponent"]["StupidAI"],
+        envs_battleai=train_config["env"]["envs_per_opponent"]["BattleAI"],
+        envs_mmai_battleai=train_config["env"]["envs_per_opponent"]["MMAI_BATTLEAI"],
+        envs_model=train_config["env"]["envs_per_opponent"]["model"],
         model_loader=train_model_loader,
         logprefix="train-",
     )
 
-    logger.info("Initialized %d train envs (%s)" % (train_venv.num_envs, train_config["env"]["num_envs_per_opponent"]))
+    logger.info("Initialized %d train envs (%s)" % (train_venv.num_envs, {k: v["num"] for k, v in train_config["env"]["envs_per_opponent"].items()}))
 
     eval_venv_variants = {}
     for name, envcfg in eval_config["env_variants"].items():
@@ -781,15 +781,15 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         eval_venv_seed = random.randint(0, (2**30)-1)  # leave some room to add i (see DualVecEnv)
         eval_venv_variants[name] = DualVecEnv(
             env_kwargs=dict(envcfg["kwargs"], seed=eval_venv_seed),
-            num_envs_stupidai=envcfg["num_envs_per_opponent"]["StupidAI"],
-            num_envs_battleai=envcfg["num_envs_per_opponent"]["BattleAI"],
-            num_envs_mmai_battleai=envcfg["num_envs_per_opponent"]["MMAI_BATTLEAI"],
-            num_envs_model=envcfg["num_envs_per_opponent"]["model"],
+            envs_stupidai=envcfg["envs_per_opponent"]["StupidAI"],
+            envs_battleai=envcfg["envs_per_opponent"]["BattleAI"],
+            envs_mmai_battleai=envcfg["envs_per_opponent"]["MMAI_BATTLEAI"],
+            envs_model=envcfg["envs_per_opponent"]["model"],
             model_loader=eval_model_loader,
             logprefix=f"eval/{name}-",
         )
 
-        logger.info("Initialized %d eval envs (variant '%s', %s)" % (eval_venv_variants[name].num_envs, name, envcfg["num_envs_per_opponent"]))
+        logger.info("Initialized %d eval envs (variant '%s')" % (sum(v["num"] for v in envcfg["envs_per_opponent"].values()), name))
 
     num_envs = train_venv.num_envs
     num_steps = train_config["num_vsteps"] * num_envs

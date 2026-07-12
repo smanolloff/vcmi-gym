@@ -64,10 +64,15 @@ dynamic_bot = lambda run_id, reload_interval_s: dict(
     reload_interval_s=reload_interval_s
 )
 
-gen_num_envs = lambda StupidAI, BattleAI, MMAI_BATTLEAI, model: dict(StupidAI=StupidAI, BattleAI=BattleAI, MMAI_BATTLEAI=MMAI_BATTLEAI, model=model)
+gen_num_envs = lambda StupidAI, BattleAI, MMAI_BATTLEAI, model: dict(
+    StupidAI=dict(num=StupidAI, kwargs={}),
+    BattleAI=dict(num=BattleAI, kwargs={}),
+    MMAI_BATTLEAI=dict(num=MMAI_BATTLEAI, kwargs={}),
+    model=dict(num=model, kwargs={})
+)
 
-eval_variant = lambda num_envs_per_opponent, model, **env_kwargs: dict(
-    num_envs_per_opponent=num_envs_per_opponent,
+eval_variant = lambda envs_per_opponent, model, **env_kwargs: dict(
+    envs_per_opponent=envs_per_opponent,
     kwargs=dict(
         train_env_kwargs,
         mapname="gym/ml-eval.vmap",
@@ -104,12 +109,12 @@ config = dict(
         env_variants={
             # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0, 0), town_chance=100),
             "BattleAI.open": eval_variant(
-                num_envs_per_opponent=gen_num_envs(0, 2, 0, 0),
+                envs_per_opponent=gen_num_envs(0, 2, 0, 0),
                 model=None,
                 town_chance=0,
             ),
             # "MMAI.open": eval_variant(
-            #     num_envs_per_opponent=gen_num_envs(0, 0, 0, 2),
+            #     envs_per_opponent=gen_num_envs(0, 0, 0, 2),
             #     model=None,
             #     # model=dynamic_bot("nkjrmrsq", 3600),
             #     # model=static_bot("nkjrmrsq-202509291846"),
@@ -125,8 +130,12 @@ config = dict(
             # XXX: more venvs = more efficient GPU usage (B=num_envs)
             # XXX: 50 envs ~= 30G RAM
             kwargs=dict(train_env_kwargs, mapname="gym/ml-mini.vmap"),
-            num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, MMAI_BATTLEAI=40, model=0),
-
+            envs_per_opponent=dict(
+                StupidAI=dict(num=0, kwargs={}),
+                BattleAI=dict(num=0, kwargs={}),
+                MMAI_BATTLEAI=dict(num=40, kwargs={}),
+                model=dict(num=0, kwargs={})
+            )
             # num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, MMAI_BATTLEAI=0, model=1),
             # model=static_bot("data/mppo-dna-heads/tukbajrv-202509241418"),
             # model=static_bot("nkjrmrsq-202509291846"),
@@ -194,15 +203,19 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["num_vsteps"] = 40
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 2
-    config["train"]["env"]["num_envs_per_opponent"] = {k: min(v, 2) for k, v in config["train"]["env"]["num_envs_per_opponent"].items()}
+
+    for env, envcfg in config["train"]["env"]["envs_per_opponent"].items():
+        envcfg["num"] = min(envcfg["num"], 2)
+
     config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
     # config["train"]["env"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     # config["eval"]["env_variants"] = dict(list(config["eval"]["env_variants"].items())[:1])
-    for name, envcfg in config["eval"]["env_variants"].items():
-        envcfg["num_envs_per_opponent"] = {k: min(v, 1) for k, v in envcfg["num_envs_per_opponent"].items()}
-        envcfg["kwargs"]["warmachine_chance"] = 0
-        envcfg["kwargs"]["mapname"] = "gym/A1.vmap"
+    for name, varcfg in config["eval"]["env_variants"].items():
+        for env, envcfg in varcfg["envs_per_opponent"].items():
+            envcfg["num"] = min(envcfg["num"], 2)
+        varcfg["kwargs"]["warmachine_chance"] = 0
+        varcfg["kwargs"]["mapname"] = "gym/A1.vmap"
         # envcfg["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     # DEBUG dual vec env:

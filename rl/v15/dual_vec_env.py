@@ -545,20 +545,20 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
     def __init__(
         self,
         env_kwargs,
-        num_envs_stupidai=0,
-        num_envs_battleai=0,
-        num_envs_mmai_battleai=0,
-        num_envs_mmai_onnx=0,
-        num_envs_model=0,
+        envs_stupidai=dict(num=0, kwargs={}),
+        envs_battleai=dict(num=0, kwargs={}),
+        envs_mmai_battleai=dict(num=0, kwargs={}),
+        envs_mmai_onnx=dict(num=0, kwargs={}),
+        envs_model=dict(num=0, kwargs={}),
         onnx_model=None,
         model_loader: AbstractModelLoader | None = None,
         logprefix="",
         e_max=3300,  # XXX: no longer needed with graph obs
     ):
-        num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai + num_envs_mmai_battleai + num_envs_mmai_onnx
+        num_envs_total = envs_model["num"] + envs_stupidai["num"] + envs_battleai["num"] + envs_mmai_battleai["num"] + envs_mmai_onnx["num"]
         assert num_envs_total > 0, f"{num_envs_total} > 0"
 
-        if num_envs_mmai_onnx > 0:
+        if envs_mmai_onnx["num"] > 0:
             assert onnx_model is not None, "onnx_model is required when num_envs_mmai_onnx > 0"
 
         assert env_kwargs["seed"] >= 0 and env_kwargs["seed"] <= (2**31 - 1 - num_envs_total)
@@ -577,16 +577,16 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         self.controller = None
         model_env_creators = []
 
-        if num_envs_model > 0:
+        if envs_model["num"] > 0:
             if model_loader is None:
-                raise ValueError("model_loader is required when num_envs_model > 0")
+                raise ValueError("model_loader is required when envs_model['num'] > 0")
 
             # Test model exists early; otherwise the controller would block the bot side later.
             if model_loader.get_model() is None or model_loader.get_model() is False:
                 raise ValueError("model_loader must be configured and loaded before creating DualVecEnv with model opponents")
 
             controller = DualEnvController(
-                num_envs_model,
+                envs_model["num"],
                 model_loader,
                 loglevel=env_kwargs.get("vcmienv_loglevel", "INFO"),
                 logprefix=logprefix,
@@ -624,11 +624,16 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             shm_name_active_action_ids = controller.shm_active_action_ids.name
 
             def env_creator_model(i):
-                env = VcmiEnv(**env_kwargs, opponent="OTHER_ENV", vcmienv_logtag=f"{logprefix}env.model.{i}")
+                env = VcmiEnv(
+                    **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_model["kwargs"]),
+                    opponent="OTHER_ENV",
+                    vcmienv_logtag=f"{logprefix}env.model.{i}"
+                )
+
                 env = DualEnvWrapper(
                     env,
                     env_id=i,
-                    num_envs=num_envs_model,
+                    num_envs=envs_model["num"],
                     node_names=node_names,
                     edge_keys=edge_keys,
                     controller_env_cond=controller_env_cond,
@@ -645,19 +650,35 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
                 )
                 return env
 
-            model_env_creators = [partial(env_creator_model, i) for i in range(num_envs_model)]
+            model_env_creators = [partial(env_creator_model, i) for i in range(envs_model["num"])]
 
         def env_creator_stupidai(i):
-            return VcmiEnv(**dict(env_kwargs, seed=env_kwargs["seed"] + i), opponent="StupidAI", vcmienv_logtag=f"{logprefix}env.stupidai.{i}")
+            return VcmiEnv(
+                **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_stupidai["kwargs"]),
+                opponent="StupidAI",
+                vcmienv_logtag=f"{logprefix}env.stupidai.{i}"
+            )
 
         def env_creator_battleai(i):
-            return VcmiEnv(**dict(env_kwargs, seed=env_kwargs["seed"] + i), opponent="BattleAI", vcmienv_logtag=f"{logprefix}env.battleai.{i}")
+            return VcmiEnv(
+                **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_battleai["kwargs"]),
+                opponent="BattleAI",
+                vcmienv_logtag=f"{logprefix}env.battleai.{i}"
+            )
 
         def env_creator_mmai_battleai(i):
-            return VcmiEnv(**dict(env_kwargs, seed=env_kwargs["seed"] + i), opponent="MMAI_BATTLEAI", vcmienv_logtag=f"{logprefix}env.mmaibattleai.{i}")
+            return VcmiEnv(
+                **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_battleai["kwargs"]),
+                opponent="MMAI_BATTLEAI",
+                vcmienv_logtag=f"{logprefix}env.mmaibattleai.{i}"
+            )
 
         def env_creator_mmai_onnx(i):
-            return VcmiEnv(**dict(env_kwargs, seed=env_kwargs["seed"] + i), opponent="MMAI_MODEL", opponent_model=onnx_model, vcmienv_logtag=f"{logprefix}env.onnx.{i}")
+            return VcmiEnv(
+                **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_mmai_onnx["kwargs"]),
+                opponent="MMAI_MODEL",
+                opponent_model=onnx_model, vcmienv_logtag=f"{logprefix}env.onnx.{i}"
+            )
 
         def env_creator_wrapper(env_creator):
             if os.getpid() == pid:
@@ -676,10 +697,10 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
 
         env_creators = []
         env_creators.extend(model_env_creators)
-        env_creators.extend([partial(env_creator_stupidai, i) for i in range(num_envs_stupidai)])
-        env_creators.extend([partial(env_creator_battleai, i) for i in range(num_envs_battleai)])
-        env_creators.extend([partial(env_creator_mmai_battleai, i) for i in range(num_envs_mmai_battleai)])
-        env_creators.extend([partial(env_creator_mmai_onnx, i) for i in range(num_envs_mmai_onnx)])
+        env_creators.extend([partial(env_creator_stupidai, i) for i in range(envs_stupidai["num"])])
+        env_creators.extend([partial(env_creator_battleai, i) for i in range(envs_battleai["num"])])
+        env_creators.extend([partial(env_creator_mmai_battleai, i) for i in range(envs_mmai_battleai["num"])])
+        env_creators.extend([partial(env_creator_mmai_onnx, i) for i in range(envs_mmai_onnx["num"])])
         funcs = [partial(env_creator_wrapper, env_creator) for env_creator in env_creators]
 
         super().__init__(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)  # type: ignore[arg-type]
