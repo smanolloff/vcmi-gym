@@ -1,4 +1,3 @@
-MAKEFLAGS += --always-make
 SHELL := bash
 .ONESHELL:
 .SHELLFLAGS := -euxo pipefail -c
