@@ -730,6 +730,7 @@ def init_model_loader(env_config, checkpoint_config, out_dir, logger, dry_run, d
             logger,
             dry_run=dry_run,
             out_dir=out_dir,
+            algo="dna",
             run_id=modelcfg["run_id"],
             optimize_local_storage=checkpoint_config["optimize_local_storage"],
             s3_config=checkpoint_config["s3"],
@@ -1073,6 +1074,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                     latest_ts, _, weights_file = download_latest_model(
                         logger=logger,
                         dry_run=dry_run,
+                        algo="dna",
                         out_dir=config["run"]["out_dir"],
                         run_id=loader_info.run_id,
                         optimize_local_storage=checkpoint_config["optimize_local_storage"],
