@@ -558,8 +558,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         envs_model=dict(num=0, kwargs={}),
         onnx_model=None,
         model_loader: AbstractModelLoader | None = None,
-        logprefix="",
-        e_max=3300,  # XXX: no longer needed with graph obs
+        logprefix=""
     ):
         num_envs_total = envs_model["num"] + envs_stupidai["num"] + envs_battleai["num"] + envs_mmai_battleai["num"] + envs_mmai_onnx["num"]
         assert num_envs_total > 0, f"{num_envs_total} > 0"
@@ -590,6 +589,15 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             # Test model exists early; otherwise the controller would block the bot side later.
             if model_loader.get_model() is None or model_loader.get_model() is False:
                 raise ValueError("model_loader must be configured and loaded before creating DualVecEnv with model opponents")
+
+            model_env_kwargs = dict(env_kwargs, **envs_model["kwargs"])
+            user_timeout = model_env_kwargs.get("user_timeout", None)
+            vcmi_timeout = model_env_kwargs.get("vcmi_timeout", None)
+
+            # Model envs use a separate VcmiEnv for both players
+            # => user_timeout for one is vcmi_timeout for the other
+            # => the two timeouts must match
+            assert user_timeout == vcmi_timeout, f"user_timeout and vcmi_timeout must match: {user_timeout} <> {vcmi_timeout}"
 
             controller = DualEnvController(
                 envs_model["num"],
@@ -631,7 +639,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
 
             def env_creator_model(i):
                 env = VcmiEnv(
-                    **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_model["kwargs"]),
+                    **dict(model_env_kwargs, seed=env_kwargs["seed"] + i),
                     opponent="OTHER_ENV",
                     vcmienv_logtag=f"{logprefix}env.model.{i}"
                 )
@@ -785,20 +793,18 @@ if __name__ == "__main__":
             return self.model
 
     model_loader = TestModelLoader()
-    model_loader.configure("zvytfdpo-best27-config.json")
-    model_loader.load("zvytfdpo-best27-model-ppo.pt")
+    model_loader.configure("zckkyvje-1783869134-config.json")
+    model_loader.load("zckkyvje-1783869134-model-ppo.pt")
 
     venv = DualVecEnv(
-        env_kwargs=dict(mapname="gym/ml-mini.vmap"),
-        num_envs_stupidai=0,
-        num_envs_battleai=0,
-        num_envs_mmai_battleai=0,
-        num_envs_mmai_onnx=0,
-        num_envs_model=2,
+        env_kwargs=dict(mapname="gym/ml-mini.vmap", seed=42),
+        envs_stupidai=dict(num=0, kwargs=dict()),
+        envs_battleai=dict(num=0, kwargs=dict()),
+        envs_mmai_battleai=dict(num=0, kwargs=dict()),
+        envs_mmai_onnx=dict(num=0, kwargs=dict()),
+        envs_model=dict(num=2, kwargs=dict()),
         model_loader=model_loader,
         logprefix="test-",
-        seed=0,
-        e_max=3300,
     )
 
     import ipdb; ipdb.set_trace()  # noqa
