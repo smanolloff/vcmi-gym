@@ -71,8 +71,9 @@ gen_num_envs = lambda StupidAI, BattleAI, MMAI_BATTLEAI, model: dict(
     model=dict(num=model, kwargs={})
 )
 
-eval_variant = lambda envs_per_opponent, model, **env_kwargs: dict(
+eval_variant = lambda envs_per_opponent, num_vsteps, model, **env_kwargs: dict(
     envs_per_opponent=envs_per_opponent,
+    num_vsteps=num_vsteps,
     kwargs=dict(
         train_env_kwargs,
         mapname="gym/ml-eval.vmap",
@@ -110,11 +111,13 @@ config = dict(
             # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0, 0), town_chance=100),
             "BattleAI.open": eval_variant(
                 envs_per_opponent=gen_num_envs(0, 2, 0, 0),
+                num_vsteps=10_000,
                 model=None,
                 town_chance=0,
             ),
             # "MMAI.open": eval_variant(
             #     envs_per_opponent=gen_num_envs(0, 0, 0, 2),
+            #     num_vsteps=10_000,
             #     model=None,
             #     # model=dynamic_bot("nkjrmrsq", 3600),
             #     # model=static_bot("nkjrmrsq-202509291846"),
@@ -122,8 +125,8 @@ config = dict(
             #     opponent_vip_chance=0
             # ),
         },
-        num_vsteps=10_000,
         interval_s=1800,
+        # num_vsteps=10_000,  # DEPRECATED: for eval envs, use per-variant num_vsteps
     ),
     train=dict(
         env=dict(
@@ -212,6 +215,7 @@ if os.getenv("VASTAI", None) != "1":
 
     # config["eval"]["env_variants"] = dict(list(config["eval"]["env_variants"].items())[:1])
     for name, varcfg in config["eval"]["env_variants"].items():
+        varcfg["num_vsteps"] = 40
         for env, envcfg in varcfg["envs_per_opponent"].items():
             envcfg["num"] = min(envcfg["num"], 2)
         varcfg["kwargs"]["warmachine_chance"] = 0
@@ -221,9 +225,7 @@ if os.getenv("VASTAI", None) != "1":
     # DEBUG dual vec env:
     config["train"]["env"]["kwargs"] = list(config["eval"]["env_variants"].values())[0]["kwargs"]
 
-    config["eval"]["at_script_start"] = False
     config["eval"]["interval_s"] = 30
-    config["eval"]["num_vsteps"] = 40
     config["wandb_log_interval_s"] = 30
 
     config["model"]["gnn_num_layers"] = 3

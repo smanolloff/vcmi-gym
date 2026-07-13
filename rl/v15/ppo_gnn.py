@@ -1036,8 +1036,10 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                             return name, stats
 
                     with ThreadPoolExecutor(max_workers=100) as ex:
+                        # Per-variant vsteps, or fallback to general eval vsteps
+                        num_vsteps = config["eval"][name].get("num_vsteps", config["eval"]["num_vsteps"])
                         futures = [
-                            ex.submit(eval_worker_fn, name, venv, eval_config["num_vsteps"])
+                            ex.submit(eval_worker_fn, name, venv, num_vsteps)
                             for name, venv in eval_venv_variants.items()
                         ]
 

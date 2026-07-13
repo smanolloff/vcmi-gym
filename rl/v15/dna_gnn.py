@@ -177,6 +177,29 @@ class DNAModel(nn.Module):
 
 
 class ModelLoader(AbstractModelLoader):
+    @staticmethod
+    def migrate_edge_key_typos(state_dict):
+        mapping = {
+            "<Global___Has___Action>": "<Global___To___Action>",
+            "<Unit___By___Action>": "<Unit___Has___Action>",
+        }
+
+        migrated = {}
+
+        # Real model has *typo* => mapping must be reversed
+        if os.getenv("VCMIGYM_INVERT_EDGE_KEY_TYPOS", None) == "1":
+            mapping = {v: k for k, v in mapping.items()}
+
+        for key, value in state_dict.items():
+            new_key = key
+            for old, new in mapping.items():
+                new_key = new_key.replace(old, new)
+
+            assert new_key not in migrated, f"Checkpoint migration collision: both old and new keys map to {new_key}"
+            migrated[new_key] = value
+
+        return migrated
+
     def __init__(self, device_type, role, loglevel="INFO"):
         assert role in ["attacker", "defender"]
         self.device_type = device_type
@@ -208,6 +231,7 @@ class ModelLoader(AbstractModelLoader):
                 device=torch.device(self.device_type)
             ).eval()
 
+        weights = self.__class__.migrate_edge_key_typos(weights)
         self.model.load_state_dict(weights, strict=True)
 
     def get_model(self):
@@ -1124,8 +1148,10 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                             return name, stats
 
                     with ThreadPoolExecutor(max_workers=100) as ex:
+                        # Per-variant vsteps, or fallback to general eval vsteps
+                        num_vsteps = config["eval"][name].get("num_vsteps", config["eval"]["num_vsteps"])
                         futures = [
-                            ex.submit(eval_worker_fn, name, venv, eval_config["num_vsteps"])
+                            ex.submit(eval_worker_fn, name, venv, num_vsteps)
                             for name, venv in eval_venv_variants.items()
                         ]
 
