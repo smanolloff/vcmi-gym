@@ -107,26 +107,38 @@ config = dict(
         ),
     ),
     eval=dict(
+        interval_s=3600,
         env_variants={
-            # "BattleAI.town": eval_variant(gen_num_envs(0, 2, 0, 0), town_chance=100),
             "BattleAI.open": eval_variant(
-                envs_per_opponent=gen_num_envs(0, 2, 0, 0),
-                num_vsteps=10_000,
+                envs_per_opponent=gen_num_envs(0, 10, 0, 0),
+                num_vsteps=2500,
                 model=None,
                 town_chance=0,
+                random_heroes=1,
+                random_armies=False,
+                opponent_vip_chance=0
             ),
-            # "MMAI.open": eval_variant(
-            #     envs_per_opponent=gen_num_envs(0, 0, 0, 2),
-            #     num_vsteps=10_000,
-            #     model=None,
-            #     # model=dynamic_bot("nkjrmrsq", 3600),
-            #     # model=static_bot("nkjrmrsq-202509291846"),
-            #     town_chance=0,
-            #     opponent_vip_chance=0
-            # ),
-        },
-        interval_s=1800,
-        # num_vsteps=10_000,  # DEPRECATED: for eval envs, use per-variant num_vsteps
+            "BattleAI.vip": eval_variant(
+                envs_per_opponent=gen_num_envs(0, 0, 10, 0),
+                num_vsteps=2500,
+                model=None,
+                town_chance=0,
+                random_heroes=0,
+                random_armies=True,
+                opponent_vip_chance=100
+            ),
+            "MMAI.open": eval_variant(
+                # NOTE: "model" envs are slower. For ppo-gnn models, a good balance
+                #       is to use envs*2 and vsteps/5 for equal evaluation times
+                envs_per_opponent=gen_num_envs(0, 0, 0, 20),
+                num_vsteps=500,
+                model=dynamic_bot("pdpyqkrb", 7200),  # pdpyqkrb=attacker
+                town_chance=0,
+                random_heroes=1,
+                random_armies=False,
+                opponent_vip_chance=0
+            ),
+        }
     ),
     train=dict(
         env=dict(

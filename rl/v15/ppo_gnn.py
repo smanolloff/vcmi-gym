@@ -1030,18 +1030,17 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                     def eval_worker_fn(name, venv, vsteps):
                         sublogger = logger.sublogger(dict(variant=name))
                         with torch.inference_mode():
-                            sublogger.info("Start evaluating env variant: %s" % name)
+                            sublogger.info("Start evaluating env variant: %s (%d envs, %d vsteps)" % (name, venv.num_envs, vsteps))
                             stats = eval_model(logger=sublogger, model=model, venv=venv, num_vsteps=vsteps)
                             sublogger.info("Done evaluating env variant: %s" % name)
                             return name, stats
 
                     with ThreadPoolExecutor(max_workers=100) as ex:
                         # Per-variant vsteps, or fallback to general eval vsteps
-                        num_vsteps = config["eval"][name].get("num_vsteps", config["eval"]["num_vsteps"])
-                        futures = [
-                            ex.submit(eval_worker_fn, name, venv, num_vsteps)
-                            for name, venv in eval_venv_variants.items()
-                        ]
+                        futures = []
+                        for name, venv in eval_venv_variants.items():
+                            num_vsteps = config["eval"]["env_variants"][name].get("num_vsteps", None) or config["eval"]["num_vsteps"]
+                            futures.append(ex.submit(eval_worker_fn, name, venv, num_vsteps))
 
                         for fut in as_completed(futures):
                             eval_multistats.add(*fut.result())
