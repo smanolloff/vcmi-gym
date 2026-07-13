@@ -1,0 +1,521 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+
+  "usermeta": {
+    "notes": [
+      "Line chart for a configurable metric (if present in query)",
+      "X-axis is relative to each run's latest available _timestamp (0h=latest point).",
+      "Data Source:",
+      "(runSets: ..., filters: [])",
+      "   id",
+      "   name",
+      "   history: (keys: [_timestamp, {metric}])",
+      "      e.g.: (keys: [_timestamp, eval/BattleAI.open/ep_value_mean])"
+    ]
+  },
+
+  "title": {
+    "text": {
+      "expr": "metric + ' (' + hours_window + 'h)'"
+    }
+  },
+
+  "data": {
+    "name": "wandb"
+  },
+
+  "params": [
+    {
+      "name": "metric",
+      "value": "${string:Query metric:eval/BattleAI.open/ep_value_mean}"
+    },
+    {
+      "name": "hours_window",
+      "value": "${string:Time limit (h):24}"
+    },
+    {
+      "name": "run_limit",
+      "value": "${string:Run limit:10}"
+    },
+    {
+      "name": "smoothness_hours",
+      "value": "${string:Smoothness:0}"
+    },
+    {
+      "name": "y_min",
+      "value": "${string:Y-min:(auto)}"
+    },
+    {
+      "name": "y_max",
+      "value": "${string:Y-max:(auto)}"
+    }
+  ],
+
+  "config": {
+    "axis": {
+      "grid": true,
+      "domain": false,
+      "ticks": false,
+      "labelFontSize": 12,
+      "labelFont": "monospace",
+      "titleFont": "monospace"
+    },
+    "legend": {
+      "labelFont": "monospace",
+      "title": null
+    }
+  },
+
+  "transform": [
+    {
+      "filter": "isValid(datum._timestamp) && isValid(datum[metric])"
+    },
+    {
+      "calculate": "datum[metric]",
+      "as": "value"
+    },
+    {
+      "joinaggregate": [
+        {
+          "op": "max",
+          "field": "_timestamp",
+          "as": "latest_timestamp"
+        }
+      ],
+      "groupby": ["id"]
+    },
+    {
+      "window": [
+        {
+          "op": "dense_rank",
+          "as": "run_rank"
+        }
+      ],
+      "sort": [
+        {
+          "field": "latest_timestamp",
+          "order": "descending"
+        }
+      ]
+    },
+    {
+      "filter": "datum.run_rank <= run_limit"
+    },
+    {
+      "calculate": "(datum.latest_timestamp - datum._timestamp) / 3600",
+      "as": "hours_ago"
+    },
+    {
+      "filter": "datum.hours_ago >= 0 && datum.hours_ago <= hours_window"
+    },
+    {
+      "calculate": "smoothness_hours > 0 ? floor(datum.hours_ago / smoothness_hours) : datum._timestamp",
+      "as": "smooth_bucket"
+    },
+    {
+      "aggregate": [
+        {
+          "op": "mean",
+          "field": "value",
+          "as": "value"
+        },
+        {
+          "op": "mean",
+          "field": "hours_ago",
+          "as": "hours_ago"
+        },
+        {
+          "op": "max",
+          "field": "_timestamp",
+          "as": "_timestamp"
+        },
+        {
+          "op": "max",
+          "field": "latest_timestamp",
+          "as": "latest_timestamp"
+        }
+      ],
+      "groupby": [
+        "id",
+        "smooth_bucket"
+      ]
+    },
+    {
+      "calculate": "30 / 60",
+      "as": "hover_bucket_size"
+    },
+    {
+      "calculate": "floor(datum.hours_ago / datum.hover_bucket_size)",
+      "as": "hover_bucket"
+    },
+    {
+      "calculate": "(datum.hover_bucket + 0.5) * datum.hover_bucket_size",
+      "as": "hover_hour"
+    },
+    {
+      "joinaggregate": [
+        {
+          "op": "min",
+          "field": "value",
+          "as": "y_auto_min"
+        },
+        {
+          "op": "max",
+          "field": "value",
+          "as": "y_auto_max"
+        }
+      ]
+    },
+    {
+      "calculate": "(datum.y_auto_max - datum.y_auto_min) * 0.1",
+      "as": "y_auto_padding"
+    },
+    {
+      "calculate": "datum.y_auto_min - datum.y_auto_padding",
+      "as": "y_auto_padded_min"
+    },
+    {
+      "calculate": "datum.y_auto_max + datum.y_auto_padding",
+      "as": "y_auto_padded_max"
+    }
+  ],
+
+  "encoding": {
+    "x": {
+      "field": "hours_ago",
+      "type": "quantitative",
+      "title": null,
+      "scale": {
+        "domain": {
+          "expr": "[hours_window, 0]"
+        },
+        "clamp": true
+      },
+      "axis": {
+        "format": ".0f",
+        "labelExpr": "datum.value + 'h'"
+      }
+    }
+  },
+
+  "layer": [
+    {
+      "mark": {
+        "type": "point",
+        "opacity": 0
+      },
+      "encoding": {
+        "x": {
+          "field": "hours_ago",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "y_auto_padded_min",
+          "type": "quantitative",
+          "scale": {
+            "domainMin": {
+              "expr": "y_min == '(auto)' ? null : toNumber(y_min)"
+            },
+            "domainMax": {
+              "expr": "y_max == '(auto)' ? null : toNumber(y_max)"
+            },
+            "zero": false,
+            "clamp": true
+          }
+        }
+      }
+    },
+    {
+      "mark": {
+        "type": "point",
+        "opacity": 0
+      },
+      "encoding": {
+        "x": {
+          "field": "hours_ago",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "y_auto_padded_max",
+          "type": "quantitative",
+          "scale": {
+            "domainMin": {
+              "expr": "y_min == '(auto)' ? null : toNumber(y_min)"
+            },
+            "domainMax": {
+              "expr": "y_max == '(auto)' ? null : toNumber(y_max)"
+            },
+            "zero": false,
+            "clamp": true
+          }
+        }
+      }
+    },
+    {
+      "params": [
+        {
+          "name": "run_select",
+          "select": {
+            "type": "point",
+            "fields": ["id"],
+            "toggle": "true"
+          },
+          "bind": "legend"
+        }
+      ],
+
+      "mark": {
+        "type": "line",
+        "strokeWidth": 1,
+        "clip": true
+      },
+
+      "encoding": {
+        "y": {
+          "field": "value",
+          "type": "quantitative",
+          "title": null,
+          "scale": {
+            "domainMin": {
+              "expr": "y_min == '(auto)' ? null : toNumber(y_min)"
+            },
+            "domainMax": {
+              "expr": "y_max == '(auto)' ? null : toNumber(y_max)"
+            },
+            "zero": false,
+            "clamp": true
+          }
+        },
+
+        "color": {
+          "field": "id",
+          "type": "nominal",
+          "title": null
+        },
+
+        "opacity": {
+          "condition": {
+            "param": "run_select",
+            "empty": true,
+            "value": 1
+          },
+          "value": 0.2
+        },
+
+        "strokeWidth": {
+          "condition": {
+            "param": "run_select",
+            "empty": true,
+            "value": 2
+          },
+          "value": 1
+        },
+
+        "detail": {
+          "field": "id"
+        },
+
+        "order": {
+          "field": "_timestamp",
+          "type": "quantitative"
+        }
+      }
+    },
+
+    {
+      "transform": [
+        {
+          "filter": {
+            "param": "run_select"
+          }
+        },
+        {
+          "aggregate": [
+            {
+              "op": "mean",
+              "field": "value",
+              "as": "value"
+            }
+          ],
+          "groupby": [
+            "hover_bucket",
+            "id"
+          ]
+        },
+        {
+          "impute": "value",
+          "key": "hover_bucket",
+          "value": null,
+          "groupby": ["id"]
+        },
+        {
+          "calculate": "(datum.hover_bucket + 0.5) * 30 / 60",
+          "as": "Hours ago"
+        },
+        {
+          "calculate": "isFinite(datum.value) ? format(datum.value, '.2f') : '-'",
+          "as": "tooltip_value"
+        },
+        {
+          "pivot": "id",
+          "value": "tooltip_value",
+          "op": "max",
+          "groupby": [
+            "Hours ago"
+          ]
+        }
+      ],
+
+      "params": [
+        {
+          "name": "time_hover",
+          "select": {
+            "type": "point",
+            "fields": ["Hours ago"],
+            "nearest": true,
+            "on": "pointermove",
+            "clear": "pointerout"
+          }
+        }
+      ],
+
+      "mark": {
+        "type": "rule",
+        "opacity": 0,
+        "tooltip": {
+          "content": "data"
+        }
+      },
+
+      "encoding": {
+        "x": {
+          "field": "Hours ago",
+          "type": "quantitative",
+          "scale": {
+            "domain": {
+              "expr": "[hours_window, 0]"
+            },
+            "clamp": true
+          }
+        }
+      }
+    },
+
+    {
+      "transform": [
+        {
+          "filter": {
+            "param": "run_select"
+          }
+        },
+        {
+          "calculate": "datum.hover_hour",
+          "as": "Hours ago"
+        },
+        {
+          "filter": {
+            "param": "time_hover",
+            "empty": false
+          }
+        },
+        {
+          "aggregate": [
+            {
+              "op": "mean",
+              "field": "Hours ago",
+              "as": "Hours ago"
+            }
+          ],
+          "groupby": [
+            "Hours ago"
+          ]
+        }
+      ],
+
+      "mark": {
+        "type": "rule",
+        "color": "gray",
+        "strokeWidth": 1
+      },
+
+      "encoding": {
+        "x": {
+          "field": "Hours ago",
+          "type": "quantitative"
+        }
+      }
+    },
+
+    {
+      "transform": [
+        {
+          "filter": {
+            "param": "run_select"
+          }
+        },
+        {
+          "calculate": "datum.hover_hour",
+          "as": "Hours ago"
+        },
+        {
+          "filter": {
+            "param": "time_hover",
+            "empty": false
+          }
+        },
+        {
+          "aggregate": [
+            {
+              "op": "mean",
+              "field": "value",
+              "as": "value"
+            },
+            {
+              "op": "mean",
+              "field": "Hours ago",
+              "as": "Hours ago"
+            }
+          ],
+          "groupby": [
+            "Hours ago",
+            "id"
+          ]
+        }
+      ],
+
+      "mark": {
+        "type": "point",
+        "filled": true,
+        "size": 60
+      },
+
+      "encoding": {
+        "x": {
+          "field": "Hours ago",
+          "type": "quantitative"
+        },
+
+        "y": {
+          "field": "value",
+          "type": "quantitative",
+          "scale": {
+            "domainMin": {
+              "expr": "y_min == '(auto)' ? null : toNumber(y_min)"
+            },
+            "domainMax": {
+              "expr": "y_max == '(auto)' ? null : toNumber(y_max)"
+            },
+            "zero": false,
+            "clamp": true
+          }
+        },
+
+        "color": {
+          "field": "id",
+          "type": "nominal",
+          "legend": null
+        }
+      }
+    }
+  ]
+}
