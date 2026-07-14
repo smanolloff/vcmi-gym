@@ -16,7 +16,7 @@ goldcounter = 0
 
 # Price threshold of $/hr
 DPH = 0.3  # may be overriden by ARGV ($1)
-ROLLOUT_SECONDS = 30  # may be overriden by ARGV ($2)
+ROLLOUT_SECONDS = 35  # may be overriden by ARGV ($2)
 
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
