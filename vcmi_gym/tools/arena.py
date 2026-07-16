@@ -255,12 +255,12 @@ if __name__ == "__main__":
     bot_loader = None
 
     if args.opponent in ["StupidAI", "BattleAI", "MMAI_BATTLEAI"]:
-        dual_venv_kwargs[f"num_envs_{args.opponent.lower()}"] = args.num_envs
+        dual_venv_kwargs[f"envs_{args.opponent.lower()}"] = dict(num=args.num_envs, kwargs={})
     elif args.opponent.endswith(".onnx"):
         # opponent=MMAI_ONNX is ultimately mapped to opponent=MMAI_MODEL for VcmiEnv
         # but since we have another "model" here (the torch model)
         # => use MMAI_ONNX to avoid confusion
-        dual_venv_kwargs["num_envs_mmai_onnx"] = args.num_envs
+        dual_venv_kwargs["envs_mmai_onnx"] = dict(num=args.num_envs, kwargs={})
         dual_venv_kwargs["onnx_model"] = args.opponent
     else:
         assert args.opponent.endswith(".pt")
@@ -340,7 +340,7 @@ if __name__ == "__main__":
 
         bot_loader.configure(bot_cfg)
         bot_loader.load(bot_weights)
-        dual_venv_kwargs["num_envs_model"] = args.num_envs
+        dual_venv_kwargs["envs_model"] = dict(num=args.num_envs, kwargs={})
         dual_venv_kwargs["model_loader"] = bot_loader
 
     print(dual_venv_kwargs)

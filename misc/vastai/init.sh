@@ -1,6 +1,6 @@
 #!/bin/bash
 
-### HOW TO USE THIS SCRIPT"
+### HOW TO USE THIS SCRIPT
 ### 0. Create misc/vastai/.env (if not already created)
 ### 1. scp misc/vastai/{.env,.init.sh} root@...
 ### 2. ssh root@... 'tmux new-session -d "bash -xc \"bash /workspace/init.sh; exec \\$SHELL\""'
@@ -217,8 +217,9 @@ function upload_checkpoint() {
 # Download a timestamped checkpoint (to out_dir as per the config)
 #
 function download_checkpoint() {
-    [ "\$1" = ppo -o "\$1" = dna ] || { echo "Usage: download_checkpoint ppo|dna RUN_ID-TAG"; return 1; }
-    [ -n "\${2:-}" ] || { echo "Usage: download_checkpoint ppo|dna RUN_ID-TAG"; return 1; }
+    local usage="Usage: download_checkpoint ppo|dna RUN_ID-TAG"
+    [ "\$1" = ppo -o "\$1" = dna ] || { echo "\$usage"; return 1; }
+    [ -n "\${2:-}" ] || { echo "\$usage"; return 1; }
 
     algo=\$1
     rid=\${2%-*}
@@ -255,8 +256,9 @@ function download_checkpoint() {
 # Same as download_checkpoint(), but only for the config & model weights
 #
 function download_model() {
-    [ "\$1" = ppo -o "\$1" = dna ] || { echo "Usage: download_model ppo|dna RUN_ID-TAG"; return 1; }
-    [ -n "\${2:-}" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
+    local usage="Usage: download_model ppo|dna RUN_ID-TAG"
+    [ "\$1" = ppo -o "\$1" = dna ] || { echo "\$usage"; return 1; }
+    [ -n "\${2:-}" ] || { echo "\$usage"; return 1; }
 
     algo=\$1
     rid=\${2%-*}
@@ -275,6 +277,15 @@ function download_model() {
 
     aws s3 cp s3://vcmi-gym/\$s3_dir/\$rid-\$tag-model-\$algo.pt \$out_dir/  || { echo "ERROR"; return 1; }
 }
+
+function prepare_arena() {
+    download_model "\$@" || return 1
+    sed -i "/^[[:space:]]*players=(/{n;s|.*|    data/v15/\$2-model-\$1.pt|;}" vcmi_gym/tools/arena.sh
+    aws s3 cp s3://vcmi-gym/v15/models/attacker-nkjrmrsq-202509291846-stochastic.onnx \
+        vcmi/Mods/mmai/models/attacker-nkjrmrsq-202509291846-stochastic.onnx
+
+}
+
 #
 # Copy a checkpoint
 # E.g. fdqwrsd-best-... gdhsgsi-202601011251-...

@@ -425,7 +425,7 @@ def load_gnn_model(cfg, weights_file):
 
 
 def export_model(cfg, weights_file):
-    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/A1.vmap", seed=0), num_envs_stupidai=1)
+    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/ml-mini.vmap", seed=0), envs_stupidai=dict(num=1, kwargs={}))
     venv.reset()
 
     src_model = load_gnn_model(cfg, weights_file)
@@ -492,7 +492,7 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
     assert json.loads(md["node_order"]) == emodel.node_order
     assert [tuple(edge_type) for edge_type in json.loads(md["edge_order"])] == emodel.edge_order
 
-    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/A1.vmap", seed=0), num_envs_stupidai=1)
+    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/ml-mini.vmap", seed=0), envs_stupidai=dict(num=1, kwargs={}))
     venv.reset()
 
     print("Testing data methods for %d steps..." % num_steps)
