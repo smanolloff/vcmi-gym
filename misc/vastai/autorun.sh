@@ -10,6 +10,8 @@ USAGE='autorun.sh runid1 [runid2 ...]'
 
 [ $# -gt 0 ] || { echo "No autoruns configured"; exit 0; }
 
+source ~/.simorc
+
 AUTORUNS=$(jq -Rnc --arg row "$*" '$row | split(" ")')
 
 # Set label to wait
