@@ -667,7 +667,7 @@ def init_model_loader(env_config, checkpoint_config, out_dir, logger, dry_run, d
         # # EOF: DEBUG
 
         # For "dynamic" models, config and weights may change on each download
-        latest_ts, config_file, weights_file = download_latest_model(
+        _, latest_ts, config_file, weights_file = download_latest_model(
             logger,
             dry_run=dry_run,
             out_dir=out_dir,
@@ -984,7 +984,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
                 loader_info.loaded_at = now
                 logger.info(f"Check if newer model exists for {loader_info.run_id} / {loader_info.model_ts.isoformat()}")
                 try:
-                    latest_ts, _, weights_file = download_latest_model(
+                    _, latest_ts, _, weights_file = download_latest_model(
                         logger=logger,
                         dry_run=dry_run,
                         algo="ppo",

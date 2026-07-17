@@ -13,15 +13,11 @@ USAGE='autorun.sh runid1 [runid2 ...]'
 AUTORUNS=$(jq -Rnc --arg row "$*" '$row | split(" ")')
 
 # Set label to wait
-curl --fail-with-body -sLH "Authorization: Bearer $VASTAI_API_KEY" \
-    --json '{"label":"wait..."}' \
-    "https://console.vast.ai/api/v0/instances/$VASTAI_INSTANCE_ID"
+/opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID wait...
 
 while true; do
     # List vastai instances
-    instances=$(curl --fail-with-body -sLH "Authorization: Bearer $VASTAI_API_KEY" \
-        "https://console.vast.ai/api/v0/instances/" \
-        | jq '[.instances[] | {id: .id, status: (.actual_status // "-"), label: (.label // "-")} | select(.status | test("^(expired|exited|stopped)$") | not)]')
+    instances=$(/opt/instance-tools/bin/vastai show instances --raw | jq '[.[] | {id: .id, status: (.actual_status // "-"), label: (.label // "-")} | select(.status | test("^(expired|exited|stopped)$") | not)]')
 
     # Check if this is the first waiting instance
     is_first=$(echo "$instances" | jq -r --arg id "$VASTAI_INSTANCE_ID" 'map(select(.label == "wait...")) | sort_by(.id) | first.id | tostring == $id')
@@ -35,9 +31,7 @@ autorun=$(jq -nr --argjson labels "$labels" --argjson autoruns "$AUTORUNS" 'firs
 
 if [ -z "$autorun" ]; then
     # Set label to ready
-    curl --fail-with-body -sLH "Authorization: Bearer $VASTAI_API_KEY" \
-        --json '{"label":"READY"}' \
-        "https://console.vast.ai/api/v0/instances/$VASTAI_INSTANCE_ID"
+    /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID ready
 else
     # XXX: no setting label to "$autorun" as the RL algo will set it
     # There is a race condition, but not a critical one

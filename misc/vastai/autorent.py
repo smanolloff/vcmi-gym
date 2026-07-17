@@ -145,9 +145,10 @@ def vastai_rent(offer_id: int) -> int:
             r'bash\ -xc\ unset\\\ FAKETIME_SHARED\\\;'
             r'cd\\\ /workspace\\\;'
             r'bash\\\ init.sh\\\;'
-            r'bash\\\ check.sh\\\ -t\\\ -i90\\\ -r%s\\\ -n5\;'
+            r'bash\\\ check.sh\\\ -t\\\ -i90\\\ -r%s\\\ -n5\\\;'
+            r'touch\\\ /workspace/.preinit\\\;'
+            r'bash\\\ autorun.sh\\\ %s\\\;'
             r'touch\ /workspace/.preinit\;'
-            r'bash\\\ autorun.sh\\\ %s\;'
             r'exec\ \$SHELL'
         ) % (ROLLOUT_SECONDS, r'\\\ '.join(AUTORUNS))
     )

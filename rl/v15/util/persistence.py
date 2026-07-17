@@ -107,7 +107,7 @@ def find_latest_tag(logger, algo, run_id, s3_config, timestamp) -> str | None:
     if latest_key is None:
         return None
 
-    return pattern.match(latest_key).group(1)
+    return pattern.match(latest_key).group(1), latest_ts
 
 
 def download_latest_model(
@@ -119,13 +119,13 @@ def download_latest_model(
     optimize_local_storage,
     s3_config,
     timestamp
-) -> tuple[dt.datetime | None, str | None, str | None]:
-    tag = find_latest_tag(logger, algo, run_id, s3_config, timestamp)
+) -> tuple[dt.datetime | None, str | None, str | None, str | None]:
+    tag, latest_timestamp = find_latest_tag(logger, algo, run_id, s3_config, timestamp)
     config_path = os.path.join(out_dir, f"{run_id}-{tag}-config.json")
     weights_path = os.path.join(out_dir, f"{run_id}-{tag}-model-{algo}.pt")
     _s3_download(logger, dry_run, s3_config, config_path)
     _s3_download(logger, dry_run, s3_config, weights_path)
-    return tag, config_path, weights_path
+    return tag, latest_timestamp, config_path, weights_path
 
 
 def load_checkpoint(
