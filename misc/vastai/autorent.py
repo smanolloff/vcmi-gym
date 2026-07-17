@@ -149,7 +149,7 @@ def vastai_rent(offer_id: int) -> int:
             r'touch\ /workspace/.preinit\;'
             r'bash\\\ autorun.sh\\\ %s\;'
             r'exec\ \$SHELL'
-        ) % (ROLLOUT_SECONDS, " ".join(AUTORUNS))
+        ) % (ROLLOUT_SECONDS, r'\\\ '.join(AUTORUNS))
     )
 
     logging.debug(f"Request body: {body}")
