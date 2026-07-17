@@ -389,7 +389,7 @@ def ntfy_send(dph: float) -> None:
     headers = {"x-title": "VastAI autorent"}
     body = f"{dph:.4f} $/hr"
     logging.debug(f"Request body: {body}")
-    response = requests.post(url, headers=headers, json=body)
+    response = requests.post(url, headers=headers, data=body)
     logging.info(f"POST {url} {response.status_code}")
     logging.debug(f"Response body: {response.text}")
 
@@ -412,12 +412,13 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
         label = running_instances[instance_id]["label"]
         txt = f"{instance_id} {host_id}/{machine_id} dph={round(dph, 4)}"
 
-        if label in ["autorent", "init...", "check...", "wait..."] and is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
-            vastai_destroy(instance_id)
-            db_audit_log(conn, f"destroy: {txt} reason=timeout")
-            db_instance_update(conn, instance_id, "timeout")
-            db_blacklist_add(conn, machine_id, host_id)
-            del running_instances[instance_id]
+        if label in ["autorent", "init...", "check...", "wait..."]:
+            if is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
+                vastai_destroy(instance_id)
+                db_audit_log(conn, f"destroy: {txt} reason=timeout")
+                db_instance_update(conn, instance_id, "timeout")
+                db_blacklist_add(conn, machine_id, host_id)
+                del running_instances[instance_id]
         elif label == "FAILED":
             vastai_destroy(instance_id)
             db_audit_log(conn, f"destroy: {txt} reason=FAILED")

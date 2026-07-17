@@ -10,7 +10,7 @@ USAGE='autorun.sh runid1 [runid2 ...]'
 
 [ $# -gt 0 ] || { echo "No autoruns configured"; exit 0; }
 
-grep -q 0 /workspace/.check || { echo "Check failed -- skipping autorun"; exit 0; }
+grep -q 1 /workspace/.check || { echo "Check failed -- skipping autorun"; exit 0; }
 
 source ~/.simorc
 
