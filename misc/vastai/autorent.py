@@ -33,8 +33,10 @@ VASTAI_ENV = dict(
     AWS_SECRET_KEY=os.environ["VASTAI_AWS_SECRET_KEY"],
     VCMI_ARCHIVE_KEY=os.environ["VASTAI_VCMI_ARCHIVE_KEY"],
     WANDB_API_KEY=os.environ["VASTAI_WANDB_API_KEY"],
-    VAST_API_KEY=os.environ["VASTAI_BENCHMARK_API_KEY"]
+    VAST_API_KEY=os.environ["VASTAI_BENCHMARK_API_KEY"],
 )
+
+VASTAI_NTFY_TOPIC = os.environ["VASTAI_NTFY_TOPIC"]
 
 BADCPU_PATTERN = re.compile("EPYC|Xeon|285K", re.IGNORECASE)
 
@@ -383,6 +385,16 @@ def migrate_warn_to_blacklist(conn: sqlite3.Connection) -> None:
         db_blacklist_add(conn, row["machine_id"], row["host_id"])
 
 
+def ntfy_send(dph: float) -> None:
+    url = f"https://ntfy.sh/{VASTAI_NTFY_TOPIC}"
+    headers = {"x-title": "VastAI autorent"}
+    body = f"{dph:.4f} $/hr"
+    logging.debug(f"Request body: {body}")
+    response = requests.post(url, headers=headers, json=body)
+    logging.info(f"POST {url} {response.status_code}")
+    logging.debug(f"Response body: {response.text}")
+
+
 def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
     pending_rows = db_instances_get_pending(conn)
     running_instances = vastai_list()
@@ -417,6 +429,7 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
             db_audit_log(conn, f"keep: {txt} reason=PASSED")
             db_instance_update(conn, instance_id, "PASSED")
             db_goldlist_add(conn, machine_id, host_id)
+            ntfy_send(dph)
             global goldcounter
             goldcounter += 1
             logging.info(f"goldcounter={goldcounter} (GOLD_TARGET={GOLD_TARGET})")

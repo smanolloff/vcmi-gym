@@ -50,5 +50,5 @@ tag, _ts = find_latest_tag(
 print(tag)')
 
     download_checkpoint ppo $autorun-$tag
-    train_gnn ppo $autorun-$tag
+    train_gnn ppo $autorun
 fi
