@@ -412,7 +412,7 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
         label = running_instances[instance_id]["label"]
         txt = f"{instance_id} {host_id}/{machine_id} dph={round(dph, 4)}"
 
-        if label in ["autorent", "init...", "check..."] and is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
+        if label in ["autorent", "init...", "check...", "wait..."] and is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
             vastai_destroy(instance_id)
             db_audit_log(conn, f"destroy: {txt} reason=timeout")
             db_instance_update(conn, instance_id, "timeout")
