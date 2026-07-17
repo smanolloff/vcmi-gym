@@ -281,9 +281,8 @@ function download_model() {
 function prepare_arena() {
     download_model "\$@" || return 1
     sed -i "/^[[:space:]]*players=(/{n;s|.*|    data/v15/\$2-model-\$1.pt|;}" vcmi_gym/tools/arena.sh
-    aws s3 cp s3://vcmi-gym/v15/models/attacker-nkjrmrsq-202509291846-stochastic.onnx \
-        vcmi/Mods/mmai/models/attacker-nkjrmrsq-202509291846-stochastic.onnx
-
+    local onnx=attacker-nkjrmrsq-202509291846-stochastic.onnx
+    [ -e vcmi/Mods/mmai/models/\$onnx ] || aws s3 cp s3://vcmi-gym/v15/models/\$onnx vcmi/Mods/mmai/models/\$onnx
 }
 
 #

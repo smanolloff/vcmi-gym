@@ -70,16 +70,7 @@ def deepmerge(a: dict, b: dict, in_place=False, allow_new=True, update_existing=
     return a
 
 
-def download_latest_model(
-    logger,
-    dry_run,
-    out_dir,
-    algo,  # ppo|dna
-    run_id,
-    optimize_local_storage,
-    s3_config,
-    timestamp
-) -> tuple[dt.datetime | None, str | None, str | None]:
+def get_latest_tag(logger, algo, run_id, s3_config, timestamp) -> str | None:
     assert isinstance(timestamp, dt.datetime)
     assert timestamp.tzinfo
 
@@ -91,7 +82,7 @@ def download_latest_model(
     paginator = s3.get_paginator("list_objects_v2")
 
     logger.info(f"Listing S3 objects with prefix={prefix}")
-    pattern = re.compile(r"%s([0-9]+)%s" % (re.escape(prefix), re.escape(suffix)))
+    pattern = re.compile(r"%s([0-9]+|volatile[0-9])%s" % (re.escape(prefix), re.escape(suffix)))
 
     latest_ts = timestamp
     latest_key = None
@@ -114,15 +105,27 @@ def download_latest_model(
     logger.info(dict(objects=n, latest_key=latest_key, latest_ts=latest_ts.isoformat(timespec="seconds")))
 
     if latest_key is None:
-        return None, None, None
+        return None
 
-    myts = pattern.match(latest_key).group(1)
-    config_path = os.path.join(out_dir, f"{run_id}-{myts}-config.json")
-    weights_path = os.path.join(out_dir, f"{run_id}-{myts}-model-{algo}.pt")
+    return pattern.match(latest_key).group(1)
+
+
+def download_latest_model(
+    logger,
+    dry_run,
+    out_dir,
+    algo,  # ppo|dna
+    run_id,
+    optimize_local_storage,
+    s3_config,
+    timestamp
+) -> tuple[dt.datetime | None, str | None, str | None]:
+    tag = get_latest_tag(logger, algo, run_id, s3_config, timestamp)
+    config_path = os.path.join(out_dir, f"{run_id}-{tag}-config.json")
+    weights_path = os.path.join(out_dir, f"{run_id}-{tag}-model-{algo}.pt")
     _s3_download(logger, dry_run, s3_config, config_path)
     _s3_download(logger, dry_run, s3_config, weights_path)
-
-    return latest_ts, config_path, weights_path
+    return tag, config_path, weights_path
 
 
 def load_checkpoint(
