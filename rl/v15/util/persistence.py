@@ -70,7 +70,7 @@ def deepmerge(a: dict, b: dict, in_place=False, allow_new=True, update_existing=
     return a
 
 
-def get_latest_tag(logger, algo, run_id, s3_config, timestamp) -> str | None:
+def find_latest_tag(logger, algo, run_id, s3_config, timestamp) -> str | None:
     assert isinstance(timestamp, dt.datetime)
     assert timestamp.tzinfo
 
@@ -120,7 +120,7 @@ def download_latest_model(
     s3_config,
     timestamp
 ) -> tuple[dt.datetime | None, str | None, str | None]:
-    tag = get_latest_tag(logger, algo, run_id, s3_config, timestamp)
+    tag = find_latest_tag(logger, algo, run_id, s3_config, timestamp)
     config_path = os.path.join(out_dir, f"{run_id}-{tag}-config.json")
     weights_path = os.path.join(out_dir, f"{run_id}-{tag}-model-{algo}.pt")
     _s3_download(logger, dry_run, s3_config, config_path)

@@ -6,6 +6,7 @@ import time
 import os
 import re
 import requests
+import argparse
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List
@@ -15,8 +16,9 @@ GOLD_TARGET = 0
 goldcounter = 0
 
 # Price threshold of $/hr
-DPH = 0.3  # may be overriden by ARGV ($1)
-ROLLOUT_SECONDS = 35  # may be overriden by ARGV ($2)
+DPH = 0.3  # -D ...
+ROLLOUT_SECONDS = 35  # -r ...
+AUTORUNS = []  # ...ARGV
 
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
@@ -145,8 +147,9 @@ def vastai_rent(offer_id: int) -> int:
             r'bash\\\ init.sh\\\;'
             r'bash\\\ check.sh\\\ -t\\\ -i90\\\ -r%s\\\ -n5\;'
             r'touch\ /workspace/.preinit\;'
+            r'bash\\\ autorun.sh\\\ %s\;'
             r'exec\ \$SHELL'
-        ) % ROLLOUT_SECONDS
+        ) % (ROLLOUT_SECONDS, " ".join(AUTORUNS))
     )
 
     logging.debug(f"Request body: {body}")
@@ -478,11 +481,15 @@ def install_signal_handlers() -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        DPH = float(sys.argv[1])
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-D', "--dph", type=float, default=DPH)
+    parser.add_argument('-r', "--rollout", type=int, default=ROLLOUT_SECONDS)
+    parser.add_argument('autoruns', nargs=argparse.REMAINDER, help="auto-run IDs (space-separated)")
+    args = parser.parse_args()
 
-    if len(sys.argv) > 2:
-        ROLLOUT_SECONDS = int(sys.argv[2])
+    DPH = args.dph
+    ROLLOUT_SECONDS = args.rollout
+    AUTORUNS = args.autoruns
 
     setup_logging()
     install_signal_handlers()

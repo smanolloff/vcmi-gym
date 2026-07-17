@@ -4,7 +4,7 @@
 # Prepares a "blank" VastAI VM for init:
 # - calculates time drift and optionally sets tmux faketime alias
 # - creates .env
-# - downloads init.sh, check.sh (does NOT execute them)
+# - downloads init.sh, check.sh, autorun.sh (does NOT execute them)
 #
 
 set -euxo pipefail
@@ -51,7 +51,7 @@ if [ "$offset" !=  "0m" ]; then
     # echo "$faketime_so" > /etc/ld.so.preload
 fi
 
-for script in init check; do
+for script in init check autorun; do
     curl -sLO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/$script.sh
 done
 
