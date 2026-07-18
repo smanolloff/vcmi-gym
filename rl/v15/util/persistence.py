@@ -25,7 +25,7 @@ def init_s3_client():
     )
 
 
-def _s3_download(logger, dry_run, s3_config, filename):
+def _s3_download(logger, dry_run, s3_config, filename, force=False):
     if os.path.exists(f"{filename}~"):
         if os.path.exists(filename):
             msg = f"Lockfile for {filename} still exists => deleting local (corrupted) file"
@@ -38,10 +38,10 @@ def _s3_download(logger, dry_run, s3_config, filename):
             os.unlink(f"{filename}~")
 
     # Download is OK even if --dry-run is given (nothing overwritten)
-    if os.path.exists(filename):
+    if os.path.exists(filename) and not force:
         logger.info(f"Found local file: {filename}")
     elif s3_config:
-        logger.info("Local file does not exist, try S3")
+        logger.info("Local file does not exist or download is forced => try S3")
 
         s3_filename = f"{s3_config['s3_dir']}/{os.path.basename(filename)}"
         logger.info(f"Download s3://{s3_config['bucket_name']}/{s3_filename} ...")
@@ -123,8 +123,9 @@ def download_latest_model(
     tag, latest_timestamp = find_latest_tag(logger, algo, run_id, s3_config, timestamp)
     config_path = os.path.join(out_dir, f"{run_id}-{tag}-config.json")
     weights_path = os.path.join(out_dir, f"{run_id}-{tag}-model-{algo}.pt")
-    _s3_download(logger, dry_run, s3_config, config_path)
-    _s3_download(logger, dry_run, s3_config, weights_path)
+    force = "volatile" in tag
+    _s3_download(logger, dry_run, s3_config, config_path, force=force)
+    _s3_download(logger, dry_run, s3_config, weights_path, force=force)
     return tag, latest_timestamp, config_path, weights_path
 
 
