@@ -38,7 +38,7 @@ VASTAI_ENV = dict(
 
 VASTAI_NTFY_TOPIC = os.environ["VASTAI_NTFY_TOPIC"]
 
-BADCPU_PATTERN = re.compile("EPYC|Xeon|285K", re.IGNORECASE)
+BADCPU_PATTERN = re.compile("EPYC|Xeon|285K|Broadwell", re.IGNORECASE)
 
 # LOG_LEVEL = logging.DEBUG
 LOG_LEVEL = logging.INFO
@@ -250,6 +250,16 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             message TEXT,
             created_at DATETIME NOT NULL
         )
+        """
+    )
+
+    # default blacklist
+    conn.execute(
+        """
+        INSERT INTO blacklist
+            (machine_id, host_id, counter, created_at, updated_at)
+        VALUES
+            (142709, 604687, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
         """
     )
 

@@ -53,5 +53,7 @@ print(tag)')
 
     download_checkpoint ppo $autorun-$tag
     link_checkpoint $autorun-$tag $autorun data/v15
+
+    [ "$autorun" = "zvytfdpo" ] && make edge-typos || :
     train_gnn ppo $autorun
 fi
