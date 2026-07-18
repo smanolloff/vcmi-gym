@@ -259,7 +259,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         INSERT INTO blacklist
             (machine_id, host_id, counter, created_at, updated_at)
         VALUES
-            (142709, 604687, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+            (142709, 604687, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT DO NOTHING;
         """
     )
 
@@ -394,10 +395,10 @@ def migrate_warn_to_blacklist(conn: sqlite3.Connection) -> None:
         db_blacklist_add(conn, row["machine_id"], row["host_id"])
 
 
-def ntfy_send(dph: float) -> None:
+def ntfy_send(instance_id: int, dph: float) -> None:
     url = f"https://ntfy.sh/{VASTAI_NTFY_TOPIC}"
     headers = {"x-title": "VastAI autorent"}
-    body = f"{dph:.4f} $/hr"
+    body = f"dph={dph:.4f} id={instance_id}"
     logging.debug(f"Request body: {body}")
     response = requests.post(url, headers=headers, data=body)
     logging.info(f"POST {url} {response.status_code}")
@@ -439,7 +440,7 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
             db_audit_log(conn, f"keep: {txt} reason=PASSED")
             db_instance_update(conn, instance_id, "PASSED")
             db_goldlist_add(conn, machine_id, host_id)
-            ntfy_send(dph)
+            ntfy_send(instance_id, dph)
             global goldcounter
             goldcounter += 1
             logging.info(f"goldcounter={goldcounter} (GOLD_TARGET={GOLD_TARGET})")
