@@ -67,6 +67,11 @@ edge-typos:
 	sed -i'' -e 's/"Global", "To", "Action"/"Global", "Has", "Action"/' \
 		-e 's/"Unit", "Has", "Action"/"Unit", "By", "Action"/' \
 		rl/v15/dual_vec_env.py
+
+	sed -i'' -e 's/"<Global___Has___Action>": "<Global___To___Action>"/"<Global___To___Action>": "<Global___Has___Action>"/' \
+		-e 's/"<Unit___By___Action>": "<Unit___Has___Action>"/"<Unit___Has___Action>": "<Unit___By___Action>"/' \
+		rl/v15/{ppo,dna}_gnn.py
+
 	cd vcmi
 	sed -i'' -e '/EdgeType{/,/},/{/EDGE_GLOBAL_TO_ACTION/{n;s/"To"/"Has"/;};}' \
 		-e '/EdgeType{/,/},/{/EDGE_UNIT_HAS_ACTION/{n;s/"Has"/"By"/;};}' \

@@ -419,13 +419,13 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
                 db_instance_update(conn, instance_id, "timeout")
                 db_blacklist_add(conn, machine_id, host_id)
                 del running_instances[instance_id]
-        elif label == "FAILED":
+        elif label == "FAILED" or label.startswith("CRASHED_"):
             vastai_destroy(instance_id)
             db_audit_log(conn, f"destroy: {txt} reason=FAILED")
             db_instance_update(conn, instance_id, "FAILED")
             db_blacklist_add(conn, machine_id, host_id)
             del running_instances[instance_id]
-        elif label == "PASSED" or len(label) == 8:  # len=8 means run_id
+        elif label == "PASSED" or label in AUTORUNS:
             db_audit_log(conn, f"keep: {txt} reason=PASSED")
             db_instance_update(conn, instance_id, "PASSED")
             db_goldlist_add(conn, machine_id, host_id)
