@@ -516,6 +516,8 @@ if __name__ == "__main__":
     ROLLOUT_SECONDS = args.rollout
     AUTORUNS = args.autoruns
 
+    assert all(re.match(r'^[a-z]{8}$', a) for a in AUTORUNS)
+
     setup_logging()
     install_signal_handlers()
     main_loop()
