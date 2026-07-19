@@ -7,7 +7,7 @@ DEL=false    # -d
 FORCE=false  # -f
 
 INIT_SECONDS=90     # cold start (40 envs, load weights, etc.)
-ROLLOUT_SECONDS=29  # "ok" duration of 1 rollout (well-tuned 9950X needs <25s)
+ROLLOUT_SECONDS=30  # "ok" duration of 1 rollout (well-tuned 9950X needs 25s)
 N_ROLLOUTS=5
 
 while getopts "tdfi:r:n:" opt; do
@@ -37,7 +37,7 @@ function http() {
 SECONDS_CHECK=$((N_ROLLOUTS * ROLLOUT_SECONDS))
 SECONDS_TIMEOUT=$((INIT_SECONDS + SECONDS_CHECK * 2))
 
-CHECKPOINT=zckkyvje-1783869134
+CHECKPOINT=pdpyqkrb-benchmark
 RUN_ID=${CHECKPOINT%-*}
 
 function check() {
