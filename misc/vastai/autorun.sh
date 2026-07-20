@@ -52,7 +52,7 @@ tag, _ts = find_latest_tag(
 print(tag)')
 
     download_checkpoint ppo $autorun-$tag
-    link_checkpoint $autorun-$tag $autorun data/v15
+    link_checkpoint -y $autorun-$tag $autorun data/v15
 
     [ "$autorun" = "zvytfdpo" ] && make edge-typos || :
     train_gnn ppo $autorun
