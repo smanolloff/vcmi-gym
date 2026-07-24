@@ -42,7 +42,7 @@ jobs:
           submodules: recursive
 
       - name: Registry login
-        uses: docker/login-action@v3.3.0
+        uses: docker/login-action@v4.5.1
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -53,7 +53,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5.6.1
+        uses: docker/metadata-action@v6.2.0
         with:
           images: ${{ env.REGISTRY }}/smanolloff/vcmi-gym
           tags: |

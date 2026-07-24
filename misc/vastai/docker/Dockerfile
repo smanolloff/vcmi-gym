@@ -8,35 +8,6 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
     { [ "${#AWS_ACCESS_KEY}" -eq 20 ] || { echo "AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}"; exit 1; } } \
     && { [ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}"; exit 1; } }
 
-####################################################
-# TODO: on rent, set these as instance ENV
-#   - VAST_API_KEY
-#   - WANDB_API_KEY
-#   - AWS_ACCESS_KEY
-#   - AWS_SECRET_KEY
-#   - VCMI_ARCHIVE_KEY
-#   - VASTAI_INSTANCE_ID
-#
-# TODO: on rent, exec:
-#   sed -e "s/__VAST_API_KEY__/$VAST_API_KEY/" \
-#       -e "s/__WANDB_API_KEY__/$WANDB_API_KEY/" \
-#       -e "s/__AWS_ACCESS_KEY__/$AWS_ACCESS_KEY/" \
-#       -e "s/__AWS_SECRET_KEY__/$AWS_SECRET_KEY/" \
-#       -e "s/__VCMI_ARCHIVE_KEY__/$VCMI_ARCHIVE_KEY/" \
-#       -i /root/.simorc /root/.aws/credentials
-#
-#   7z x vcmi/h3.7z -p"$VCMI_ARCHIVE_KEY" -o"vcmi"
-#   wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
-#
-#   # This can't be done build-time (tmux throws errors)
-#   git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm \
-#     && tmux source /root/.tmux.conf \
-#     && ~/.tmux/plugins/tpm/bin/install_plugins
-#
-#   /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID ready
-#
-####################################################
-
 # Everything installed after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
 COPY ./misc/vastai/docker/etc/apt/sources.list /etc/apt/
 RUN apt-get update && apt-get -y install \
@@ -77,18 +48,21 @@ COPY ./misc/vastai/docker/.vimrc \
     ./misc/vastai/docker/.tmux.conf \
     ./misc/vastai/docker/.gitconfig \
     ./misc/vastai/docker/.gitignore_global \
-    ./misc/vastai/docker/runcmd.sh \
-    ./misc/vastai/docker/cleanup.sh \
     ./misc/vastai/docker/.simorc \
+    ./misc/vastai/docker/cleanup.sh \
+    ./misc/vastai/docker/entrypoint.sh \
+    ./misc/vastai/docker/init.sh \
+    ./misc/vastai/docker/runcmd.sh \
     /root/
 
 # Use a separate simorc which is called explicitly from nonlogin shells
-RUN echo "source ~/.simorc" >> /root/.bashrc \
-    && echo 'export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)' >> /root/.bashrc \
+RUN chmod +x /root/entrypoint.sh \
     && chmod +x /root/cleanup.sh \
-    && chmod 644 /etc/cron.d/cleanup # TODO: check if cron is started on boot
+    && echo 'export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)' >> /root/.bashrc \
+    && echo "source ~/.simorc" >> /root/.bashrc
 
 COPY . .
+
 RUN . /venv/main/bin/activate \
     && make pip-install \
     && cd vcmi \
@@ -100,3 +74,8 @@ RUN . /venv/main/bin/activate \
     && cd .. \
     && make vastai-build-connector \
     && pip cache purge
+
+ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+ENV VASTAI=1
+
+ENTRYPOINT ["/root/entrypoint.sh"]

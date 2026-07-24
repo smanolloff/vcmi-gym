@@ -366,14 +366,13 @@ cd /workspace/vcmi-gym
 . /venv/main/bin/activate
 
 # These are required in scripts
-. ~/secrets
-[ "${#AWS_ACCESS_KEY}" -eq 40 ] || { echo "WARNING: AWS_ACCESS_KEY: invalid length: want: 20, have: #${#AWS_ACCESS_KEY}"; }
-[ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "WARNING: AWS_SECRET_KEY: invalid length: want: 40, have: #${#AWS_SECRET_KEY}"; }
-[ "${#WANDB_API_KEY}" -eq 20 ] || { echo "WARNING: WANDB_API_KEY: invalid length: want: 20, have: #${#WANDB_API_KEY}"; }
+[ "${#AWS_ACCESS_KEY}" -eq 20 ] || { echo "WARNING: AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}"; }
+[ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "WARNING: AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}"; }
+[ "${#VCMI_ARCHIVE_KEY}" -eq 16 ] || { echo "WARNING: VCMI_ARCHIVE_KEY: invalid length: want: 16, have: ${#VCMI_ARCHIVE_KEY}"; }
+[ "${#VAST_API_KEY}" -eq 64 ] || { echo "WARNING: VAST_API_KEY: invalid length: want: 64, have: ${#VAST_API_KEY}"; }
+[ "${#WANDB_API_KEY}" -eq 40 ] || { echo "WARNING: WANDB_API_KEY: invalid length: want: 40, have: ${#WANDB_API_KEY}"; }
 [[ $VASTAI_INSTANCE_ID =~ ^[[:digit:]]+$ ]] || { echo "WARNING: VASTAI_INSTANCE_ID: invalid value: '$VASTAI_INSTANCE_ID'"; }
 
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export RAY_memory_monitor_refresh_ms=0
-export VASTAI=1
+bash ~/init.sh
 
 set -x
