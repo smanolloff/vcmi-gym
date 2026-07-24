@@ -14,11 +14,9 @@ RUN apt-get update && apt-get -y install \
     libboost-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev \
     libboost-program-options-dev libboost-locale-dev libboost-iostreams-dev \
     libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
-    qtbase5-dev qtbase5-dev-tools qttools5-dev qttools5-dev-tools \
-    libqt5svg5-dev \
+    qtbase5-dev qtbase5-dev-tools qttools5-dev qttools5-dev-tools libqt5svg5-dev \
     ninja-build zlib1g-dev libavformat-dev libswscale-dev libtbb-dev \
-    libluajit-5.1-dev libminizip-dev libfuzzylite-dev libsqlite3-dev \
-    libsquish-dev
+    libluajit-5.1-dev libminizip-dev libfuzzylite-dev libsqlite3-dev libsquish-dev
 
 # aws CLI setup
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
@@ -44,10 +42,7 @@ COPY ./misc/vastai/docker/.vimrc \
     ./misc/vastai/docker/.simorc \
     /root/
 
-# Use a separate simorc which is called explicitly from nonlogin shells
-RUN chmod +x misc/vastai/docker/entrypoint.sh \
-    && chmod +x misc/vastai/docker/cleanup.sh \
-    && echo 'export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)' >> /root/.bashrc \
+RUN echo 'export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)' >> /root/.bashrc \
     && echo "source ~/.simorc" >> /root/.bashrc \
     && mkdir -p data/v15
 
@@ -61,7 +56,10 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
 
 COPY . .
 
-RUN . /venv/main/bin/activate \
+# Use a separate simorc which is called explicitly from nonlogin shells
+RUN chmod +x misc/vastai/docker/entrypoint.sh \
+    && chmod +x misc/vastai/docker/cleanup.sh \
+    && . /venv/main/bin/activate \
     && make pip-install \
     && cd vcmi \
     && mkdir -p data/config \
