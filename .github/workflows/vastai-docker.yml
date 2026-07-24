@@ -70,4 +70,4 @@ jobs:
           provenance: false  # https://github.com/docker/buildx/issues/1990#issuecomment-1666435850
           push: true
           cache-from: type=gha
-          cache-to: type=gha
+          cache-to: type=gha,mode=max

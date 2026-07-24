@@ -65,9 +65,10 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
     && aws s3 cp s3://vcmi-gym/h3.7z vcmi/
 
 # ONNX setup (copied from vcmi/CI/before_install/linux_common.sh)
-ENV ONNXRUNTIME_ROOT=/opt/onnxruntime
-RUN ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz \
-    mkdir -p "$ONNXRUNTIME_ROOT" \
+ENV ONNXRUNTIME_ROOT=/opt/onnxruntime \
+    ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
+
+RUN mkdir -p "$ONNXRUNTIME_ROOT" \
     && curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
 
 COPY ./misc/vastai/docker/etc/cron.d/cleanup /etc/cron.d/
