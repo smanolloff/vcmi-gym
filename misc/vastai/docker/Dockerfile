@@ -1,12 +1,12 @@
-FROM vastai/pytorch:cuda-12.8.1-auto AS builder
+FROM vastai/pytorch:cuda-12.8.1-auto
 
 WORKDIR /workspace/vcmi-gym
 
 # Check secrets
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
     --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_KEY \
-    { [ "${#AWS_ACCESS_KEY}" -eq 20 ] || { echo "AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}"; exit 1; } } \
-    && { [ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}"; exit 1; } }
+    { [ "${#AWS_ACCESS_KEY}" -eq 20 ] || { echo "AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}"; exit 1; }; } \
+    && { [ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}"; exit 1; }; }
 
 # Everything installed after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
 RUN apt-get update && apt-get -y install \
@@ -23,6 +23,7 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_ACCESS_KEY \
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
     && unzip awscliv2.zip \
+    && rm awscliv2.zip \
     && ./aws/install --update \
     && aws configure set region eu-north-1 \
     && aws configure set output json \
@@ -45,16 +46,17 @@ COPY ./misc/vastai/docker/.vimrc \
 
 RUN echo "source ~/.simorc" >> /root/.bashrc
 
+COPY . .
+
 # Benchmark model
-RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
-    --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_KEY \
-    mkdir -p data/v15 \
-    && for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do \
+RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_ACCESS_KEY \
+    set -e; \
+    mkdir -p data/v15; \
+    for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do \
         aws s3 cp s3://vcmi-gym/v15/models/pdpyqkrb-benchmark-$suffix data/v15/; \
         ln -s pdpyqkrb-benchmark-$suffix data/v15/pdpyqkrb-$suffix; \
     done
-
-COPY . .
 
 # Use a separate simorc which is called explicitly from nonlogin shells
 RUN chmod +x misc/vastai/docker/cleanup.sh \
