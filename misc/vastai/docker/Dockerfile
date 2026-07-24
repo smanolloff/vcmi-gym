@@ -94,6 +94,7 @@ RUN . /venv/main/bin/activate \
     && cd vcmi \
     && mkdir -p data/config \
     && cp ML/configs/*.json data/config \
+    && mkdir -p data/Maps \
     && ln -s ../../../maps/gym data/Maps/ \
     && make vastai-build \
     && cd .. \
