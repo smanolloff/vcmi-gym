@@ -253,7 +253,7 @@ function retry_until_sigint() {
     local i=0
     while true; do
         tmux rename-window $VASTAI_INSTANCE_ID:$run_id || :
-        bash -x ~/runcmd.sh $*
+        bash -x /workspace/vcmi-gym/misc/vastai/docker/runcmd.sh $*
         if [ $? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
             /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID IDLE
@@ -328,7 +328,7 @@ USAGE
     if $new_run; then
         echo "This is a new run -- will start ONCE with --run-id to create it"
         tmux rename-window $VASTAI_INSTANCE_ID:$run_id || :
-        bash -x ~/runcmd.sh $newcmd --skip-eval
+        bash -x /workspace/vcmi-gym/misc/vastai/docker/runcmd.sh $newcmd --skip-eval
 
         if [ $? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
@@ -365,14 +365,13 @@ alias gco='git checkout'
 cd /workspace/vcmi-gym
 . /venv/main/bin/activate
 
-# These are required in scripts
-[ "${#AWS_ACCESS_KEY}" -eq 20 ] || { echo "WARNING: AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}"; }
-[ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "WARNING: AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}"; }
-[ "${#VCMI_ARCHIVE_KEY}" -eq 16 ] || { echo "WARNING: VCMI_ARCHIVE_KEY: invalid length: want: 16, have: ${#VCMI_ARCHIVE_KEY}"; }
-[ "${#VAST_API_KEY}" -eq 64 ] || { echo "WARNING: VAST_API_KEY: invalid length: want: 64, have: ${#VAST_API_KEY}"; }
-[ "${#WANDB_API_KEY}" -eq 40 ] || { echo "WARNING: WANDB_API_KEY: invalid length: want: 40, have: ${#WANDB_API_KEY}"; }
-[[ $VASTAI_INSTANCE_ID =~ ^[[:digit:]]+$ ]] || { echo "WARNING: VASTAI_INSTANCE_ID: invalid value: '$VASTAI_INSTANCE_ID'"; }
-
-bash ~/init.sh
+# Sanity checks
+[ "${#AWS_ACCESS_KEY}" -eq 20 ] || echo "WARNING: AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}";
+[ "${#AWS_SECRET_KEY}" -eq 40 ] || echo "WARNING: AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}";
+[ "${#VCMI_ARCHIVE_KEY}" -eq 16 ] || echo "WARNING: VCMI_ARCHIVE_KEY: invalid length: want: 16, have: ${#VCMI_ARCHIVE_KEY}";
+[ "${#VAST_API_KEY}" -eq 64 ] || echo "WARNING: VAST_API_KEY: invalid length: want: 64, have: ${#VAST_API_KEY}";
+[ "${#WANDB_API_KEY}" -eq 40 ] || echo "WARNING: WANDB_API_KEY: invalid length: want: 40, have: ${#WANDB_API_KEY}";
+[[ $VASTAI_INSTANCE_ID =~ ^[[:digit:]]+$ ]] || echo "WARNING: VASTAI_INSTANCE_ID: invalid value: '$VASTAI_INSTANCE_ID'";
+pidof cron >/dev/null || echo "WARNING: cron is not running"
 
 set -x

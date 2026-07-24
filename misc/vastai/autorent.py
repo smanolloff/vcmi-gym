@@ -43,6 +43,9 @@ BADCPU_PATTERN = re.compile("EPYC|Xeon|285K|Broadwell", re.IGNORECASE)
 # LOG_LEVEL = logging.DEBUG
 LOG_LEVEL = logging.INFO
 
+BALANCE_WARNED_AT = time.time()
+BALANCE_WARN_INTERVAL = 10800  # 3h
+
 
 def setup_logging() -> None:
     logging.basicConfig(
@@ -127,7 +130,7 @@ def vastai_list():
     return {instance["id"]: instance for instance in data["instances"]}
 
 
-def vastai_rent(offer_id: int) -> int:
+def vastai_rent(offer_id: int) -> int | None:
     logging.info(f"vastai_rent({offer_id})")
     url = f"https://console.vast.ai/api/v0/asks/{offer_id}/"
     headers = {"Authorization": f"Bearer {VASTAI_API_KEY}"}
@@ -135,18 +138,16 @@ def vastai_rent(offer_id: int) -> int:
         client_id="me",
         env=VASTAI_ENV,
         disk=15.0,  # NOTE: must correspond to `allocated_storage` in vastai_search()
-        template_hash_id="ecc6deee8dc72eba779819f7774dcbe2",  # "PyTorch (Vast) - 12.8"
+        template_hash_id="45d8b6aafe75e5bcfabcb7b4b5868529",  # "PyTorch (vcmi-gym) - 12.8"
         label="autorent",
         # -r32 means "32 seconds per rollout" threshold (see check.sh)
         # autorent instances as usually cheap => threshold is a bit higher.
         onstart=(
-            'set -x; [ -e /workspace/.preinit ] && exit 0 || touch ~/.no_auto_tmux; mkdir -p /workspace; cd /workspace;'
-            'curl -sLO https://raw.githubusercontent.com/smanolloff/vcmi-gym/refs/heads/main/misc/vastai/preinit.sh;'
-            'source preinit.sh; set +e; env -u FAKETIME_SHARED; unset FAKETIME_SHARED;'
+            'set -x; [ -e /workspace/.preinit ] && exit 0'
+            'source /workspace/vcmi-gym/misc/vastai/preinit.sh; set +e; unset FAKETIME_SHARED;'
             r'tmux set-option -g history-limit 100000 \; new-session -d unset\ FAKETIME_SHARED\;'
             r'bash\ -xc\ unset\\\ FAKETIME_SHARED\\\;'
-            r'cd\\\ /workspace\\\;'
-            r'bash\\\ init.sh\\\;'
+            r'cd\\\ /workspace/vcmi-gym/misc/vastai\\\;'
             r'bash\\\ check.sh\\\ -t\\\ -i90\\\ -r%s\\\ -n5\\\;'
             r'bash\\\ autorun.sh\\\ %s\;'
             r'touch\ /workspace/.preinit\;'
@@ -327,7 +328,7 @@ def db_goldlist_add(conn: sqlite3.Connection, machine_id: int, host_id: int):
     conn.commit()
 
 
-def db_warnlist_del_sel(conn: sqlite3.Connection, counter: int) -> None:
+def db_warnlist_del_sel(conn: sqlite3.Connection, counter: int) -> list[sqlite3.Row]:
     sql = f"""
         DELETE FROM warnlist
         WHERE counter > {counter}
@@ -395,10 +396,20 @@ def migrate_warn_to_blacklist(conn: sqlite3.Connection) -> None:
         db_blacklist_add(conn, row["machine_id"], row["host_id"])
 
 
-def ntfy_send(instance_id: int, dph: float) -> None:
+def ntfy_autorent(instance_id: int, dph: float) -> None:
     url = f"https://ntfy.sh/{VASTAI_NTFY_TOPIC}"
     headers = {"x-title": "VastAI autorent"}
     body = f"dph={dph:.4f} id={instance_id}"
+    logging.debug(f"Request body: {body}")
+    response = requests.post(url, headers=headers, data=body)
+    logging.info(f"POST {url} {response.status_code}")
+    logging.debug(f"Response body: {response.text}")
+
+
+def ntfy_balance(balance: float) -> None:
+    url = f"https://ntfy.sh/{VASTAI_NTFY_TOPIC}"
+    headers = {"x-title": "VastAI low balance", "tags": "warning"}
+    body = f"balance={balance:.2f}"
     logging.debug(f"Request body: {body}")
     response = requests.post(url, headers=headers, data=body)
     logging.info(f"POST {url} {response.status_code}")
@@ -423,7 +434,7 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
         label = running_instances[instance_id]["label"]
         txt = f"{instance_id} {host_id}/{machine_id} dph={round(dph, 4)}"
 
-        if label in ["autorent", "init...", "check...", "wait..."]:
+        if label in ["autorent", "check...", "wait..."]:
             if is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
                 vastai_destroy(instance_id)
                 db_audit_log(conn, f"destroy: {txt} reason=timeout")
@@ -440,7 +451,7 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
             db_audit_log(conn, f"keep: {txt} reason=PASSED")
             db_instance_update(conn, instance_id, "PASSED")
             db_goldlist_add(conn, machine_id, host_id)
-            ntfy_send(instance_id, dph)
+            ntfy_autorent(instance_id, dph)
             global goldcounter
             goldcounter += 1
             logging.info(f"goldcounter={goldcounter} (GOLD_TARGET={GOLD_TARGET})")
@@ -483,6 +494,12 @@ def main_loop() -> None:
 
                 credit = vastai_get_user()["credit"]
                 n_instances = len(running_instances)
+
+                global BALANCE_WARNED_AT
+                if credit < 3 * n_instances and time.time() > BALANCE_WARNED_AT + BALANCE_WARN_INTERVAL:
+                    BALANCE_WARNED_AT = time.time()
+                    ntfy_balance(credit)
+
                 if credit < 10 + 10 * n_instances:
                     logging.info(f"Sleeping 600 seconds due to low balance (credit=${credit:.2f} n_instances={n_instances})")
                     time.sleep(600)
@@ -542,7 +559,7 @@ if __name__ == "__main__":
 # }
 #
 # 2. RENT 32493628
-# {"success": true, "new_contract": 33402296, "instance_api_key": "e8620fcad067a82e2223917522665911c209d8656d8bfb8060a927ca8788fc1f"}
+# {"success": true, "new_contract": 33402296, "instance_api_key": "e8620fca..."}
 #
 # 3. GET instances
 # Relevant fields for 1 instance:

@@ -9,7 +9,6 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
     && { [ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}"; exit 1; } }
 
 # Everything installed after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
-COPY ./misc/vastai/docker/etc/apt/sources.list /etc/apt/
 RUN apt-get update && apt-get -y install \
     7zip tmux vim ccache g++ liblzma-dev libboost-date-time-dev \
     libboost-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev \
@@ -22,37 +21,27 @@ RUN apt-get update && apt-get -y install \
     libsquish-dev
 
 # aws CLI setup
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_ACCESS_KEY \
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
     && unzip awscliv2.zip \
-    && ./aws/install --update
-
-RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
-    --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_KEY \
-    mkdir -p /root/.aws \
-    && echo "[default]" > /root/.aws/credentials \
-    && echo "aws_access_key_id=${AWS_ACCESS_KEY}" >> /root/.aws/credentials \
-    && echo "aws_secret_access_key=${AWS_SECRET_KEY}" >> /root/.aws/credentials \
-    && chmod 600 /root/.aws/credentials \
+    && ./aws/install --update \
+    && aws configure set region eu-north-1 \
+    && aws configure set output json \
     && aws s3 cp s3://vcmi-gym/h3.7z vcmi/
 
 # ONNX setup (copied from vcmi/CI/before_install/linux_common.sh)
-ENV ONNXRUNTIME_ROOT=/opt/onnxruntime \
-    ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
+ENV ONNXRUNTIME_ROOT=/opt/onnxruntime
+ENV ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
 
 RUN mkdir -p "$ONNXRUNTIME_ROOT" \
     && curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
 
-COPY ./misc/vastai/docker/etc/cron.d/cleanup /etc/cron.d/
-COPY ./misc/vastai/docker/.aws/ /root/.aws/
 COPY ./misc/vastai/docker/.vimrc \
     ./misc/vastai/docker/.tmux.conf \
     ./misc/vastai/docker/.gitconfig \
     ./misc/vastai/docker/.gitignore_global \
     ./misc/vastai/docker/.simorc \
-    ./misc/vastai/docker/cleanup.sh \
-    ./misc/vastai/docker/entrypoint.sh \
-    ./misc/vastai/docker/init.sh \
-    ./misc/vastai/docker/runcmd.sh \
     /root/
 
 # Use a separate simorc which is called explicitly from nonlogin shells
@@ -87,4 +76,4 @@ RUN . /venv/main/bin/activate \
 ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ENV VASTAI=1
 
-ENTRYPOINT ["/root/entrypoint.sh"]
+ENTRYPOINT ["/workspace/vcmi-gym/misc/vastai/docker/entrypoint.sh"]
