@@ -1,0 +1,379 @@
+#!/bin/bash
+set -x
+
+function pymod() {
+    local f=$1
+    shift
+    python -m $(echo ${f//\//.} | sed 's/\.py$//') "${@}"
+}
+
+#
+# Link a tagged checkpoint
+# e.g. link_checkpoint [-y] joymfkqj-1767449899 joymfkqj
+#
+function link_checkpoint() {
+    if [ "$1" = "-y" ]; then
+        confirmed=yes
+        shift
+    fi
+
+    [ -n "${1:-}" -a -n "${2:-}" ] || { echo "Usage: link_checkpoint PREFIX LINK_PREFIX [DIR]"; return 1; }
+    [ -n "$3" ] && workdir="${3%/}" || workdir=.
+
+    prefix=$1
+    lprefix=$2
+
+    (
+        set -e
+        cd $workdir
+
+        if ! [ -e $prefix-model-ppo.pt -o -e $prefix-model-dna.pt ]; then
+            echo "Source model not found: $prefix-model-ppo.pt | $prefix-model-dna.pt"
+            return 1
+        fi
+
+        for f in $prefix-*; do
+            tail=${f#$prefix-}
+            flink=$lprefix-$tail
+
+            if [ -e $flink -a ${confirmed:-no} != yes ]; then
+                echo -n "File exists, type 'yes' to continue: "
+                read -r confirmed
+                [ "$confirmed" = "yes" ] || return 0
+            fi
+
+            ln -fs $f $flink
+        done
+    )
+}
+
+#
+# Upload a timestamped checkpoint (from current dir)
+#
+function upload_checkpoint() {
+    [ -n "${1:-}" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG [DIR]"; return 1; }
+    [ -n "$2" ] && workdir="${2%/}" || workdir=.
+
+    rid=${1%-*}
+    tag=${1#*-}
+
+    [ -n "$rid" -a -n "$tag" ] || { echo "Usage: upload_checkpoint RUN_ID-TAG"; return 1; }
+
+    (
+        set -e
+        cd $workdir
+
+        if [ -e $rid-$tag-model-ppo.pt ]; then
+            suffixes="config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt"
+        elif [ -e $rid-$tag-model-dna.pt ]; then
+            suffixes="config.json state-default.json model-dna.pt optimizer-policy.pt optimizer-value.pt optimizer-distill.pt scaler-default.pt"
+        else
+            echo "Neither ppo nor dna model found"
+            return 1
+        fi
+
+        s3_dir=v15/models
+
+        files=()
+        for suffix in $suffixes; do
+            f=$rid-$tag-$suffix
+            [ -r $f ] || { echo "Not found: $f"; return 1; }
+            files+=($f)
+        done
+
+        for f in ${files[@]}; do
+            aws s3 cp $f s3://vcmi-gym/$s3_dir/
+        done
+    )
+}
+
+#
+# Download a timestamped checkpoint (to out_dir as per the config)
+#
+function download_checkpoint() {
+    local usage="Usage: download_checkpoint ppo|dna RUN_ID-TAG"
+    [ "$1" = ppo -o "$1" = dna ] || { echo "$usage"; return 1; }
+    [ -n "${2:-}" ] || { echo "$usage"; return 1; }
+
+    algo=$1
+    rid=${2%-*}
+    tag=${2#*-}
+    s3_dir=v15/models
+
+    [ -n "$rid" -a -n "$tag" ] || { echo "Usage: download_checkpoint RUN_ID-TAG"; return 1; }
+
+    cfg_json="$(aws s3 cp s3://vcmi-gym/$s3_dir/$rid-$tag-config.json -)"
+    [ -n "$cfg_json" ] || { echo "Failed to fetch config.json"; return 1; }
+    out_dir=$(echo "$cfg_json" | jq -r '.run.out_dir')
+    mkdir -p "$out_dir"
+
+    # Copy config separately (already downloaded as text)
+    echo "$cfg_json" > $out_dir/$rid-$tag-config.json
+
+    if [ "$algo" = ppo ]; then
+        suffixes="state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt"
+    else
+        suffixes="state-default.json model-dna.pt optimizer-policy.pt optimizer-value.pt optimizer-distill.pt scaler-default.pt"
+    fi
+
+    files=()
+    for suffix in $suffixes; do
+        files+=($rid-$tag-$suffix)
+    done
+
+    for f in ${files[@]}; do
+      aws s3 cp s3://vcmi-gym/$s3_dir/$f $out_dir/  || { echo "ERROR"; return 1; }
+    done
+}
+
+#
+# Same as download_checkpoint(), but only for the config & model weights
+#
+function download_model() {
+    local usage="Usage: download_model ppo|dna RUN_ID-TAG"
+    [ "$1" = ppo -o "$1" = dna ] || { echo "$usage"; return 1; }
+    [ -n "${2:-}" ] || { echo "$usage"; return 1; }
+
+    algo=$1
+    rid=${2%-*}
+    tag=${2#*-}
+    s3_dir=v15/models
+
+    [ -n "$rid" -a -n "$tag" ] || { echo "Usage: download_model RUN_ID-TAG"; return 1; }
+
+    cfg_json="$(aws s3 cp s3://vcmi-gym/$s3_dir/$rid-$tag-config.json -)"
+    [ -n "$cfg_json" ] || { echo "Failed to fetch config.json"; return 1; }
+    out_dir=$(echo "$cfg_json" | jq -r '.run.out_dir')
+    mkdir -p "$out_dir"
+
+    # Copy config separately (already downloaded as text)
+    echo "$cfg_json" > $out_dir/$rid-$tag-config.json
+
+    aws s3 cp s3://vcmi-gym/$s3_dir/$rid-$tag-model-$algo.pt $out_dir/  || { echo "ERROR"; return 1; }
+}
+
+#
+# Download v15 .pt model + old onnx models for arena
+# Example:
+#   prepare_arena zvytfdpo-202607230657
+#
+function prepare_arena() {
+    download_model "$@" || return 1
+    sed -i "/^[[:space:]]*players=(/{n;s|.*|    data/v15/$2-model-$1.pt|;}" vcmi_gym/tools/arena.sh
+
+    for onnx in attacker-nkjrmrsq-202509291846 defender-tukbajrv-202509241418; do
+        local f=attacker-nkjrmrsq-202509291846-stochastic.onnx
+        [ -e vcmi/Mods/mmai/models/$f ] || aws s3 cp s3://vcmi-gym/v15/models/$f vcmi/Mods/mmai/models/$f
+    done
+}
+
+#
+# Copy a checkpoint
+# E.g. fdqwrsd-best-... gdhsgsi-202601011251-...
+#
+function copy_checkpoint() {
+    if [ "$1" = "-y" ]; then
+        confirmed=yes
+        shift
+    fi
+
+    [ -n "${1:-}" -a -n "${2:-}" ] || { echo "Usage: copy_checkpoint [-y] RUN_ID-TAG1 RUN_ID-TAG2 [DIR]"; return 1; }
+    [ -n "$3" ] && workdir="${3%/}" || workdir=.
+
+    rid1=${1%-*}
+    tag1=${1#*-}
+    rid2=${2%-*}
+    tag2=${2#*-}
+
+    [[ $rid1 =~ ^[a-z]+$ ]] || { echo "Bad RUN_ID1: $rid1"; return 1; }
+    [[ $rid2 =~ ^[a-z]+$ ]] || { echo "Bad RUN_ID2: $rid2"; return 1; }
+    [[ $tag1 =~ ^[0-9a-z]+$ ]] || { echo "Bad TAG1: $tag1"; return 1; }
+    [[ $tag2 =~ ^[0-9a-z]+$ ]] || { echo "Bad TAG2: $tag2"; return 1; }
+
+    (
+        set -e
+        cd $workdir
+
+        if [ $rid1 != $rid2 -a ${confirmed:-no} != yes ]; then
+            echo -n "RUN_ID is different, type 'yes' to continue: "
+            read -r confirmed
+            [ "$confirmed" = "yes" ] || return 0
+        fi
+
+        prefix1=$rid1-$tag1
+        prefix2=$rid2-$tag2
+
+        if [ -e $prefix1-model-ppo.pt ]; then
+            model1=$prefix1-model-ppo.pt
+            model2=$prefix2-model-ppo.pt
+            suffixes="model-ppo optimizer-default scaler-default"
+        elif [ -e $prefix1-model-dna.pt ]; then
+            model2=$prefix1-model-dna.pt
+            model2=$prefix2-model-dna.pt
+            suffixes="model-dna optimizer-policy optimizer-value optimizer-distill scaler-default"
+        else
+            echo "Neither ppo nor dna source model found"
+            return 1
+        fi
+
+        if [ -e $model2 ]; then
+            echo "Destination already exists: $model2"
+            return 1
+        fi
+
+        for f in config state-default; do
+          cp {$prefix1-,$prefix2-}$f.json
+        done
+
+        for suffix in $suffixes; do
+          cp {$prefix1-,$prefix2-}$suffix.pt
+        done
+    )
+}
+
+function setboot() {
+    cat <<EOL >/root/onstart.sh
+#!/bin/bash
+# Logs are in /var/log/onstart.log
+
+set -x
+
+# For tracking reboots
+date +'BOOTED_AT=%FT%T%z' >> ~/.bashrc
+
+service cron start || :
+
+tmux new-session -d "source ~/.simorc; tmux rename-window $VASTAI_INSTANCE_ID:REBOOTED; /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID REBOOTED; cd $PWD; $*; exec $SHELL"
+EOL
+}
+
+function retry_until_sigint() {
+    local run_id=$1
+    shift
+    local i=0
+    while true; do
+        tmux rename-window $VASTAI_INSTANCE_ID:$run_id || :
+        bash -x ~/runcmd.sh $*
+        if [ $? -eq 130 ]; then
+            echo "Interrupt detected, will NOT retry"
+            /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID IDLE
+            tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
+            break
+        else
+            echo "Interrupt NOT detected, will retry in 10s..."
+            let ++i
+            /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID CRASHED_$i
+            tmux rename-window $VASTAI_INSTANCE_ID:CRASHED_$i || :
+            # FIXME: if there are other runs on the same instance, this will kill them as well
+            killall python
+            sleep 10
+        fi
+    done
+}
+
+function train_gnn() {
+    local algo=$1
+    local run_id=$2
+    shift 2
+    local rest=$*
+
+    if ! [[ $algo =~ ^(ppo|dna)$ ]]; then
+        echo "bad algo type: want: (ppo|dna), have: $algo"
+        return 1
+    fi
+
+    local new_run=false
+    if [ -z "$run_id" ]; then
+        LC_ALL=C run_id=$(tr -dc 'a-z' </dev/urandom | head -c8)
+        new_run=true
+    fi
+
+    [[ $run_id =~ ^[a-z]{8}$ ]] || {
+        cat <<-USAGE
+Usage: train_gnn algo run_id [opts]
+USAGE
+        return 1
+    }
+
+    local dry_run
+    echo $* | grep -- --dry-run && dry_run=true || dry_run=false
+
+    local f="data/v15/$run_id-config.json"
+
+    if [ -r "$f" ] && $new_run; then
+        echo "Config already exists, but this should be a new run"
+        retirn 1
+    fi
+
+    if ! [ -r "$f" ] && ! $new_run; then
+        echo "Config not found, but this should be a resumed run"
+        return 1
+    fi
+
+    local basecmd="python -m rl.v15.${algo}_gnn"
+    local newcmd="$basecmd --run-id $run_id $rest"
+
+    # Resuming does not use any args except -f and (optionally) --dry-run
+    local resumecmd="$basecmd -f $f"
+    if $dry_run; then
+        resumecmd+=" --dry-run"
+
+        # don't resume on boot (let it transition to REBOOTED)
+        setboot :
+    else
+        # must not start a new run on boot => use resumecmd
+        setboot retry_until_sigint $run_id $resumecmd
+    fi
+
+    if $new_run; then
+        echo "This is a new run -- will start ONCE with --run-id to create it"
+        tmux rename-window $VASTAI_INSTANCE_ID:$run_id || :
+        bash -x ~/runcmd.sh $newcmd --skip-eval
+
+        if [ $? -eq 130 ]; then
+            echo "Interrupt detected, will NOT retry"
+            tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
+            /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID IDLE
+            # run was interrupted, no need to resume on boot
+            setboot :
+            return 0
+        fi
+
+        # The config file should now be created, can enter the regular retry loop
+        echo "Interrupt NOT detected, will enter retry loop"
+        tmux rename-window $VASTAI_INSTANCE_ID:CRASHED || :
+        /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID CRASHED
+        killall python
+        sleep 10
+    fi
+
+    retry_until_sigint $run_id $resumecmd
+    setboot :
+}
+
+set +x
+alias gs='git status'
+alias gl='git log'
+alias gh='git h'
+alias ghh='git hh'
+alias ga='git add'
+alias gc='git commit'
+alias gci='git commit'
+alias gd='git diff'
+alias gco='git checkout'
+
+cd /workspace/vcmi-gym
+. /venv/main/bin/activate
+
+# These are required in scripts
+. ~/secrets
+[ "${#AWS_ACCESS_KEY}" -eq 40 ] || { echo "WARNING: AWS_ACCESS_KEY: invalid length: want: 20, have: #${#AWS_ACCESS_KEY}"; }
+[ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "WARNING: AWS_SECRET_KEY: invalid length: want: 40, have: #${#AWS_SECRET_KEY}"; }
+[ "${#WANDB_API_KEY}" -eq 20 ] || { echo "WARNING: WANDB_API_KEY: invalid length: want: 20, have: #${#WANDB_API_KEY}"; }
+[[ $VASTAI_INSTANCE_ID =~ ^[[:digit:]]+$ ]] || { echo "WARNING: VASTAI_INSTANCE_ID: invalid value: '$VASTAI_INSTANCE_ID'"; }
+
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export RAY_memory_monitor_refresh_ms=0
+export VASTAI=1
+
+set -x

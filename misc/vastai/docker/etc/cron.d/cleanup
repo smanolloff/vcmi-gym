@@ -1,0 +1,1 @@
+0 0 * * * root /root/cleanup.sh 48 /workspace/vcmi-gym/data/v15 >> /root/cleanup.log
