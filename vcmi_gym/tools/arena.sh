@@ -10,14 +10,15 @@ set -euxo pipefail
 #
 
 players=(
-    models/ihggsmxw-1782726477-model-dna.pt
-    models/zvytfdpo-best27-model-ppo.pt
-    models/zvytfdpo-best29-model-ppo.pt
+    #data/v15/pdpyqkrb-202607230944-model-ppo.pt  # ATTACKER
+    data/v15/zvytfdpo-202607230657-model-ppo.pt  # DEFENDER
 )
 
 opponents=(
     BattleAI
-    mmai/models/attacker-nkjrmrsq-202509291846-stochastic.onnx
+
+    mmai/models/attacker-nkjrmrsq-202509291846-stochastic.onnx  # ATTACKER
+    #mmai/models/defender-tukbajrv-202509241418-stochastic.onnx  # DEFENDER
 )
 
 for player in "${players[@]}"; do

@@ -80,3 +80,4 @@ edge-typos:
 	cd ..
 	$(MAKE) vastai-build-connector
 
+# download-onnx: use prepare_arena() bash function instead
