@@ -60,7 +60,7 @@ RUN chmod +x /root/entrypoint.sh \
     && chmod +x /root/cleanup.sh \
     && echo 'export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)' >> /root/.bashrc \
     && echo "source ~/.simorc" >> /root/.bashrc \
-    && mkdir data/v15
+    && mkdir -p data/v15
 
 # Benchmark model
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
