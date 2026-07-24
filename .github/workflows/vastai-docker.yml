@@ -23,6 +23,14 @@ jobs:
   vastai-docker:
     runs-on: ubuntu-24.04
     steps:
+      - name: Free up disk space
+        run: |
+          echo "Disk usage BEFORE cleanup:"
+          df -h
+          sudo rm -rf /opt/ghc /usr/local/.ghcup /usr/share/dotnet || :
+          echo "Disk usage AFTER cleanup:"
+          df -h
+
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
