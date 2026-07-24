@@ -39,14 +39,14 @@ if [ -z "$autorun" ]; then
 else
     # XXX: no setting label to "$autorun" as the RL algo will set it
     # There is a race condition, but not a critical one
-    tag=$(python -c '
+    tag=$(RUN_ID=$autorun python -c '
 from rl.v15.util.persistence import find_latest_tag
 from rl.v15.util.structured_logger import StructuredLogger
 import datetime as dt
 tag, _ts = find_latest_tag(
     StructuredLogger(level=40, context=dict(name="test")),
     "ppo",
-    "eaqbvprl",
+    os.environ["RUN_ID"],
     {"bucket_name": "vcmi-gym", "s3_dir": "v15/models"},
     dt.datetime(2000, 1, 1).astimezone(dt.timezone.utc))
 print(tag)')

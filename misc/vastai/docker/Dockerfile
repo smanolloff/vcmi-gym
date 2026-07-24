@@ -59,7 +59,16 @@ COPY ./misc/vastai/docker/.vimrc \
 RUN chmod +x /root/entrypoint.sh \
     && chmod +x /root/cleanup.sh \
     && echo 'export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)' >> /root/.bashrc \
-    && echo "source ~/.simorc" >> /root/.bashrc
+    && echo "source ~/.simorc" >> /root/.bashrc \
+    && mkdir data/v15
+
+# Benchmark model
+RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
+    --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_KEY \
+    for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do \
+        aws s3 cp s3://vcmi-gym/v15/models/pdpyqkrb-benchmark-$suffix data/v15/; \
+        ln -s pdpyqkrb-benchmark-$suffix data/v15/pdpyqkrb-$suffix; \
+    done
 
 COPY . .
 
