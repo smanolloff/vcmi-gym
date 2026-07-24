@@ -40,16 +40,16 @@ COPY ./misc/vastai/docker/.vimrc \
     ./misc/vastai/docker/.gitconfig \
     ./misc/vastai/docker/.gitignore_global \
     ./misc/vastai/docker/.simorc \
+    ./misc/vastai/docker/onstart.sh \
     /root/
 
-RUN echo 'export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)' >> /root/.bashrc \
-    && echo "source ~/.simorc" >> /root/.bashrc \
-    && mkdir -p data/v15
+RUN echo "source ~/.simorc" >> /root/.bashrc
 
 # Benchmark model
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
     --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_KEY \
-    for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do \
+    mkdir -p data/v15 \
+    && for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do \
         aws s3 cp s3://vcmi-gym/v15/models/pdpyqkrb-benchmark-$suffix data/v15/; \
         ln -s pdpyqkrb-benchmark-$suffix data/v15/pdpyqkrb-$suffix; \
     done
@@ -57,8 +57,7 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
 COPY . .
 
 # Use a separate simorc which is called explicitly from nonlogin shells
-RUN chmod +x misc/vastai/docker/entrypoint.sh \
-    && chmod +x misc/vastai/docker/cleanup.sh \
+RUN chmod +x misc/vastai/docker/cleanup.sh \
     && . /venv/main/bin/activate \
     && make pip-install \
     && cd vcmi \
@@ -73,5 +72,3 @@ RUN chmod +x misc/vastai/docker/entrypoint.sh \
 
 ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ENV VASTAI=1
-
-ENTRYPOINT ["/workspace/vcmi-gym/misc/vastai/docker/entrypoint.sh"]

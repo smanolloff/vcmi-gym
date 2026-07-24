@@ -17,8 +17,7 @@ goldcounter = 0
 
 # Price threshold of $/hr
 DPH = 0.3  # -D ...
-ROLLOUT_SECONDS = 30  # -r ...
-AUTORUNS = []  # ...ARGV
+AUTORUNS = []  # ARGV
 
 DB_PATH = "autorent.db"
 SLEEP_SECONDS = 60
@@ -34,6 +33,9 @@ VASTAI_ENV = dict(
     VCMI_ARCHIVE_KEY=os.environ["VASTAI_VCMI_ARCHIVE_KEY"],
     WANDB_API_KEY=os.environ["VASTAI_WANDB_API_KEY"],
     VAST_API_KEY=os.environ["VASTAI_BENCHMARK_API_KEY"],
+    # VASTAI_INIT_UPDATE=(set later)
+    # VASTAI_INIT_CHECK_ARGS=(set later)
+    # VASTAI_INIT_AUTORUN_ARGS=(set later)
 )
 
 VASTAI_NTFY_TOPIC = os.environ["VASTAI_NTFY_TOPIC"]
@@ -75,7 +77,7 @@ def vastai_search(blacklist: List[int]):
     body = {
         "type": "on-demand",
         "order": [["dph_total", "asc"]],
-        "allocated_storage": 15.0,  # NOTE: must correspond to `disk` in vastai_rent()
+        "allocated_storage": 8,  # NOTE: must correspond to `disk` in vastai_rent()
         "external": {"eq": True},
         "rented": {"eq": False},
         "gpu_name": {"eq": "RTX 5090"},
@@ -137,22 +139,9 @@ def vastai_rent(offer_id: int) -> int | None:
     body = dict(
         client_id="me",
         env=VASTAI_ENV,
-        disk=15.0,  # NOTE: must correspond to `allocated_storage` in vastai_search()
+        disk=8,  # NOTE: must correspond to `allocated_storage` in vastai_search()
         template_hash_id="45d8b6aafe75e5bcfabcb7b4b5868529",  # "PyTorch (vcmi-gym) - 12.8"
-        label="autorent",
-        # -r32 means "32 seconds per rollout" threshold (see check.sh)
-        # autorent instances as usually cheap => threshold is a bit higher.
-        onstart=(
-            'set -x; [ -e /workspace/.preinit ] && exit 0'
-            'source /workspace/vcmi-gym/misc/vastai/preinit.sh; set +e; unset FAKETIME_SHARED;'
-            r'tmux set-option -g history-limit 100000 \; new-session -d unset\ FAKETIME_SHARED\;'
-            r'bash\ -xc\ unset\\\ FAKETIME_SHARED\\\;'
-            r'cd\\\ /workspace/vcmi-gym/misc/vastai\\\;'
-            r'bash\\\ check.sh\\\ -t\\\ -i90\\\ -r%s\\\ -n5\\\;'
-            r'bash\\\ autorun.sh\\\ %s\;'
-            r'touch\ /workspace/.preinit\;'
-            r'exec\ \$SHELL'
-        ) % (ROLLOUT_SECONDS, r'\\\ '.join(AUTORUNS))
+        label="autorent"
     )
 
     logging.debug(f"Request body: {body}")
@@ -434,7 +423,7 @@ def handle_pending_instances(conn: sqlite3.Connection) -> Dict[int, dict]:
         label = running_instances[instance_id]["label"]
         txt = f"{instance_id} {host_id}/{machine_id} dph={round(dph, 4)}"
 
-        if label in ["autorent", "check...", "wait..."]:
+        if label in ["autorent", "init...", "check...", "wait..."]:
             if is_older_than_minutes(created_at, INIT_TIMEOUT_MINUTES):
                 vastai_destroy(instance_id)
                 db_audit_log(conn, f"destroy: {txt} reason=timeout")
@@ -523,17 +512,24 @@ def install_signal_handlers() -> None:
 
 
 if __name__ == "__main__":
+    # -r25 means "25 seconds per rollout" threshold (see check.sh)
+    # autorent instances as usually cheap => allow slower (27)
+
     parser = argparse.ArgumentParser()
     parser.add_argument('-D', "--dph", type=float, default=DPH)
-    parser.add_argument('-r', "--rollout", type=int, default=ROLLOUT_SECONDS)
+    parser.add_argument('-r', "--rollout", type=int, default=27)
+    parser.add_argument('-u', "--update", action="store_true")
     parser.add_argument('autoruns', nargs=argparse.REMAINDER, help="auto-run IDs (space-separated)")
     args = parser.parse_args()
 
-    DPH = args.dph
-    ROLLOUT_SECONDS = args.rollout
-    AUTORUNS = args.autoruns
+    assert all(re.match(r'^[a-z]{8}$', a) for a in args.autoruns)
 
-    assert all(re.match(r'^[a-z]{8}$', a) for a in AUTORUNS)
+    VASTAI_ENV["VASTAI_INIT_UPDATE"] = str(int(args.update))
+    VASTAI_ENV["VASTAI_INIT_CHECK_ARGS"] = f"-t -i90 -r{args.rollout} -n5"
+    VASTAI_ENV["VASTAI_INIT_AUTORUN_ARGS"] = " ".join(args.autoruns)
+
+    AUTORUNS = args.autoruns
+    DPH = args.dph
 
     setup_logging()
     install_signal_handlers()

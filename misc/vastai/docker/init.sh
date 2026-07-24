@@ -41,7 +41,6 @@ fi
 ################
 
 touch ~/.no_auto_tmux
-tmux source ~/.tmux.conf || :
 [ -d ~/.tmux/plugins/tpm ] || git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 ~/.tmux/plugins/tpm/bin/install_plugins
 
@@ -57,6 +56,7 @@ service cron reload
 
 aws configure set aws_access_key_id "$AWS_ACCESS_KEY"
 aws configure set aws_secret_access_key "$AWS_SECRET_KEY"
+chmod 600 ~/.aws/credentials
 
 ################
 ### H3 data
@@ -64,7 +64,6 @@ aws configure set aws_secret_access_key "$AWS_SECRET_KEY"
 
 cd /workspace/vcmi-gym
 7z x vcmi/h3.7z -y -p"$VCMI_ARCHIVE_KEY" -o"vcmi/"
-/opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID ready
 
 ################
 ### W&B

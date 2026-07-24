@@ -1,6 +1,8 @@
 #!/bin/bash
 set -x
 
+export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)
+
 function pymod() {
     local f=$1
     shift
