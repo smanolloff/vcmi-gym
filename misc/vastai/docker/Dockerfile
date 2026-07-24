@@ -90,7 +90,6 @@ RUN echo "source ~/.simorc" >> /root/.bashrc \
 
 COPY . .
 RUN . /venv/main/bin/activate \
-    && cd vcmi-gym \
     && make pip-install \
     && cd vcmi \
     && mkdir -p data/config \
