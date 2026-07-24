@@ -52,6 +52,9 @@ jobs:
         with:
           context: .
           file: ./misc/vastai/docker/Dockerfile
+          secrets: |
+            aws_access_key=${{ secrets.AWS_ACCESS_KEY }}
+            aws_secret_key=${{ secrets.AWS_SECRET_KEY }}
           tags: |
               ${{ env.REGISTRY }}/smanolloff/vcmi-gym:${{ github.sha }}
               ${{ env.REGISTRY }}/smanolloff/vcmi-gym:${{ inputs.tag }}
