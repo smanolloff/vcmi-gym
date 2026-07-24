@@ -68,7 +68,7 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
 ENV ONNXRUNTIME_ROOT=/opt/onnxruntime
 RUN ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz \
     mkdir -p "$ONNXRUNTIME_ROOT" \
-    curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
+    && curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
 
 COPY ./misc/vastai/docker/etc/cron.d/cleanup /etc/cron.d/
 COPY ./misc/vastai/docker/.aws/ /root/.aws/
