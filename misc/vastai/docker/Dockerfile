@@ -33,7 +33,7 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
 # Everything installed after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
 COPY ./misc/vastai/docker/etc/apt/sources.list /etc/apt/
 RUN apt-get update && apt-get -y install \
-    7zip vim ccache g++ liblzma-dev libboost-date-time-dev \
+    7zip tmux vim ccache g++ liblzma-dev libboost-date-time-dev \
     libboost-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev \
     libboost-program-options-dev libboost-locale-dev libboost-iostreams-dev \
     libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
@@ -44,9 +44,9 @@ RUN apt-get update && apt-get -y install \
     libsquish-dev
 
 # tmux setup
-RUN git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm \
-    && tmux source /root/.tmux.conf \
-    && /root/.tmux/plugins/tpm/bin/install_plugins
+# RUN git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm \
+#     && tmux source /root/.tmux.conf \
+#     && /root/.tmux/plugins/tpm/bin/install_plugins
 
 # aws CLI setup
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
