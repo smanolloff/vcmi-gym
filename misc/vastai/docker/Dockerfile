@@ -5,7 +5,7 @@ WORKDIR /workspace/vcmi-gym
 # Check secrets
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
     --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_KEY \
-    && { [ "${#AWS_ACCESS_KEY}" -eq 40 ] || { echo "AWS_ACCESS_KEY: invalid length: want: 20, have: #${#AWS_ACCESS_KEY}"; exit 1; } } \
+    { [ "${#AWS_ACCESS_KEY}" -eq 40 ] || { echo "AWS_ACCESS_KEY: invalid length: want: 20, have: #${#AWS_ACCESS_KEY}"; exit 1; } } \
     && { [ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "AWS_SECRET_KEY: invalid length: want: 40, have: #${#AWS_SECRET_KEY}"; exit 1; } }
 
 ####################################################
