@@ -27,7 +27,14 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
 #
 #   7z x vcmi/h3.7z -p"$VCMI_ARCHIVE_KEY" -o"vcmi"
 #   wandb init -p vcmi-gym && wandb login "$WANDB_API_KEY"
+#
+#   # This can't be done build-time (tmux throws errors)
+#   git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm \
+#     && tmux source /root/.tmux.conf \
+#     && ~/.tmux/plugins/tpm/bin/install_plugins
+#
 #   /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID ready
+#
 ####################################################
 
 # Everything installed after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
@@ -43,11 +50,6 @@ RUN apt-get update && apt-get -y install \
     libluajit-5.1-dev libminizip-dev libfuzzylite-dev libsqlite3-dev \
     libsquish-dev
 
-# tmux setup
-# RUN git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm \
-#     && tmux source /root/.tmux.conf \
-#     && /root/.tmux/plugins/tpm/bin/install_plugins
-
 # aws CLI setup
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
     && unzip awscliv2.zip \
@@ -55,7 +57,12 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
     --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_KEY \
-    aws s3 cp s3://vcmi-gym/h3.7z vcmi/
+    mkdir -p /root/.aws \
+    && echo "[default]" > /root/.aws/credentials \
+    && echo "aws_access_key_id=${AWS_ACCESS_KEY}" >> /root/.aws/credentials \
+    && echo "aws_secret_access_key=${AWS_SECRET_KEY}" >> /root/.aws/credentials \
+    && chmod 600 /root/.aws/credentials \
+    && aws s3 cp s3://vcmi-gym/h3.7z vcmi/
 
 # ONNX setup (copied from vcmi/CI/before_install/linux_common.sh)
 ENV ONNXRUNTIME_ROOT=/opt/onnxruntime
