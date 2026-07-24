@@ -45,8 +45,8 @@ COPY ./misc/vastai/docker/.vimrc \
     /root/
 
 # Use a separate simorc which is called explicitly from nonlogin shells
-RUN chmod +x /root/entrypoint.sh \
-    && chmod +x /root/cleanup.sh \
+RUN chmod +x misc/vastai/docker/entrypoint.sh \
+    && chmod +x misc/vastai/docker/cleanup.sh \
     && echo 'export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)' >> /root/.bashrc \
     && echo "source ~/.simorc" >> /root/.bashrc \
     && mkdir -p data/v15
