@@ -22,9 +22,9 @@ RUN apt-get update && apt-get -y install \
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_ACCESS_KEY \
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
-    && unzip awscliv2.zip \
+    && unzip awscliv2.zip -d /root \
     && rm awscliv2.zip \
-    && ./aws/install --update \
+    && /root/aws/install --update \
     && aws configure set region eu-north-1 \
     && aws configure set output json \
     && aws s3 cp s3://vcmi-gym/h3.7z vcmi/
@@ -74,3 +74,24 @@ RUN chmod +x misc/vastai/docker/cleanup.sh \
 
 ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ENV VASTAI=1
+
+#
+# NOTE:
+# The VastAI's entrypoint is /opt/instance-tools/bin/entrypoint.sh
+#
+#   $ docker buildx imagetools inspect ghcr.io/smanolloff/vcmi-gym:latest --format '{{json .Image.Config.Entrypoint}}'
+#   [
+#     "/opt/instance-tools/bin/entrypoint.sh"
+#   ]
+#
+# However, this entrypoint is NOT used: vast uses cmdline on container create
+#
+#   # from container itself
+#   $ tr '\0' ' ' < /proc/1/cmdline
+#   bash /.launch
+#
+# => the de-facto entrypoint is /.launch
+# It installs essentials such as openssh-server, tmux, rsync, etc.
+# It also has a bug where it checks and creates .onstart.sh using a relative instead of absolute path,
+# resulting in a redundant /workspace/vcmi-gym/onstart.sh file created
+#

@@ -3,3 +3,6 @@
 *.orig
 *.pyc
 .venv
+
+# auto-created in WORKDIR by vastai's /.launch
+onstart.sh

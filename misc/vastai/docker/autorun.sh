@@ -43,6 +43,7 @@ else
 from rl.v15.util.persistence import find_latest_tag
 from rl.v15.util.structured_logger import StructuredLogger
 import datetime as dt
+import os
 tag, _ts = find_latest_tag(
     StructuredLogger(level=40, context=dict(name="test")),
     "ppo",
