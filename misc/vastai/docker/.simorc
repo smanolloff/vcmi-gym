@@ -1,7 +1,25 @@
 #!/bin/bash
-set -x
 
-export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)
+# Sanity checks
+[ "${#AWS_ACCESS_KEY}" -eq 20 ] || echo "WARNING: AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}";
+[ "${#AWS_SECRET_KEY}" -eq 40 ] || echo "WARNING: AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}";
+[ "${#VCMI_ARCHIVE_KEY}" -eq 16 ] || echo "WARNING: VCMI_ARCHIVE_KEY: invalid length: want: 16, have: ${#VCMI_ARCHIVE_KEY}";
+[ "${#VAST_API_KEY}" -eq 64 ] || echo "WARNING: VAST_API_KEY: invalid length: want: 64, have: ${#VAST_API_KEY}";
+[ "${#WANDB_API_KEY}" -eq 40 ] || echo "WARNING: WANDB_API_KEY: invalid length: want: 40, have: ${#WANDB_API_KEY}";
+[[ $VASTAI_INSTANCE_ID =~ ^[[:digit:]]+$ ]] || echo "WARNING: VASTAI_INSTANCE_ID: invalid value: '$VASTAI_INSTANCE_ID'";
+pidof cron >/dev/null || echo "WARNING: cron is not running"
+
+# Usage: vcurl VERB PATH [BODY]
+function vcurl() {
+    [ $# -eq 2 -o $# -eq 3 ] || { echo "Usage: vcurl VERB PATH [BODY]"; return 1; }
+    local -a curlargs=(--fail-with-body -sLH "Authorization: Bearer $VAST_API_KEY" -X $1 --url "https://console.vast.ai/api/v0$2")
+    [ $# -lt 3 ] || curlargs+=(--json "$3")
+    curl "${curlargs[@]}"
+}
+
+function set_label() {
+    vcurl PUT /instances/$VASTAI_INSTANCE_ID '{"label": "'"$1"'"}'
+}
 
 function pymod() {
     local f=$1
@@ -245,7 +263,7 @@ date +'BOOTED_AT=%FT%T%z' >> ~/.bashrc
 
 service cron start || :
 
-tmux new-session -d "source ~/.simorc; tmux rename-window $VASTAI_INSTANCE_ID:REBOOTED; /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID REBOOTED; cd $PWD; $*; exec $SHELL"
+tmux new-session -d "source ~/.simorc; tmux rename-window $VASTAI_INSTANCE_ID:REBOOTED; set_label REBOOTED; cd $PWD; $*; exec $SHELL"
 EOL
 }
 
@@ -258,13 +276,13 @@ function retry_until_sigint() {
         bash -x /workspace/vcmi-gym/misc/vastai/docker/runcmd.sh $*
         if [ $? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
-            /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID IDLE
+            set_label IDLE
             tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
             break
         else
             echo "Interrupt NOT detected, will retry in 10s..."
             let ++i
-            /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID CRASHED_$i
+            set_label CRASHED_$i
             tmux rename-window $VASTAI_INSTANCE_ID:CRASHED_$i || :
             # FIXME: if there are other runs on the same instance, this will kill them as well
             killall python
@@ -335,7 +353,7 @@ USAGE
         if [ $? -eq 130 ]; then
             echo "Interrupt detected, will NOT retry"
             tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
-            /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID IDLE
+            set_label IDLE
             # run was interrupted, no need to resume on boot
             setboot :
             return 0
@@ -344,7 +362,7 @@ USAGE
         # The config file should now be created, can enter the regular retry loop
         echo "Interrupt NOT detected, will enter retry loop"
         tmux rename-window $VASTAI_INSTANCE_ID:CRASHED || :
-        /opt/instance-tools/bin/vastai label instance $VASTAI_INSTANCE_ID CRASHED
+        set_label CRASHED
         killall python
         sleep 10
     fi
@@ -353,7 +371,6 @@ USAGE
     setboot :
 }
 
-set +x
 alias gs='git status'
 alias gl='git log'
 alias gh='git h'
@@ -366,14 +383,5 @@ alias gco='git checkout'
 
 cd /workspace/vcmi-gym
 . /venv/main/bin/activate
-
-# Sanity checks
-[ "${#AWS_ACCESS_KEY}" -eq 20 ] || echo "WARNING: AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}";
-[ "${#AWS_SECRET_KEY}" -eq 40 ] || echo "WARNING: AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}";
-[ "${#VCMI_ARCHIVE_KEY}" -eq 16 ] || echo "WARNING: VCMI_ARCHIVE_KEY: invalid length: want: 16, have: ${#VCMI_ARCHIVE_KEY}";
-[ "${#VAST_API_KEY}" -eq 64 ] || echo "WARNING: VAST_API_KEY: invalid length: want: 64, have: ${#VAST_API_KEY}";
-[ "${#WANDB_API_KEY}" -eq 40 ] || echo "WARNING: WANDB_API_KEY: invalid length: want: 40, have: ${#WANDB_API_KEY}";
-[[ $VASTAI_INSTANCE_ID =~ ^[[:digit:]]+$ ]] || echo "WARNING: VASTAI_INSTANCE_ID: invalid value: '$VASTAI_INSTANCE_ID'";
-pidof cron >/dev/null || echo "WARNING: cron is not running"
 
 set -x

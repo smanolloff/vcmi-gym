@@ -1,6 +1,30 @@
 #!/bin/bash
 
+if [ -f /workspace/.init ]; then
+    exit 0
+fi
+
 set -euxo pipefail
+
+################
+# Env
+################
+
+export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)
+
+# XXX: this file is parsed by PAM and is not a shell script
+cat <<-EOF >>/etc/environment
+AWS_ACCESS_KEY=$AWS_ACCESS_KEY
+AWS_SECRET_KEY=$AWS_SECRET_KEY
+VCMI_ARCHIVE_KEY=$VCMI_ARCHIVE_KEY
+VAST_API_KEY=$VAST_API_KEY
+WANDB_API_KEY=$WANDB_API_KEY
+VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
+EOF
+
+source ~/.simorc
+
+set_label init...
 
 ################
 # Faketime
@@ -101,3 +125,6 @@ fi
 if [ -n "${VASTAI_INIT_AUTORUN_ARGS:-}" ]; then
     bash misc/vastai/docker/autorun.sh $VASTAI_INIT_AUTORUN_ARGS
 fi
+
+set_label ready
+touch /workspace/.init

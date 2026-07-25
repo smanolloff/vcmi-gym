@@ -140,7 +140,7 @@ def vastai_rent(offer_id: int) -> int | None:
         client_id="me",
         env=VASTAI_ENV,
         disk=8,  # NOTE: must correspond to `allocated_storage` in vastai_search()
-        template_hash_id="45d8b6aafe75e5bcfabcb7b4b5868529",  # "PyTorch (vcmi-gym) - 12.8"
+        template_hash_id="f91f9054cb251242e271540b5703012b",  # "PyTorch (vcmi-gym) - 12.8"
         label="autorent"
     )
 
