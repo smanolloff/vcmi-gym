@@ -62,6 +62,7 @@ function check() {
   status=$?
   set -e
   date
+
   if [ $status -eq 124 ]; then
     echo "CHECK FAILED (timeout)"
     return $status

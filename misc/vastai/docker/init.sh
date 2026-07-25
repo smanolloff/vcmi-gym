@@ -125,8 +125,6 @@ if [ -f /workspace/.init ]; then
     exit 0
 fi
 
-
-
 if main "$@"; then
     set_label IDLE
     tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
@@ -136,8 +134,8 @@ if main "$@"; then
     ### Autorun
     ################################################
     if [ -n "${VASTAI_INIT_AUTORUN_ARGS:-}" ]; then
-        # autorun will manage the instance labels
-        bash misc/vastai/docker/autorun.sh $VASTAI_INIT_AUTORUN_ARGS
+        # autorun manages the instance labels from here on
+        bash misc/vastai/docker/autorun.sh $VASTAI_INIT_AUTORUN_ARGS || :
     fi
 
     exit 0

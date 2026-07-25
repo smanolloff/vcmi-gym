@@ -2,10 +2,12 @@ FROM vastai/pytorch:cuda-12.8.1-auto
 
 WORKDIR /workspace/vcmi-gym
 
-# Check secrets
-# Everything installed after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
-RUN apt-get update && apt-get -y install \
+# 1st line of installed packages are needed by vcmi-gym
+# 2nd line of installed packages are needed by vastai itself (installs them on instance create)
+# 3rd line and everything after are packages from vcmi/CI/before_install/linux_qt5.sh
+RUN apt-get update && apt-get -y --no-install-recommends install \
     7zip tmux vim ccache g++ liblzma-dev libboost-date-time-dev \
+    openssh-server git wget curl less locales sudo software-properties-common rsync \
     libboost-dev libboost-filesystem-dev libboost-system-dev libboost-thread-dev \
     libboost-program-options-dev libboost-locale-dev libboost-iostreams-dev \
     libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
