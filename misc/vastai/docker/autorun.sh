@@ -34,8 +34,7 @@ labels=$(echo "$instances" | jq -c 'map(.label)')
 autorun=$(jq -nr --argjson labels "$labels" --argjson autoruns "$AUTORUNS" 'first($autoruns[] | select(. as $x | $labels | index($x) | not)) // empty')
 
 if [ -z "$autorun" ]; then
-    # Set label to ready
-    set_label ready
+    set_label IDLE
 else
     # XXX: no setting label to "$autorun" as the RL algo will set it
     # There is a race condition, but not a critical one

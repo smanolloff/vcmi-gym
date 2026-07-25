@@ -74,7 +74,7 @@ EOF
     ### Cron
     ################################################
     echo '0 0 * * * root /workspace/vcmi-gym/misc/vastai/docker/cleanup.sh 48 /workspace/vcmi-gym/data/v15 >> /root/cleanup.log' > /etc/cron.d/cleanup
-    service cron reload
+    service cron restart
 
     ################################################
     ### AWS CLI
@@ -119,26 +119,31 @@ EOF
             make vastai-build-connector
         fi
     fi
-
-    ################################################
-    ### Autorun
-    ################################################
-
-    if [ -n "${VASTAI_INIT_AUTORUN_ARGS:-}" ]; then
-        bash misc/vastai/docker/autorun.sh $VASTAI_INIT_AUTORUN_ARGS
-    fi
 }
 
 if [ -f /workspace/.init ]; then
     exit 0
 fi
 
+
+
 if main "$@"; then
-    set_label ready
+    set_label IDLE
+    tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
     touch /workspace/.init
+
+    ################################################
+    ### Autorun
+    ################################################
+    if [ -n "${VASTAI_INIT_AUTORUN_ARGS:-}" ]; then
+        # autorun will manage the instance labels
+        bash misc/vastai/docker/autorun.sh $VASTAI_INIT_AUTORUN_ARGS
+    fi
+
     exit 0
 else
     set_label ERR_INIT
+    tmux rename-window $VASTAI_INSTANCE_ID:ERR_INIT || :
     echo "INIT ERROR" >&2
     exit 1
 fi
