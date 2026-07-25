@@ -3,11 +3,6 @@ FROM vastai/pytorch:cuda-12.8.1-auto
 WORKDIR /workspace/vcmi-gym
 
 # Check secrets
-RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY \
-    --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_KEY \
-    { [ "${#AWS_ACCESS_KEY}" -eq 20 ] || { echo "AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}"; exit 1; }; } \
-    && { [ "${#AWS_SECRET_KEY}" -eq 40 ] || { echo "AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}"; exit 1; }; }
-
 # Everything installed after the first newline are packages from vcmi/CI/before_install/linux_qt5.sh
 RUN apt-get update && apt-get -y install \
     7zip tmux vim ccache g++ liblzma-dev libboost-date-time-dev \
@@ -18,48 +13,40 @@ RUN apt-get update && apt-get -y install \
     ninja-build zlib1g-dev libavformat-dev libswscale-dev libtbb-dev \
     libluajit-5.1-dev libminizip-dev libfuzzylite-dev libsqlite3-dev libsquish-dev
 
-# aws CLI setup
-RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
-    --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_ACCESS_KEY \
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
-    && unzip awscliv2.zip -d /root \
-    && rm awscliv2.zip \
-    && /root/aws/install --update \
-    && aws configure set region eu-north-1 \
-    && aws configure set output json \
-    && aws s3 cp s3://vcmi-gym/h3.7z vcmi/
-
 # ONNX setup (copied from vcmi/CI/before_install/linux_common.sh)
-ENV ONNXRUNTIME_ROOT=/opt/onnxruntime
-ENV ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
-
-RUN mkdir -p "$ONNXRUNTIME_ROOT" \
-    && curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT"
-
-COPY ./misc/vastai/docker/.vimrc \
-    ./misc/vastai/docker/.tmux.conf \
-    ./misc/vastai/docker/.gitconfig \
-    ./misc/vastai/docker/.gitignore_global \
-    ./misc/vastai/docker/.simorc \
-    ./misc/vastai/docker/onstart.sh \
-    /root/
-
-RUN echo "source ~/.simorc" >> /root/.bashrc
+ENV ONNXRUNTIME_ROOT=/opt/onnxruntime \
+    ONNXRUNTIME_URL=https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz \
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+    VASTAI=1
 
 COPY . .
 
 # Benchmark model
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_ACCESS_KEY \
-    set -e; \
-    mkdir -p data/v15; \
-    for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do \
+    set -e \
+    && cp ./misc/vastai/docker/.vimrc /root/ \
+    && cp ./misc/vastai/docker/.tmux.conf /root/ \
+    && cp ./misc/vastai/docker/.gitconfig /root/ \
+    && cp ./misc/vastai/docker/.gitignore_global /root/ \
+    && cp ./misc/vastai/docker/.simorc /root/ \
+    && cp ./misc/vastai/docker/onstart.sh /root/ \
+    && mkdir -p data/v15 \
+    && mkdir -p "$ONNXRUNTIME_ROOT" \
+    && curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT" \
+    && for suffix in config.json state-default.json model-ppo.pt optimizer-default.pt scaler-default.pt; do \
         aws s3 cp s3://vcmi-gym/v15/models/pdpyqkrb-benchmark-$suffix data/v15/; \
         ln -s pdpyqkrb-benchmark-$suffix data/v15/pdpyqkrb-$suffix; \
-    done
-
-# Use a separate simorc which is called explicitly from nonlogin shells
-RUN chmod +x misc/vastai/docker/cleanup.sh \
+    done \
+    && curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+    && unzip awscliv2.zip -d /root \
+    && rm awscliv2.zip \
+    && /root/aws/install --update \
+    && aws configure set region eu-north-1 \
+    && aws configure set output json \
+    && aws s3 cp s3://vcmi-gym/h3.7z vcmi/ \
+    && echo "source ~/.simorc" >> /root/.bashrc \
+    && chmod +x misc/vastai/docker/cleanup.sh \
     && . /venv/main/bin/activate \
     && make pip-install \
     && cd vcmi \
@@ -71,9 +58,6 @@ RUN chmod +x misc/vastai/docker/cleanup.sh \
     && cd .. \
     && make vastai-build-connector \
     && pip cache purge
-
-ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-ENV VASTAI=1
 
 #
 # NOTE:
