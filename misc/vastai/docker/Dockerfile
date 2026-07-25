@@ -25,12 +25,12 @@ COPY . .
 RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
     --mount=type=secret,id=aws_secret_key,env=AWS_SECRET_ACCESS_KEY \
     set -e \
-    && cp ./misc/vastai/docker/.vimrc /root/ \
-    && cp ./misc/vastai/docker/.tmux.conf /root/ \
-    && cp ./misc/vastai/docker/.gitconfig /root/ \
-    && cp ./misc/vastai/docker/.gitignore_global /root/ \
-    && cp ./misc/vastai/docker/.simorc /root/ \
-    && cp ./misc/vastai/docker/onstart.sh /root/ \
+    && ln -s /workspace/vcmi-gym/misc/vastai/docker/.vimrc /root/ \
+    && ln -s /workspace/vcmi-gym/misc/vastai/docker/.tmux.conf /root/ \
+    && ln -s /workspace/vcmi-gym/misc/vastai/docker/.gitconfig /root/ \
+    && ln -s /workspace/vcmi-gym/misc/vastai/docker/.gitignore_global /root/ \
+    && ln -s /workspace/vcmi-gym/misc/vastai/docker/.simorc /root/ \
+    && cp /workspace/vcmi-gym/misc/vastai/docker/onstart.sh /root/ \
     && mkdir -p data/v15 \
     && mkdir -p "$ONNXRUNTIME_ROOT" \
     && curl -fsSL "$ONNXRUNTIME_URL" | tar -xzv --strip-components=1 -C "$ONNXRUNTIME_ROOT" \
@@ -46,7 +46,6 @@ RUN --mount=type=secret,id=aws_access_key,env=AWS_ACCESS_KEY_ID \
     && aws configure set output json \
     && aws s3 cp s3://vcmi-gym/h3.7z vcmi/ \
     && echo "source ~/.simorc" >> /root/.bashrc \
-    && chmod +x misc/vastai/docker/cleanup.sh \
     && . /venv/main/bin/activate \
     && make pip-install \
     && cd vcmi \

@@ -7,9 +7,15 @@ function main() {
     # Env
     ################################################
 
-    export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)
+    # XXX: Custon env vars (wandb keys, aws keys, etc.) are available during boot
+    # as the container itself was created with this env.
+    # However, they are NOT available in other sessions (e.g. in ssh sessions)
+    # => store them in /etc/environment to be auto-loaded by PAM
+    #
+    # XXX: VASTAI_INSTANCE_ID is a special env var as it is not available during boot.
+    #      => it is excplicitly set in .simorc
+    source ~/.simorc
 
-    # XXX: this file is parsed by PAM and is not a shell script
     cat <<-EOF >>/etc/environment
 AWS_ACCESS_KEY=$AWS_ACCESS_KEY
 AWS_SECRET_KEY=$AWS_SECRET_KEY
@@ -18,8 +24,6 @@ VAST_API_KEY=$VAST_API_KEY
 WANDB_API_KEY=$WANDB_API_KEY
 VASTAI_INSTANCE_ID=$VASTAI_INSTANCE_ID
 EOF
-
-    source ~/.simorc
 
     set_label init...
 

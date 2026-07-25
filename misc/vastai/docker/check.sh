@@ -22,7 +22,7 @@ while getopts "tdfi:r:n:" opt; do
     esac
 done
 
-if [ -e /workspace/.check ] && !$FORCE; then
+if [ -e /workspace/.check ] && ! $FORCE; then
     echo "Already checked, nothing to do."
     exit 0
 fi

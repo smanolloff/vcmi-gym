@@ -1,2 +1,3 @@
 #!/bin/bash
-tmux new-session -d "bash -xc 'bash /workspace/vcmi-gym/misc/vastai/docker/init.sh; exec \$SHELL'"
+# Logs are in /var/log/onstart.log
+tmux new-session -d "set -x; bash /workspace/vcmi-gym/misc/vastai/docker/init.sh; exec $SHELL"

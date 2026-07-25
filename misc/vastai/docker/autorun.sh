@@ -55,6 +55,9 @@ print(tag)')
     download_checkpoint ppo $autorun-$tag
     link_checkpoint -y $autorun-$tag $autorun data/v15
 
-    [ "$autorun" = "zvytfdpo" ] && make edge-typos || :
+    if python -c "import torch, sys; sys.exit(0 if any('Unit___By' in w for w in torch.load('data/v15/$autorun-model-ppo.pt')) else 1)"; then
+        make edge-typos
+    fi
+
     train_gnn ppo $autorun
 fi

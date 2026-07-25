@@ -1,5 +1,7 @@
 #!/bin/bash
 
+[ -n "${VASTAI_INSTANCE_ID:-}" ] || export VASTAI_INSTANCE_ID=$(cat ~/.vast_containerlabel | cut -c3-)
+
 # Sanity checks
 [ "${#AWS_ACCESS_KEY}" -eq 20 ] || echo "WARNING: AWS_ACCESS_KEY: invalid length: want: 20, have: ${#AWS_ACCESS_KEY}";
 [ "${#AWS_SECRET_KEY}" -eq 40 ] || echo "WARNING: AWS_SECRET_KEY: invalid length: want: 40, have: ${#AWS_SECRET_KEY}";
@@ -263,7 +265,7 @@ date +'BOOTED_AT=%FT%T%z' >> ~/.bashrc
 
 service cron start || :
 
-tmux new-session -d "source ~/.simorc; tmux rename-window $VASTAI_INSTANCE_ID:REBOOTED; set_label REBOOTED; cd $PWD; $*; exec $SHELL"
+tmux new-session -d "set -x; source ~/.simorc; tmux rename-window $VASTAI_INSTANCE_ID:REBOOTED; set_label REBOOTED; cd $PWD; $*; exec $SHELL"
 EOL
 }
 
