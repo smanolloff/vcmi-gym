@@ -12,6 +12,7 @@ train_env_kwargs = dict(
     random_terrain_chance=100,
     tight_formation_chance=0,
     town_chance=10,
+    mirror_armies=False,
     random_armies=True,
     random_army_value_min=5000,
     random_army_value_max=5_000_000,

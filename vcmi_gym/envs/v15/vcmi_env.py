@@ -196,7 +196,7 @@ class VcmiEnv(gym.Env):
 
     def __init__(
         self,
-        mapname: str = "gym/A1.vmap",
+        mapname: str = "gym/ml-mini.vmap",
         seed: Optional[int] = None,
         render_mode: str = "ansi",
         max_steps: int = 500,
@@ -223,6 +223,7 @@ class VcmiEnv(gym.Env):
         town_chance: int = 0,
         warmachine_chance: int = 0,
         random_terrain_chance: int = 0,
+        mirror_armies: bool = False,
         random_armies: bool = False,
         random_army_value_min: int = 5000,
         random_army_value_max: int = 5_000_000,
@@ -377,6 +378,7 @@ class VcmiEnv(gym.Env):
             randomObstacles=random_obstacles,
             townChance=town_chance,
             warmachineChance=warmachine_chance,
+            mirrorArmies=mirror_armies,
             randomArmies=random_armies,
             randomArmyValueMin=random_army_value_min,
             randomArmyValueMax=random_army_value_max,

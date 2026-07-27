@@ -25,6 +25,7 @@ namespace Connector::V15 {
                 int,                    // randomObstacles
                 int,                    // townChance
                 int,                    // warmachineChance
+                bool,                   // mirrorArmies
                 bool,                   // randomArmies
                 int,                    // randomArmyValueMin
                 int,                    // randomArmyValueMax
@@ -62,6 +63,7 @@ namespace Connector::V15 {
                 py::arg("randomObstacles"),
                 py::arg("townChance"),
                 py::arg("warmachineChance"),
+                py::arg("mirrorArmies"),
                 py::arg("randomArmies"),
                 py::arg("randomArmyValueMin"),
                 py::arg("randomArmyValueMax"),
