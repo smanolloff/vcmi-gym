@@ -30,25 +30,29 @@ for opponent in "${opponents[@]}"; do
 done
 
 for player in "${players[@]}"; do
-    for opponent in "${opponents[@]}"; do
-        for town_chance in 0; do
-            cat <<-EOF
-=========================== $player vs. $opponent (town_chance=$town_chance)
+ for opponent in "${opponents[@]}"; do
+  for town_chance in 0; do
+   for rand_mirror in False True; do
+    cat <<-EOF
+=========================== $player vs. $opponent (town_chance=$town_chance rand_mirror=$rand_mirror)
 EOF
-            python -m vcmi_gym.tools.arena \
-                --num-envs=${1-40} \
-                --num-vsteps=${2-10000} \
-                --player=$player \
-                --opponent=$opponent \
-                --map=gym/ml-eval.vmap \
-                --envarg seed=42 \
-                --envarg town_chance=$town_chance \
-                --envarg warmachine_chance=20 \
-                --envarg random_armies=False \
-                --envarg random_heroes=1 \
-                --envarg random_obstacles=1 \
-                --envarg random_terrain_chance=100 \
-                --envarg random_primary_skills=0
-        done
-    done
+    # XXX: mirror can also use random armies
+    python -m vcmi_gym.tools.arena \
+        --num-envs=${1-40} \
+        --num-vsteps=${2-10000} \
+        --player=$player \
+        --opponent=$opponent \
+        --map=gym/ml-eval.vmap \
+        --envarg seed=42 \
+        --envarg town_chance=$town_chance \
+        --envarg warmachine_chance=20 \
+        --envarg mirror_armies=$rand_mirror \
+        --envarg random_armies=$rand_mirror \
+        --envarg random_heroes=1 \
+        --envarg random_obstacles=1 \
+        --envarg random_terrain_chance=100 \
+        --envarg random_primary_skills=0
+   done
+  done
+ done
 done

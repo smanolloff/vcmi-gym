@@ -72,13 +72,13 @@ function check() {
   fi
 
   line=$(printf "%s" "$output" | grep '"event": "finish"') || :
-  t=$(printf "%s" "$line" | jq -e ".message.timers.all | round")
+  t=$(printf "%s" "$line" | jq -e "((.message.timers.all * 100 / 5) | round) / 100")
 
-  if [ "$t" -le $SECONDS_CHECK ]; then
-    echo "CHECK PASSED (t=$t, CHECK=$SECONDS_CHECK)"
+  if [ "$t" -le $ROLLOUT_SECONDS ]; then
+    echo "CHECK PASSED: t=$t (max=$ROLLOUT_SECONDS)"
     return 0
   else
-    echo "CHECK FAILED (t=$t, CHECK=$SECONDS_CHECK)"
+    echo "CHECK FAILED: t=$t (max=$ROLLOUT_SECONDS)"
     return 1
   fi
 }

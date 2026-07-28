@@ -342,21 +342,21 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
     def __init__(
         self,
         env_kwargs,
-        num_envs_stupidai=0,
-        num_envs_battleai=0,
-        num_envs_mmai_battleai=0,
-        num_envs_mmai_onnx=0,
-        num_envs_model=0,
+        envs_stupidai=dict(num=0, kwargs={}),
+        envs_battleai=dict(num=0, kwargs={}),
+        envs_mmai_battleai=dict(num=0, kwargs={}),
+        envs_mmai_onnx=dict(num=0, kwargs={}),
+        envs_model=dict(num=0, kwargs={}),
         onnx_model=None,
         model_loader: AbstractModelLoader = None,
         e_max=3300,
         env_version=14,
         logprefix="",
     ):
-        num_envs_total = num_envs_model + num_envs_stupidai + num_envs_battleai + num_envs_mmai_battleai + num_envs_mmai_onnx
+        num_envs_total = envs_model["num"] + envs_stupidai["num"] + envs_battleai["num"] + envs_mmai_battleai["num"] + envs_mmai_onnx["num"]
         assert num_envs_total > 0, f"{num_envs_total} > 0"
 
-        if num_envs_mmai_onnx > 0:
+        if envs_mmai_onnx["num"] > 0:
             assert onnx_model is not None, "onnx_model is required when num_envs_mmai_onnx > 0"
 
         if env_version == 13:
@@ -377,12 +377,12 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             close=lambda: None
         )
 
-        if num_envs_model > 0:
+        if envs_model["num"] > 0:
             # test model exists (avoids errors in sub-processes)
             model_loader.get_model()
 
             self.controller = DualEnvController(
-                num_envs_model,
+                envs_model["num"],
                 model_loader,
                 state_size_one_hex=VcmiEnv.STATE_SIZE_HEXES // 165,
                 loglevel=env_kwargs.get("vcmienv_loglevel", "INFO"),
@@ -391,7 +391,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             self.controller.start()
 
             dual_kwargs = dict(
-                num_envs=num_envs_model,
+                num_envs=envs_model["num"],
                 e_max=e_max,
                 controller_env_cond=self.controller.controller_env_cond,
                 controller_act_cond=self.controller.controller_act_cond,
@@ -431,11 +431,11 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             return env
 
         env_creators = []
-        env_creators.extend([partial(env_creator_model, i) for i in range(num_envs_model)])
-        env_creators.extend([partial(env_creator_stupidai, i) for i in range(num_envs_stupidai)])
-        env_creators.extend([partial(env_creator_battleai, i) for i in range(num_envs_battleai)])
-        env_creators.extend([partial(env_creator_mmai_battleai, i) for i in range(num_envs_mmai_battleai)])
-        env_creators.extend([partial(env_creator_mmai_onnx, i) for i in range(num_envs_mmai_onnx)])
+        env_creators.extend([partial(env_creator_model, i) for i in range(envs_model["num"])])
+        env_creators.extend([partial(env_creator_stupidai, i) for i in range(envs_stupidai["num"])])
+        env_creators.extend([partial(env_creator_battleai, i) for i in range(envs_battleai["num"])])
+        env_creators.extend([partial(env_creator_mmai_battleai, i) for i in range(envs_mmai_battleai["num"])])
+        env_creators.extend([partial(env_creator_mmai_onnx, i) for i in range(envs_mmai_onnx["num"])])
         funcs = [partial(env_creator_wrapper, env_creator) for env_creator in env_creators]
 
         super().__init__(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)
@@ -507,11 +507,11 @@ if __name__ == "__main__":
     # model_loader = TestModelLoader()
     venv = DualVecEnv(
         env_kwargs=dict(mapname="gym/A1.vmap"),
-        num_envs_stupidai=0,
-        num_envs_battleai=0,
-        num_envs_mmai_battleai=0,
-        num_envs_mmai_onnx=1,
-        num_envs_model=0,
+        envs_stupidai=dict(num=0, kwargs=dict()),
+        envs_battleai=dict(num=0, kwargs=dict()),
+        envs_mmai_battleai=dict(num=0, kwargs=dict()),
+        envs_mmai_onnx=dict(num=0, kwargs=dict()),
+        envs_model=dict(num=2, kwargs=dict()),
         onnx_model="MMAI/models/attacker-nkjrmrsq-202509291846-stochastic.onnx",
         # model_loader=model_loader,
         model_loader=None,
