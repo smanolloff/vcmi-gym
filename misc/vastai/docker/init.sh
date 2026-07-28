@@ -115,7 +115,7 @@ EOF
         else
             echo "vcmi-gym is NOT up to date"
             git pull --recurse-submodules
-            make vastai-build
+            make vastai-rebuild
             make vastai-build-connector
         fi
     fi
