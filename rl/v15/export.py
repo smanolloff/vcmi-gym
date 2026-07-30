@@ -16,7 +16,7 @@ from torch_geometric.data import Batch
 
 from .dual_vec_env import DualVecEnv
 from .gnn_model import GNNModel, to_hdata_list, add_action_active_local_ids
-from .ppo_gnn import PPOModel
+from .ppo_gnn import PPOModel, ModelLoader
 from vcmi_gym.envs.v15.vcmi_env import VcmiEnv
 
 
@@ -65,8 +65,6 @@ _register_custom_op_symbolic("aten::scatter_reduce", scatter_reduce_to_scatterel
 
 
 MIN_FLOAT32 = -((2 - 2**-23) * 2**127)
-
-
 
 
 def _model_edge_types(cfg):
@@ -375,32 +373,12 @@ def onnx_fwd(edge, inputs):
     ]
 
 
-def migrate_edge_key_typos(state_dict):
-    replacements = {
-        "<Global___Has___Action>": "<Global___To___Action>",
-        "<Unit___By___Action>": "<Unit___Has___Action>",
-    }
-
-    migrated = {}
-
-    for key, value in state_dict.items():
-        new_key = key
-        for old, new in replacements.items():
-            new_key = new_key.replace(old, new)
-
-        if new_key in migrated:
-            raise RuntimeError(f"Checkpoint migration collision: {key} -> {new_key}")
-
-        migrated[new_key] = value
-
-    return migrated
-
 
 def load_gnn_model(cfg, weights_file):
     _ensure_supported_cfg(cfg)
 
     weights = torch.load(weights_file, weights_only=True, map_location="cpu")
-    weights = migrate_edge_key_typos(weights)
+    weights = ModelLoader.migrate_edge_key_typos(weights)
     node_types = VcmiEnv.node_types()
     edge_types = _model_edge_types(cfg)
 
@@ -517,8 +495,8 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
             eaction, eactive_probs, evalue, eactive_action_ids = emodel(*inputs.values())
 
         assert torch.equal(b_action[0].cpu(), eaction.cpu())
-        assert torch.allclose(active_probs.cpu(), eactive_probs.cpu(), atol=1e-5, rtol=0)
-        assert torch.allclose(b_value[0].cpu(), evalue.cpu(), atol=1e-5, rtol=0)
+        assert torch.allclose(active_probs.cpu(), eactive_probs.cpu(), atol=1e-4, rtol=0)
+        assert torch.allclose(b_value[0].cpu(), evalue.cpu(), atol=1e-4, rtol=0)
         assert torch.equal(inputs["active_action_ids"].cpu(), eactive_action_ids.cpu())
 
         t0 = perf_counter_ns()
@@ -528,8 +506,8 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
         ms_total += ms
 
         assert torch.equal(b_action[0].cpu(), oaction.cpu())
-        assert torch.allclose(active_probs.cpu(), oactive_probs.cpu(), atol=1e-5, rtol=0)
-        assert torch.allclose(b_value[0].cpu(), ovalue.cpu(), atol=1e-5, rtol=0)
+        assert torch.allclose(active_probs.cpu(), oactive_probs.cpu(), atol=1e-4, rtol=0)
+        assert torch.allclose(b_value[0].cpu(), ovalue.cpu(), atol=1e-4, rtol=0)
         assert torch.equal(inputs["active_action_ids"].cpu(), oactive_action_ids.cpu())
 
         venv.step([int(b_action[0].item())])

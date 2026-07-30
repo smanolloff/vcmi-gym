@@ -101,8 +101,10 @@ EOF
     ### Perf check
     ################################################
 
+    local retval=0
     if [ -n "${VASTAI_INIT_CHECK_ARGS:-}" ]; then
         bash misc/vastai/docker/check.sh $VASTAI_INIT_CHECK_ARGS
+        retval=$?
     fi
 
     ################################################
@@ -119,6 +121,8 @@ EOF
             make vastai-build-connector
         fi
     fi
+
+    return $retval
 }
 
 if [ -f /workspace/.init ]; then

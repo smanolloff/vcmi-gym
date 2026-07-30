@@ -167,6 +167,7 @@ namespace Connector::V15::Thread {
         , initargs(ML::InitArgs{
             .leftAllowMlBot=redAllowMlBot,
             .rightAllowMlBot=blueAllowMlBot,
+            .temperature=0,
             .mapname=mapname,
             .maxBattles=0,
             .seed=seed,
