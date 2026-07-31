@@ -403,7 +403,7 @@ def load_gnn_model(cfg, weights_file):
 
 
 def export_model(cfg, weights_file):
-    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/ml-mini.vmap", seed=0), envs_stupidai=dict(num=1, kwargs={}))
+    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/A1.vmap", seed=0), envs_stupidai=dict(num=1, kwargs={}))
     venv.reset()
 
     src_model = load_gnn_model(cfg, weights_file)
@@ -470,7 +470,7 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
     assert json.loads(md["node_order"]) == emodel.node_order
     assert [tuple(edge_type) for edge_type in json.loads(md["edge_order"])] == emodel.edge_order
 
-    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/ml-mini.vmap", seed=0), envs_stupidai=dict(num=1, kwargs={}))
+    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/A1.vmap", seed=0), envs_stupidai=dict(num=1, kwargs={}))
     venv.reset()
 
     print("Testing data methods for %d steps..." % num_steps)
@@ -530,7 +530,7 @@ def save_exported_model(m, export_dir, symlink_dir, basename):
 
     print("Wrote %s" % dst)
 
-    if symlink_dir:
+    if symlink_dir and os.path.realpath(symlink_dir) != os.path.realpath(export_dir):
         os.makedirs(symlink_dir, exist_ok=True)
         symlink = f"{symlink_dir}/{basename}.onnx"
         if os.path.islink(symlink) or os.path.exists(symlink):
