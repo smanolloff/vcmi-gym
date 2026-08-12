@@ -120,6 +120,7 @@ def migrate_edge_key_typos(state_dict):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--player", metavar="MODEL", default="rng", help="rng | <MODEL>")
+    parser.add_argument("--player-role", metavar="ROLE", default="auto", help="auto | attacker | defender")
     parser.add_argument("--map", metavar="MAPNAME", default="maps/gym/ml-eval.vmap", help="run id to use (incompatible with -f)")
     parser.add_argument("--opponent", metavar="OPPONENT", default="BattleAI", help="StupidAI | BattleAI | <MODEL>")  # model may be .onnx or .pt
     parser.add_argument("--rng-role", metavar="ROLE", default="defender", help="attacker | defender")
@@ -246,7 +247,12 @@ if __name__ == "__main__":
         ).eval()
 
     player_model.load_state_dict(pw, strict=True)
-    player_role = player_cfg["train"]["env"]["kwargs"]["role"]
+
+    if args.player_role == "auto":
+        player_role = player_cfg["train"]["env"]["kwargs"]["role"]
+    else:
+        assert args.player_role in ["attacker", "defender"]
+        player_role = args.player_role
 
     print(f"-- Player role: {player_role}")
 
@@ -273,7 +279,12 @@ if __name__ == "__main__":
 
         with open(bot_cfgfile, "r") as f:
             bot_cfg = json.load(f)
-        bot_role = bot_cfg["train"]["env"]["kwargs"]["role"]
+
+        if player_role == "auto":
+            bot_role = bot_cfg["train"]["env"]["kwargs"]["role"]
+        else:
+            bot_role = "defender" if player_role == "attacker" else "attacker"
+
         assert bot_role != player_role
 
         bw = torch.load(bot_weights, weights_only=True, map_location=DEVICE.type)
