@@ -32,8 +32,8 @@ namespace Connector::V15 {
                 int,                    // randomArmyTargetVar
                 int,                    // tightFormationChance
                 int,                    // randomTerrainChance
-                int,                    // leftVipChance
-                int,                    // rightVipChance
+                bool,                   // leftVip
+                bool,                   // rightVip
                 const std::string &,    // battlefieldPattern
                 int,                    // manaMin
                 int,                    // manaMax
@@ -70,8 +70,8 @@ namespace Connector::V15 {
                 py::arg("randomArmyTargetVar"),
                 py::arg("tightFormationChance"),
                 py::arg("randomTerrainChance"),
-                py::arg("leftVipChance"),
-                py::arg("rightVipChance"),
+                py::arg("leftVip"),
+                py::arg("rightVip"),
                 py::arg("battlefieldPattern"),
                 py::arg("manaMin"),
                 py::arg("manaMax"),

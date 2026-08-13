@@ -5,6 +5,7 @@ import multiprocessing
 import numpy as np
 import torch
 import threading
+from typing import NamedTuple
 from functools import partial
 from torch_geometric.data import Batch
 from multiprocessing.shared_memory import SharedMemory
@@ -547,26 +548,23 @@ class DualEnvWrapper(gym.Wrapper):
         return self.env.obs
 
 
+class EnvMeta(NamedTuple):
+    type: str = ""  # StupidAI | BattleAI | VIPBot | HARBot | MMAI_MODEL | torch_model
+    num: int = 0
+    kwargs: dict[str, any] = {}  # env-specific kwargs to be merged with env_kwargs
+    model_loader: None = None  # needed for torch_model envs only
+
+
 class DualVecEnv(gym.vector.AsyncVectorEnv):
     def __init__(
         self,
-        env_kwargs,
-        envs_stupidai=dict(num=0, kwargs={}),
-        envs_battleai=dict(num=0, kwargs={}),
-        envs_mmai_battleai=dict(num=0, kwargs={}),
-        envs_mmai_onnx=dict(num=0, kwargs={}),
-        envs_model=dict(num=0, kwargs={}),
-        onnx_model=None,
-        model_loader: AbstractModelLoader | None = None,
+        seed: int,
+        env_metas: list[EnvMeta],
         logprefix=""
     ):
-        num_envs_total = envs_model["num"] + envs_stupidai["num"] + envs_battleai["num"] + envs_mmai_battleai["num"] + envs_mmai_onnx["num"]
+        num_envs_total = sum(em.num for em in env_metas)
         assert num_envs_total > 0, f"{num_envs_total} > 0"
-
-        if envs_mmai_onnx["num"] > 0:
-            assert onnx_model is not None, "onnx_model is required when num_envs_mmai_onnx > 0"
-
-        assert env_kwargs["seed"] >= 0 and env_kwargs["seed"] <= (2**31 - 1 - num_envs_total)
+        assert seed >= 0 and seed <= (2**31 - 1 - num_envs_total)
 
         # AsyncVectorEnv creates a dummy_env() in the main process just to
         # extract metadata, which causes VCMI init pid error afterwards
@@ -580,119 +578,114 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         )
 
         self.controller = None
-        model_env_creators = []
+        have_torch_model_envmeta = False
+        env_creators = []
 
-        if envs_model["num"] > 0:
-            if model_loader is None:
-                raise ValueError("model_loader is required when envs_model['num'] > 0")
+        for ienv, em in enumerate(env_metas):
+            if em.num == 0:
+                continue
 
-            # Test model exists early; otherwise the controller would block the bot side later.
-            if model_loader.get_model() is None or model_loader.get_model() is False:
-                raise ValueError("model_loader must be configured and loaded before creating DualVecEnv with model opponents")
+            if em.type in ["StupidAI", "BattleAI", "VIPBot", "HARBot"]:
+                # Avoid late binding via a "opponent" arg with default value
+                def creator(i, ienv=ienv, em=em):
+                    return VcmiEnv(
+                        **dict(em.kwargs, seed=seed + i, **em.kwargs),
+                        opponent=em.type,
+                        vcmienv_logtag=f"{logprefix}env.{ienv}.{i}"
+                    )
+            elif em.type == "onnx_model":
+                assert em.kwargs["opponent_model"] is not None, "opponent_model is required for onnx_model envs"
+                def creator(i, ienv=ienv, em=em):
+                    return VcmiEnv(
+                        **dict(em.kwargs, seed=seed + i, **em.kwargs),
+                        opponent="MMAI_MODEL",
+                        vcmienv_logtag=f"{logprefix}env.{ienv}.{i}"
+                    )
+            elif em.type == "torch_model":
+                assert not have_torch_model_envmeta, "there can be at most 1 DualVecEnv of type torch_model"
+                have_torch_model_envmeta = True
+                assert em.model_loader is not None, "model_loader is required for torch_model envs"
 
-            model_env_kwargs = dict(env_kwargs, **envs_model["kwargs"])
-            user_timeout = model_env_kwargs.get("user_timeout", None)
-            vcmi_timeout = model_env_kwargs.get("vcmi_timeout", None)
+                # Test model exists early; otherwise the controller would block the bot side later.
+                if em.model_loader.get_model() is None or em.model_loader.get_model() is False:
+                    raise ValueError("model_loader must be configured and loaded before creating DualVecEnv with model opponents")
 
-            # Model envs use a separate VcmiEnv for both players
-            # => user_timeout for one is vcmi_timeout for the other
-            # => the two timeouts must match
-            assert user_timeout == vcmi_timeout, f"user_timeout and vcmi_timeout must match: {user_timeout} <> {vcmi_timeout}"
+                user_timeout = em.kwargs.get("user_timeout", None)
+                vcmi_timeout = em.kwargs.get("vcmi_timeout", None)
 
-            controller = DualEnvController(
-                envs_model["num"],
-                model_loader,
-                loglevel=env_kwargs.get("vcmienv_loglevel", "INFO"),
-                logprefix=logprefix,
-            )
-            self.controller = controller
-            controller.start()
+                # Model envs use a separate VcmiEnv for both players
+                # => user_timeout for one is vcmi_timeout for the other
+                # => the two timeouts must match
+                assert user_timeout == vcmi_timeout, f"user_timeout and vcmi_timeout must match: {user_timeout} <> {vcmi_timeout}"
 
-            shm_names_nodes = {
-                name: {
-                    "shm": ipc["shm"].name,
-                    "nmax": ipc["nmax"],
-                    "size": ipc["size"],
-                }
-                for name, ipc in controller.ipc_nodes.items()
-            }
-            shm_names_edges = {
-                key: {
-                    "index": ipc["index"]["shm"].name,
-                    "attrs": ipc["attrs"]["shm"].name if ipc["attrs"]["shm"] is not None else None,
-                    "emax": ipc["emax"],
-                    "size": ipc["size"],
-                }
-                for key, ipc in controller.ipc_edges.items()
-            }
-
-            node_names = controller.node_names
-            edge_keys = controller.edge_keys
-            controller_env_cond = controller.controller_env_cond
-            controller_act_cond = controller.controller_act_cond
-            shm_name_states = controller.shm_states.name
-            shm_name_actions = controller.shm_actions.name
-            shm_name_num_nodes = controller.shm_num_nodes.name
-            shm_name_num_edges = controller.shm_num_edges.name
-            shm_name_num_active_action_ids = controller.shm_num_active_action_ids.name
-            shm_name_active_action_ids = controller.shm_active_action_ids.name
-
-            def env_creator_model(i):
-                env = VcmiEnv(
-                    **dict(model_env_kwargs, seed=env_kwargs["seed"] + i),
-                    opponent="OTHER_ENV",
-                    vcmienv_logtag=f"{logprefix}env.model.{i}"
-                )
-
-                env = DualEnvWrapper(
-                    env,
-                    env_id=i,
-                    num_envs=envs_model["num"],
-                    node_names=node_names,
-                    edge_keys=edge_keys,
-                    controller_env_cond=controller_env_cond,
-                    controller_act_cond=controller_act_cond,
-                    shm_name_states=shm_name_states,
-                    shm_name_actions=shm_name_actions,
-                    shm_name_num_nodes=shm_name_num_nodes,
-                    shm_name_num_edges=shm_name_num_edges,
-                    shm_name_num_active_action_ids=shm_name_num_active_action_ids,
-                    shm_name_active_action_ids=shm_name_active_action_ids,
-                    shm_names_nodes=shm_names_nodes,
-                    shm_names_edges=shm_names_edges,
+                controller = DualEnvController(
+                    em.num,
+                    em.model_loader,
+                    loglevel=em.kwargs.get("vcmienv_loglevel", "INFO"),
                     logprefix=logprefix,
                 )
-                return env
+                self.controller = controller
+                controller.start()
 
-            model_env_creators = [partial(env_creator_model, i) for i in range(envs_model["num"])]
+                shm_names_nodes = {
+                    name: {
+                        "shm": ipc["shm"].name,
+                        "nmax": ipc["nmax"],
+                        "size": ipc["size"],
+                    }
+                    for name, ipc in controller.ipc_nodes.items()
+                }
+                shm_names_edges = {
+                    key: {
+                        "index": ipc["index"]["shm"].name,
+                        "attrs": ipc["attrs"]["shm"].name if ipc["attrs"]["shm"] is not None else None,
+                        "emax": ipc["emax"],
+                        "size": ipc["size"],
+                    }
+                    for key, ipc in controller.ipc_edges.items()
+                }
 
-        def env_creator_stupidai(i):
-            return VcmiEnv(
-                **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_stupidai["kwargs"]),
-                opponent="StupidAI",
-                vcmienv_logtag=f"{logprefix}env.stupidai.{i}"
-            )
+                node_names = controller.node_names
+                edge_keys = controller.edge_keys
+                controller_env_cond = controller.controller_env_cond
+                controller_act_cond = controller.controller_act_cond
+                shm_name_states = controller.shm_states.name
+                shm_name_actions = controller.shm_actions.name
+                shm_name_num_nodes = controller.shm_num_nodes.name
+                shm_name_num_edges = controller.shm_num_edges.name
+                shm_name_num_active_action_ids = controller.shm_num_active_action_ids.name
+                shm_name_active_action_ids = controller.shm_active_action_ids.name
 
-        def env_creator_battleai(i):
-            return VcmiEnv(
-                **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_battleai["kwargs"]),
-                opponent="BattleAI",
-                vcmienv_logtag=f"{logprefix}env.battleai.{i}"
-            )
+                def creator(i, ienv=ienv, em=em):
+                    env = VcmiEnv(
+                        **dict(em.kwargs, seed=seed + i),
+                        opponent="OTHER_ENV",
+                        vcmienv_logtag=f"{logprefix}env.{ienv}.{i}"
+                    )
 
-        def env_creator_mmai_battleai(i):
-            return VcmiEnv(
-                **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_battleai["kwargs"]),
-                opponent="MMAI_BATTLEAI",
-                vcmienv_logtag=f"{logprefix}env.mmaibattleai.{i}"
-            )
+                    env = DualEnvWrapper(
+                        env,
+                        env_id=i,
+                        num_envs=em.num,
+                        node_names=node_names,
+                        edge_keys=edge_keys,
+                        controller_env_cond=controller_env_cond,
+                        controller_act_cond=controller_act_cond,
+                        shm_name_states=shm_name_states,
+                        shm_name_actions=shm_name_actions,
+                        shm_name_num_nodes=shm_name_num_nodes,
+                        shm_name_num_edges=shm_name_num_edges,
+                        shm_name_num_active_action_ids=shm_name_num_active_action_ids,
+                        shm_name_active_action_ids=shm_name_active_action_ids,
+                        shm_names_nodes=shm_names_nodes,
+                        shm_names_edges=shm_names_edges,
+                        logprefix=logprefix,
+                    )
+                    return env
+            else:
+                raise RuntimeError(f"Unknown em.type: {em.type}")
 
-        def env_creator_mmai_onnx(i):
-            return VcmiEnv(
-                **dict(env_kwargs, seed=env_kwargs["seed"] + i, **envs_mmai_onnx["kwargs"]),
-                opponent="MMAI_MODEL",
-                opponent_model=onnx_model, vcmienv_logtag=f"{logprefix}env.onnx.{i}"
-            )
+            env_creators.extend([partial(creator, i) for i in range(em.num)])
 
         def env_creator_wrapper(env_creator):
             if os.getpid() == pid:
@@ -709,14 +702,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
 
             return env
 
-        env_creators = []
-        env_creators.extend(model_env_creators)
-        env_creators.extend([partial(env_creator_stupidai, i) for i in range(envs_stupidai["num"])])
-        env_creators.extend([partial(env_creator_battleai, i) for i in range(envs_battleai["num"])])
-        env_creators.extend([partial(env_creator_mmai_battleai, i) for i in range(envs_mmai_battleai["num"])])
-        env_creators.extend([partial(env_creator_mmai_onnx, i) for i in range(envs_mmai_onnx["num"])])
         funcs = [partial(env_creator_wrapper, env_creator) for env_creator in env_creators]
-
         super().__init__(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)  # type: ignore[arg-type]
 
     def reload_model(self, *args, **kwargs):
@@ -734,7 +720,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
                 self.controller.close()
 
 
-if __name__ == "__main__":
+def main():
     import json
     from rl.v15.gnn_model import GNNModel
 
@@ -793,19 +779,24 @@ if __name__ == "__main__":
             return self.model
 
     model_loader = TestModelLoader()
-    model_loader.configure("zckkyvje-1783869134-config.json")
-    model_loader.load("zckkyvje-1783869134-model-ppo.pt")
+    model_loader.configure("export/pdpyqkrb-202707290651-config.json")
+    model_loader.load("export/pdpyqkrb-202707290651-model-ppo.pt")
+    env_kwargs = dict(mapname="gym/ml-mini.vmap")
 
     venv = DualVecEnv(
-        env_kwargs=dict(mapname="gym/ml-mini.vmap", seed=42),
-        envs_stupidai=dict(num=0, kwargs=dict()),
-        envs_battleai=dict(num=0, kwargs=dict()),
-        envs_mmai_battleai=dict(num=0, kwargs=dict()),
-        envs_mmai_onnx=dict(num=0, kwargs=dict()),
-        envs_model=dict(num=2, kwargs=dict()),
-        model_loader=model_loader,
+        seed=42,
+        env_metas=[
+            EnvMeta(type="StupidAI", num=0, kwargs={}),
+            EnvMeta(type="BattleAI", num=0, kwargs={}),
+            EnvMeta(type="VIPBot", num=1, kwargs={}),
+            EnvMeta(type="onnx_model", num=0, kwargs=dict(env_kwargs, mapname="gym/ml-mini.vmap", opponent_model="simo.onnx")),
+            EnvMeta(type="torch_model", num=0, kwargs=env_kwargs, model_loader=model_loader),
+        ],
         logprefix="test-",
     )
 
     import ipdb; ipdb.set_trace()  # noqa
     pass
+
+if __name__ == "__main__":
+    main()

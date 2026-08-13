@@ -1,6 +1,7 @@
 import os
 
 train_env_kwargs = dict(
+    mapname="gym/ml-mini.vmap",
     role="defender",
     # opponent="",  # overwritten
     max_steps=500,
@@ -12,6 +13,7 @@ train_env_kwargs = dict(
     random_terrain_chance=100,
     tight_formation_chance=0,
     town_chance=10,
+    opponent_vip=False,
     mirror_armies=False,
     random_armies=True,
     random_army_value_min=5000,
@@ -49,6 +51,20 @@ train_env_kwargs = dict(
     boot_timeout=1200,
 )
 
+eval_env_kwargs = dict(
+    train_env_kwargs,
+    mapname="gym/ml-eval.vmap",
+    # Turn everything off by default => env variants must explicitly enable those
+    random_heroes=0,
+    town_chance=0,
+    opponent_vip=False,
+    mirror_armies=False,
+    random_armies=False,
+    user_timeout=2100,  # must be >= eval.interval_s + 300
+    vcmi_timeout=2100,  # must be >= eval.interval_s + 300
+
+)
+
 # Example:
 # static_bot("data/mppo-dna-heads/nkjrmrsq-202509291846")
 static_bot = lambda path_prefix: dict(
@@ -63,28 +79,6 @@ dynamic_bot = lambda run_id, reload_interval_s: dict(
     type="dynamic",
     run_id=run_id,
     reload_interval_s=reload_interval_s
-)
-
-gen_num_envs = lambda StupidAI, BattleAI, MMAI_BATTLEAI, model: dict(
-    StupidAI=dict(num=StupidAI, kwargs={}),
-    BattleAI=dict(num=BattleAI, kwargs={}),
-    MMAI_BATTLEAI=dict(num=MMAI_BATTLEAI, kwargs={}),
-    model=dict(num=model, kwargs={})
-)
-
-eval_variant = lambda envs_per_opponent, num_vsteps, model, **env_kwargs: dict(
-    envs_per_opponent=envs_per_opponent,
-    num_vsteps=num_vsteps,
-    kwargs=dict(
-        train_env_kwargs,
-        mapname="gym/ml-eval.vmap",
-        random_armies=False,
-        random_heroes=1,
-        user_timeout=2100,  # must be >= eval.interval_s + 300
-        vcmi_timeout=2100,  # must be >= eval.interval_s + 300
-        **env_kwargs,
-    ),
-    model=model,
 )
 
 config = dict(
@@ -111,53 +105,41 @@ config = dict(
     eval=dict(
         interval_s=3600,
         env_variants={
-            "BattleAI.open": eval_variant(
-                envs_per_opponent=gen_num_envs(0, 10, 0, 0),
+            "BattleAI.open": dict(
+                # XXX: too verbose
                 num_vsteps=2500,
-                model=None,
-                town_chance=0,
-                random_heroes=1,
-                random_armies=False,
-                opponent_vip_chance=0
+                env_meta=dict(
+                    type="BattleAI",
+                    num=10,
+                    kwargs=dict(eval_env_kwargs, random_heroes=1)
+                )
             ),
-            "BattleAI.vip": eval_variant(
-                envs_per_opponent=gen_num_envs(0, 0, 10, 0),
+            "BattleAI.vip": dict(
                 num_vsteps=2500,
-                model=None,
-                town_chance=0,
-                random_heroes=0,
-                random_armies=True,
-                opponent_vip_chance=100
+                env_meta=dict(
+                    type="VIPBot",
+                    num=10,
+                    kwargs=dict(eval_env_kwargs, random_armies=True, opponent_vip=True)
+                )
             ),
-            "MMAI.open": eval_variant(
-                # NOTE: "model" envs are slower. For ppo-gnn models, a good balance
-                #       is to use envs*2 and vsteps/5 for equal evaluation times
-                envs_per_opponent=gen_num_envs(0, 0, 0, 20),
+            "MMAI.open": dict(
                 num_vsteps=500,
-                model=dynamic_bot("pdpyqkrb", 7200),  # pdpyqkrb=attacker
-                town_chance=0,
-                random_heroes=1,
-                random_armies=False,
-                opponent_vip_chance=0
-            ),
+                env_meta=dict(
+                    type="torch_model",
+                    num=10,
+                    kwargs=dict(eval_env_kwargs, random_heroes=1),
+                    model_=dynamic_bot("pdpyqkrb", 7200)
+                )
+            )
         }
     ),
     train=dict(
-        env=dict(
-            # XXX: more venvs = more efficient GPU usage (B=num_envs)
-            # XXX: 50 envs ~= 30G RAM
-            kwargs=dict(train_env_kwargs, mapname="gym/ml-mini.vmap"),
-            envs_per_opponent=dict(
-                StupidAI=dict(num=0, kwargs={}),
-                BattleAI=dict(num=0, kwargs={}),
-                MMAI_BATTLEAI=dict(num=40, kwargs={}),
-                model=dict(num=0, kwargs={})
-            )
-            # num_envs_per_opponent=dict(StupidAI=0, BattleAI=0, MMAI_BATTLEAI=0, model=1),
-            # model=static_bot("data/mppo-dna-heads/tukbajrv-202509241418"),
-            # model=static_bot("nkjrmrsq-202509291846"),
-        ),
-        num_vsteps=125,                 # num_steps = num_vsteps * num_envs
+        env_metas=[
+            dict(type="VIPBot", num=20, kwargs=dict(train_env_kwargs, opponent_vip=True)),
+            dict(type="torch_model", num=10, kwargs=train_env_kwargs, model_=dynamic_bot("pdpyqkrb", 7200)),
+        ],
+
+        num_vsteps=150,                 # num_steps = num_vsteps * num_envs
         num_minibatches=20,             # mb_size = num_steps / num_minibatches
         update_epochs=2,
 
@@ -221,23 +203,29 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 2
 
-    for env, envcfg in config["train"]["env"]["envs_per_opponent"].items():
-        envcfg["num"] = min(envcfg["num"], 2)
 
-    config["train"]["env"]["kwargs"]["mapname"] = "gym/A1.vmap"
-    # config["train"]["env"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
+    for env_meta in config["train"]["env_metas"]:
+        env_meta["num"] = min(env_meta["num"], 2)
+        env_meta["kwargs"]["mapname"] = "gym/A1.vmap"
+        # env_meta["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
-    # config["eval"]["env_variants"] = dict(list(config["eval"]["env_variants"].items())[:1])
+    # env_variants={
+    #     "BattleAI.open": dict(
+    #         # XXX: too verbose
+    #         num_vsteps=2500,
+    #         env_meta=dict(
+    #             type="BattleAI",
+    #             num=10,
+    #             kwargs=dict(eval_env_kwargs, random_heroes=1)
+    #         )
+    #     ),
+
     for name, varcfg in config["eval"]["env_variants"].items():
         varcfg["num_vsteps"] = 40
-        for env, envcfg in varcfg["envs_per_opponent"].items():
-            envcfg["num"] = min(envcfg["num"], 2)
-        varcfg["kwargs"]["warmachine_chance"] = 0
-        varcfg["kwargs"]["mapname"] = "gym/A1.vmap"
-        # envcfg["kwargs"]["vcmienv_loglevel"] = "DEBUG"
-
-    # DEBUG dual vec env:
-    config["train"]["env"]["kwargs"] = list(config["eval"]["env_variants"].values())[0]["kwargs"]
+        varcfg["env_meta"]["num"] = min(varcfg["env_meta"]["num"], 2)
+        varcfg["env_meta"]["kwargs"]["warmachine_chance"] = 0
+        varcfg["env_meta"]["kwargs"]["mapname"] = "gym/A1.vmap"
+        # varcfg["env_meta"]["kwargs"]["vcmienv_loglevel"] = "DEBUG"
 
     config["eval"]["interval_s"] = 30
     config["wandb_log_interval_s"] = 30

@@ -137,7 +137,7 @@ class VcmiEnv(gym.Env):
 
     VCMI_LOGLEVELS = ["trace", "debug", "info", "warn", "error"]
     ROLES = ["attacker", "defender"]
-    OPPONENTS = ["StupidAI", "BattleAI", "MMAI_BATTLEAI", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
+    OPPONENTS = ["StupidAI", "BattleAI", "VIPBot", "HARBot", "MMAI_MODEL", "MMAI_RANDOM", "OTHER_ENV"]
 
     STATE_SIZE = STATE_SIZE
     STATE_SIZE_HEXES = STATE_SIZE_HEXES
@@ -200,8 +200,8 @@ class VcmiEnv(gym.Env):
         random_army_value_max: int = 5_000_000,
         random_army_target_var: int = 30,
         tight_formation_chance: int = 0,
-        vip_chance: int = 0,
-        opponent_vip_chance: int = 0,
+        vip: bool = False,
+        opponent_vip: bool = False,
         battlefield_pattern: str = "",
         mana_min: int = 0,
         mana_max: int = 0,
@@ -250,9 +250,9 @@ class VcmiEnv(gym.Env):
                 # ...
         """
 
-        assert vcmi_loglevel_global in self.__class__.VCMI_LOGLEVELS
-        assert vcmi_loglevel_ai in self.__class__.VCMI_LOGLEVELS
-        assert role in self.__class__.ROLES
+        assert vcmi_loglevel_global in self.__class__.VCMI_LOGLEVELS, vcmi_loglevel_global
+        assert vcmi_loglevel_ai in self.__class__.VCMI_LOGLEVELS, vcmi_loglevel_ai
+        assert role in self.__class__.ROLES, role
         assert opponent in self.__class__.OPPONENTS, f"{opponent} in {self.__class__.OPPONENTS}"
 
         self.action_space = self.__class__.ACTION_SPACE
@@ -304,15 +304,15 @@ class VcmiEnv(gym.Env):
             # => make sure mlbot is NOT allowed for our side
             attacker_allow_mlbot = False
             defender_allow_mlbot = opponent_allow_mlbot
-            attacker_vip_chance = vip_chance
-            defender_vip_chance = opponent_vip_chance
+            attacker_vip = vip
+            defender_vip = opponent_vip
         else:
             attacker = opp
             defender = "MMAI_USER"
             attacker_allow_mlbot = opponent_allow_mlbot
             defender_allow_mlbot = False
-            attacker_vip_chance = opponent_vip_chance
-            defender_vip_chance = vip_chance
+            attacker_vip = opponent_vip
+            defender_vip = vip
 
         if attacker == "MMAI_MODEL":
             attacker_model = opponent_model
@@ -353,8 +353,8 @@ class VcmiEnv(gym.Env):
             randomArmyTargetVar=random_army_target_var,
             tightFormationChance=tight_formation_chance,
             randomTerrainChance=random_terrain_chance,
-            leftVipChance=attacker_vip_chance,
-            rightVipChance=defender_vip_chance,
+            leftVip=attacker_vip,
+            rightVip=defender_vip,
             battlefieldPattern=battlefield_pattern,
             manaMin=mana_min,
             manaMax=mana_max,

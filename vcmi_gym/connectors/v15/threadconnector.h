@@ -140,8 +140,8 @@ namespace Connector::V15::Thread {
             int randomArmyTargetVar,
             int tightFormationChance,
             int randomTerrainChance,
-            int leftVipChance,
-            int rightVipChance,
+            bool leftVip,
+            bool rightVip,
             const std::string & battlefieldPattern,
             int manaMin,
             int manaMax,
@@ -165,8 +165,6 @@ namespace Connector::V15::Thread {
         , blue(blue)
         , blueModel(blueModel)
         , initargs(ML::InitArgs{
-            .leftAllowMlBot=redAllowMlBot,
-            .rightAllowMlBot=blueAllowMlBot,
             .temperature=0,
             .mapname=mapname,
             .maxBattles=0,
@@ -182,8 +180,8 @@ namespace Connector::V15::Thread {
             .randomArmyTargetVar=randomArmyTargetVar,
             .tightFormationChance=tightFormationChance,
             .randomTerrainChance=randomTerrainChance,
-            .leftVipChance=leftVipChance,
-            .rightVipChance=rightVipChance,
+            .leftVip=leftVip,
+            .rightVip=rightVip,
             .battlefieldPattern=battlefieldPattern,
             .manaMin=manaMin,
             .manaMax=manaMax,

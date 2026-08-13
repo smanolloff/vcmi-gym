@@ -14,7 +14,7 @@ import torch.nn as nn
 
 from torch_geometric.data import Batch
 
-from .dual_vec_env import DualVecEnv
+from .dual_vec_env import DualVecEnv, EnvMeta
 from .gnn_model import GNNModel, to_hdata_list, add_action_active_local_ids
 from .ppo_gnn import PPOModel, ModelLoader
 from vcmi_gym.envs.v15.vcmi_env import VcmiEnv
@@ -68,7 +68,7 @@ MIN_FLOAT32 = -((2 - 2**-23) * 2**127)
 
 
 def _model_edge_types(cfg):
-    ignored_edges = cfg["train"]["env"]["kwargs"].get("ignored_edges", [])
+    ignored_edges = cfg["train"]["env_metas"][0]["kwargs"].get("ignored_edges", [])
     return VcmiEnv.filtered_edge_types(ignored_edges)
 
 
@@ -269,7 +269,7 @@ class ExportableGNNModel(nn.Module):
         self.policy_head = copy.deepcopy(src_model.policy_head)
         self.value_head = copy.deepcopy(src_model.value_head)
 
-        side = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
+        side = dict(attacker=0, defender=1)[cfg["train"]["env_metas"][0]["kwargs"]["role"]]
         self.register_buffer("version", torch.tensor([15], dtype=torch.int32), persistent=False)
         self.register_buffer("side", torch.tensor([side], dtype=torch.int32), persistent=False)
 
@@ -403,7 +403,8 @@ def load_gnn_model(cfg, weights_file):
 
 
 def export_model(cfg, weights_file):
-    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/A1.vmap", seed=0), envs_stupidai=dict(num=1, kwargs={}))
+    em = next(em for em in cfg["train"]["env_metas"] if em["type"] == "BattleAI")
+    venv = DualVecEnv(seed=0, env_metas=[EnvMeta(**dict(em, num=1))])
     venv.reset()
 
     src_model = load_gnn_model(cfg, weights_file)
@@ -461,7 +462,7 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
     src_model = load_gnn_model(cfg, weights_file)
     emodel = ExportableGNNModel(src_model, cfg).eval()
 
-    eside = dict(attacker=0, defender=1)[cfg["train"]["env"]["kwargs"]["role"]]
+    eside = dict(attacker=0, defender=1)[cfg["train"]["env_metas"][0]["kwargs"]["role"]]
 
     print("Testing metadata methods...")
     md = onnx_model.get_modelmeta().custom_metadata_map
@@ -470,7 +471,8 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
     assert json.loads(md["node_order"]) == emodel.node_order
     assert [tuple(edge_type) for edge_type in json.loads(md["edge_order"])] == emodel.edge_order
 
-    venv = DualVecEnv(dict(cfg["train"]["env"]["kwargs"], mapname="gym/A1.vmap", seed=0), envs_stupidai=dict(num=1, kwargs={}))
+    em = next(em for em in cfg["train"]["env_metas"] if em["type"] == "BattleAI")
+    venv = DualVecEnv(seed=0, env_metas=[EnvMeta(**dict(em, num=1))])
     venv.reset()
 
     print("Testing data methods for %d steps..." % num_steps)
@@ -513,7 +515,7 @@ def verify_export(cfg, weights_file, onnx_model, num_steps=10):
         venv.step([int(b_action[0].item())])
 
     print("Total execution time: %dms (mean %.2f)" % (ms_total, ms_total / num_steps))
-    print("Model role: %s" % cfg["train"]["env"]["kwargs"]["role"])
+    print("Model role: %s" % cfg["train"]["env_metas"][0]["kwargs"]["role"])
     print("verify_export: OK")
 
 
@@ -578,7 +580,7 @@ def main(argv=None):
         raise SystemExit("Provide either <prefix> or both --config and --weights")
 
     cfg = _load_cfg(config_path)
-    export_basename = "%s-%s" % (cfg["train"]["env"]["kwargs"]["role"], args.prefix or os.path.splitext(os.path.basename(weights_path))[0])
+    export_basename = "%s-%s" % (cfg["train"]["env_metas"][0]["kwargs"]["role"], args.prefix or os.path.splitext(os.path.basename(weights_path))[0])
     if args.suffix:
         export_basename += f"-{args.suffix}"
 

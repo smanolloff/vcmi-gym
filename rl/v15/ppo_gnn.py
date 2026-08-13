@@ -12,6 +12,7 @@ import contextlib
 import importlib
 import math
 import traceback
+import copy
 
 from dataclasses import dataclass, field, asdict
 from collections import deque
@@ -32,7 +33,7 @@ from .util.wandb import setup_wandb
 from .util.timer import Timer
 from .util.misc import dig, safe_mean, timer_stats
 
-from .dual_vec_env import DualVecEnv, AbstractModelLoader, VcmiEnv
+from .dual_vec_env import DualVecEnv, EnvMeta, AbstractModelLoader, VcmiEnv
 from .gnn_model import GNNModel, to_hdata_list, add_action_active_local_ids
 
 if os.getenv("PYDEBUG", None) == "1":
@@ -213,10 +214,20 @@ class ModelLoader(AbstractModelLoader):
         self.config_file = config_file
         self.logger.debug(f"Loading model config from file: {config_file}")
         with open(config_file, "r") as f:
-            self.config = json.load(f)
+            config = json.load(f)
 
-        loaded_role = self.config["train"]["env"]["kwargs"]["role"]
-        assert loaded_role == self.role, f"{loaded_role} == {self.role}"
+        self.model_config = config["model"]
+
+        # Migrate old-style configs to new env_metas
+        if "env" in config["train"]:
+            self.ignored_edges = config["train"]["env"]["kwargs"]["ignored_edges"]
+            loaded_role = config["train"]["env"]["kwargs"]["role"]
+            assert loaded_role == self.role, f"{loaded_role} == {self.role}"
+        else:
+            self.ignored_edges = config["train"]["env_metas"][0]["kwargs"]["ignored_edges"]
+            for em in self.config["train"]["env_metas"]:
+                loaded_role = em["kwargs"]["role"]
+                assert loaded_role == self.role, f"{loaded_role} == {self.role}"
 
     # This function will be called from within another process
     # (referenced non-local objects must be serializable for IPC).
@@ -227,8 +238,8 @@ class ModelLoader(AbstractModelLoader):
         if not self.model:
             self.model = PPOModel(
                 node_types=VcmiEnv.node_types(),
-                edge_types=VcmiEnv.filtered_edge_types(self.config["train"]["env"]["kwargs"]["ignored_edges"]),
-                config=self.config["model"],
+                edge_types=VcmiEnv.filtered_edge_types(self.ignored_edges),
+                config=self.model_config,
                 device=torch.device(self.device_type)
             ).eval()
 
@@ -395,7 +406,7 @@ def train_model(
     assert torch.is_grad_enabled()
 
     num_vsteps = train_config["num_vsteps"]
-    num_envs = sum(v["num"] for v in train_config["env"]["envs_per_opponent"].values())
+    num_envs = sum(em["num"] for em in train_config["env_metas"])
     v_next_hdata_batch = Batch.from_data_list(storage.v_next_hdata_list)
     add_action_active_local_ids(v_next_hdata_batch)
 
@@ -634,17 +645,12 @@ def prepare_wandb_log(
     return wlog
 
 
-def init_model_loader(env_config, checkpoint_config, out_dir, logger, dry_run, device):
-    if env_config["envs_per_opponent"]["model"]["num"] == 0:
-        return None
-
+def init_model_loader_info(env_kwargs, modelcfg, checkpoint_config, out_dir, logger, dry_run, device):
     # Wanted bot role based on train role
     bot_roles = dict(defender="attacker", attacker="defender")
-    bot_role = bot_roles[env_config["kwargs"]["role"]]
+    bot_role = bot_roles[env_kwargs["role"]]
     model_loader = ModelLoader(device.type, role=bot_role)
 
-    modelcfg = env_config["model"]
-    assert modelcfg, str(modelcfg)
     assert modelcfg["type"] in ["static", "dynamic"]
 
     if modelcfg["type"] == "static":
@@ -721,7 +727,8 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
     # i.e. the slowest env to finish eval_model().
     # Real value depends on num_steps, num_envs, opponent & hardware
     eval_duration_s_guess = 600
-    assert config["train"]["env"]["kwargs"]["user_timeout"] >= eval_duration_s_guess
+    for em in config["train"]["env_metas"]:
+        assert em["kwargs"]["user_timeout"] >= eval_duration_s_guess, em["kwargs"]["user_timeout"]
 
     checkpoint_config = dig(config, "checkpoint")
     train_config = dig(config, "train")
@@ -747,53 +754,51 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         torch.backends.cuda.matmul.allow_tf32 = True
 
     loader_infos = []
+    train_env_metas = []
 
-    train_loader_info = init_model_loader(train_config["env"], checkpoint_config, config["run"]["out_dir"], logger, dry_run, device)
+    for env_meta_dict in train_config["env_metas"]:
+        if env_meta_dict["type"] == "torch_model":
+            assert "model_" in env_meta_dict, env_meta_dict
+            model_loader_info = init_model_loader_info(env_meta_dict["kwargs"], env_meta_dict["model_"], checkpoint_config, config["run"]["out_dir"], logger, dry_run, device)
+            env_meta_dict = env_meta_dict.copy()  # will modify it => use a copy
+            env_meta_dict["model_loader"] = model_loader_info.model_loader
+            del env_meta_dict["model_"]
+            loader_infos.append(model_loader_info)
+        train_env_metas.append(EnvMeta(**env_meta_dict))
 
-    if train_loader_info:
-        loader_infos.append(train_loader_info)
-        train_model_loader = train_loader_info.model_loader
-    else:
-        train_model_loader = None
-
-    train_venv_seed = random.randint(0, (2**30)-1)  # leave some room to add i (see DualVecEnv)
     train_venv = DualVecEnv(
-        env_kwargs=dict(train_config["env"]["kwargs"], seed=train_venv_seed),
-        envs_stupidai=train_config["env"]["envs_per_opponent"]["StupidAI"],
-        envs_battleai=train_config["env"]["envs_per_opponent"]["BattleAI"],
-        envs_mmai_battleai=train_config["env"]["envs_per_opponent"]["MMAI_BATTLEAI"],
-        envs_model=train_config["env"]["envs_per_opponent"]["model"],
-        model_loader=train_model_loader,
+        seed=random.randint(0, (2**30)-1),  # leave some room to add i (see DualVecEnv)
+        env_metas=train_env_metas,
         logprefix="train-",
     )
 
-    logger.info("Initialized %d train envs (%s)" % (train_venv.num_envs, {k: v["num"] for k, v in train_config["env"]["envs_per_opponent"].items()}))
+    logger.info("Initialized %d train envs (%s)" % (train_venv.num_envs, [(em.type, em.num) for em in train_env_metas]))
 
     eval_venv_variants = {}
     for name, envcfg in eval_config["env_variants"].items():
-        # Blind guess for the time ot tales tp complete 1 training cycle
+        # Blind guess for the time ot takes to complete 1 training cycle
         # i.e. one cycle of collect_samples() + train_model()
         # Real value depends on num_steps, num_envs, opponent & hardware
-        assert envcfg["kwargs"]["user_timeout"] >= config["eval"]["interval_s"] + 300
-        eval_loader_info = init_model_loader(envcfg, checkpoint_config, config["run"]["out_dir"], logger, dry_run, device)
-        if eval_loader_info:
-            loader_infos.append(eval_loader_info)
-            eval_model_loader = eval_loader_info.model_loader
-        else:
-            eval_model_loader = None
+        assert envcfg["env_meta"]["kwargs"]["user_timeout"] >= config["eval"]["interval_s"] + 300
+        env_meta_dict = envcfg["env_meta"]
 
-        eval_venv_seed = random.randint(0, (2**30)-1)  # leave some room to add i (see DualVecEnv)
-        eval_venv_variants[name] = DualVecEnv(
-            env_kwargs=dict(envcfg["kwargs"], seed=eval_venv_seed),
-            envs_stupidai=envcfg["envs_per_opponent"]["StupidAI"],
-            envs_battleai=envcfg["envs_per_opponent"]["BattleAI"],
-            envs_mmai_battleai=envcfg["envs_per_opponent"]["MMAI_BATTLEAI"],
-            envs_model=envcfg["envs_per_opponent"]["model"],
-            model_loader=eval_model_loader,
+        if env_meta_dict["type"] == "torch_model":
+            assert "model_" in env_meta_dict
+            model_loader_info = init_model_loader_info(env_meta_dict["kwargs"], env_meta_dict["model_"], checkpoint_config, config["run"]["out_dir"], logger, dry_run, device)
+            env_meta_dict = env_meta_dict.copy()  # will modify it => use a copy
+            env_meta_dict["model_loader"] = model_loader_info.model_loader
+            del env_meta_dict["model_"]
+            loader_infos.append(model_loader_info)
+
+        eval_env_meta = EnvMeta(**env_meta_dict)
+        eval_venv_variant = DualVecEnv(
+            seed=random.randint(0, (2**30)-1),  # leave some room to add i (see DualVecEnv)
+            env_metas=[eval_env_meta],
             logprefix=f"eval/{name}-",
         )
 
-        logger.info("Initialized %d eval envs (variant '%s')" % (sum(v["num"] for v in envcfg["envs_per_opponent"].values()), name))
+        eval_venv_variants[name] = eval_venv_variant
+        logger.info("Initialized %d eval envs (variant '%s')" % (eval_venv_variant.num_envs, name))
 
     num_envs = train_venv.num_envs
     num_steps = train_config["num_vsteps"] * num_envs
@@ -804,7 +809,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
     model = PPOModel(
         node_types=VcmiEnv.node_types(),
-        edge_types=VcmiEnv.filtered_edge_types(config["train"]["env"]["kwargs"]["ignored_edges"]),
+        edge_types=VcmiEnv.filtered_edge_types(config["train"]["env_metas"][0]["kwargs"]["ignored_edges"]),
         config=config["model"],
         device=device
     )
