@@ -210,7 +210,6 @@ class VcmiEnv(gym.Env):
         role: str = "attacker",
         opponent: str = "StupidAI",
         opponent_model: Optional[str] = None,
-        opponent_allow_mlbot: bool = True,      # only if opponent is MMAI_MODEL or OTHER_ENV (i.e. MMAI_USER)
         vcmi_stats_mode: str = "disabled",
         vcmi_stats_storage: str = "-",
         vcmi_stats_persist_freq: int = 100,
@@ -229,8 +228,6 @@ class VcmiEnv(gym.Env):
         random_army_value_max: int = 5_000_000,
         random_army_target_var: int = 30,
         tight_formation_chance: int = 0,
-        vip: bool = False,
-        opponent_vip: bool = False,
         battlefield_pattern: str = "",
         mana_min: int = 0,
         mana_max: int = 0,
@@ -322,6 +319,13 @@ class VcmiEnv(gym.Env):
         self.logger.debug("Initializing...")
         self.main_env = main_env
 
+        # VIP and HAR are automatic based on the opponent
+        # For player, they are always False (no need to make configurable atm)
+        vip = False  # if needed, expose VIP option for p
+        har = False
+        opponent_vip = opponent == "VIPBot"
+        opponent_har = opponent == "HARBot"
+
         if opponent == "OTHER_ENV":
             opp = "MMAI_USER"
         else:
@@ -330,21 +334,17 @@ class VcmiEnv(gym.Env):
         if role == "attacker":
             attacker = "MMAI_USER"
             defender = opp
-            # When mlbot is allowed for a MMAI_USER or MMAI_MODEL ai, it will
-            # acts automatically if VIP-shooter army is detected.
-            # We never want that for the main VcmiEnv player
-            # => make sure mlbot is NOT allowed for our side
-            attacker_allow_mlbot = False
-            defender_allow_mlbot = opponent_allow_mlbot
             attacker_vip = vip
             defender_vip = opponent_vip
+            attacker_har = har
+            defender_har = opponent_har
         else:
             attacker = opp
             defender = "MMAI_USER"
-            attacker_allow_mlbot = opponent_allow_mlbot
-            defender_allow_mlbot = False
             attacker_vip = opponent_vip
             defender_vip = vip
+            attacker_har = opponent_har
+            defender_har = har
 
         if attacker == "MMAI_MODEL":
             attacker_model = opponent_model
@@ -387,6 +387,8 @@ class VcmiEnv(gym.Env):
             randomTerrainChance=random_terrain_chance,
             leftVip=attacker_vip,
             rightVip=defender_vip,
+            leftHar=attacker_har,
+            rightHar=defender_har,
             battlefieldPattern=battlefield_pattern,
             manaMin=mana_min,
             manaMax=mana_max,
@@ -400,8 +402,6 @@ class VcmiEnv(gym.Env):
             blue=defender,
             redModel=attacker_model,
             blueModel=defender_model,
-            redAllowMlBot=attacker_allow_mlbot,
-            blueAllowMlBot=defender_allow_mlbot,
             statsMode=vcmi_stats_mode,
             statsStorage=vcmi_stats_storage,
             statsPersistFreq=vcmi_stats_persist_freq,

@@ -40,6 +40,8 @@ namespace Connector::V13 {
                 int,                    // randomTerrainChance
                 bool,                   // leftVip
                 bool,                   // rightVip
+                bool,                   // leftHar
+                bool,                   // rightHar
                 const std::string &,    // battlefieldPattern
                 int,                    // manaMin
                 int,                    // manaMax
@@ -49,8 +51,6 @@ namespace Connector::V13 {
                 const std::string &,    // loglevelAI
                 const std::string &,    // loglevelNetwork
                 const std::string &,    // loglevelStats
-                bool,                   // redAllowMlBot
-                bool,                   // blueAllowMlBot
                 const std::string &,    // statsMode
                 const std::string &,    // statsStorage
                 int                     // statsPersistFreq
@@ -78,6 +78,8 @@ namespace Connector::V13 {
                 py::arg("randomTerrainChance"),
                 py::arg("leftVip"),
                 py::arg("rightVip"),
+                py::arg("leftHar"),
+                py::arg("rightHar"),
                 py::arg("battlefieldPattern"),
                 py::arg("manaMin"),
                 py::arg("manaMax"),
@@ -87,8 +89,6 @@ namespace Connector::V13 {
                 py::arg("loglevelAI"),
                 py::arg("loglevelNetwork"),
                 py::arg("loglevelStats"),
-                py::arg("redAllowMlBot"),
-                py::arg("blueAllowMlBot"),
                 py::arg("statsMode"),
                 py::arg("statsStorage"),
                 py::arg("statsPersistFreq")

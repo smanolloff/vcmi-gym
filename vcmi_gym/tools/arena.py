@@ -47,7 +47,8 @@ def main(model, venv, num_vsteps, player, opponent, dual_venv_kwargs):
         s = time.time() - t0
         times.append(s)
         resets.append(stats.num_episodes)
-        winrates.append(stats.ep_is_success_mean)
+        if stats.num_episodes > 0:
+            winrates.append(stats.ep_is_success_mean)
 
         print("%d%%... vstep=%d step=%d episode=%d resets: %d steps/s: %-6.0f resets/s: %-6.2f winrate=(%.0f%%)" % (
             10 + 10*i,
@@ -103,6 +104,13 @@ def parse_kv(text):
     return key, value
 
 
+def v15_env_kwargs(config):
+    train_config = config["train"]
+    if "env" in train_config:
+        return train_config["env"]["kwargs"]
+    return train_config["env_metas"][0]["kwargs"]
+
+
 def migrate_edge_key_typos(state_dict):
     migrated = {}
 
@@ -122,7 +130,7 @@ if __name__ == "__main__":
     parser.add_argument("--player", metavar="MODEL", default="rng", help="rng | <MODEL>")
     parser.add_argument("--player-role", metavar="ROLE", default="auto", help="auto | attacker | defender")
     parser.add_argument("--map", metavar="MAPNAME", default="maps/gym/ml-eval.vmap", help="run id to use (incompatible with -f)")
-    parser.add_argument("--opponent", metavar="OPPONENT", default="BattleAI", help="StupidAI | BattleAI | <MODEL>")  # model may be .onnx or .pt
+    parser.add_argument("--opponent", metavar="OPPONENT", default="BattleAI", help="StupidAI | BattleAI | VIPBot | HARBot | <MODEL>")  # model may be .onnx or .pt
     parser.add_argument("--rng-role", metavar="ROLE", default="defender", help="attacker | defender")
     parser.add_argument("--num-envs", metavar="INT", type=int, default=10)
     parser.add_argument("--num-vsteps", metavar="INT", type=int, default=1000)
@@ -166,10 +174,11 @@ if __name__ == "__main__":
     is_bot_v15 = False
 
     if player_cfg.get("version", None) == 15 or player_cfg["wandb_group"] == "v15":
-        from rl.v15.dual_vec_env import DualVecEnv
+        from rl.v15.dual_vec_env import DualVecEnv, EnvMeta
         from vcmi_gym.envs.v15.vcmi_env import VcmiEnv
 
-        dual_venv_kwargs["env_kwargs"]["ignored_edges"] = player_cfg["train"]["env"]["kwargs"]["ignored_edges"]
+        player_env_kwargs = v15_env_kwargs(player_cfg)
+        dual_venv_kwargs["env_kwargs"]["ignored_edges"] = player_env_kwargs["ignored_edges"]
 
         if any("model_policy." in k for k in pw.keys()):
             print("[player] Using v15 (DNA) model")
@@ -191,7 +200,7 @@ if __name__ == "__main__":
 
         player_model = player_Model(
             node_types=VcmiEnv.node_types(),
-            edge_types=VcmiEnv.filtered_edge_types(player_cfg["train"]["env"]["kwargs"]["ignored_edges"]),
+            edge_types=VcmiEnv.filtered_edge_types(player_env_kwargs["ignored_edges"]),
             config=player_cfg["model"],
             device=DEVICE
         ).eval()
@@ -249,7 +258,10 @@ if __name__ == "__main__":
     player_model.load_state_dict(pw, strict=True)
 
     if args.player_role == "auto":
-        player_role = player_cfg["train"]["env"]["kwargs"]["role"]
+        if is_player_v15:
+            player_role = v15_env_kwargs(player_cfg)["role"]
+        else:
+            player_role = player_cfg["train"]["env"]["kwargs"]["role"]
     else:
         assert args.player_role in ["attacker", "defender"]
         player_role = args.player_role
@@ -260,7 +272,7 @@ if __name__ == "__main__":
 
     bot_loader = None
 
-    if args.opponent in ["StupidAI", "BattleAI", "MMAI_BATTLEAI"]:
+    if args.opponent in ["StupidAI", "BattleAI", "VIPBot", "HARBot"]:
         dual_venv_kwargs[f"envs_{args.opponent.lower()}"] = dict(num=args.num_envs, kwargs={})
     elif args.opponent.endswith(".onnx"):
         # opponent=MMAI_ONNX is ultimately mapped to opponent=MMAI_MODEL for VcmiEnv
@@ -349,13 +361,39 @@ if __name__ == "__main__":
         if bot_loader and is_bot_v15 != is_player_v15:
             raise Exception(f"can't mix v15 and non-v15 models: is_player_v15={is_player_v15} and is_bot_v15={is_bot_v15}")
 
-        bot_loader.configure(bot_cfg)
+        bot_loader.configure(bot_cfgfile if is_bot_v15 else bot_cfg)
         bot_loader.load(bot_weights)
         dual_venv_kwargs["envs_model"] = dict(num=args.num_envs, kwargs={})
         dual_venv_kwargs["model_loader"] = bot_loader
 
-    print(dual_venv_kwargs)
-    venv = DualVecEnv(**dual_venv_kwargs)
+    if is_player_v15:
+        # use VIPBot or HARBot instead
+        assert args.opponent != "MMAI_BATTLEAI", f"DualVecEnv (v15) does not support opponent={args.opponent}"
+        v15_kwargs = dict(env_kwargs)
+        v15_seed = v15_kwargs.pop("seed", 0)
+        if args.opponent in ["StupidAI", "BattleAI", "VIPBot", "HARBot"]:
+            env_meta = EnvMeta(type=args.opponent, num=args.num_envs, kwargs=v15_kwargs)
+        elif args.opponent.endswith(".onnx"):
+            env_meta = EnvMeta(
+                type="onnx_model",
+                num=args.num_envs,
+                kwargs=dict(v15_kwargs, opponent_model=args.opponent),
+            )
+        else:
+            env_meta = EnvMeta(
+                type="torch_model",
+                num=args.num_envs,
+                kwargs=v15_kwargs,
+                model_loader=bot_loader,
+            )
+        venv_kwargs = dict(seed=v15_seed, env_metas=[env_meta])
+    else:
+        # use MMAI_BATTLEAI instead
+        assert args.opponent not in ["VIPBot", "HARBot"], f"DualVecEnv (legacy) does not support opponent={args.opponent}"  # v14 uses MMAI_BATTLEAI instead
+        venv_kwargs = dual_venv_kwargs
+
+    print(venv_kwargs)
+    venv = DualVecEnv(**venv_kwargs)
 
     if args.player == "rng":
         player_model.venv = venv
