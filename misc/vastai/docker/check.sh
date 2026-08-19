@@ -74,22 +74,22 @@ function check() {
   line=$(printf "%s" "$output" | grep '"event": "finish"') || :
   t=$(printf "%s" "$line" | jq -e "((.message.timers.all * 100 / 5) | round) / 100")
 
-  if [ "$t" -le $ROLLOUT_SECONDS ]; then
+  # -le works for integers only
+  if [ "${t%.*}" -le $ROLLOUT_SECONDS ]; then
     echo "CHECK PASSED: t=$t (max=$ROLLOUT_SECONDS)"
-    return 0
+    $TAG && tmux rename-window $VASTAI_INSTANCE_ID:PASSED || :
+    $TAG && http PUT '{"label": "PASSED"}' || :
+    echo 1 > /workspace/.check
   else
     echo "CHECK FAILED: t=$t (max=$ROLLOUT_SECONDS)"
-    return 1
+    $TAG && tmux rename-window $VASTAI_INSTANCE_ID:FAILED || :
+    $TAG && http PUT '{"label": "FAILED"}' || :
+    $DEL && http DELETE '{}' || :
+    echo 0 > /workspace/.check
   fi
 }
 
 $TAG && http PUT '{"label": "check..."}' || :
 
-if check; then
-    $TAG && http PUT '{"label": "PASSED"}' || :
-    echo 1 > /workspace/.check
-else
-    $TAG && http PUT '{"label": "FAILED"}' || :
-    $DEL && http DELETE '{}' || :
-    echo 0 > /workspace/.check
-fi
+# Return is 0 if passed or failed, non-0 if errored
+check

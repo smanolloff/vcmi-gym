@@ -101,10 +101,8 @@ EOF
     ### Perf check
     ################################################
 
-    local retval=0
     if [ -n "${VASTAI_INIT_CHECK_ARGS:-}" ]; then
         bash misc/vastai/docker/check.sh $VASTAI_INIT_CHECK_ARGS
-        retval=$?
     fi
 
     ################################################
@@ -121,8 +119,6 @@ EOF
             make vastai-build-connector
         fi
     fi
-
-    return $retval
 }
 
 if [ -f /workspace/.init ]; then
@@ -130,8 +126,12 @@ if [ -f /workspace/.init ]; then
 fi
 
 if main "$@"; then
-    set_label IDLE
-    tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
+    # Set labels only if check did not contain "-t" (tag)
+    if echo "${VASTAI_INIT_CHECK_ARGS:-}" | grep -vq -- "-t"
+        set_label IDLE
+        tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
+    fi
+
     touch /workspace/.init
 
     ################################################
@@ -144,6 +144,7 @@ if main "$@"; then
 
     exit 0
 else
+    # Always set a label here (check errored)
     set_label ERR_INIT
     tmux rename-window $VASTAI_INSTANCE_ID:ERR_INIT || :
     echo "INIT ERROR" >&2
