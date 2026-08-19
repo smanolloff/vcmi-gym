@@ -37,7 +37,7 @@ function http() {
 SECONDS_CHECK=$((N_ROLLOUTS * ROLLOUT_SECONDS))
 SECONDS_TIMEOUT=$((INIT_SECONDS + SECONDS_CHECK * 2))
 
-CHECKPOINT=pdpyqkrb-benchmark
+CHECKPOINT=pdpyqkrb-1787155426
 RUN_ID=${CHECKPOINT%-*}
 
 function check() {
