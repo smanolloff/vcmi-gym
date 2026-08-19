@@ -127,7 +127,7 @@ fi
 
 if main "$@"; then
     # Set labels only if check did not contain "-t" (tag)
-    if echo "${VASTAI_INIT_CHECK_ARGS:-}" | grep -vq -- "-t"
+    if echo "${VASTAI_INIT_CHECK_ARGS:-}" | grep -vq -- "-t"; then
         set_label IDLE
         tmux rename-window $VASTAI_INSTANCE_ID:IDLE || :
     fi
