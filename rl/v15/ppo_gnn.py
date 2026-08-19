@@ -225,7 +225,7 @@ class ModelLoader(AbstractModelLoader):
             assert loaded_role == self.role, f"{loaded_role} == {self.role}"
         else:
             self.ignored_edges = config["train"]["env_metas"][0]["kwargs"]["ignored_edges"]
-            for em in self.config["train"]["env_metas"]:
+            for em in config["train"]["env_metas"]:
                 loaded_role = em["kwargs"]["role"]
                 assert loaded_role == self.role, f"{loaded_role} == {self.role}"
 
