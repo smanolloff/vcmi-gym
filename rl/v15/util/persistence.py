@@ -70,7 +70,7 @@ def deepmerge(a: dict, b: dict, in_place=False, allow_new=True, update_existing=
     return a
 
 
-def find_latest_tag(logger, algo, run_id, s3_config, timestamp) -> str | None:
+def find_latest_tag(logger, algo, run_id, s3_config, timestamp) -> tuple[str | None, any | None]:
     assert isinstance(timestamp, dt.datetime)
     assert timestamp.tzinfo
 
@@ -105,7 +105,7 @@ def find_latest_tag(logger, algo, run_id, s3_config, timestamp) -> str | None:
     logger.info(dict(objects=n, latest_key=latest_key, latest_ts=latest_ts.isoformat(timespec="seconds")))
 
     if latest_key is None:
-        return None
+        return None, None
 
     return pattern.match(latest_key).group(1), latest_ts
 
@@ -121,6 +121,9 @@ def download_latest_model(
     timestamp
 ) -> tuple[dt.datetime | None, str | None, str | None, str | None]:
     tag, latest_timestamp = find_latest_tag(logger, algo, run_id, s3_config, timestamp)
+    if tag is None:
+        return None, None, None, None
+
     config_path = os.path.join(out_dir, f"{run_id}-{tag}-config.json")
     weights_path = os.path.join(out_dir, f"{run_id}-{tag}-model-{algo}.pt")
     force = "volatile" in tag

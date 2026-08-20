@@ -94,7 +94,15 @@ class DualEnvController():
         ("Unit", "BecomesMeleeThreatAfter", "Action"): 15000,
         ("Unit", "BecomesShootThreatAfter", "Action"): 15000,
         ("Unit", "IsMeleedBy", "Action"): 700,
-        ("Unit", "IsShotBy", "Action"): 200,
+        ("Unit", "IsShotBy", "Action"): 500,  # magog or lich vs clumped VIP/guard stacks makes a lot
+
+        # NOTE: these edges are significantly less than the max values if the env ignores them:
+        # ignored_edges=[
+        #     # These often dominate the graph (e.g. 30k of total 40k edges)
+        #     ["Hex", "BecomesMeleeTargetAfter", "Action"],
+        #     ["Hex", "BecomesShootTargetAfter", "Action"],
+        # ],
+
         ("Unit", "BecomesMeleeTargetAfter", "Action"): 20000,
         ("Unit", "BecomesShootTargetAfter", "Action"): 20000,
         ("Hex", "BecomesMeleeTargetAfter", "Action"): 60000,
