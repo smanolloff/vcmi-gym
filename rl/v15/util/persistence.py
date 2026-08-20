@@ -70,7 +70,7 @@ def deepmerge(a: dict, b: dict, in_place=False, allow_new=True, update_existing=
     return a
 
 
-def find_latest_tag(logger, algo, run_id, s3_config, timestamp) -> tuple[str | None, any | None]:
+def find_latest_tag(logger, algo, run_id, s3_config, timestamp) -> tuple[str | None, dt.datetime | None]:
     assert isinstance(timestamp, dt.datetime)
     assert timestamp.tzinfo
 
