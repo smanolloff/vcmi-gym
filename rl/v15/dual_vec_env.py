@@ -25,6 +25,39 @@ from abc import ABC, abstractmethod
 TRACE = os.getenv("VCMIGYM_DEBUG", "0") == "1"
 
 
+class ThreadFailure:
+    def __init__(self, thread_name: str):
+        self.thread_name: str = thread_name
+        self.event: threading.Event = threading.Event()
+        self.exception: BaseException | None = None
+
+    def raise_if_set(self):
+        if self.event.is_set():
+            assert self.exception is not None
+            raise RuntimeError(f"Background thread {self.thread_name!r} failed") from self.exception
+
+
+def start_thread(*, target, logger, kwargs=None, daemon=True, notify_conditions=()):
+    thread_name = target.__name__
+    failure = ThreadFailure(thread_name)
+
+    def run():
+        try:
+            target(**(kwargs or {}))
+        except BaseException as exc:
+            failure.exception = exc
+            failure.event.set()
+            logger.exception("Unhandled exception in background thread %s", thread_name)
+
+            for condition in notify_conditions:
+                with condition:
+                    condition.notify_all()
+
+    thread = threading.Thread(target=run, name=thread_name, daemon=daemon)
+    thread.start()
+    return thread, failure
+
+
 def tracelog(func, maxlen=80):
     if not TRACE:
         return func
@@ -182,12 +215,21 @@ class DualEnvController():
                 size=size,
             )
 
-        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread = None
+        self.thread_failure = None
         self.reload_lock = threading.RLock()
 
     def start(self):
         self.logger.debug("Starting runner thread")
-        self.thread.start()
+        self.thread, self.thread_failure = start_thread(
+            target=self._run,
+            logger=self.logger,
+            notify_conditions=(self.controller_env_cond, self.controller_act_cond),
+        )
+
+    def raise_if_thread_failed(self):
+        if self.thread_failure is not None:
+            self.thread_failure.raise_if_set()
 
     def close(self):
         for shm in reversed(self.shms):
@@ -280,11 +322,15 @@ class DualEnvController():
                         self.controller_act_cond.notify_all()
 
     def reload_model(self, *args, **kwargs):
+        self.raise_if_thread_failed()
+
         if not self.model_loader:
             return
 
         with self.controller_act_cond:
             self.model_loader.load(*args, **kwargs)
+
+        self.raise_if_thread_failed()
 
 
 class DualEnvWrapper(gym.Wrapper):
@@ -485,29 +531,33 @@ class DualEnvWrapper(gym.Wrapper):
         self.shm_states = SharedMemory(name=shm_name_states)
         self.env_states = np.ndarray((num_envs,), dtype=np.uint8, buffer=self.shm_states.buf)
 
-        self.bot_thread = threading.Thread(target=self.__class__._bot_loop, daemon=True, kwargs=dict(
-            main_env=env,
-            env_id=env_id,
-            num_envs=num_envs,
-            node_names=node_names,
-            edge_keys=edge_keys,
-            controller_env_cond=controller_env_cond,
-            controller_act_cond=controller_act_cond,
-            shm_name_states=shm_name_states,
-            shm_name_actions=shm_name_actions,
-            shm_name_num_nodes=shm_name_num_nodes,
-            shm_name_num_edges=shm_name_num_edges,
-            shm_name_num_active_action_ids=shm_name_num_active_action_ids,
-            shm_name_active_action_ids=shm_name_active_action_ids,
-            shm_names_nodes=shm_names_nodes,
-            shm_names_edges=shm_names_edges,
-        ))
-
         self.logger.debug("starting bot thread")
-        self.bot_thread.start()
+        self.bot_thread, self.bot_thread_failure = start_thread(
+            target=self.__class__._bot_loop,
+            logger=self.logger,
+            kwargs=dict(
+                main_env=env,
+                env_id=env_id,
+                num_envs=num_envs,
+                node_names=node_names,
+                edge_keys=edge_keys,
+                controller_env_cond=controller_env_cond,
+                controller_act_cond=controller_act_cond,
+                shm_name_states=shm_name_states,
+                shm_name_actions=shm_name_actions,
+                shm_name_num_nodes=shm_name_num_nodes,
+                shm_name_num_edges=shm_name_num_edges,
+                shm_name_num_active_action_ids=shm_name_num_active_action_ids,
+                shm_name_active_action_ids=shm_name_active_action_ids,
+                shm_names_nodes=shm_names_nodes,
+                shm_names_edges=shm_names_edges,
+            ),
+            notify_conditions=(controller_env_cond, controller_act_cond),
+        )
 
         self.logger.debug("env.connect() -- as %s" % env.role)
         env.connect()
+        self.bot_thread_failure.raise_if_set()
 
         # .connect() calls .reset() internally
         # => must explicitly notify controller
@@ -520,7 +570,9 @@ class DualEnvWrapper(gym.Wrapper):
 
     @tracelog
     def reset(self, *args, **kwargs):
+        self.bot_thread_failure.raise_if_set()
         obs, info = self.env.reset(*args, **kwargs)
+        self.bot_thread_failure.raise_if_set()
         self.logger.debug("[reset] with self.controller_env_cond")
 
         with self.controller_env_cond:
@@ -528,12 +580,16 @@ class DualEnvWrapper(gym.Wrapper):
             self.env_states[self.env_id] = EnvState.DONE
             self.logger.debug("[reset] self.controller_env_cond.notify()")
             self.controller_env_cond.notify()
+
+        self.bot_thread_failure.raise_if_set()
         return obs, info
 
     @tracelog
     def step(self, *args, **kwargs):
+        self.bot_thread_failure.raise_if_set()
         self.logger.debug("[step] %s %s" % (str(args), str(kwargs)))
         obs, rew, term, trunc, info = self.env.step(*args, **kwargs)
+        self.bot_thread_failure.raise_if_set()
 
         if term or trunc:
             # Setting DONE here would cause controller to re-set ALL states to UNSET.
@@ -549,10 +605,12 @@ class DualEnvWrapper(gym.Wrapper):
                 self.logger.debug("[step] self.controller_env_cond.notify()")
                 self.controller_env_cond.notify()
 
+        self.bot_thread_failure.raise_if_set()
         return obs, rew, term, trunc, info
 
     @property
     def obs(self):
+        self.bot_thread_failure.raise_if_set()
         return self.env.obs
 
 
@@ -713,7 +771,24 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
         funcs = [partial(env_creator_wrapper, env_creator) for env_creator in env_creators]
         super().__init__(funcs, daemon=True, autoreset_mode=gym.vector.AutoresetMode.SAME_STEP)  # type: ignore[arg-type]
 
+    def _raise_if_controller_thread_failed(self):
+        if self.controller:
+            self.controller.raise_if_thread_failed()
+
+    def reset(self, *args, **kwargs):
+        self._raise_if_controller_thread_failed()
+        result = super().reset(*args, **kwargs)
+        self._raise_if_controller_thread_failed()
+        return result
+
+    def step(self, *args, **kwargs):
+        self._raise_if_controller_thread_failed()
+        result = super().step(*args, **kwargs)
+        self._raise_if_controller_thread_failed()
+        return result
+
     def reload_model(self, *args, **kwargs):
+        self._raise_if_controller_thread_failed()
         if self.controller:
             self.controller.reload_model(*args, **kwargs)
 
