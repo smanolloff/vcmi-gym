@@ -102,7 +102,7 @@ EOF
     ################################################
 
     if [ -n "${VASTAI_INIT_CHECK_ARGS:-}" ]; then
-        bash misc/vastai/docker/check.sh $VASTAI_INIT_CHECK_ARGS
+        bash misc/vastai/docker/check.sh $VASTAI_INIT_CHECK_ARGS || return $?
     fi
 
     ################################################
