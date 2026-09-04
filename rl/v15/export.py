@@ -532,12 +532,15 @@ def save_exported_model(m, export_dir, symlink_dir, basename):
 
     print("Wrote %s" % dst)
 
-    if symlink_dir and os.path.realpath(symlink_dir) != os.path.realpath(export_dir):
+    if not symlink_dir:
+        return
+
+    symlink = f"{symlink_dir}/{basename}.onnx"
+    if os.path.realpath(symlink_dir) != os.path.realpath(export_dir):
         os.makedirs(symlink_dir, exist_ok=True)
-        symlink = f"{symlink_dir}/{basename}.onnx"
         if os.path.islink(symlink) or os.path.exists(symlink):
             os.unlink(symlink)
-        os.symlink(dst, symlink)
+        os.symlink(os.path.realpath(dst), symlink)
         print("Linked %s" % symlink)
 
 
