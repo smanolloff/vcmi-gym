@@ -5,7 +5,6 @@ rel
 /data
 /wandb
 *.egg-info
-CMakeUserPresets.json
 conan-generated/
 conan-generated-debug/
 test.out

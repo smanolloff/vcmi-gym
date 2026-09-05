@@ -63,6 +63,7 @@ vastai-rebuild:
 	&& cmake --build rel/ -- -j$$(nproc)
 
 # XXX: remove this once models trained on edges with typos are no longer used
+# XXX: these commands work only with GNU sed
 edge-typos:
 	sed -i'' -e 's/"Global", "To", "Action"/"Global", "Has", "Action"/' \
 		-e 's/"Unit", "Has", "Action"/"Unit", "By", "Action"/' \
