@@ -33,15 +33,15 @@ class DummyLogger:
         pass
 
 
-def main(model, venv, num_vsteps, player, opponent, dual_venv_kwargs):
-    assert num_vsteps % 10 == 0
-    report_vsteps = num_vsteps // 10
+def main(model, venv, num_vsteps, num_reports, player, opponent, dual_venv_kwargs):
+    assert num_vsteps % num_reports == 0
+    report_vsteps = num_vsteps // num_reports
     winrates = []
     resets = []
     times = []
 
     print("0%...")
-    for i in range(10):
+    for i in range(num_reports):
         t0 = time.time()
         stats = eval_model(DummyLogger(), model, venv, report_vsteps)
         s = time.time() - t0
@@ -51,7 +51,7 @@ def main(model, venv, num_vsteps, player, opponent, dual_venv_kwargs):
             winrates.append(stats.ep_is_success_mean)
 
         print("%d%%... vstep=%d step=%d episode=%d resets: %d steps/s: %-6.0f resets/s: %-6.2f winrate=(%.0f%%)" % (
-            10 + 10*i,
+            (100 // num_reports) * (i+1),
             report_vsteps + report_vsteps*i,
             venv.num_envs * (report_vsteps + report_vsteps*i),
             sum(resets),
@@ -134,6 +134,7 @@ if __name__ == "__main__":
     parser.add_argument("--rng-role", metavar="ROLE", default="defender", help="attacker | defender")
     parser.add_argument("--num-envs", metavar="INT", type=int, default=10)
     parser.add_argument("--num-vsteps", metavar="INT", type=int, default=1000)
+    parser.add_argument("--num-reports", metavar="INT", type=int, default=10)
     parser.add_argument("--cpu", action="store_true", help="force CPU even if CUDA is available")
     parser.add_argument("--envarg", action="append", type=parse_kv, metavar="KEY=VALUE", help="Env kwarg in key=value format")
 
@@ -256,6 +257,7 @@ if __name__ == "__main__":
         ).eval()
 
     player_model.load_state_dict(pw, strict=True)
+    player_model.eval()
 
     if args.player_role == "auto":
         if is_player_v15:
@@ -399,4 +401,4 @@ if __name__ == "__main__":
         player_model.venv = venv
 
     with torch.inference_mode():
-        main(player_model, venv, args.num_vsteps, args.player, args.opponent, dual_venv_kwargs)
+        main(player_model, venv, args.num_vsteps, args.num_reports, args.player, args.opponent, dual_venv_kwargs)

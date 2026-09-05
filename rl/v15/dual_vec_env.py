@@ -653,13 +653,17 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
 
             if em.type in ["StupidAI", "BattleAI", "VIPBot", "HARBot"]:
                 # Avoid late binding via a "opponent" arg with default value
+                print(f"Creator: kwargs: {dict(em.kwargs, BASE_seed=seed, **em.kwargs)}")
+                print(f"Creator: opponent: {em.type}")
                 def creator(i, ienv=ienv, em=em):
+                    #print(f"(creator seed={seed + i})")
                     return VcmiEnv(
                         **dict(em.kwargs, seed=seed + i, **em.kwargs),
                         opponent=em.type,
                         vcmienv_logtag=f"{logprefix}env.{ienv}.{i}"
                     )
             elif em.type == "onnx_model":
+                print(f"!!!!!!!! BAD CREATOR")
                 assert em.kwargs["opponent_model"] is not None, "opponent_model is required for onnx_model envs"
                 def creator(i, ienv=ienv, em=em):
                     return VcmiEnv(
@@ -668,6 +672,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
                         vcmienv_logtag=f"{logprefix}env.{ienv}.{i}"
                     )
             elif em.type == "torch_model":
+                print(f"!!!!!!!! BAD CREATOR")
                 assert not have_torch_model_envmeta, "there can be at most 1 DualVecEnv of type torch_model"
                 have_torch_model_envmeta = True
                 assert em.model_loader is not None, "model_loader is required for torch_model envs"
