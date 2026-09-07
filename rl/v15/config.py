@@ -20,8 +20,8 @@ train_env_kwargs = dict(
     town_chance=10,
     mirror_armies=False,
     random_armies=True,
-    random_army_value_min=5000,
-    random_army_value_max=5_000_000,
+    random_army_value_min=500,
+    random_army_value_max=500_000,
     random_army_target_var=30,
     warmachine_chance=40,
     mana_min=0,
@@ -125,6 +125,29 @@ config = dict(
                     kwargs=dict(eval_env_kwargs, random_armies=True)
                 )
             ),
+            "BattleAI.har": dict(
+                num_vsteps=2500,
+                env_meta=dict(
+                    type="HARBot",
+                    num=10,
+                    kwargs=dict(eval_env_kwargs, random_armies=True)
+                )
+            ),
+            "BattleAI.bank": dict(
+                num_vsteps=2500,
+                env_meta=dict(
+                    type="HARBot",
+                    num=1,
+                    kwargs=dict(
+                        eval_env_kwargs,
+                        random_armies=True,
+                        creature_bank_chance=100,
+                        whitelist="core:griffin",
+                        opponent_whitelist="core:angel,core:pikeman",
+                        random_army_value_min=7500  # 50 griffins
+                    )
+                )
+            ),
             "MMAI.open": dict(
                 num_vsteps=500,
                 env_meta=dict(
@@ -138,8 +161,17 @@ config = dict(
     ),
     train=dict(
         env_metas=[
-            dict(type="VIPBot", num=20, kwargs=dict(train_env_kwargs)),
-            dict(type="torch_model", num=10, kwargs=train_env_kwargs, model_=dynamic_bot("pdpyqkrb", 7200)),
+            dict(type="VIPBot", num=5, kwargs=dict(train_env_kwargs)),
+            dict(type="HARBot", num=5, kwargs=dict(train_env_kwargs)),
+            dict(type="HARBot", num=1, kwargs=dict(
+                train_env_kwargs,
+                creature_bank_chance=100,
+                whitelist="core:griffin",
+                opponent_whitelist="core:angel,core:pikeman",
+                random_army_value_min=7500  # 50 griffins
+            )),
+            dict(type="BattleAI", num=5, kwargs=dict(train_env_kwargs)),
+            dict(type="torch_model", num=5, kwargs=train_env_kwargs, model_=dynamic_bot("pdpyqkrb", 7200)),
         ],
 
         num_vsteps=150,                 # num_steps = num_vsteps * num_envs
