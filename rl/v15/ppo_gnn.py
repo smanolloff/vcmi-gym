@@ -341,11 +341,11 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
     return stats
 
 
-def eval_model(logger, model, venv, num_vsteps):
+def eval_model(logger, model, venv, num_vsteps, reset=True):
     assert torch.is_inference_mode_enabled()
 
     stats = SampleStats()
-    v_obs, _ = venv.reset()
+    v_obs = venv.reset()[0] if reset else venv.call("obs")
     v_done = torch.zeros(venv.num_envs, dtype=torch.bool)
 
     for vstep in range(0, num_vsteps):
@@ -705,7 +705,8 @@ def init_model_loader_info(env_kwargs, modelcfg, checkpoint_config, out_dir, log
     )
 
 
-def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_eval=False, max_rollouts=float("inf"), save_on_exit=True):
+def main(config, loglevel, dry_run, no_wandb, seed=0, seconds_total=float("inf"), skip_eval=False, max_rollouts=float("inf"), save_on_exit=True):
+    print("main seed: %s" % seed)
     run_id = config["run"]["id"]
     resumed_config = config["run"]["resumed_config"]
 
@@ -767,7 +768,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
         train_env_metas.append(EnvMeta(**env_meta_dict))
 
     train_venv = DualVecEnv(
-        seed=random.randint(0, (2**30)-1),  # leave some room to add i (see DualVecEnv)
+        seed=seed or random.randint(1, (2**30)-1),  # leave some room to add i (see DualVecEnv)
         env_metas=train_env_metas,
         logprefix="train-",
     )
@@ -792,7 +793,7 @@ def main(config, loglevel, dry_run, no_wandb, seconds_total=float("inf"), skip_e
 
         eval_env_meta = EnvMeta(**env_meta_dict)
         eval_venv_variant = DualVecEnv(
-            seed=random.randint(0, (2**30)-1),  # leave some room to add i (see DualVecEnv)
+            seed=seed or random.randint(1, (2**30)-1),  # leave some room to add i (see DualVecEnv)
             env_metas=[eval_env_meta],
             logprefix=f"eval/{name}-",
         )
@@ -1191,6 +1192,7 @@ if __name__ == "__main__":
     parser.add_argument("-f", metavar="FILE", help="config file to resume or test")
     parser.add_argument("--dry-run", action="store_true", help="do not save anything to disk (implies --no-wandb)")
     parser.add_argument("--no-wandb", action="store_true", help="do not initialize wandb")
+    parser.add_argument("--seed", metavar="INT", type=int, help="initial seed or 0 for random (default: 0)", default=0)
     parser.add_argument("--loglevel", metavar="LOGLEVEL", default="INFO", help="DEBUG | INFO | WARN | ERROR")
     parser.add_argument("--skip-eval", action="store_true", help="do not eval at script start")
     parser.add_argument("--max-rollouts", metavar="N", type=int, default=0, help="exit after N rollouts, printing iterationsing info")
@@ -1203,6 +1205,7 @@ if __name__ == "__main__":
         loglevel=args.loglevel,
         dry_run=args.dry_run,
         no_wandb=args.no_wandb,
+        seed=args.seed,
         skip_eval=args.skip_eval,
         max_rollouts=args.max_rollouts or float("inf"),
         # seconds_total=10

@@ -651,9 +651,12 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             if em.num == 0:
                 continue
 
+            print(f"[{em.type}] num={em.num} seed=({seed}+i) kwargs={dict(em.kwargs, **em.kwargs)}")
+
             if em.type in ["StupidAI", "BattleAI", "VIPBot", "HARBot"]:
                 # Avoid late binding via a "opponent" arg with default value
                 def creator(i, ienv=ienv, em=em):
+                    print(f"[{em.type}.{i}] seed={seed + i}")
                     return VcmiEnv(
                         **dict(em.kwargs, seed=seed + i, **em.kwargs),
                         opponent=em.type,
@@ -662,6 +665,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
             elif em.type == "onnx_model":
                 assert em.kwargs["opponent_model"] is not None, "opponent_model is required for onnx_model envs"
                 def creator(i, ienv=ienv, em=em):
+                    print(f"[{em.type}.{i}] seed={seed + i}")
                     return VcmiEnv(
                         **dict(em.kwargs, seed=seed + i, **em.kwargs),
                         opponent="MMAI_MODEL",
@@ -723,6 +727,7 @@ class DualVecEnv(gym.vector.AsyncVectorEnv):
                 shm_name_active_action_ids = controller.shm_active_action_ids.name
 
                 def creator(i, ienv=ienv, em=em):
+                    print(f"[{em.type}.{i}] seed={seed + i}")
                     env = VcmiEnv(
                         **dict(em.kwargs, seed=seed + i),
                         opponent="OTHER_ENV",

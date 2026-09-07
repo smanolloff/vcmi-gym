@@ -1007,11 +1007,11 @@ def collect_samples(logger, model, venv, num_vsteps, storage):
     return stats
 
 
-def eval_model(logger, model, venv, num_vsteps):
+def eval_model(logger, model, venv, num_vsteps, reset=True):
     assert torch.is_inference_mode_enabled()
 
     stats = SampleStats()
-    v_obs, _ = venv.reset()
+    v_obs = venv.reset()[0] if reset else venv.call("obs")
     v_done = torch.zeros(venv.num_envs, dtype=torch.bool)
 
     for vstep in range(0, num_vsteps):

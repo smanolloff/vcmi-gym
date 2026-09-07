@@ -227,7 +227,12 @@ class VcmiEnv(gym.Env):
         random_army_value_min: int = 5000,
         random_army_value_max: int = 5_000_000,
         random_army_target_var: int = 30,
+        uniform_chance: int = 0,
+        opponent_uniform_chance: int = 0,
+        whitelist: str = "",
+        opponent_whitelist: str = "",
         tight_formation_chance: int = 0,
+        creature_bank_chance: int = 0,
         battlefield_pattern: str = "",
         mana_min: int = 0,
         mana_max: int = 0,
@@ -338,13 +343,23 @@ class VcmiEnv(gym.Env):
             defender_vip = opponent_vip
             attacker_har = har
             defender_har = opponent_har
-        else:
+            attacker_uniform_chance = uniform_chance
+            attacker_whitelist = whitelist
+            defender_uniform_chance = opponent_uniform_chance
+            defender_whitelist = opponent_whitelist
+        elif role == "defender":
             attacker = opp
             defender = "MMAI_USER"
             attacker_vip = opponent_vip
             defender_vip = vip
             attacker_har = opponent_har
             defender_har = har
+            attacker_uniform_chance = opponent_uniform_chance
+            attacker_whitelist = opponent_whitelist
+            defender_uniform_chance = uniform_chance
+            defender_whitelist = whitelist
+        else:
+            raise Exception(f"invalid role: {role}")
 
         if attacker == "MMAI_MODEL":
             attacker_model = opponent_model
@@ -383,7 +398,12 @@ class VcmiEnv(gym.Env):
             randomArmyValueMin=random_army_value_min,
             randomArmyValueMax=random_army_value_max,
             randomArmyTargetVar=random_army_target_var,
+            leftUniformChance=attacker_uniform_chance,
+            rightUniformChance=defender_uniform_chance,
+            leftWhitelist=attacker_whitelist,
+            rightWhitelist=defender_whitelist,
             tightFormationChance=tight_formation_chance,
+            creatureBankChance=creature_bank_chance,
             randomTerrainChance=random_terrain_chance,
             leftVip=attacker_vip,
             rightVip=defender_vip,

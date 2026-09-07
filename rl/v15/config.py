@@ -11,9 +11,13 @@ train_env_kwargs = dict(
     random_heroes=0,
     random_obstacles=1,
     random_terrain_chance=100,
+    uniform_chance=0,
+    opponent_uniform_chance=0,
+    whitelist="",
+    opponent_whitelist="",
     tight_formation_chance=0,
+    creature_bank_chance=0,
     town_chance=10,
-    opponent_vip=False,
     mirror_armies=False,
     random_armies=True,
     random_army_value_min=5000,
@@ -57,7 +61,6 @@ eval_env_kwargs = dict(
     # Turn everything off by default => env variants must explicitly enable those
     random_heroes=0,
     town_chance=0,
-    opponent_vip=False,
     mirror_armies=False,
     random_armies=False,
     user_timeout=2100,  # must be >= eval.interval_s + 300
@@ -119,7 +122,7 @@ config = dict(
                 env_meta=dict(
                     type="VIPBot",
                     num=10,
-                    kwargs=dict(eval_env_kwargs, random_armies=True, opponent_vip=True)
+                    kwargs=dict(eval_env_kwargs, random_armies=True)
                 )
             ),
             "MMAI.open": dict(
@@ -135,7 +138,7 @@ config = dict(
     ),
     train=dict(
         env_metas=[
-            dict(type="VIPBot", num=20, kwargs=dict(train_env_kwargs, opponent_vip=True)),
+            dict(type="VIPBot", num=20, kwargs=dict(train_env_kwargs)),
             dict(type="torch_model", num=10, kwargs=train_env_kwargs, model_=dynamic_bot("pdpyqkrb", 7200)),
         ],
 
@@ -203,6 +206,9 @@ if os.getenv("VASTAI", None) != "1":
     config["train"]["num_minibatches"] = 4
     config["train"]["update_epochs"] = 2
 
+    # torch_model envs force a download from s3
+    config["eval"]["env_variants"] = {k: v for k, v in config["eval"]["env_variants"].items() if v["env_meta"]["type"] != "torch_model"}
+    config["train"]["env_metas"] = [em for em in config["train"]["env_metas"] if em["type"] != "torch_model"]
 
     for env_meta in config["train"]["env_metas"]:
         env_meta["num"] = min(env_meta["num"], 2)

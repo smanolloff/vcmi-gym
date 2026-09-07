@@ -30,7 +30,12 @@ namespace Connector::V15 {
                 int,                    // randomArmyValueMin
                 int,                    // randomArmyValueMax
                 int,                    // randomArmyTargetVar
+                int,                    // leftUniformChance
+                int,                    // rightUniformChance
+                const std::string &,    // leftWhitelist
+                const std::string &,    // rightWhitelist
                 int,                    // tightFormationChance
+                int,                    // creatureBankChance
                 int,                    // randomTerrainChance
                 bool,                   // leftVip
                 bool,                   // rightVip
@@ -68,7 +73,12 @@ namespace Connector::V15 {
                 py::arg("randomArmyValueMin"),
                 py::arg("randomArmyValueMax"),
                 py::arg("randomArmyTargetVar"),
+                py::arg("leftUniformChance"),
+                py::arg("rightUniformChance"),
+                py::arg("leftWhitelist"),
+                py::arg("rightWhitelist"),
                 py::arg("tightFormationChance"),
+                py::arg("creatureBankChance"),
                 py::arg("randomTerrainChance"),
                 py::arg("leftVip"),
                 py::arg("rightVip"),
