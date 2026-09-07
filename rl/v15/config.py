@@ -1,5 +1,7 @@
 import os
 
+eval_interval_s = 3600
+
 train_env_kwargs = dict(
     mapname="gym/ml-mini.vmap",
     role="defender",
@@ -50,9 +52,9 @@ train_env_kwargs = dict(
     ],
 
     # With DualVecEnv, all timeouts must be the same (large enough)
-    user_timeout=1200,
-    vcmi_timeout=1200,
-    boot_timeout=1200,
+    user_timeout=2400,
+    vcmi_timeout=2400,
+    boot_timeout=2400,
 )
 
 eval_env_kwargs = dict(
@@ -63,8 +65,8 @@ eval_env_kwargs = dict(
     town_chance=0,
     mirror_armies=False,
     random_armies=False,
-    user_timeout=2100,  # must be >= eval.interval_s + 300
-    vcmi_timeout=2100,  # must be >= eval.interval_s + 300
+    user_timeout=300 + eval_interval_s,  # must be >= eval.interval_s + 300
+    vcmi_timeout=300 + eval_interval_s,  # must be >= eval.interval_s + 300
 
 )
 
@@ -106,7 +108,7 @@ config = dict(
         ),
     ),
     eval=dict(
-        interval_s=3600,
+        interval_s=eval_interval_s,
         env_variants={
             "BattleAI.open": dict(
                 # XXX: too verbose
