@@ -163,6 +163,7 @@ config = dict(
     ),
     train=dict(
         env_metas=[
+            # XXX: the total sum of all train envs must be divisible by num_vsteps * num_minibatches
             dict(type="VIPBot", num=5, kwargs=dict(train_env_kwargs)),
             dict(type="HARBot", num=5, kwargs=dict(train_env_kwargs)),
             dict(type="HARBot", num=1, kwargs=dict(
@@ -172,7 +173,7 @@ config = dict(
                 opponent_whitelist="core:angel,core:pikeman",
                 random_army_value_min=7500  # 50 griffins
             )),
-            dict(type="BattleAI", num=5, kwargs=dict(train_env_kwargs)),
+            dict(type="BattleAI", num=4, kwargs=dict(train_env_kwargs)),
             dict(type="torch_model", num=5, kwargs=train_env_kwargs, model_=dynamic_bot("pdpyqkrb", 7200)),
         ],
 
