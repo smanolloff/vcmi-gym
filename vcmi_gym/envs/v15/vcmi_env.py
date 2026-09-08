@@ -349,8 +349,8 @@ class VcmiEnv(gym.Env):
             attacker_whitelist = whitelist
             defender_uniform_chance = opponent_uniform_chance
             defender_whitelist = opponent_whitelist
-            attacker_target_mod = whitelist
-            defender_target_mod = opponent_whitelist
+            attacker_target_mod = target_mod
+            defender_target_mod = opponent_target_mod
         elif role == "defender":
             attacker = opp
             defender = "MMAI_USER"
@@ -362,8 +362,8 @@ class VcmiEnv(gym.Env):
             attacker_whitelist = opponent_whitelist
             defender_uniform_chance = uniform_chance
             defender_whitelist = whitelist
-            attacker_target_mod = opponent_whitelist
-            defender_target_mod = whitelist
+            attacker_target_mod = target_mod
+            defender_target_mod = opponent_target_mod
         else:
             raise Exception(f"invalid role: {role}")
 
