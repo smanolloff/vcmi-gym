@@ -144,9 +144,16 @@ config = dict(
                         eval_env_kwargs,
                         random_armies=True,
                         creature_bank_chance=100,
+                        uniform_chance=100,
                         whitelist="core:griffin",
                         opponent_whitelist="core:angel,core:pikeman",
-                        random_army_value_min=7500  # 50 griffins
+                        # NOTE: army values use CalculateValue() in ServePlugin.cpp
+                        random_army_value_min=7500, # 50 griffins
+                        random_army_value_max=30_000,  # 200 griffins
+                        # These are always disabled on banks, set them for consistency
+                        town_chance=0,
+                        warmachine_chance=0,
+                        random_obstacles=0,
                     )
                 )
             ),
@@ -164,17 +171,23 @@ config = dict(
     train=dict(
         env_metas=[
             # XXX: the total sum of all train envs must be divisible by num_vsteps * num_minibatches
+            dict(type="BattleAI", num=4, kwargs=dict(train_env_kwargs)),
             dict(type="VIPBot", num=5, kwargs=dict(train_env_kwargs)),
             dict(type="HARBot", num=5, kwargs=dict(train_env_kwargs)),
             dict(type="HARBot", num=1, kwargs=dict(
                 train_env_kwargs,
                 creature_bank_chance=100,
+                uniform_chance=100,
                 whitelist="core:griffin",
                 opponent_whitelist="core:angel,core:pikeman",
-                random_army_value_min=7500  # 50 griffins
+                random_army_value_min=7500,  # 50 griffins
+                random_army_value_max=30_000,  # 200 griffins
+                # These are always disabled on banks, set them for consistency
+                town_chance=0,
+                warmachine_chance=0,
+                random_obstacles=0,
             )),
-            dict(type="BattleAI", num=4, kwargs=dict(train_env_kwargs)),
-            dict(type="torch_model", num=5, kwargs=train_env_kwargs, model_=dynamic_bot("pdpyqkrb", 7200)),
+            dict(type="torch_model", num=5, kwargs=dict(train_env_kwargs), model_=dynamic_bot("pdpyqkrb", 7200)),
         ],
 
         num_vsteps=150,                 # num_steps = num_vsteps * num_envs
