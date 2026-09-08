@@ -150,6 +150,7 @@ config = dict(
                         # NOTE: army values use CalculateValue() in ServePlugin.cpp
                         random_army_value_min=7500, # 50 griffins
                         random_army_value_max=30_000,  # 200 griffins
+                        random_army_target_var=20,  # 20% var on 7500 =~ +-3000 (1 angel=2500)
                         # These are always disabled on banks, set them for consistency
                         town_chance=0,
                         warmachine_chance=0,
@@ -182,6 +183,7 @@ config = dict(
                 opponent_whitelist="core:angel,core:pikeman",
                 random_army_value_min=7500,  # 50 griffins
                 random_army_value_max=30_000,  # 200 griffins
+                random_army_target_var=20,  # 20% var on 7500 =~ +-3000 (1 angel=2500)
                 # These are always disabled on banks, set them for consistency
                 town_chance=0,
                 warmachine_chance=0,
