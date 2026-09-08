@@ -227,6 +227,8 @@ class VcmiEnv(gym.Env):
         random_army_value_min: int = 5000,
         random_army_value_max: int = 5_000_000,
         random_army_target_var: int = 30,
+        target_mod: float = 1.0,
+        opponent_target_mod: float = 1.0,
         uniform_chance: int = 0,
         opponent_uniform_chance: int = 0,
         whitelist: str = "",
@@ -347,6 +349,8 @@ class VcmiEnv(gym.Env):
             attacker_whitelist = whitelist
             defender_uniform_chance = opponent_uniform_chance
             defender_whitelist = opponent_whitelist
+            attacker_target_mod = whitelist
+            defender_target_mod = opponent_whitelist
         elif role == "defender":
             attacker = opp
             defender = "MMAI_USER"
@@ -358,6 +362,8 @@ class VcmiEnv(gym.Env):
             attacker_whitelist = opponent_whitelist
             defender_uniform_chance = uniform_chance
             defender_whitelist = whitelist
+            attacker_target_mod = opponent_whitelist
+            defender_target_mod = whitelist
         else:
             raise Exception(f"invalid role: {role}")
 
@@ -398,6 +404,8 @@ class VcmiEnv(gym.Env):
             randomArmyValueMin=random_army_value_min,
             randomArmyValueMax=random_army_value_max,
             randomArmyTargetVar=random_army_target_var,
+            leftTargetMod=attacker_target_mod,
+            rightTargetMod=defender_target_mod,
             leftUniformChance=attacker_uniform_chance,
             rightUniformChance=defender_uniform_chance,
             leftWhitelist=attacker_whitelist,

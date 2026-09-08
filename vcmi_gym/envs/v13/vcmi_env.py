@@ -357,6 +357,8 @@ class VcmiEnv(gym.Env):
             randomArmyValueMin=random_army_value_min,
             randomArmyValueMax=random_army_value_max,
             randomArmyTargetVar=random_army_target_var,
+            leftTargetMod=left_target_mod,
+            rightTargetMod=right_target_mod,
             leftUniformChance=left_uniform_chance,
             rightUniformChance=right_uniform_chance,
             leftWhitelist=left_whitelist,

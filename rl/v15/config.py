@@ -25,6 +25,8 @@ train_env_kwargs = dict(
     random_army_value_min=500,
     random_army_value_max=500_000,
     random_army_target_var=30,
+    target_mod=1.0,
+    opponent_target_mod=1.0,
     warmachine_chance=40,
     mana_min=0,
     mana_max=0,
@@ -150,7 +152,8 @@ config = dict(
                         # NOTE: army values use CalculateValue() in ServePlugin.cpp
                         random_army_value_min=7500, # 50 griffins
                         random_army_value_max=30_000,  # 200 griffins
-                        random_army_target_var=20,  # 20% var on 7500 =~ +-3000 (1 angel=2500)
+                        random_army_target_var=13,  # 13% is the minimum to prevent "unbuildable army" errors
+                        opponent_target_mod=0.8,
                         # These are always disabled on banks, set them for consistency
                         town_chance=0,
                         warmachine_chance=0,
@@ -173,9 +176,9 @@ config = dict(
         env_metas=[
             # XXX: the total sum of all train envs must be divisible by num_vsteps * num_minibatches
             dict(type="BattleAI", num=4, kwargs=dict(train_env_kwargs)),
-            dict(type="VIPBot", num=5, kwargs=dict(train_env_kwargs)),
-            dict(type="HARBot", num=5, kwargs=dict(train_env_kwargs)),
-            dict(type="HARBot", num=1, kwargs=dict(
+            dict(type="VIPBot", num=4, kwargs=dict(train_env_kwargs)),
+            dict(type="HARBot", num=4, kwargs=dict(train_env_kwargs)),
+            dict(type="HARBot", num=4, kwargs=dict(
                 train_env_kwargs,
                 creature_bank_chance=100,
                 uniform_chance=100,
@@ -183,13 +186,14 @@ config = dict(
                 opponent_whitelist="core:angel,core:pikeman",
                 random_army_value_min=7500,  # 50 griffins
                 random_army_value_max=30_000,  # 200 griffins
-                random_army_target_var=20,  # 20% var on 7500 =~ +-3000 (1 angel=2500)
+                random_army_target_var=13,  # 13% is the minimum to prevent "unbuildable army" errors
+                opponent_target_mod=0.8,
                 # These are always disabled on banks, set them for consistency
                 town_chance=0,
                 warmachine_chance=0,
                 random_obstacles=0,
             )),
-            dict(type="torch_model", num=5, kwargs=dict(train_env_kwargs), model_=dynamic_bot("pdpyqkrb", 7200)),
+            dict(type="torch_model", num=4, kwargs=dict(train_env_kwargs), model_=dynamic_bot("pdpyqkrb", 7200)),
         ],
 
         num_vsteps=150,                 # num_steps = num_vsteps * num_envs

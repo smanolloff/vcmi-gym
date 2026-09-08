@@ -30,6 +30,8 @@ namespace Connector::V15 {
                 int,                    // randomArmyValueMin
                 int,                    // randomArmyValueMax
                 int,                    // randomArmyTargetVar
+                float,                  // leftTargetMod
+                float,                  // rightTargetMod
                 int,                    // leftUniformChance
                 int,                    // rightUniformChance
                 const std::string &,    // leftWhitelist
@@ -73,6 +75,8 @@ namespace Connector::V15 {
                 py::arg("randomArmyValueMin"),
                 py::arg("randomArmyValueMax"),
                 py::arg("randomArmyTargetVar"),
+                py::arg("leftTargetMod"),
+                py::arg("rightTargetMod"),
                 py::arg("leftUniformChance"),
                 py::arg("rightUniformChance"),
                 py::arg("leftWhitelist"),
