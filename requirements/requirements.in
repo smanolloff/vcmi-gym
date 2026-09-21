@@ -19,6 +19,7 @@
 
 torch_geometric
 torch_scatter
+onnxruntime
 wandb
 vastai_sdk>=0.5.1
 gymnasium>=1.3.0

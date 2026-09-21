@@ -64,6 +64,7 @@ def tracelog(func, maxlen=80):
 class RewardConfig(NamedTuple):
     err_exclusive: float
     step_fixed: float
+    term_fixed: float
     dmg_mult: float
     term_mult: float
     relval_mult: float
@@ -244,6 +245,7 @@ class VcmiEnv(gym.Env):
         reward_err_exclusive: float = -10,
         # Applied on every step:
         reward_step_fixed: float = -1,          # reward = value
+        reward_term_fixed: float = 1,
 
         # These require BATTLE_ROUND in obs (to add in future env version)
         # See RewardConfig for more info
@@ -313,6 +315,7 @@ class VcmiEnv(gym.Env):
         self.reward_cfg = RewardConfig(
             err_exclusive=float(reward_err_exclusive),
             step_fixed=float(reward_step_fixed),
+            term_fixed=float(reward_term_fixed),
             prog_base=float(reward_prog_base),
             prog_trigger=float(reward_prog_trigger),
             prog_exponent=float(reward_prog_exponent),
@@ -691,6 +694,15 @@ class VcmiEnv(gym.Env):
         prog = -min(a*(max(b, int(x)) - b)**c, d)
 
         done = term or trunc
+
+        term_fixed = 0
+        if done:
+            if (gnode.BATTLE_WINNER == 0 and me == pnodes[0]) or (gnode.BATTLE_WINNER == 1 and me == pnodes[1]):
+                term_fixed = cfg.term_fixed
+            else:
+                term_fixed = -cfg.term_fixed
+
+        print(f"TERM FIXED: {term_fixed}")
 
         # Idea:
         # If I win with final rel0=100 (enemy rel0=0 ofc), term reward depends
