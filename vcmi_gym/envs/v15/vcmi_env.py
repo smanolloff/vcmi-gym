@@ -702,8 +702,6 @@ class VcmiEnv(gym.Env):
             else:
                 term_fixed = -cfg.term_fixed
 
-        print(f"TERM FIXED: {term_fixed}")
-
         # Idea:
         # If I win with final rel0=100 (enemy rel0=0 ofc), term reward depends
         # on the starting conditions:
@@ -720,6 +718,6 @@ class VcmiEnv(gym.Env):
             step_fixed=cfg.step_fixed,
             prog=prog,
             dmg_mult=net_dmg * cfg.dmg_mult,
-            term_mult=done * cfg.term_mult * (enemy_rel0_diff - my_rel0_diff),
+            term_mult=done * (term_fixed + cfg.term_mult * efficiency),
             relval_mult=net_value * cfg.relval_mult,
         )
