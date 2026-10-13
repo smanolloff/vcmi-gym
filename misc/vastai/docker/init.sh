@@ -73,7 +73,10 @@ EOF
     ################################################
     ### Cron
     ################################################
-    echo '0 0 * * * root /workspace/vcmi-gym/misc/vastai/docker/cleanup.sh 48 /workspace/vcmi-gym/data/v15 >> /root/cleanup.log' > /etc/cron.d/cleanup
+    cat <<-EOF
+0 0 * * * root /workspace/vcmi-gym/misc/vastai/docker/cleanup.sh 48 /workspace/vcmi-gym/data/v15 >> /root/cleanup.log' > /etc/cron.d/cleanup
+0 0 * * * root /workspace/vcmi-gym/misc/vastai/docker/cleanup.sh 48 /workspace/vcmi-gym/wandb >> /root/cleanup.log' > /etc/cron.d/cleanup
+EOF
     chmod 644 /etc/cron.d/cleanup
     service cron restart
 
