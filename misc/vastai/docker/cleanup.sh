@@ -25,14 +25,15 @@ for link in $(find . -maxdepth 1 -type l -printf '%f\n' | sort); do
 done
 
 DELETED=()
-for file in $(find . -maxdepth 1 -type f -mmin "+$MINUTES" -printf '%f\n' | sort); do
+for file in $(find . -maxdepth 3 -type f -mmin "+$MINUTES" | sort); do
     [ "${LINK_TARGETS[$file]-}" = "1" ] && continue || :
+    [[ $file =~ -best ]] && continue || :
     rm -f "$file"
     DELETED+=("$file")
 done
 
 cat <<EOF
 ========================
-Deleted:
+Deleted from $DIR:
 $(printf '%s\n' "${DELETED[@]}")
 EOF
